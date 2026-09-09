@@ -10,6 +10,7 @@ import {
 } from '../../src/engine/checkpoint.ts';
 import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
 import {
+  assertCanonicalGameManifest,
   createGameManifest,
   createGameSession,
   hashGameState,
@@ -410,7 +411,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     seed: 3,
   };
   const validManifest = createGameManifest({ ...input, cards });
-  assert.throws(() => createGameSession({
+  assert.throws(() => assertCanonicalGameManifest({
     ...validManifest,
     firstSeat: 'east',
   } as unknown as GameManifest), /firstSeat is unsupported/);
@@ -7761,43 +7762,34 @@ test("RULE-03/04 healing Magic is targetless, capped, and cannot leave Death's D
   ]);
 });
 
-test('RULE-03 explicit permission allows a minion to be summoned to any site', () => {
-  const summonCells = (summonToAnySite: boolean): readonly string[] => {
-    let session = keep(createGameSession(manifest(111, {
-      spell: {
-        manaCost: 1,
-        summonToAnySite,
-        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
-      },
-    })));
-    session = keep(session);
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    const cardInstanceId = session.state.players.north.hand.spellbook[0]?.instanceId;
-    assert.ok(cardInstanceId);
-    const cells = legalGameActions(session.state, 'north').flatMap(({ descriptor }) =>
-      descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === cardInstanceId
-        ? [descriptor.cell]
-        : []);
-    if (summonToAnySite) {
-      session = accept(session, action(session, ({ descriptor }) =>
-        descriptor.kind === 'summon-minion'
-          && descriptor.cardInstanceId === cardInstanceId
-          && descriptor.cell === 'C1'));
-      assert.equal(session.state.realm.units[0]?.location, 'C1');
-      assert.equal(verifyGameReplay(session), true);
-    }
+test('RULE-03 explicit permission allows a minion to be summoned to any site', async () => {
+  const summonCells = async (summonToAnySite: boolean): Promise<readonly string[]> => {
+    let cells: readonly string[] = [];
+    await withNorthSecondMain(111, false, {
+      manaCost: 1,
+      summonToAnySite,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    }, async (ctx) => {
+      const cardInstanceId = ctx.state.players.north.hand.spellbook[0]?.instanceId;
+      assert.ok(cardInstanceId);
+      cells = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === cardInstanceId
+          ? [descriptor.cell]
+          : []);
+      if (summonToAnySite) {
+        await ctx.accept(await ctx.action(({ descriptor }) =>
+          descriptor.kind === 'summon-minion'
+            && descriptor.cardInstanceId === cardInstanceId
+            && descriptor.cell === 'C1'));
+        assert.equal(ctx.state.realm.units[0]?.location, 'C1');
+        assert.equal(await ctx.verifyReplay(), true);
+      }
+    });
     return cells;
   };
 
-  assert.deepEqual(summonCells(false), ['C4']);
-  assert.deepEqual(summonCells(true), ['C1', 'C4']);
+  assert.deepEqual(await summonCells(false), ['C4']);
+  assert.deepEqual(await summonCells(true), ['C1', 'C4']);
 });
 
 test('RULE-03 a Water-site cast restriction filters unrestricted summons by terrain', () => {
@@ -8454,90 +8446,102 @@ test('RULE-04 Charge allows a summoned minion to Move and Attack immediately', a
   });
 });
 
-test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning', () => {
+test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoning', async () => {
   const spell: SpellFacts = {
     genesisDrawSite: true,
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   };
-  let session = keep(createGameSession(manifest(40, { spell })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  const before = session.state.players.north;
-  const drawn = before.atlas[0];
-  assert.ok(drawn);
-  const result = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  assert.equal(result.accepted, true);
-  session = result.session;
-  assert.equal(session.state.players.north.atlas.length, before.atlas.length - 1);
-  assert.equal(session.state.players.north.hand.atlas.length, before.hand.atlas.length + 1);
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'site-drawn']);
-  assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
-  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
-  assert.equal(verifyGameReplay(session), true);
+  await withSetup(manifest(40, { spell }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    const before = ctx.state.players.north;
+    const drawn = before.atlas[0];
+    assert.ok(drawn);
+    const result = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    assert.equal(ctx.state.players.north.atlas.length, before.atlas.length - 1);
+    assert.equal(ctx.state.players.north.hand.atlas.length, before.hand.atlas.length + 1);
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'site-drawn']);
+    assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson(ctx.observe('south')), new RegExp(drawn.cardId));
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   const short = deck('genesis-short', 3, 3);
-  session = keep(createGameSession(manifest(40, { north: short, south: short, spell })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  assert.equal(session.state.realm.units.length, 1);
-  assert.deepEqual(session.state.terminal, {
-    loser: 'north',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'south',
+  await withSetup(manifest(40, { north: short, south: short, spell }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    assert.equal(ctx.state.realm.units.length, 1);
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['minion-summoned', 'game-ended'],
+    );
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['minion-summoned', 'game-ended'],
-  );
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning', () => {
+test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after summoning', async () => {
   const spell: SpellFacts = {
     genesisDrawSpells: 1,
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   };
-  let session = keep(createGameSession(manifest(127, { spell })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  const before = session.state.players.north;
-  const drawn = before.spellbook[0];
-  assert.ok(drawn);
-  const result = stepGame(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  assert.equal(result.accepted, true);
-  session = result.session;
-  assert.equal(session.state.players.north.spellbook.length, before.spellbook.length - 1);
-  assert.equal(session.state.players.north.hand.spellbook.length, before.hand.spellbook.length);
-  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'spell-drawn']);
-  assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
-  assert.doesNotMatch(canonicalJson(observeGame(session.state, 'south')), new RegExp(drawn.cardId));
-  assert.equal(verifyGameReplay(session), true);
+  await withSetup(manifest(127, { spell }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    const before = ctx.state.players.north;
+    const drawn = before.spellbook[0];
+    assert.ok(drawn);
+    const result = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    assert.equal(ctx.state.players.north.spellbook.length, before.spellbook.length - 1);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, before.hand.spellbook.length);
+    assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'spell-drawn']);
+    assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson(ctx.observe('south')), new RegExp(drawn.cardId));
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   const short = deck('genesis-spell-short', 3, 3);
-  session = keep(createGameSession(manifest(127, { north: short, south: short, spell })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  assert.equal(session.state.realm.units.length, 1);
-  assert.deepEqual(session.state.terminal, {
-    loser: 'north',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'south',
+  await withSetup(manifest(127, { north: short, south: short, spell }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    assert.equal(ctx.state.realm.units.length, 1);
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['minion-summoned', 'game-ended'],
+    );
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['minion-summoned', 'game-ended'],
-  );
-  assert.equal(verifyGameReplay(session), true);
 });
 
-function numericGenesisSession(remainingCount: number, seed: number): GameSession {
+async function withNumericGenesis(
+  remainingCount: number,
+  seed: number,
+  run: (ctx: SetupCtx) => Promise<void>,
+): Promise<void> {
   const decks = {
     north: deck(`genesis-spells-north-${remainingCount}`, 5, 3 + remainingCount),
     south: deck(`genesis-spells-south-${remainingCount}`, 5, 3 + remainingCount),
@@ -8549,7 +8553,7 @@ function numericGenesisSession(remainingCount: number, seed: number): GameSessio
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, undefined, { elements: ['air'] });
-  let session = keep(createGameSession(createGameManifest({
+  await withSetup(createGameManifest({
     authority: {
       contentHash: SYNTHETIC_AUTHORITY_HASH,
       mode: 'synthetic',
@@ -8559,75 +8563,80 @@ function numericGenesisSession(remainingCount: number, seed: number): GameSessio
     decks,
     firstSeat: 'north',
     seed,
-  })));
-  session = keep(session);
-  return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await run(ctx);
+  });
 }
 
-test('RULE-03 numeric Genesis spell draw counts draw ordered hidden cards', () => {
-  const session = numericGenesisSession(3, 128);
-  const before = session.state.players.north;
-  const expectedDraws = before.spellbook.slice(0, 3);
-  assert.equal(expectedDraws.length, 3);
+test('RULE-03 numeric Genesis spell draw counts draw ordered hidden cards', async () => {
+  await withNumericGenesis(3, 128, async (ctx) => {
+    const before = ctx.state.players.north;
+    const expectedDraws = before.spellbook.slice(0, 3);
+    assert.equal(expectedDraws.length, 3);
 
-  const result = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'));
-  assert.equal(result.accepted, true);
-  if (!result.accepted) return;
-  const after = result.session.state.players.north;
-  assert.equal(after.spellbook.length, before.spellbook.length - 3);
-  assert.equal(after.hand.spellbook.length, before.hand.spellbook.length + 2);
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
-    'minion-summoned',
-    'spell-drawn',
-    'spell-drawn',
-    'spell-drawn',
-  ]);
-  for (const drawn of expectedDraws) {
-    assert.equal(after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
-    assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
-    assert.doesNotMatch(canonicalJson(observeGame(result.session.state, 'south')), new RegExp(drawn.cardId));
-  }
-  assert.equal(observeGame(result.session.state, 'north').realm.units.some(({ attack, damage, defense }) =>
-    attack === 0 && damage === 0 && defense === 0), true);
-  assert.deepEqual(result.receipt.randomDraws, []);
-  assert.equal(verifyGameReplay(result.session), true);
-});
-
-test('RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss', () => {
-  for (const remainingCount of [2, 1, 0]) {
-    const session = numericGenesisSession(remainingCount, 129 + remainingCount);
-    const before = session.state.players.north;
-    assert.equal(before.spellbook.length, remainingCount);
-    const expectedDraws = before.spellbook.slice();
-
-    const result = stepGame(session, action(session, ({ descriptor }) =>
+    const result = await ctx.step(await ctx.action(({ descriptor }) =>
       descriptor.kind === 'summon-minion'));
     assert.equal(result.accepted, true);
-    if (!result.accepted) continue;
-    assert.deepEqual(result.session.state.terminal, {
-      loser: 'north',
-      reason: 'deck_empty',
-      status: 'finished',
-      winner: 'south',
-    });
-    assert.equal(result.session.state.players.north.spellbook.length, 0);
+    if (!result.accepted) return;
+    const after = ctx.state.players.north;
+    assert.equal(after.spellbook.length, before.spellbook.length - 3);
+    assert.equal(after.hand.spellbook.length, before.hand.spellbook.length + 2);
     assert.deepEqual(result.receipt.events.map(({ type }) => type), [
       'minion-summoned',
-      ...Array.from({ length: remainingCount }, () => 'spell-drawn' as const),
-      'game-ended',
+      'spell-drawn',
+      'spell-drawn',
+      'spell-drawn',
     ]);
     for (const drawn of expectedDraws) {
-      assert.equal(result.session.state.players.north.hand.spellbook
-        .some(({ instanceId }) => instanceId === drawn.instanceId), true);
+      assert.equal(after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
       assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
-      assert.doesNotMatch(
-        canonicalJson(observeGame(result.session.state, 'south')),
-        new RegExp(drawn.cardId),
-      );
+      assert.doesNotMatch(canonicalJson(ctx.observe('south')), new RegExp(drawn.cardId));
     }
+    assert.equal(ctx.observe('north').realm.units.some(({ attack, damage, defense }) =>
+      attack === 0 && damage === 0 && defense === 0), true);
     assert.deepEqual(result.receipt.randomDraws, []);
-    assert.equal(verifyGameReplay(result.session), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss', async () => {
+  for (const remainingCount of [2, 1, 0]) {
+    await withNumericGenesis(remainingCount, 129 + remainingCount, async (ctx) => {
+      const before = ctx.state.players.north;
+      assert.equal(before.spellbook.length, remainingCount);
+      const expectedDraws = before.spellbook.slice();
+
+      const result = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'));
+      assert.equal(result.accepted, true);
+      if (!result.accepted) return;
+      assert.deepEqual(ctx.state.terminal, {
+        loser: 'north',
+        reason: 'deck_empty',
+        status: 'finished',
+        winner: 'south',
+      });
+      assert.equal(ctx.state.players.north.spellbook.length, 0);
+      assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+        'minion-summoned',
+        ...Array.from({ length: remainingCount }, () => 'spell-drawn' as const),
+        'game-ended',
+      ]);
+      for (const drawn of expectedDraws) {
+        assert.equal(ctx.state.players.north.hand.spellbook
+          .some(({ instanceId }) => instanceId === drawn.instanceId), true);
+        assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
+        assert.doesNotMatch(
+          canonicalJson(ctx.observe('south')),
+          new RegExp(drawn.cardId),
+        );
+      }
+      assert.deepEqual(result.receipt.randomDraws, []);
+      assert.equal(await ctx.verifyReplay(), true);
+    });
   }
 });
 
@@ -9195,33 +9204,35 @@ test('RULE-03 Grain Sparrow Genesis gains controller life through shared healing
   assert.equal(verifyGameReplay(result.session), true);
 });
 
-test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expires', () => {
-  let session = keep(createGameSession(manifest(55, {
+test('RULE-03 site Genesis grants temporary mana once, pays a summon, and expires', async () => {
+  await withSetup(manifest(55, {
     site: { genesisGainMana: 1 },
     spell: {
       manaCost: 2,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(session.state.players.north.mana, 2);
-  assert.deepEqual(
-    session.transcript.at(-1)?.events.map(({ type }) => type),
-    ['site-played', 'mana-gained'],
-  );
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  assert.equal(session.state.players.north.mana, 0);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(session.state.players.north.mana, 0);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  assert.equal(session.state.players.north.mana, 1);
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    assert.equal(ctx.state.players.north.mana, 2);
+    assert.deepEqual(
+      ctx.session.transcript.at(-1)?.events.map(({ type }) => type),
+      ['site-played', 'mana-gained'],
+    );
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    assert.equal(ctx.state.players.north.mana, 0);
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(ctx.state.players.north.mana, 0);
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    assert.equal(ctx.state.players.north.mana, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 site Genesis heals every nearby Avatar through shared life caps', () => {
@@ -10311,42 +10322,45 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
   assert.equal(verifyGameReplay(caveIn.session), true);
 });
 
-test('RULE-03 Tower Genesis grants mana only for the first controlled copy', () => {
+test('RULE-03 Tower Genesis grants mana only for the first controlled copy', async () => {
   const north = deck('tower-north');
-  let session = keep(keep(createGameSession(manifest(56, {
+  await withSetup(manifest(56, {
     north: { ...north, atlas: ['dark-tower', 'gothic-tower', 'dark-tower'] },
     site: { genesisGainManaIfOnlyControlledCopy: 1 },
-  }))));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  const playNorthSite = (cardId: string, gainsBonus: boolean): void => {
-    const instanceId = session.state.players.north.hand.atlas
-      .find((card) => card.cardId === cardId)?.instanceId;
-    assert.ok(instanceId);
-    const manaBefore = session.state.players.north.mana;
-    take(({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cardInstanceId === instanceId);
-    assert.equal(session.state.players.north.mana - manaBefore, gainsBonus ? 2 : 1);
-    assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
-      'site-played',
-      ...(gainsBonus ? ['mana-gained'] : []),
-    ]);
-  };
-  playNorthSite('dark-tower', true);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playNorthSite('gothic-tower', true);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  playNorthSite('dark-tower', false);
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      await ctx.accept(await ctx.action(predicate));
+    };
+    const playNorthSite = async (cardId: string, gainsBonus: boolean): Promise<void> => {
+      const instanceId = ctx.state.players.north.hand.atlas
+        .find((card) => card.cardId === cardId)?.instanceId;
+      assert.ok(instanceId);
+      const manaBefore = ctx.state.players.north.mana;
+      await take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cardInstanceId === instanceId);
+      assert.equal(ctx.state.players.north.mana - manaBefore, gainsBonus ? 2 : 1);
+      assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+        'site-played',
+        ...(gainsBonus ? ['mana-gained'] : []),
+      ]);
+    };
+    await playNorthSite('dark-tower', true);
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await playNorthSite('gothic-tower', true);
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await playNorthSite('dark-tower', false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 Humble Village Genesis may spend its mana to summon one Foot Soldier', () => {
@@ -14795,44 +14809,46 @@ test('RULE-04 Dalcean Phalanx can move itself only forward for its seat', () => 
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-02/04 a unit can move across connected top and bottom realm edges', () => {
-  let session = keep(createGameSession(manifest(128, {
+test('RULE-02/04 a unit can move across connected top and bottom realm edges', async () => {
+  await withSetup(manifest(128, {
     spell: {
       connectsTopBottom: true,
       manaCost: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'summon-minion'));
-  const unit = session.state.realm.units[0];
-  assert.ok(unit);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'summon-minion'));
+    const unit = ctx.state.realm.units[0];
+    assert.ok(unit);
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
 
-  const actions = legalGameActions(session.state, 'north');
-  const wraps = ({ descriptor }: GameLegalAction): boolean => descriptor.kind === 'move-and-attack'
-    && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
-  assert.equal(actions.some((candidate) =>
-    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
-      && candidate.descriptor.unitInstanceId === unit.instanceId), true);
-  assert.equal(actions.some((candidate) =>
-    wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
-      && candidate.descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unit.instanceId
-    && descriptor.to.cell === 'C1'));
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  assert.equal(verifyGameReplay(session), true);
+    const actions = await ctx.legalActions('north');
+    const wraps = ({ descriptor }: GameLegalAction): boolean => descriptor.kind === 'move-and-attack'
+      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C1';
+    assert.equal(actions.some((candidate) =>
+      wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+        && candidate.descriptor.unitInstanceId === unit.instanceId), true);
+    assert.equal(actions.some((candidate) =>
+      wraps(candidate) && candidate.descriptor.kind === 'move-and-attack'
+        && candidate.descriptor.unitInstanceId === ctx.state.players.north.avatar.card.instanceId), false);
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unit.instanceId
+      && descriptor.to.cell === 'C1'));
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), true);
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'decline-attack'));
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 Submerge uses underwater summons, movement, and region-isolated combat', () => {
@@ -15106,8 +15122,8 @@ test('RULE-04 Secret Tunnel connects burrowed allies only to the controller\'s o
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts', () => {
-  let session = keep(createGameSession(manifest(139, {
+test('RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts', async () => {
+  await withSetup(manifest(139, {
     northSpell: {
       attack: 3,
       burrowing: true,
@@ -15116,33 +15132,35 @@ test('RULE-03 a must-be-burrowed cast restriction suppresses only non-undergroun
       mustBeCastBurrowed: true,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      await ctx.accept(await ctx.action(predicate));
+    };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  const summons = legalGameActions(session.state, 'north');
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === undefined), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === 'underground'), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === 'underground');
-  const unitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underground,C4/surface');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const summons = await ctx.legalActions('north');
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === undefined), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === 'underground'), true);
+    await take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === 'underground');
+    const unitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(unitId);
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underground,C4/surface');
+    await take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts', () => {
