@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import type { JsonValue } from '../../src/authority/canonical-json.ts';
 import {
+  createGameCheckpoint,
   resumeGameCheckpointAsync,
   type GameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
@@ -108,6 +109,18 @@ export class SetupCtx {
     return this.handle.verifyReplay();
   }
 
+  /** Captures a resume-safe checkpoint of the current journals. */
+  checkpoint(): GameCheckpoint {
+    return createGameCheckpoint(this.session);
+  }
+
+  /** Opens an independent live session at this exact history. */
+  async fork(): Promise<SetupCtx> {
+    const forked = await SetupCtx.open(this.session.manifest);
+    await forked.resume(createGameCheckpoint(this.session));
+    return forked;
+  }
+
   /** Resumes one parsed checkpoint into this live session. */
   async resume(checkpoint: GameCheckpoint): Promise<GameSession> {
     return this.handle.resume(checkpoint as unknown as JsonValue);
@@ -142,4 +155,17 @@ export async function withPreview(
   run: (ctx: SetupCtx) => Promise<void>,
 ): Promise<void> {
   await withSetup(manifest, run);
+}
+
+/** Runs one callback against a fork of the current live history. */
+export async function withFork(
+  ctx: SetupCtx,
+  run: (forked: SetupCtx) => Promise<void>,
+): Promise<void> {
+  const forked = await ctx.fork();
+  try {
+    await run(forked);
+  } finally {
+    await forked.close();
+  }
 }

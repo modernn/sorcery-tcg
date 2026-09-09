@@ -24,6 +24,7 @@ import {
   type GameReceipt,
   type GameSession,
 } from '../../src/engine/game.ts';
+import { withSetup } from './rust-setup-session.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -364,33 +365,35 @@ function keep(session: GameSession): GameSession {
       && descriptor.spellbookOrder.length === 0));
 }
 
-test('RULE-01 setup shuffles two decks, deals split hidden hands, and places Avatars', () => {
-  const session = createGameSession(manifest(7));
-  const north = session.state.players.north;
-  const southView = observeGame(session.state, 'south');
+test('RULE-01 setup shuffles two decks, deals split hidden hands, and places Avatars', async () => {
+  await withSetup(manifest(7), async (ctx) => {
+    const session = ctx.session;
+    const north = session.state.players.north;
+    const southView = ctx.observe('south');
 
-  assert.equal(session.state.phase, 'mulligan');
-  assert.equal(session.state.activeSeat, 'north');
-  assert.equal(session.state.turnNumber, 0);
-  assert.equal(north.hand.atlas.length, 3);
-  assert.equal(north.hand.spellbook.length, 3);
-  assert.equal(north.atlas.length, 27);
-  assert.equal(north.spellbook.length, 47);
-  assert.equal(north.avatar.location, 'C4');
-  assert.equal(north.avatar.region, 'surface');
-  assert.equal(north.avatar.life, 20);
-  assert.deepEqual(north.cemetery, []);
-  assert.equal(session.state.players.south.avatar.location, 'C1');
-  assert.equal(session.state.decisionSeat, 'north');
-  assert.ok(session.initialRandomDraws.length >= 156);
-  assert.ok(session.initialRandomDraws.every(({ purpose }) => purpose.startsWith('setup_')));
-  assert.equal(southView.players.north.hand.atlas, 3);
-  assert.equal(southView.players.north.hand.spellbook, 3);
-  assert.doesNotMatch(JSON.stringify(southView), /north-(?:site|spell)-/);
-  const northActions = legalGameActions(session.state, 'north');
-  assert.equal(northActions.length, 76);
-  assert.equal(legalGameActions(session.state, 'north'), northActions);
-  assert.deepEqual(legalGameActions(session.state, 'south'), []);
+    assert.equal(session.state.phase, 'mulligan');
+    assert.equal(session.state.activeSeat, 'north');
+    assert.equal(session.state.turnNumber, 0);
+    assert.equal(north.hand.atlas.length, 3);
+    assert.equal(north.hand.spellbook.length, 3);
+    assert.equal(north.atlas.length, 27);
+    assert.equal(north.spellbook.length, 47);
+    assert.equal(north.avatar.location, 'C4');
+    assert.equal(north.avatar.region, 'surface');
+    assert.equal(north.avatar.life, 20);
+    assert.deepEqual(north.cemetery, []);
+    assert.equal(session.state.players.south.avatar.location, 'C1');
+    assert.equal(session.state.decisionSeat, 'north');
+    assert.ok(session.initialRandomDraws.length >= 156);
+    assert.ok(session.initialRandomDraws.every(({ purpose }) => purpose.startsWith('setup_')));
+    assert.equal(southView.players.north.hand.atlas, 3);
+    assert.equal(southView.players.north.hand.spellbook, 3);
+    assert.doesNotMatch(JSON.stringify(southView), /north-(?:site|spell)-/);
+    const northActions = await ctx.legalActions('north');
+    assert.equal(northActions.length, 76);
+    assert.deepEqual(await ctx.legalActions('north'), northActions);
+    assert.deepEqual(await ctx.legalActions('south'), []);
+  });
 });
 
 test('RULE-06 the manifest accepts only exact deck-scoped supported card facts', () => {
@@ -1400,94 +1403,103 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   }), /connectsBurrowedAllies/);
 });
 
-test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', () => {
-  const first = createGameSession(manifest(9));
-  const second = createGameSession(manifest(9, {
-    north: {
-      ...deck('north'),
-      atlas: deck('north').atlas.map((_, index) => `alternate-site-${index + 1}`),
-      spellbook: deck('north').spellbook.map((_, index) => `alternate-spell-${index + 1}`),
-    },
-  }));
-
-  assert.notEqual(first.state.players.north.hand.atlas[0]?.cardId, second.state.players.north.hand.atlas[0]?.cardId);
-  assert.equal(canonicalJson(observeGame(first.state, 'south')), canonicalJson(observeGame(second.state, 'south')));
-  assert.equal(
-    canonicalJson(legalGameActions(first.state, 'south')),
-    canonicalJson(legalGameActions(second.state, 'south')),
-  );
+test('TEST-03 different opponent hidden cards cannot change an observation or legal actions', async () => {
+  await withSetup(manifest(9), async (first) => {
+    await withSetup(manifest(9, {
+      north: {
+        ...deck('north'),
+        atlas: deck('north').atlas.map((_, index) => `alternate-site-${index + 1}`),
+        spellbook: deck('north').spellbook.map((_, index) => `alternate-spell-${index + 1}`),
+      },
+    }), async (second) => {
+      assert.notEqual(
+        first.state.players.north.hand.atlas[0]?.cardId,
+        second.state.players.north.hand.atlas[0]?.cardId,
+      );
+      assert.equal(canonicalJson(first.observe('south')), canonicalJson(second.observe('south')));
+      assert.equal(
+        canonicalJson(await first.legalActions('south')),
+        canonicalJson(await second.legalActions('south')),
+      );
+    });
+  });
 });
 
-test('RULE-01 one mulligan returns at most three chosen cards to their deck bottoms and redraws', () => {
-  const initial = createGameSession(manifest(11));
-  const returned = initial.state.players.north.hand.atlas[0];
-  assert.ok(returned);
-  const mulligan = action(initial, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 1
-      && descriptor.atlasOrder[0] === returned.instanceId
-      && descriptor.spellbookOrder.length === 0);
-  const result = stepGame(initial, mulligan);
-  assert.equal(result.accepted, true);
-  const north = result.session.state.players.north;
+test('RULE-01 one mulligan returns at most three chosen cards to their deck bottoms and redraws', async () => {
+  await withSetup(manifest(11), async (ctx) => {
+    const returned = ctx.state.players.north.hand.atlas[0];
+    assert.ok(returned);
+    const mulligan = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'mulligan'
+        && descriptor.atlasOrder.length === 1
+        && descriptor.atlasOrder[0] === returned.instanceId
+        && descriptor.spellbookOrder.length === 0);
+    const result = await ctx.step(mulligan);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    const north = result.session.state.players.north;
 
-  assert.equal(north.mulliganComplete, true);
-  assert.equal(north.hand.atlas.length, 3);
-  assert.equal(north.atlas.length, 27);
-  assert.equal(north.atlas.at(-1)?.instanceId, returned.instanceId);
-  assert.equal(north.hand.atlas.some(({ instanceId }) => instanceId === returned.instanceId), false);
-  assert.deepEqual(result.receipt.events[0]?.payload, {
-    atlasCount: 1,
-    seat: 'north',
-    spellbookCount: 0,
+    assert.equal(north.mulliganComplete, true);
+    assert.equal(north.hand.atlas.length, 3);
+    assert.equal(north.atlas.length, 27);
+    assert.equal(north.atlas.at(-1)?.instanceId, returned.instanceId);
+    assert.equal(north.hand.atlas.some(({ instanceId }) => instanceId === returned.instanceId), false);
+    assert.deepEqual(result.receipt.events[0]?.payload, {
+      atlasCount: 1,
+      seat: 'north',
+      spellbookCount: 0,
+    });
+    assert.equal(result.session.state.activeSeat, 'south');
   });
-  assert.equal(result.session.state.activeSeat, 'south');
 });
 
-test('RULE-01 first player skips its draw, establishes a domain, then second player chooses a deck', () => {
-  let session = keep(createGameSession(manifest(13)));
-  session = keep(session);
+test('RULE-01 first player skips its draw, establishes a domain, then second player chooses a deck', async () => {
+  await withSetup(manifest(13), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const session = ctx.session;
 
-  assert.equal(session.state.turnNumber, 1);
-  assert.equal(session.state.activeSeat, 'north');
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.players.north.hand.atlas.length, 3);
-  assert.equal(session.transcript.at(-1)?.events.at(-1)?.type, 'turn-started');
-  assert.deepEqual(session.transcript.at(-1)?.events.at(-1)?.payload, {
-    drawSkipped: true,
-    seat: 'north',
-    turnNumber: 1,
+    assert.equal(session.state.turnNumber, 1);
+    assert.equal(session.state.activeSeat, 'north');
+    assert.equal(session.state.phase, 'main');
+    assert.equal(session.state.players.north.hand.atlas.length, 3);
+    assert.equal(session.transcript.at(-1)?.events.at(-1)?.type, 'turn-started');
+    assert.deepEqual(session.transcript.at(-1)?.events.at(-1)?.payload, {
+      drawSkipped: true,
+      seat: 'north',
+      turnNumber: 1,
+    });
+
+    const site = await ctx.action(({ descriptor }) => descriptor.kind === 'play-site');
+    const siteId = site.descriptor.kind === 'play-site' ? site.descriptor.cardInstanceId : '';
+    await ctx.accept(site);
+    assert.equal(ctx.state.realm.sites.C4?.instanceId, siteId);
+    assert.equal(ctx.state.realm.sites.C4?.controller, 'north');
+    assert.equal(ctx.state.players.north.avatar.tapped, true);
+    assert.equal(ctx.state.players.north.domainEstablished, true);
+    assert.equal(ctx.state.players.north.mana, 1);
+    const afterSiteKinds = (await ctx.legalActions('north')).map(({ descriptor }) => descriptor.kind);
+    assert.equal(afterSiteKinds.includes('play-site'), false);
+    assert.equal(afterSiteKinds.includes('draw-site'), false);
+    assert.equal(afterSiteKinds.includes('end-turn'), true);
+
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(ctx.state.turnNumber, 2);
+    assert.equal(ctx.state.activeSeat, 'south');
+    assert.equal(ctx.state.phase, 'draw');
+    assert.deepEqual(
+      (await ctx.legalActions('south')).map(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone),
+      ['atlas', 'spellbook'],
+    );
+
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.players.south.hand.atlas.length, 4);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events[0]?.payload, { seat: 'south', zone: 'atlas' });
+    assert.doesNotMatch(canonicalJson(ctx.session.transcript.at(-1)?.events[0]?.payload ?? null), /south-site-/);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-
-  const site = action(session, ({ descriptor }) => descriptor.kind === 'play-site');
-  const siteId = site.descriptor.kind === 'play-site' ? site.descriptor.cardInstanceId : '';
-  session = accept(session, site);
-  assert.equal(session.state.realm.sites.C4?.instanceId, siteId);
-  assert.equal(session.state.realm.sites.C4?.controller, 'north');
-  assert.equal(session.state.players.north.avatar.tapped, true);
-  assert.equal(session.state.players.north.domainEstablished, true);
-  assert.equal(session.state.players.north.mana, 1);
-  const afterSiteKinds = legalGameActions(session.state, 'north').map(({ descriptor }) => descriptor.kind);
-  assert.equal(afterSiteKinds.includes('play-site'), false);
-  assert.equal(afterSiteKinds.includes('draw-site'), false);
-  assert.equal(afterSiteKinds.includes('end-turn'), true);
-
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  assert.equal(session.state.turnNumber, 2);
-  assert.equal(session.state.activeSeat, 'south');
-  assert.equal(session.state.phase, 'draw');
-  assert.deepEqual(
-    legalGameActions(session.state, 'south').map(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone),
-    ['atlas', 'spellbook'],
-  );
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.players.south.hand.atlas.length, 4);
-  assert.deepEqual(session.transcript.at(-1)?.events[0]?.payload, { seat: 'south', zone: 'atlas' });
-  assert.doesNotMatch(canonicalJson(session.transcript.at(-1)?.events[0]?.payload ?? null), /south-site-/);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 function northSecondMain(seed = 23, shortDecks = false, spell?: SpellFacts): GameSession {
@@ -16746,25 +16758,27 @@ test('shared stale rejection leaves game state, PRNG, and accepted transcript un
   assert.equal(stale.session.attempts.length, 2);
 });
 
-test('RULE-01 attempting to draw from an empty deck immediately loses', () => {
+test('RULE-01 attempting to draw from an empty deck immediately loses', async () => {
   const short = deck('short', 3, 3);
-  let session = keep(createGameSession(manifest(19, { north: short, south: short })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+  await withSetup(manifest(19, { north: short, south: short }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'));
+    await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    await ctx.accept(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
 
-  assert.deepEqual(session.state.terminal, {
-    loser: 'south',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'north',
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'south',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'north',
+    });
+    assert.equal(ctx.state.phase, 'terminal');
+    assert.deepEqual(await ctx.legalActions('south'), []);
+    assert.equal(ctx.session.transcript.at(-1)?.events[0]?.type, 'game-ended');
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(session.state.phase, 'terminal');
-  assert.deepEqual(legalGameActions(session.state, 'south'), []);
-  assert.equal(session.transcript.at(-1)?.events[0]?.type, 'game-ended');
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn', () => {
