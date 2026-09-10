@@ -196,6 +196,7 @@ pub enum MagicEffect {
     },
     DestroyTargetSiteWithDamageGrid([u8; 5]),
     DisableTargetNearbyMinionUntilNextTurn,
+    DrawSites(u8),
     DrawSpells(u8),
     FightAllyWithAdjacentEnemy,
     GainControlOfTargetNearbyMinion,
@@ -689,6 +690,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
     "destroyTargetSite",
     "disableTargetNearbyMinionUntilNextTurn",
+    "drawSites",
     "drawSpells",
     "discardSiteAsAdditionalCost",
     "fightAllyWithAdjacentEnemy",
@@ -1186,6 +1188,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             damage_grid.map(MagicEffect::DestroyTargetSiteWithDamageGrid),
             true_only(object, "disableTargetNearbyMinionUntilNextTurn", path)?
                 .then_some(MagicEffect::DisableTargetNearbyMinionUntilNextTurn),
+            optional_bounded_integer(object, "drawSites", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::DrawSites(compact_u8(count))),
             optional_bounded_integer(object, "drawSpells", 1, MAX_DECK_CARDS, path)?
                 .map(|count| MagicEffect::DrawSpells(compact_u8(count))),
             true_only(object, "fightAllyWithAdjacentEnemy", path)?

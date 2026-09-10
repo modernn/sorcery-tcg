@@ -178,6 +178,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     discardSiteAsAdditionalCost?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
+    drawSites?: number;
     drawSpells?: number;
     fightAllyWithAdjacentEnemy?: true;
     gainControlOfTargetNearbyMinion?: true;
@@ -1007,7 +1008,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
     destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
-    grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSpells
+    grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby teleportAllyToTargetSite
@@ -1462,6 +1463,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
+      + Number(card.drawSites !== undefined)
       + Number(card.drawSpells !== undefined)
       + Number(card.killTargetMinion === true)
       + Number(card.killTargetWoundedMinion === true)
@@ -1509,6 +1511,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.healController < 1
       || card.healController > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.healController must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.drawSites !== undefined && (!Number.isSafeInteger(card.drawSites)
+      || card.drawSites < 1
+      || card.drawSites > MAX_DECK_CARDS)) {
+      throw new RangeError(`${path}.drawSites must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
     }
     if (card.drawSpells !== undefined && (!Number.isSafeInteger(card.drawSpells)
       || card.drawSpells < 1
@@ -2157,6 +2164,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
+                  : card.drawSites !== undefined
+                    ? { drawSites: card.drawSites }
                   : card.drawSpells !== undefined
                     ? { drawSpells: card.drawSpells }
                     : card.returnMinionFromOwnCemetery === true

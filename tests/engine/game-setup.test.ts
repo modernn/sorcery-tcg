@@ -879,6 +879,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        drawSites: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /drawSites/);
+  const drawnSites = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSites: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(drawnSites.cards[firstSpell]?.cardType === 'magic'
+    && drawnSites.cards[firstSpell].drawSites, 2);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSites: 2,
+        drawSpells: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         damageTargetUnit: 1,
         manaCost: 1,
         targetNearby: 'yes',
@@ -19049,6 +19088,106 @@ test('RULE-03 kill-minion Magic destroys a healthy minion and never offers an Av
       instanceId === targetInstanceId), true);
     assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
       instanceId === sourceInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 draw-site Magic draws hidden Atlas cards and redacts them from the opponent', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(6).fill('draw-north-site'),
+    avatar: 'draw-north-avatar',
+    spellbook: Array(4).fill('draw-sites'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('draw-south-site'),
+    avatar: 'draw-south-avatar',
+    spellbook: Array(4).fill('draw-south-minion'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'draw-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-north-site': { cardType: 'site', elements: ['earth'] },
+    'draw-sites': {
+      cardType: 'magic',
+      drawSites: 2,
+      manaCost: 1,
+      thresholds,
+    },
+    'draw-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'draw-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-draw-sites-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 200,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['draw-sites'], cards['draw-sites']);
+
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const expected = ctx.state.players.north.atlas.slice(0, 2).map(({ instanceId }) => instanceId);
+    assert.equal(expected.length, 2);
+    const southBefore = ctx.observe('south');
+    assert.equal(southBefore.players.north.hand.atlas, 2);
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'draw-sites');
+    assert.ok(spell);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === spell.instanceId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const drawn = await ctx.step(cast);
+    assert.equal(drawn.accepted, true);
+    if (!drawn.accepted) return;
+    assert.deepEqual(drawn.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'site-drawn',
+      'site-drawn',
+      'magic-resolved',
+    ]);
+    assert.equal(drawn.receipt.events[1]?.payload.seat, 'north');
+    assert.equal(drawn.receipt.events[1]?.payload.sourceInstanceId, sourceInstanceId);
+    assert.equal(drawn.receipt.events[2]?.payload.sourceInstanceId, sourceInstanceId);
+    assert.deepEqual(drawn.receipt.randomDraws, []);
+    const hand = ctx.state.players.north.hand.atlas;
+    assert.equal(hand.length, 4);
+    for (const instanceId of expected) {
+      assert.equal(hand.some((card) => card.instanceId === instanceId), true);
+    }
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === sourceInstanceId), true);
+    const southAfter = ctx.observe('south');
+    assert.equal(southAfter.players.north.hand.atlas, 4);
+    assert.equal(southAfter.players.north.atlasCount, 1);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

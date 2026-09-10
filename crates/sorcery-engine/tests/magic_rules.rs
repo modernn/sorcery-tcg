@@ -7383,3 +7383,137 @@ fn rule_catalog_0199_kill_target_minion_ward_absorbs_the_kill() {
     );
     assert_exact_replay(&session);
 }
+
+fn draw_sites_manifest(seed: u32, atlas_count: usize) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-draw": magic(("drawSites", json!(2)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; atlas_count],
+                "avatar": "north-avatar",
+                "spellbook": ["north-draw"; 6],
+            },
+            "south": {
+                "atlas": ["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": ["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+#[test]
+fn rule_catalog_0200_draw_sites_magic_draws_hidden_atlas_cards() {
+    let encoded = draw_sites_manifest(200, 6);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let expected: Vec<_> = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .iter()
+        .take(2)
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(expected.len(), 2);
+    let south_before = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_before["players"]["north"]["hand"]["atlas"], 2);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    });
+    let spell_id = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("draw Magic identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-drawn", "site-drawn", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], spell_id);
+    let after = state(&session);
+    let hand = after["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand");
+    assert_eq!(hand.len(), 4);
+    for instance_id in &expected {
+        assert!(
+            hand.iter().any(|card| &card["instanceId"] == instance_id),
+            "the drawn identities must enter the hidden Atlas hand"
+        );
+    }
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    let south_after = session
+        .public_view(Seat::South)
+        .expect("South public view after the draws");
+    assert_eq!(
+        south_after["players"]["north"]["hand"]["atlas"], 4,
+        "the opponent sees only the new Atlas hand count"
+    );
+    assert_eq!(south_after["players"]["north"]["atlasCount"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library() {
+    for remaining in 0..=1 {
+        let encoded = draw_sites_manifest(
+            201 + u32::try_from(remaining).expect("small remaining count"),
+            3 + remaining,
+        );
+        let mut session = opening_main(&encoded);
+        let before = state(&session);
+        let expected = before["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .clone();
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+        });
+        let kinds = event_types(&receipt);
+        assert_eq!(kinds.first(), Some(&"magic-cast"));
+        assert_eq!(
+            kinds.iter().filter(|kind| **kind == "site-drawn").count(),
+            expected.len()
+        );
+        assert_eq!(kinds.last(), Some(&"game-ended"));
+        assert!(kinds.contains(&"magic-resolved"));
+        let after = state(&session);
+        assert_eq!(after["players"]["north"]["atlas"], json!([]));
+        assert_eq!(after["terminal"]["reason"], "deck_empty");
+        assert_eq!(after["terminal"]["loser"], "north");
+        for card in expected {
+            assert!(
+                after["players"]["north"]["hand"]["atlas"]
+                    .as_array()
+                    .expect("north Atlas hand")
+                    .contains(&card)
+            );
+        }
+        assert_exact_replay(&session);
+    }
+}
