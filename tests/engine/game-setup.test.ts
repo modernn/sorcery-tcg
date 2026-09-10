@@ -1271,6 +1271,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        grantStealthToTargetMinion: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantStealthToTargetMinion must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantWardToTargetMinion: true,
+        grantStealthToTargetMinion: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const grantStealth = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantStealthToTargetMinion: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(grantStealth.cards[firstSpell]?.cardType === 'magic'
+    && grantStealth.cards[firstSpell].grantStealthToTargetMinion, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         discardSiteAsAdditionalCost: true,
         manaCost: 1,
@@ -21112,6 +21151,140 @@ test('RULE-03 grant-Ward Magic marks an unwarded minion and is a paid no-op when
     ]);
     const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
     assert.equal(after?.warded, true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 grant-Stealth Magic hides an enemy minion from later targeting', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards = (printedStealth: boolean): Record<string, GameCardDefinition> => ({
+    'stealth-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'stealth-north-site': { cardType: 'site', elements: ['earth'] },
+    'stealth-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'stealth-south-charger': {
+      attack: 1,
+      cardType: 'minion',
+      charge: true,
+      defense: 1,
+      manaCost: 0,
+      ...(printedStealth ? { stealth: true } : {}),
+      thresholds,
+    },
+    'stealth-south-site': { cardType: 'site', elements: ['earth'] },
+    'stealth-spell': {
+      cardType: 'magic',
+      grantStealthToTargetMinion: true,
+      manaCost: 0,
+      thresholds,
+    },
+  });
+  const input = (seed: number, printedStealth: boolean) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-grant-stealth-magic-v1',
+    },
+    cards: cards(printedStealth),
+    decks: {
+      north: {
+        atlas: Array(4).fill('stealth-north-site'),
+        avatar: 'stealth-north-avatar',
+        spellbook: Array(4).fill('stealth-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(4).fill('stealth-south-site'),
+        avatar: 'stealth-south-avatar',
+        spellbook: Array(4).fill('stealth-south-charger'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const grantManifest = createGameManifest(input(223, false));
+  assert.equal(grantManifest.cards['stealth-spell']?.cardType === 'magic'
+    && grantManifest.cards['stealth-spell'].grantStealthToTargetMinion, true);
+
+  const stageCharger = async (ctx: SetupCtx): Promise<string> => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'stealth-south-charger'
+        && descriptor.cell === 'C1');
+    const chargerId = ctx.state.realm.units.find(({ cardId }) => cardId === 'stealth-south-charger')
+      ?.instanceId;
+    assert.ok(chargerId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    return chargerId;
+  };
+
+  await withSetup(grantManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const chargerId = await stageCharger(ctx);
+    const charger = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(charger?.stealthed, false);
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'stealth-spell');
+    assert.ok(spell);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.target
+        ? [[descriptor.target.kind, descriptor.target.instanceId] as const]
+        : []);
+    assert.deepEqual(targets, [['minion', chargerId]]);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === chargerId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const granted = await ctx.step(cast);
+    assert.equal(granted.accepted, true);
+    if (!granted.accepted) return;
+    assert.deepEqual(granted.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-stealthed',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(granted.receipt.events[1]?.payload, {
+      instanceId: chargerId,
+      seat: 'south',
+      sourceInstanceId,
+    });
+    const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(after?.stealthed, true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'stealth-spell'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(224, true)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const chargerId = await stageCharger(ctx);
+    const charger = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(charger?.stealthed, true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'stealth-spell'), false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

@@ -1268,6 +1268,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::GainControlOfTargetNearbyMinion
         | MagicEffect::KillTargetMinion
@@ -5248,6 +5249,7 @@ impl Game {
             | MagicEffect::KillTargetMinion
             | MagicEffect::ReturnTargetMinionToOwnerHand
             | MagicEffect::TapTargetMinion
+            | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantWardToTargetMinion
             | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
@@ -14881,6 +14883,21 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::GrantStealthToTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_grant_stealth_minion(
+                    instance_id,
+                    *target_seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::GrantWardToTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -17093,6 +17110,32 @@ impl Game {
         Ok(())
     }
 
+    fn apply_grant_stealth_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if !unit.stealthed {
+            unit.stealthed = true;
+            outcomes.push("minion-stealthed", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn apply_grant_ward_minion(
         &mut self,
         instance_id: &IdentityHash,
@@ -18896,6 +18939,10 @@ mod tests {
             (
                 MagicEffect::TargetPlayerLosesLife(2),
                 json!({ "targetPlayerLosesLife": 2 }),
+            ),
+            (
+                MagicEffect::GrantStealthToTargetMinion,
+                json!({ "grantStealthToTargetMinion": true }),
             ),
             (
                 MagicEffect::GrantWardToTargetMinion,
