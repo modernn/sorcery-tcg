@@ -2233,7 +2233,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (endTurnPulseCount > 1) {
     throw new RangeError(`${path} competing end-turn pulses are unsupported`);
   }
-  if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined)
+  if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDamageEachOtherUnitHere)
       || card.atStartOfControllerTurnDamageEachOtherUnitHere < 1
       || card.atStartOfControllerTurnDamageEachOtherUnitHere > MAX_COMBAT_STAT)) {
