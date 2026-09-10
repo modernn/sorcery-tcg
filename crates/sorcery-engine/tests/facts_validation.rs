@@ -8,7 +8,10 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 #[path = "../src/facts.rs"]
 mod facts;
 
-use facts::{CardFacts, Element, MagicEffect, MinionGenesis, Thresholds, parse_card_definition};
+use facts::{
+    CardFacts, Element, MagicEffect, MinionGenesis, RequiredCastRegion, Thresholds,
+    parse_card_definition,
+};
 
 fn thresholds() -> Value {
     json!({ "earth": 0, "fire": 0, "water": 0, "air": 0 })
@@ -945,4 +948,51 @@ fn oversized_burrowing_and_submerge_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.submerge);
+}
+
+#[test]
+fn oversized_required_cast_regions_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-burrowed-only",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "burrowing",
+                json!(true),
+            ),
+            "mustBeCastBurrowed",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized burrowed-only minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.burrowing);
+    assert_eq!(
+        facts.required_cast_region,
+        Some(RequiredCastRegion::Underground)
+    );
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-submerged-only",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "submerge",
+                json!(true),
+            ),
+            "mustBeCastSubmerged",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized submerged-only minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.submerge);
+    assert_eq!(
+        facts.required_cast_region,
+        Some(RequiredCastRegion::Underwater)
+    );
 }

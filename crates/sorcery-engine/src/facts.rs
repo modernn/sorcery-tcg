@@ -1483,11 +1483,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     )?
     .map(compact_u8);
     if occupies_square_area_two
-        && (connects_top_bottom
-            || required_cast_region.is_some()
-            || voidwalk
-            || must_be_cast_to_outer_column
-            || token)
+        && (connects_top_bottom || voidwalk || must_be_cast_to_outer_column || token)
     {
         return Err(FactError::new(
             format!("{path}.occupiesSquareArea"),

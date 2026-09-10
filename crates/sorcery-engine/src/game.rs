@@ -6546,7 +6546,9 @@ impl Game {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .flat_map(|cells| self.square_area_summon_destinations(minion, cells, summon_cell))
+                .flat_map(|cells| {
+                    self.square_area_summon_destinations(minion, cells, summon_cell, false)
+                })
                 .collect()
         } else {
             let mut destinations = Cell::ALL
@@ -6565,12 +6567,14 @@ impl Game {
     /// Surface plus every lower layer the whole 2x2 can occupy.
     ///
     /// Underground needs land under every cell; underwater needs Water under every cell. A mixed
-    /// square stays surface-only. Cast-region restrictions keep only the required layer.
+    /// square stays surface-only. Paid casts keep only the required layer; a free placement
+    /// ignores that printed restriction the same way a 1x1 does.
     fn square_area_summon_destinations(
         &self,
         minion: &MinionFacts,
         cells: SquareArea,
         summon_cell: impl Fn(Cell) -> Option<u64>,
+        anywhere: bool,
     ) -> Vec<SummonDestination> {
         let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
             cells
@@ -6596,7 +6600,7 @@ impl Game {
             region,
         };
         let mut destinations = Vec::new();
-        let required = minion.required_cast_region;
+        let required = (!anywhere).then_some(minion.required_cast_region).flatten();
         if required.is_none() {
             destinations.push(destination(None));
         }
@@ -6713,7 +6717,7 @@ impl Game {
                 .into_iter()
                 .flat_map(|cells| {
                     let summon_cell = |cell: Cell| may_enter(cell).then_some(0);
-                    self.square_area_summon_destinations(minion, cells, summon_cell)
+                    self.square_area_summon_destinations(minion, cells, summon_cell, true)
                 })
                 .collect()
         } else {

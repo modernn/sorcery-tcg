@@ -3836,6 +3836,54 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0186_oversized_submerge_summons_underwater_on_an_all_water_square"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0187",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that must be cast burrowed is offered only the underground placement of an all-land square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "burrowing",
+        "mustBeCastBurrowed"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0187_oversized_burrowed_only_cast_offers_only_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0188",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that must be cast submerged is offered only the underwater placement of an all-Water square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "submerge",
+        "mustBeCastSubmerged"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0188_oversized_submerged_only_cast_offers_only_underwater"
+      }
     }
   ]
 }

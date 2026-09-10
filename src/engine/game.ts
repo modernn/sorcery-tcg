@@ -1766,8 +1766,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.occupiesSquareArea === 2
     && (card.connectsTopBottom === true
-      || card.mustBeCastBurrowed === true
-      || card.mustBeCastSubmerged === true
       || card.voidwalk === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true)) {
