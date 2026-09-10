@@ -259,7 +259,7 @@ fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardId"] == "south-site"
-            && descriptor["cell"] == "D1"
+            && descriptor["cell"] == "C1"
     });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
@@ -279,7 +279,7 @@ fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
         "an Ordinary site remains a legal conjure target: {legal_cells:?}"
     );
     assert!(
-        !legal_cells.contains(&json!(["D1"])),
+        !legal_cells.contains(&json!(["C1"])),
         "a Unique or Legendary site is not a legal conjure target: {legal_cells:?}"
     );
     accept_where(&mut session, |descriptor| {

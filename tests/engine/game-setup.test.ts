@@ -24087,7 +24087,7 @@ test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and i
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'play-site'
         && descriptor.cardId === 'ablaze-south-site'
-        && descriptor.cell === 'D1');
+        && descriptor.cell === 'C1');
     await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
     await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
     const legalCells = (await ctx.legalActions('north'))
@@ -24095,7 +24095,7 @@ test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and i
         descriptor.kind === 'cast-aura' && descriptor.cardId === 'ablaze-north-aura')
       .map(({ descriptor }) => descriptor.kind === 'cast-aura' ? descriptor.cells : []);
     assert.equal(legalCells.some((cells) => cells[0] === 'C4' && cells.length === 1), true);
-    assert.equal(legalCells.some((cells) => cells[0] === 'D1'), false);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C1'), false);
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'cast-aura'
         && descriptor.cardId === 'ablaze-north-aura'
