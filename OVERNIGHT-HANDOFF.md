@@ -12,7 +12,8 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 `data/rules/catalog.json`: **291 rust-supported / 0 typescript-supported** out of 291.
 
-Latest catalog proofs: end-of-controller-turn here-area damage (`RULE-CATALOG-0290`–`0291`) and target-player library draw (`RULE-CATALOG-0286`–`0289`).
+Latest catalog proofs: end-of-controller-turn here-area damage (`RULE-CATALOG-0290`–`0291`, verified) and target-player library draw (`RULE-CATALOG-0286`–`0289`).
+End-of-controller-turn here-area reuses the shared footprint helper, continues through the existing end-turn Deathrite path, and observes survivors after End Phase clears leftover damage. Allocations plus Avatar life loss prove a 2-defense visitor was hit.
 Grant-Airborne this turn remains `RULE-CATALOG-0274`–`0275`.
 Cemetery Aura return remains `RULE-CATALOG-0272`–`0273`.
 Destroy- and return-target Aura Magic remains `RULE-CATALOG-0270`–`0271`.
@@ -64,14 +65,14 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `4bebc97`.
 - `pnpm typecheck` / `pnpm lint` — green.
 - `tests/engine` + catalog proofs — 256 engine + 1 catalog pass, including catalog 0167–0291.
-- Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
+- Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover. Engine playthroughs including end-turn here-area are green after rebuilding `session-json`.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices. End-of-controller-turn here-area damage continues through the existing end-turn deathrite path; do not break Ignited or end-turn Auras. Target-player library draw on an empty library is a deck-out; mill remains a paid no-op. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices. End-of-controller-turn here-area is landed; do not break Ignited or end-turn Auras. Target-player library draw on an empty library is a deck-out; mill remains a paid no-op. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
