@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/simplify-search-wrappers-0005`. Stack this on current `master` (`f8b127d`). Do not grow already-merged landings.
+Live line: `cursor/game-record-artifacts-0005`. Stack this on current `master` (`ed9ae4d`). Do not grow already-merged landings.
 
-Search RPCs are on master. This branch only deduplicates TS/Rust wrappers, session-json param helpers, and the seed-31 test fixture. It does not change report contracts.
+This branch writes SIM-03 per-game artifacts (`sorcery-engine record`, `exportGameRecord`) without changing the compact demo/batch report contract.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

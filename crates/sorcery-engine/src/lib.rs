@@ -10,6 +10,7 @@ pub mod counterfactual;
 pub mod deck;
 pub mod facts;
 pub mod game;
+pub mod game_record;
 pub mod gauntlet;
 pub mod novelty;
 pub mod novelty_dispatch;

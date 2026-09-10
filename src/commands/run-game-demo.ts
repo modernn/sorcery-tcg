@@ -11,7 +11,12 @@ import {
   type GameManifest,
   type GameTerminal,
 } from '../engine/game.ts';
-import { runRustSyntheticDemo, type Sha256Hash } from '../engine/rust-engine.ts';
+import {
+  runRustSyntheticDemo,
+  runRustSyntheticRecord,
+  type RustGameRecord,
+  type Sha256Hash,
+} from '../engine/rust-engine.ts';
 import { withRustSession } from '../engine/rust-session-helpers.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
@@ -95,6 +100,10 @@ export async function runDeterministicGame(manifest: GameManifest): Promise<Dete
       turnCount: session.state.turnNumber,
     });
   });
+}
+
+export function runGameRecord(seed = 1): RustGameRecord {
+  return runRustSyntheticRecord(seed);
 }
 
 export function runGameDemo(seed = 1): DeterministicGameReport {
