@@ -6622,6 +6622,48 @@
         "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
         "testName": "rule_catalog_0307_end_turn_controller_life_loss_can_open_deaths_door"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0308",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can skip the controller Start Phase untap. After it taps, it stays tapped on that player's next turn and cannot Move and Attack until something else readies it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "doesNotUntapDuringControllersStartPhase"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
+        "testName": "rule_catalog_0308_does_not_untap_during_the_controllers_start_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0309",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Disable suppresses the Start Phase doesn't-untap replacement. A frozen copy untaps with the rest of the controller's minions, then Freeze expires at the caster's next turn start.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "doesNotUntapDuringControllersStartPhase"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-disable-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
+        "testName": "rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement"
+      }
     }
   ]
 }

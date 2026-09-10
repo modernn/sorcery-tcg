@@ -10,10 +10,11 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **307 rust-supported / 0 typescript-supported** out of 307.
+`data/rules/catalog.json`: **309 rust-supported / 0 typescript-supported** out of 309.
 
-Latest catalog proofs: end-of-controller-turn Avatar life (`RULE-CATALOG-0304`–`0307`) and Deathrite library mill (`RULE-CATALOG-0300`–`0303`).
-End-turn controller life gain and loss reuse the shared Avatar helpers. Healing is capped at printed life and cannot leave Death's Door. Life loss can open Death's Door without ending the game. The three end-turn pulses — life gain, life loss, and here-area damage — are exclusive; Ignited is not a pulse. Disabled minions do not fire. Deathrite mill reuses the shared mill helper and resolves before cemetery entry. An empty Atlas or Spellbook is a no-op, never a deck-out.
+Latest catalog proofs: Start Phase doesn't-untap (`RULE-CATALOG-0308`–`0309`) and end-of-controller-turn Avatar life (`RULE-CATALOG-0304`–`0307`).
+A printed minion can replace the controller Start Phase untap and stay tapped into that player's next Main phase. Disable suppresses the replacement, so a frozen copy still readies, then Freeze expires at the caster's next turn start. This is not a start-turn trigger. End-turn controller life gain and loss reuse the shared Avatar helpers. Healing is capped at printed life and cannot leave Death's Door. Life loss can open Death's Door without ending the game. The three end-turn pulses — life gain, life loss, and here-area damage — are exclusive; Ignited is not a pulse. Disabled minions do not fire.
+Deathrite library mill remains `RULE-CATALOG-0300`–`0303`.
 Heal-target-minion Magic remains `RULE-CATALOG-0298`–`0299`.
 Grant-Airborne this turn remains `RULE-CATALOG-0274`–`0275`.
 Cemetery Aura return remains `RULE-CATALOG-0272`–`0273`.
@@ -66,9 +67,9 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `86286c1`.
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `b8e8587`.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 262 engine + 1 catalog pass, including catalog 0167–0307.
+- `tests/engine` + catalog proofs — 263 engine + 1 catalog pass, including catalog 0167–0309.
 - Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
