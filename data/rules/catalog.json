@@ -6450,6 +6450,92 @@
         "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
         "testName": "rule_catalog_0299_heal_target_minion_is_a_paid_noop_on_an_undamaged_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0300",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can mill the top Spellbook card into the cemetery before the corpse enters. The milled identity is public. An empty Spellbook does not lose.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "spell-discarded",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0300_deathrite_mill_spells_puts_the_top_spell_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0301",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Spellbook mill from an empty library is a no-op. The corpse still dies, the game stays active, and no card is discarded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0301_deathrite_mill_spells_is_a_no_op_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0302",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can mill the top Atlas card into the cemetery before the corpse enters. The milled identity is public.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSites"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "site-discarded",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0302_deathrite_mill_sites_puts_the_top_site_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0303",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Atlas mill from an empty library is a no-op. The corpse still dies and the game stays active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSites"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0303_deathrite_mill_sites_is_a_no_op_on_an_empty_atlas"
+      }
     }
   ]
 }

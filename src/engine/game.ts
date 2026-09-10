@@ -362,6 +362,8 @@ export type GameCardDefinition =
     deathriteDrawSite?: boolean;
     deathriteDrawSpells?: boolean;
     deathriteLoseLifePerNearbySiteControlled?: 1;
+    deathriteMillSites?: boolean;
+    deathriteMillSpells?: boolean;
     defense: number;
     discardSpellToDamageRandomOtherUnitHere?: number;
     discardRandomCardInsteadOfMana?: true;
@@ -1215,7 +1217,7 @@ const SUPPORTED_CARD_FIELDS = {
   minion: new Set(`
     airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
-    charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal
+    charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal deathriteMillSites deathriteMillSpells
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
@@ -1957,6 +1959,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.deathriteDrawSpells !== undefined && typeof card.deathriteDrawSpells !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSpells must be boolean`);
+  }
+  if (card.deathriteMillSites !== undefined && typeof card.deathriteMillSites !== 'boolean') {
+    throw new RangeError(`${path}.deathriteMillSites must be boolean`);
+  }
+  if (card.deathriteMillSpells !== undefined && typeof card.deathriteMillSpells !== 'boolean') {
+    throw new RangeError(`${path}.deathriteMillSpells must be boolean`);
   }
   if (card.deathriteDamageEachUnitHere !== undefined
     && (!Number.isSafeInteger(card.deathriteDamageEachUnitHere)
@@ -2848,6 +2856,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
             ...(card.deathriteDrawSpells === true ? { deathriteDrawSpells: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
+            ...(card.deathriteMillSites === true ? { deathriteMillSites: true } : {}),
+            ...(card.deathriteMillSpells === true ? { deathriteMillSpells: true } : {}),
             ...(card.deathriteLoseLifePerNearbySiteControlled === 1
               ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
               : {}),

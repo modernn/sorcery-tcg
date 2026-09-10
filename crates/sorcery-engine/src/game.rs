@@ -1475,6 +1475,8 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         deathrite_draw_spells: _,
         deathrite_heal: _,
         deathrite_lose_life_per_nearby_site_controlled: _,
+        deathrite_mill_sites: _,
+        deathrite_mill_spells: _,
         defense: _,
         dies_at_end_of_controller_turn: _,
         enemies_must_attack_this_if_able: _,
@@ -10924,7 +10926,9 @@ impl Game {
                     || facts.deathrite_draw_site
                     || facts.deathrite_draw_spells
                     || facts.deathrite_heal.is_some()
-                    || facts.deathrite_lose_life_per_nearby_site_controlled;
+                    || facts.deathrite_lose_life_per_nearby_site_controlled
+                    || facts.deathrite_mill_sites
+                    || facts.deathrite_mill_spells;
                 if has_deathrite && !self.minion_is_disabled(unit) {
                     let (current_power, _, lethal) = self.minion_current_stats(unit)?;
                     sources.push(PendingDeathriteSource {
@@ -11439,6 +11443,24 @@ impl Game {
             } else if !pending.deck_losers.contains(&source.controller) {
                 pending.deck_losers.push(source.controller);
             }
+        }
+        if facts.deathrite_mill_sites {
+            self.apply_mill_library(
+                source.controller,
+                DeckZone::Atlas,
+                1,
+                &source.instance_id,
+                outcomes,
+            );
+        }
+        if facts.deathrite_mill_spells {
+            self.apply_mill_library(
+                source.controller,
+                DeckZone::Spellbook,
+                1,
+                &source.instance_id,
+                outcomes,
+            );
         }
         if !triggered_deaths.is_empty() {
             let (sources, corpses) = self.collect_minion_deaths(&triggered_deaths)?;
@@ -21886,6 +21908,14 @@ mod tests {
             .expect("valid Deathrite spell-draw manifest")
             .ensure_selfplay_supported()
             .expect("Deathrite spell draw is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSpells", json!(true))]))
+            .expect("valid Deathrite spell-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell mill is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSites", json!(true))]))
+            .expect("valid Deathrite site-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite site mill is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

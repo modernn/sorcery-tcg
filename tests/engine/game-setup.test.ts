@@ -45,6 +45,8 @@ type SpellFacts = Readonly<{
   deathriteDrawSite?: boolean;
   deathriteDrawSpells?: boolean;
   deathriteHeal?: number;
+  deathriteMillSites?: boolean;
+  deathriteMillSpells?: boolean;
   deathriteLoseLifePerNearbySiteControlled?: 1;
   defense?: number;
   discardSpellToDamageRandomOtherUnitHere?: number;
@@ -218,6 +220,8 @@ function cardsFor(
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
         ...(facts.deathriteDrawSpells === true ? { deathriteDrawSpells: true as const } : {}),
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
+        ...(facts.deathriteMillSites === true ? { deathriteMillSites: true as const } : {}),
+        ...(facts.deathriteMillSpells === true ? { deathriteMillSpells: true as const } : {}),
         ...(facts.deathriteLoseLifePerNearbySiteControlled === 1
           ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
           : {}),
@@ -2571,6 +2575,56 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   assert.equal(
     deathriteDrawSpellsManifest.cards[firstSpell]?.cardType === 'minion'
       && deathriteDrawSpellsManifest.cards[firstSpell].deathriteDrawSpells,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteMillSpells: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /deathriteMillSpells must be boolean/);
+  const deathriteMillSpellsManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteMillSpells: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    deathriteMillSpellsManifest.cards[firstSpell]?.cardType === 'minion'
+      && deathriteMillSpellsManifest.cards[firstSpell].deathriteMillSpells,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteMillSites: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /deathriteMillSites must be boolean/);
+  const deathriteMillSitesManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteMillSites: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    deathriteMillSitesManifest.cards[firstSpell]?.cardType === 'minion'
+      && deathriteMillSitesManifest.cards[firstSpell].deathriteMillSites,
     true,
   );
   assert.throws(() => createGameManifest({
@@ -26872,6 +26926,115 @@ test('RULE-03 heal-target-minion Magic clears same-turn damage or is a paid no-o
     assert.equal(after?.damage, 0);
     assert.equal(await ctx.verifyReplay(), true);
   });
+});
+
+test('RULE-03 Deathrite mill puts a public library card in the cemetery or no-ops an empty library', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards = {
+    'mill-north-avatar': avatar,
+    'mill-north-site': site,
+    'mill-north-source': {
+      attack: 1,
+      cardType: 'minion' as const,
+      deathriteMillSpells: true,
+      defense: 1,
+      diesAtEndOfControllerTurn: true as const,
+      manaCost: 0,
+      thresholds,
+    },
+    'mill-south-avatar': avatar,
+    'mill-south-dummy': {
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'mill-south-site': site,
+  } satisfies Record<string, GameCardDefinition>;
+  const run = async (spellbookCount: number, expectMill: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-deathrite-mill-v1',
+      },
+      cards,
+      decks: {
+        north: {
+          atlas: Array(6).fill('mill-north-site'),
+          avatar: 'mill-north-avatar',
+          spellbook: Array(spellbookCount).fill('mill-north-source'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('mill-south-site'),
+          avatar: 'mill-south-avatar',
+          spellbook: Array(6).fill('mill-south-dummy'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 300,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'mill-north-source'
+          && descriptor.cell === 'C4');
+      const sourceId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'mill-north-source')?.instanceId;
+      const milledId = ctx.state.players.north.spellbook[0]?.instanceId;
+      const libraryBefore = ctx.state.players.north.spellbook.length;
+      assert.equal(typeof sourceId, 'string');
+      const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'end-turn'));
+      assert.equal(ended.accepted, true);
+      if (!ended.accepted) {
+        return;
+      }
+      if (expectMill) {
+        assert.equal(typeof milledId, 'string');
+        const milledAt = ended.receipt.events.findIndex(({ type }) => type === 'spell-discarded');
+        const diedAt = ended.receipt.events.findIndex(({ type }) => type === 'minion-died');
+        assert.equal(milledAt >= 0 && diedAt > milledAt, true);
+        assert.equal(ctx.state.phase === 'draw', true);
+        assert.equal(ctx.state.terminal.status === 'active', true);
+        assert.equal(ctx.state.players.north.spellbook.length, libraryBefore - 1);
+        assert.equal(
+          ctx.state.players.north.cemetery.some((card) => card.instanceId === milledId),
+          true,
+        );
+        assert.equal(
+          ctx.state.players.north.cemetery.some((card) => card.instanceId === sourceId),
+          true,
+        );
+      } else {
+        assert.equal(libraryBefore, 0);
+        assert.equal(
+          ended.receipt.events.some(({ type }) => type === 'spell-discarded'),
+          false,
+        );
+        assert.equal(ctx.state.phase === 'draw', true);
+        assert.equal(ctx.state.terminal.status === 'active', true);
+        assert.equal(
+          ended.receipt.events.some(({ type }) => type === 'game-ended'),
+          false,
+        );
+      }
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(6, true);
+  await run(3, false);
 });
 
 test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {

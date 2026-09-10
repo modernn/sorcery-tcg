@@ -4620,6 +4620,8 @@ function gameDefinition(
   atStartOfControllerTurnMillSites: 0 | 1 = 0,
   deathriteDrawSpells = false,
   healTargetMinion: 0 | 1 = 0,
+  deathriteMillSpells = false,
+  deathriteMillSites = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4892,6 +4894,8 @@ function gameDefinition(
       connectsTopBottom,
       deathriteDrawSite,
       ...(deathriteDrawSpells ? { deathriteDrawSpells: true as const } : {}),
+      ...(deathriteMillSpells ? { deathriteMillSpells: true as const } : {}),
+      ...(deathriteMillSites ? { deathriteMillSites: true as const } : {}),
       ...(deathriteHeal ? { deathriteHeal } : {}),
       ...(deathriteDamageEachUnitHere ? { deathriteDamageEachUnitHere } : {}),
       ...(deathriteLoseLifePerNearbySiteControlled
