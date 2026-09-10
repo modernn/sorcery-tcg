@@ -1084,6 +1084,69 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /healController/);
+  const healTarget = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healTargetMinion: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(healTarget.cards[firstSpell]?.cardType === 'magic'
+    && healTarget.cards[firstSpell].healTargetMinion, 1);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healTargetMinion: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /healTargetMinion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healTargetMinion: 1.5,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /healTargetMinion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healTargetMinion: 101,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /healTargetMinion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 7,
+        healTargetMinion: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -26654,6 +26717,161 @@ test('RULE-03 Deathrite spell draw puts a hidden card in hand or decks out an em
   };
   await run(6, true);
   await run(3, false);
+});
+
+test('RULE-03 heal-target-minion Magic clears same-turn damage or is a paid no-op', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards = {
+    'heal-north-avatar': avatar,
+    'heal-north-damage': {
+      cardType: 'magic' as const,
+      damageTargetUnit: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'heal-north-heal': {
+      cardType: 'magic' as const,
+      healTargetMinion: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'heal-north-site': site,
+    'heal-south-avatar': avatar,
+    'heal-south-site': site,
+    'heal-south-visitor': {
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  } satisfies Record<string, GameCardDefinition>;
+  const input = (seed: number) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-heal-target-minion-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('heal-north-site'),
+        avatar: 'heal-north-avatar',
+        spellbook: [
+          'heal-north-damage',
+          'heal-north-damage',
+          'heal-north-damage',
+          'heal-north-heal',
+          'heal-north-heal',
+          'heal-north-heal',
+        ],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('heal-south-site'),
+        avatar: 'heal-south-avatar',
+        spellbook: Array(6).fill('heal-south-visitor'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const accepted = createGameManifest(input(298));
+  assert.equal(accepted.cards['heal-north-heal']?.cardType === 'magic'
+    && accepted.cards['heal-north-heal'].healTargetMinion, 1);
+
+  const stage = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'heal-south-visitor'
+        && descriptor.cell === 'C4');
+    const visitorId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'heal-south-visitor')?.instanceId;
+    assert.equal(typeof visitorId, 'string');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    return visitorId;
+  };
+
+  await withSetup(createGameManifest(input(298)), async (ctx) => {
+    const visitorId = await stage(ctx);
+    const northAvatar = ctx.state.players.north.avatar.card.instanceId;
+    const southAvatar = ctx.state.players.south.avatar.card.instanceId;
+    const healTargets = (await ctx.legalActions()).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'heal-north-heal' && descriptor.target
+        ? [descriptor.target]
+        : []);
+    assert.equal(healTargets.every((target) => target.kind === 'minion'), true);
+    assert.equal(healTargets.some((target) =>
+      target.instanceId === northAvatar || target.instanceId === southAvatar), false);
+    const damaged = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'heal-north-damage'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === visitorId));
+    assert.equal(damaged.accepted, true);
+    const wounded = ctx.state.realm.units.find((unit) => unit.instanceId === visitorId);
+    assert.equal(wounded?.damage, 1);
+    const healed = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'heal-north-heal'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === visitorId));
+    assert.equal(healed.accepted, true);
+    if (!healed.accepted) {
+      return;
+    }
+    assert.deepEqual(healed.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-healed',
+      'magic-resolved',
+    ]);
+    assert.equal(healed.receipt.events.some(({ payload, type }) =>
+      type === 'minion-healed'
+        && typeof payload === 'object'
+        && payload !== null
+        && 'amount' in payload
+        && payload.amount === 1), true);
+    const after = ctx.state.realm.units.find((unit) => unit.instanceId === visitorId);
+    assert.equal(after?.damage, 0);
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(299)), async (ctx) => {
+    const visitorId = await stage(ctx);
+    const noop = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'heal-north-heal'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === visitorId));
+    assert.equal(noop.accepted, true);
+    if (!noop.accepted) {
+      return;
+    }
+    assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(noop.receipt.events.some(({ type }) => type === 'minion-healed'), false);
+    const after = ctx.state.realm.units.find((unit) => unit.instanceId === visitorId);
+    assert.equal(after?.damage, 0);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {

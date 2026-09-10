@@ -309,6 +309,7 @@ export type GameCardDefinition =
     grantPowerToAllyThisTurn?: 2;
     grantRangedToAllyThisTurn?: true;
     healController?: number;
+    healTargetMinion?: number;
     killTargetMinion?: true;
     killTargetWoundedMinion?: true;
     leapAttackAlly?: true;
@@ -1200,7 +1201,7 @@ const SUPPORTED_CARD_FIELDS = {
     destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn grantRangedToAllyThisTurn
-    grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
+    grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
@@ -1799,6 +1800,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantStealthToTargetMinion === true)
       + Number(card.grantWardToTargetMinion === true)
       + Number(card.healController !== undefined)
+      + Number(card.healTargetMinion !== undefined)
       + Number(card.drawSites !== undefined)
       + Number(card.drawSpells !== undefined)
       + Number(card.killTargetMinion === true)
@@ -1860,6 +1862,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.healController < 1
       || card.healController > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.healController must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.healTargetMinion !== undefined && (!Number.isSafeInteger(card.healTargetMinion)
+      || card.healTargetMinion < 1
+      || card.healTargetMinion > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.healTargetMinion must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
     if (card.targetPlayerLosesLife !== undefined && (!Number.isSafeInteger(card.targetPlayerLosesLife)
       || card.targetPlayerLosesLife < 1
@@ -2707,6 +2714,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
+                  : card.healTargetMinion !== undefined
+                    ? { healTargetMinion: card.healTargetMinion }
                   : card.drawSites !== undefined
                     ? { drawSites: card.drawSites }
                   : card.drawSpells !== undefined

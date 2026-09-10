@@ -6408,6 +6408,48 @@
         "file": "crates/sorcery-engine/tests/deathrite_draw_spells_rules.rs",
         "testName": "rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0298",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Heal-target-minion Magic removes damage from a living minion in the same turn it was wounded. Avatars are not legal targets. The heal does not kill the minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0298_heal_target_minion_clears_same_turn_damage_without_targeting_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0299",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Healing an undamaged minion is a paid no-op. No heal event is emitted, Ward is not broken, and the minion stays in play at zero damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0299_heal_target_minion_is_a_paid_noop_on_an_undamaged_minion"
+      }
     }
   ]
 }

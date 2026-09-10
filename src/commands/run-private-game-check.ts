@@ -4619,6 +4619,7 @@ function gameDefinition(
   atStartOfControllerTurnMillSpells: 0 | 1 = 0,
   atStartOfControllerTurnMillSites: 0 | 1 = 0,
   deathriteDrawSpells = false,
+  healTargetMinion: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4782,7 +4783,8 @@ function gameDefinition(
     + Number(grantLethalToAllyThisTurn)
     + Number(grantFirstStrikeToAllyThisTurn)
     + Number(targetPlayerDrawsSpells !== 0)
-    + Number(targetPlayerDrawsSites !== 0);
+    + Number(targetPlayerDrawsSites !== 0)
+    + Number(healTargetMinion !== 0);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -4811,6 +4813,7 @@ function gameDefinition(
       ...(grantFirstStrikeToAllyThisTurn ? { grantFirstStrikeToAllyThisTurn: true as const } : {}),
       ...(targetPlayerDrawsSpells !== 0 ? { targetPlayerDrawsSpells } : {}),
       ...(targetPlayerDrawsSites !== 0 ? { targetPlayerDrawsSites } : {}),
+      ...(healTargetMinion !== 0 ? { healTargetMinion } : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),

@@ -250,6 +250,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("grantStealthToTargetMinion", json!(true)),
         ("grantWardToTargetMinion", json!(true)),
         ("healController", json!(2)),
+        ("healTargetMinion", json!(1)),
         ("drawSites", json!(2)),
         ("drawSpells", json!(2)),
         ("killTargetMinion", json!(true)),
@@ -507,6 +508,20 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(2),
             ),
             "exactly one",
+        ),
+        (
+            "heal target minion exclusive",
+            with(
+                spell("magic", ("healTargetMinion", json!(1))),
+                "healController",
+                json!(2),
+            ),
+            "exactly one",
+        ),
+        (
+            "heal target minion range",
+            spell("magic", ("healTargetMinion", json!(0))),
+            "must be between",
         ),
         (
             "targetNearby false still needs target damage",

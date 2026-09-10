@@ -1322,6 +1322,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
     match effect {
         MagicEffect::HealController(_)
+        | MagicEffect::HealTargetMinion(_)
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::DamageChainNearbyUnits
@@ -6107,6 +6108,7 @@ impl Game {
             | MagicEffect::TapTargetMinion
             | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantWardToTargetMinion
+            | MagicEffect::HealTargetMinion(_)
             | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
@@ -16809,6 +16811,22 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::HealTargetMinion(amount) => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_heal_target_minion(
+                    instance_id,
+                    *target_seat,
+                    amount,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::GrantStealthToTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -19398,6 +19416,39 @@ impl Game {
         Ok(())
     }
 
+    fn apply_heal_target_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        attempted_amount: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        let attempted = u16::from(attempted_amount);
+        let amount = unit.damage.min(attempted);
+        if amount > 0 {
+            unit.damage -= amount;
+            let damage = unit.damage;
+            outcomes.push("minion-healed", || {
+                json!({
+                    "amount": amount,
+                    "attemptedAmount": attempted,
+                    "damage": damage,
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn apply_untap_minion(
         &mut self,
         instance_id: &IdentityHash,
@@ -21429,6 +21480,10 @@ mod tests {
             (
                 MagicEffect::UntapTargetMinion,
                 json!({ "untapTargetMinion": true }),
+            ),
+            (
+                MagicEffect::HealTargetMinion(1),
+                json!({ "healTargetMinion": 1 }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
