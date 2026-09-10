@@ -686,4 +686,35 @@ fn typed_effects_should_retain_only_normalized_values() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.spellcaster);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-deathrite",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "deathriteDamageEachUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Deathrite minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.deathrite_damage_each_unit_here, Some(1));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-here",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "genesisDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Genesis here minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.genesis,
+        Some(MinionGenesis::DamageEachOtherUnitHereOne)
+    );
 }

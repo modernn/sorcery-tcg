@@ -9968,9 +9968,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { siteProvidesNoThreshold: true as const },
     { ranged: true as const },
     { waterbound: true as const },
-    { genesisDamageEachOtherUnitHere: 1 as const },
-    { genesisStrikeEachEnemyHere: true as const },
-    { genesisMayDamageTargetAdjacentUnit: 2 as const },
+    { discardSpellToDamageRandomOtherUnitHere: 3 as const },
   ]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -9990,6 +9988,10 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { genesisLoseControllerLife: 2 as const },
     { genesisDisableSelfUntilDamaged: true as const },
     { spellcaster: true as const },
+    { deathriteDamageEachUnitHere: 1 },
+    { genesisDamageEachOtherUnitHere: 1 as const },
+    { genesisStrikeEachEnemyHere: true as const },
+    { genesisMayDamageTargetAdjacentUnit: 2 as const },
   ]) {
     const composed = createGameManifest({
       ...input,

@@ -1783,11 +1783,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.summonToAnySite === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true
-      || card.deathriteDamageEachUnitHere !== undefined
-      || card.discardSpellToDamageRandomOtherUnitHere !== undefined
-      || card.genesisDamageEachOtherUnitHere === 1
-      || card.genesisMayDamageTargetAdjacentUnit === 2
-      || card.genesisStrikeEachEnemyHere === true)) {
+      || card.discardSpellToDamageRandomOtherUnitHere !== undefined)) {
     throw new RangeError(
       `${path}.occupiesSquareArea has an unsupported ability combination`,
     );

@@ -2653,6 +2653,7 @@ impl Game {
                 seat,
                 &card.instance_id,
                 destination.cell,
+                destination.cells,
                 facts.genesis,
             ) {
                 let genesis_suffix = Self::genesis_damage_suffix(
@@ -3159,6 +3160,7 @@ impl Game {
                     seat,
                     &card.instance_id,
                     destination.cell,
+                    destination.cells,
                     facts.genesis,
                 );
                 for (mana_cost, payment_mode, sacrificed_minion_instance_ids) in
@@ -4441,6 +4443,12 @@ impl Game {
 
     fn unit_occupies_cell(unit: &UnitPosition, cell: Cell) -> bool {
         Self::unit_occupied_cells(unit).contains(&cell)
+    }
+
+    fn summon_occupied_cells<'a>(cell: &'a Cell, cells: &'a Option<SquareArea>) -> &'a [Cell] {
+        cells
+            .as_ref()
+            .map_or(std::slice::from_ref(cell), |area| area.as_slice())
     }
 
     fn footprints_nearby(source: &[Cell], target: &[Cell]) -> bool {
@@ -6650,9 +6658,8 @@ impl Game {
         &self,
         seat: Seat,
         source_instance_id: &IdentityHash,
-        cell: Cell,
+        source_cells: &[Cell],
     ) -> Vec<UnitTarget> {
-        let source_cells = [cell];
         let mut targets = vec![UnitTarget::Minion {
             instance_id: source_instance_id.clone(),
             seat,
@@ -6660,7 +6667,7 @@ impl Game {
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
             if Self::footprints_here_or_bordering(
-                &source_cells,
+                source_cells,
                 std::slice::from_ref(&player.avatar.location),
             ) {
                 targets.push(UnitTarget::Avatar {
@@ -6676,7 +6683,7 @@ impl Game {
                         unit.controller == target_seat
                             && unit.region == Region::Surface
                             && Self::footprints_here_or_bordering(
-                                &source_cells,
+                                source_cells,
                                 Self::unit_occupied_cells(unit),
                             )
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
@@ -6697,14 +6704,19 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         cell: Cell,
+        cells: Option<SquareArea>,
         genesis: Option<MinionGenesis>,
     ) -> Vec<(Option<GenesisDamageChoice>, Option<UnitTarget>)> {
         if genesis == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) {
             std::iter::once((Some(GenesisDamageChoice::Decline), None))
                 .chain(
-                    self.genesis_damage_targets(seat, source_instance_id, cell)
-                        .into_iter()
-                        .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
+                    self.genesis_damage_targets(
+                        seat,
+                        source_instance_id,
+                        Self::summon_occupied_cells(&cell, &cells),
+                    )
+                    .into_iter()
+                    .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
                 )
                 .collect()
         } else {
@@ -6732,6 +6744,7 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         cell: Cell,
+        cells: Option<SquareArea>,
         genesis: Option<MinionGenesis>,
         choice: Option<GenesisDamageChoice>,
         target: Option<&UnitTarget>,
@@ -6747,7 +6760,11 @@ impl Game {
                 Some(GenesisDamageChoice::Target),
                 Some(target),
             ) => self
-                .genesis_damage_targets(seat, source_instance_id, cell)
+                .genesis_damage_targets(
+                    seat,
+                    source_instance_id,
+                    Self::summon_occupied_cells(&cell, &cells),
+                )
                 .contains(target),
             (Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo), _, _) => false,
             (_, None, None) => true,
@@ -10105,31 +10122,7 @@ impl Game {
         };
         let mut triggered_deaths = Vec::new();
         if let Some(amount) = facts.deathrite_damage_each_unit_here {
-            let source_cell = source.unit.location;
-            let mut targets = Vec::new();
-            for seat in [Seat::North, Seat::South] {
-                let avatar = &self.position.players[seat_index(seat)].avatar;
-                if source.unit.region == Region::Surface && source_cell == avatar.location {
-                    targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
-                }
-            }
-            targets.extend(
-                self.position
-                    .units
-                    .iter()
-                    .filter(|unit| {
-                        unit.region == source.unit.region
-                            && Self::unit_occupies_cell(unit, source_cell)
-                    })
-                    .map(|unit| {
-                        (
-                            unit.card.instance_id.clone(),
-                            UnitKind::Minion,
-                            unit.controller,
-                        )
-                    }),
-            );
-            targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            let targets = self.units_sharing_footprint(&source.unit, false);
             let targets = targets
                 .into_iter()
                 .map(|(instance_id, kind, seat)| {
@@ -15891,6 +15884,7 @@ impl Game {
                 seat,
                 card_instance_id,
                 *cell,
+                *cells,
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),
@@ -16230,6 +16224,7 @@ impl Game {
                 seat,
                 card_instance_id,
                 *cell,
+                *cells,
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),

@@ -3429,6 +3429,94 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0169",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized Deathrite damages every other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "deathrite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0169_oversized_deathrite_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0170",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Oversized Genesis here damages every other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "genesis-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0170_oversized_genesis_here_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0171",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized Genesis strike hits enemies sharing any occupied footprint cell and skips allies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0171_oversized_genesis_strike_hits_enemies_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0172",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Optional adjacent Genesis from a 2x2 reaches units orthogonally bordering any footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "genesis-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_footprint_cell"
+      }
     }
   ]
 }

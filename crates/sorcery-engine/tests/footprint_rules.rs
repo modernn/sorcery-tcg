@@ -567,9 +567,19 @@ fn freeze() -> Value {
     })
 }
 
+fn zap() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageTargetUnit": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn composition_manifest(
     seed: u32,
     giant_extra: &Value,
+    south_extra: &Value,
     north_spells: &[&str],
     south_spells: &[&str],
 ) -> String {
@@ -583,11 +593,21 @@ fn composition_manifest(
         "north-giant": giant,
         "north-site": site(false),
         "south-avatar": avatar(),
-        "south-minion": minion(&json!({})),
         "south-site": site(false),
     });
     if north_spells.contains(&"north-freeze") {
         cards["north-freeze"] = freeze();
+    }
+    if south_spells.contains(&"south-zap") {
+        cards["south-zap"] = zap();
+    }
+    if south_spells.contains(&"south-minion") {
+        let mut south = minion(&json!({}));
+        south
+            .as_object_mut()
+            .expect("south minion facts")
+            .extend(south_extra.as_object().expect("extra south facts").clone());
+        cards["south-minion"] = south;
     }
     let mut value = json!({
         "authority": {
@@ -620,12 +640,15 @@ fn composition_manifest(
 
 fn composition_session(
     giant_extra: &Value,
+    south_extra: &Value,
     north_spells: &[&str],
     south_spells: &[&str],
     required_north: &[&str],
 ) -> Session {
     let manifest = (1u32..=512)
-        .map(|seed| composition_manifest(seed, giant_extra, north_spells, south_spells))
+        .map(|seed| {
+            composition_manifest(seed, giant_extra, south_extra, north_spells, south_spells)
+        })
         .find(|candidate| {
             let preview = Session::new(candidate).expect("candidate session");
             let preview_state = state(&preview);
@@ -660,6 +683,38 @@ fn establish_north_square(session: &mut Session) {
     play_site(session, "B3");
 }
 
+fn establish_north_square_and_south_c2(session: &mut Session) -> String {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    play_site(session, "C2");
+    let (enemy, _) = summon_at(session, "south-minion", "C2");
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
+fn establish_north_square_and_south_c4(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    let (enemy, _) = summon_at(session, "south-minion", "C4");
+    end_and_draw(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
 fn establish_north_square_and_south_d2(session: &mut Session) -> String {
     play_first_domains(session);
     play_site(session, "B4");
@@ -679,6 +734,7 @@ fn establish_north_square_and_south_d2(session: &mut Session) -> String {
 fn rule_catalog_0167_oversized_genesis_still_draws_after_summoning() {
     let mut session = composition_session(
         &json!({ "genesisDrawSpells": 1 }),
+        &json!({}),
         &["north-giant"; 8],
         &["south-minion"; 8],
         &["north-giant"],
@@ -707,6 +763,7 @@ fn rule_catalog_0167_oversized_genesis_still_draws_after_summoning() {
 fn rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell() {
     let mut session = composition_session(
         &json!({ "spellcaster": true }),
+        &json!({}),
         &[
             "north-giant",
             "north-giant",
@@ -756,5 +813,166 @@ fn rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_fo
         unit(&state(&session), &enemy)["disableEffects"][0]["sourceInstanceId"],
         receipt.events[0].payload["instanceId"]
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0169_oversized_deathrite_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "deathriteDamageEachUnitHere": 1,
+            "defense": 0,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-zap"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    end_and_draw(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-zap"
+            && descriptor["target"]["instanceId"] == giant
+    });
+    let allocated: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "deathrite-damage-allocated")
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("Deathrite target")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(allocated, [avatar_id]);
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["life"],
+        19,
+        "the C4 Avatar shares the oversized footprint, not the B3 anchor"
+    );
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0170_oversized_genesis_here_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "genesisDamageEachOtherUnitHere": 1,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 1,
+            "sourceInstanceId": giant,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 19);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0171_oversized_genesis_strike_hits_enemies_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "attack": 2,
+            "defense": 10,
+            "genesisStrikeEachEnemyHere": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    let enemy = establish_north_square_and_south_c4(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    let struck: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 2);
+            assert_eq!(event.payload["strikerInstanceId"], giant.as_str());
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("struck identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(struck, [enemy.clone()]);
+    assert!(!struck.contains(&avatar_id));
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "genesisMayDamageTargetAdjacentUnit": 2,
+        }),
+        &json!({ "defense": 10 }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    let enemy = establish_north_square_and_south_c2(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["genesisDamageTarget"]["instanceId"] == enemy
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
     assert_exact_replay(&session);
 }

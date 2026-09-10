@@ -10,10 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **168 rust-supported / 0 typescript-supported** out of 168.
+`data/rules/catalog.json`: **172 rust-supported / 0 typescript-supported** out of 172.
 
-Latest catalog proofs: oversized 2×2 composes with location-independent Genesis and printed Spellcaster
-(`RULE-CATALOG-0167`–`0168`). Nearby Magic originates from every occupied footprint cell.
+Latest catalog proofs: oversized 2×2 Deathrite and Genesis “here” / adjacent effects use every
+occupied footprint cell (`RULE-CATALOG-0169`–`0172`).
 
 ## TypeScript legality cutover
 
