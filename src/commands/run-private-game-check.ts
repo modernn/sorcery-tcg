@@ -4603,6 +4603,7 @@ function gameDefinition(
   atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: 0 | 2 = 0,
   affectedSitesAreFlooded = false,
   affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold = false,
+  atStartOfControllerTurnControllerGainsLife: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4819,6 +4820,9 @@ function gameDefinition(
     && (card.manaCost !== null || token)) {
     return {
       airborne,
+      ...(atStartOfControllerTurnControllerGainsLife
+        ? { atStartOfControllerTurnControllerGainsLife }
+        : {}),
       ...(atStartOfControllerTurnControllerLosesLife
         ? { atStartOfControllerTurnControllerLosesLife }
         : {}),

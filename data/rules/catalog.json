@@ -5741,6 +5741,47 @@
         "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
         "testName": "rule_catalog_0267_later_drought_wins_over_flood"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0268",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can gain its controller a printed amount of life at the start of that player's turn. The heal uses the shared Avatar helper, is capped at printed life, and the Start Phase continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_gain_rules.rs",
+        "testName": "rule_catalog_0268_start_turn_life_gain_heals_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0269",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn life gain cannot take an Avatar off Death's Door. The trigger still resolves, the minion remains, and the Start Phase continues to the Draw step with the game active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_gain_rules.rs",
+        "testName": "rule_catalog_0269_start_turn_life_gain_cannot_leave_deaths_door"
+      }
     }
   ]
 }
