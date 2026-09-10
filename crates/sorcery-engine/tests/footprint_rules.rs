@@ -1135,7 +1135,7 @@ fn rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_s
 #[test]
 fn rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site() {
     let mut session = composition_session(
-        &json!({ "waterbound": true }),
+        &json!({ "charge": true, "waterbound": true }),
         &json!({}),
         &["north-giant"; 8],
         &["south-minion"; 8],
@@ -1148,12 +1148,18 @@ fn rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site() {
         unit(&current, &giant)["occupiedCells"],
         json!(["B3", "B4", "C3", "C4"])
     );
-    assert_eq!(current["realm"]["sites"]["C4"]["elements"], json!(["water"]));
-    assert_eq!(current["realm"]["sites"]["B3"]["elements"], json!(["earth"]));
-    assert_eq!(
-        unit(&current, &giant)["disabled"],
-        false,
-        "C4 Water shares the oversized footprint, so Waterbound is not disabled at the B3 land anchor"
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-water");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    assert!(
+        session
+            .legal_actions()
+            .expect("Waterbound actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "move-and-attack"
+                    && action.descriptor["unitInstanceId"] == giant
+            }),
+        "C4 Water shares the oversized footprint, so Waterbound stays enabled at the B3 land anchor"
     );
     assert_exact_replay(&session);
 }
