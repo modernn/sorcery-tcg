@@ -61,14 +61,14 @@ fn manifest() -> String {
         },
         "decks": {
             "north": {
-                "atlas": vec!["north-site"; 6],
+                "atlas": vec!["north-site"; 12],
                 "avatar": "north-avatar",
-                "spellbook": vec!["north-aura"; 6],
+                "spellbook": vec!["north-aura"; 12],
             },
             "south": {
-                "atlas": vec!["south-site"; 6],
+                "atlas": vec!["south-site"; 12],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-minion"; 6],
+                "spellbook": vec!["south-minion"; 12],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -168,7 +168,7 @@ fn rule_catalog_0262_wandering_aura_damages_each_unit_then_must_move() {
     });
     assert!(state(&session)["realm"].get("immobileAreas").is_none());
     let source_id = aura_id(&session);
-    let avatar_id = state(&session)["players"]["north"]["avatar"]["instanceId"].clone();
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"].clone();
     let ended = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn").1;
     assert!(ended.events.iter().any(|event| {
         event.event_type == "aura-end-turn-damage-allocated"
@@ -248,8 +248,8 @@ fn rule_catalog_0263_far_sites_are_illegal_and_each_turn_can_box_the_aura_out() 
             .any(|event| event.event_type == "aura-end-turn-triggered"),
         "the Aura triggers at the end of each turn"
     );
-    move_wildfire(&mut session, "C2");
-    for cell in ["C1", "B1", "A1", "A2", "A3", "A4", "B4", "B3", "B2"] {
+    move_wildfire(&mut session, "B3");
+    for cell in ["A3", "A4", "B4"] {
         draw_then_end(&mut session);
         move_wildfire(&mut session, cell);
     }
