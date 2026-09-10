@@ -22005,12 +22005,20 @@ test('RULE-03 cemetery Site return restores own cemetery Site to hidden Atlas or
     await ctx.keep();
     await ctx.keep();
     await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-    const siteId = ctx.state.realm.sites.C4?.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    const siteId = ctx.state.realm.sites.B4?.instanceId;
     assert.ok(siteId);
     const destroyed = await ctx.step(await ctx.action(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
         && descriptor.cardId === 'return-destroy'
-        && descriptor.targetLocation?.cell === 'C4'
+        && descriptor.targetLocation?.cell === 'B4'
         && descriptor.targetSiteInstanceId === siteId));
     assert.equal(destroyed.accepted, true);
     if (!destroyed.accepted) return;

@@ -10149,14 +10149,28 @@ fn rule_catalog_0233_cemetery_site_return_restores_own_cemetery_site_to_hidden_a
     );
     let mut session = opening_main(&encoded);
     assert_eq!(cemetery_site_cast_ids(&session), Vec::<String>::new());
-    let site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B4"
+    });
+    let site_id = state(&session)["realm"]["sites"]["B4"]["instanceId"]
         .as_str()
-        .expect("C4 site identity")
+        .expect("B4 site identity")
         .to_owned();
     let (_, destroyed) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-destroy"
-            && descriptor["targetLocation"]["cell"] == "C4"
+            && descriptor["targetLocation"]["cell"] == "B4"
             && descriptor["targetSiteInstanceId"] == site_id
     });
     assert!(
