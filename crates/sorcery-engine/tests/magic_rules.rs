@@ -8601,3 +8601,192 @@ fn rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death
     assert_eq!(after_second["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
+
+fn life_gain_magic_manifest(seed: u32, north_life: u8) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(north_life),
+        "north-life-gain": magic(("targetPlayerGainsLife", json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-site": site(false),
+    });
+    let south_spellbook = if north_life == 2 {
+        cards.as_object_mut().expect("cards").insert(
+            "south-lash".to_owned(),
+            magic(("damageTargetUnit", json!(2)), 0),
+        );
+        ["south-lash"; 6]
+    } else {
+        cards.as_object_mut().expect("cards").insert(
+            "south-loss".to_owned(),
+            minion(json!({ "genesisLoseControllerLife": 2 })),
+        );
+        ["south-loss"; 6]
+    };
+    manifest(seed, &cards, &["north-life-gain"; 6], &south_spellbook)
+}
+
+fn life_gain_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("life-gain actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-gain"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0215_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap() {
+    let encoded = life_gain_magic_manifest(215, 20);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    assert_eq!(before["players"]["south"]["avatar"]["life"], 18);
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        life_gain_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("life-gain actions")
+            .into_iter()
+            .filter(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-gain")
+            .all(|action| {
+                action.descriptor["target"]["kind"] == "avatar"
+                    && action.descriptor["target"]["instanceId"] != minion_id
+            })
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-gain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "avatar-healed", "magic-resolved"]
+    );
+    let healed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-healed")
+        .expect("life-gain event");
+    assert_eq!(healed.payload["amount"], 2);
+    assert_eq!(healed.payload["attemptedAmount"], 2);
+    assert_eq!(healed.payload["life"], 20);
+    assert_eq!(healed.payload["seat"], "south");
+    assert_eq!(
+        healed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "avatar-life-lost")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("life-gain checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized life-gain");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed life-gain");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed life-gain session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door() {
+    let encoded = life_gain_magic_manifest(216, 2);
+    let mut session = opening_main(&encoded);
+    let north_avatar = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (_, damage) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-lash"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert!(
+        event_types(&damage)
+            .iter()
+            .any(|event_type| *event_type == "avatar-reached-deaths-door")
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
+    let death_door_turn = state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-gain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-healed"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "game-ended")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
+    assert_eq!(
+        after["players"]["north"]["avatar"]["deathDoorTurn"],
+        death_door_turn
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}

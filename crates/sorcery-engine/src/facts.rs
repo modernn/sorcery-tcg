@@ -216,6 +216,7 @@ pub enum MagicEffect {
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
     SummonTokenToEachControlledSiteBorderingEnemySite(String),
+    TargetPlayerGainsLife(u8),
     TargetPlayerLosesLife(u8),
     TeleportAllyToTargetSite,
     TeleportNearbyAllyThenDrawCard,
@@ -719,6 +720,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "summonRandomMinionFromAnyCemetery",
     "summonTokenToEachControlledSiteBorderingEnemySite",
     "targetNearby",
+    "targetPlayerGainsLife",
     "targetPlayerLosesLife",
     "teleportAllyToTargetSite",
     "teleportNearbyAllyThenDrawCard",
@@ -1236,6 +1238,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             true_only(object, "summonRandomMinionFromAnyCemetery", path)?
                 .then_some(MagicEffect::SummonRandomMinionFromAnyCemetery),
             token_reference.map(MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite),
+            optional_bounded_integer(object, "targetPlayerGainsLife", 1, MAX_COMBAT_STAT, path)?
+                .map(|amount| MagicEffect::TargetPlayerGainsLife(compact_u8(amount))),
             optional_bounded_integer(object, "targetPlayerLosesLife", 1, MAX_COMBAT_STAT, path)?
                 .map(|amount| MagicEffect::TargetPlayerLosesLife(compact_u8(amount))),
             true_only(object, "teleportAllyToTargetSite", path)?

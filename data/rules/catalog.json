@@ -4524,6 +4524,53 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0215",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-gain Magic pays its cost, offers only both Avatars, never offers a minion, and heals the chosen Avatar through the shared printed-life cap. Unlike controller-only healing, it can restore an opponent.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-healed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0215_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0216",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-gain Magic that would heal an Avatar at Death's Door is a paid no-op. Life stays at zero, the game stays active, and no healing event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door"
+      }
     }
   ]
 }

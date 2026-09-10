@@ -1089,6 +1089,58 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        targetPlayerGainsLife: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /targetPlayerGainsLife/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 2,
+        targetPlayerGainsLife: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        targetPlayerGainsLife: 2,
+        targetPlayerLosesLife: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const lifeGain = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        targetPlayerGainsLife: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(lifeGain.cards[firstSpell]?.cardType === 'magic'
+    && lifeGain.cards[firstSpell].targetPlayerGainsLife, 2);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         discardSiteAsAdditionalCost: true,
         manaCost: 1,
@@ -20297,6 +20349,177 @@ test('RULE-03 life-loss Magic reduces Avatar life and reaches Death\'s Door with
     assert.equal(second.accepted, true);
     if (!second.accepted) return;
     assert.deepEqual(second.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.players.north.avatar.life, 0);
+    assert.equal(ctx.state.players.north.avatar.deathDoorTurn, deathDoorTurn);
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 life-gain Magic heals an enemy Avatar and cannot leave Death\'s Door', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards = (
+    northLife: number,
+    southSpell: 'loss' | 'lash',
+  ): Record<string, GameCardDefinition> => ({
+    'life-gain-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: northLife,
+    },
+    'life-gain-north-site': { cardType: 'site', elements: ['earth'] },
+    'life-gain-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    ...(southSpell === 'lash'
+      ? {
+        'life-gain-south-lash': {
+          cardType: 'magic' as const,
+          damageTargetUnit: 2,
+          manaCost: 0,
+          thresholds,
+        },
+      }
+      : {
+        'life-gain-south-loss': {
+          attack: 1,
+          cardType: 'minion' as const,
+          defense: 1,
+          genesisLoseControllerLife: 2 as const,
+          manaCost: 0,
+          thresholds,
+        },
+      }),
+    'life-gain-south-site': { cardType: 'site', elements: ['earth'] },
+    'life-gain-spell': {
+      cardType: 'magic',
+      manaCost: 0,
+      targetPlayerGainsLife: 2,
+      thresholds,
+    },
+  });
+  const input = (seed: number, northLife: number, southSpell: 'loss' | 'lash') => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-life-gain-magic-v1',
+    },
+    cards: cards(northLife, southSpell),
+    decks: {
+      north: {
+        atlas: Array(4).fill('life-gain-north-site'),
+        avatar: 'life-gain-north-avatar',
+        spellbook: Array(4).fill('life-gain-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(4).fill('life-gain-south-site'),
+        avatar: 'life-gain-south-avatar',
+        spellbook: Array(4).fill(
+          southSpell === 'lash' ? 'life-gain-south-lash' : 'life-gain-south-loss',
+        ),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const enemyManifest = createGameManifest(input(215, 20, 'loss'));
+  assert.equal(enemyManifest.cards['life-gain-spell']?.cardType === 'magic'
+    && enemyManifest.cards['life-gain-spell'].targetPlayerGainsLife, 2);
+
+  await withSetup(enemyManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'life-gain-south-loss'
+        && descriptor.cell === 'C1');
+    assert.equal(ctx.state.players.south.avatar.life, 18);
+    const minionId = ctx.state.realm.units.find(({ cardId }) => cardId === 'life-gain-south-loss')
+      ?.instanceId;
+    assert.ok(minionId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const southAvatarId = ctx.state.players.south.avatar.card.instanceId;
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'life-gain-spell');
+    assert.ok(spell);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.target
+        ? [[descriptor.target.kind, descriptor.target.seat] as const]
+        : []).sort((left, right) => left[1].localeCompare(right[1]));
+    assert.deepEqual(targets, [['avatar', 'north'], ['avatar', 'south']]);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'
+        && descriptor.target.instanceId === southAvatarId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const healed = await ctx.step(cast);
+    assert.equal(healed.accepted, true);
+    if (!healed.accepted) return;
+    assert.deepEqual(healed.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'avatar-healed',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(healed.receipt.events[1]?.payload, {
+      amount: 2,
+      attemptedAmount: 2,
+      life: 20,
+      seat: 'south',
+      sourceInstanceId,
+    });
+    assert.equal(ctx.state.players.south.avatar.life, 20);
+    assert.equal(ctx.state.players.north.avatar.life, 20);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === minionId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(216, 2, 'lash')), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const northAvatarId = ctx.state.players.north.avatar.card.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'life-gain-south-lash'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'north'
+        && descriptor.target.instanceId === northAvatarId);
+    assert.equal(ctx.state.players.north.avatar.life, 0);
+    const deathDoorTurn = ctx.state.players.north.avatar.deathDoorTurn;
+    assert.ok(deathDoorTurn !== null && deathDoorTurn !== undefined);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const gain = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'north'
+        && descriptor.target.instanceId === northAvatarId);
+    const healed = await ctx.step(gain);
+    assert.equal(healed.accepted, true);
+    if (!healed.accepted) return;
+    assert.deepEqual(healed.receipt.events.map(({ type }) => type), [
       'magic-cast',
       'magic-resolved',
     ]);

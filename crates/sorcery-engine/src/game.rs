@@ -1277,6 +1277,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
+        | MagicEffect::TargetPlayerGainsLife(_)
         | MagicEffect::TargetPlayerLosesLife(_)
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
@@ -4985,6 +4986,25 @@ impl Game {
             .collect()
     }
 
+    fn targeted_avatar_seat(&self, target: &Option<UnitTarget>) -> Result<Seat, GameError> {
+        let Some(UnitTarget::Avatar {
+            seat: target_seat,
+            instance_id,
+        }) = target
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.players[seat_index(*target_seat)]
+            .avatar
+            .card
+            .instance_id
+            != *instance_id
+        {
+            return Err(GameError::IllegalAction);
+        }
+        Ok(*target_seat)
+    }
+
     fn artifact_target_choices(
         &self,
         seat: Seat,
@@ -5289,7 +5309,9 @@ impl Game {
             MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
                 self.artifact_target_choices(seat, caster_instance_id)?
             }
-            MagicEffect::TargetPlayerLosesLife(_) => self.avatar_player_choices(),
+            MagicEffect::TargetPlayerGainsLife(_) | MagicEffect::TargetPlayerLosesLife(_) => {
+                self.avatar_player_choices()
+            }
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 if caster_location.region == Region::Void {
@@ -14853,25 +14875,14 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::TargetPlayerGainsLife(amount) => {
+                let target_seat = self.targeted_avatar_seat(target)?;
+                self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
+            }
             MagicEffect::TargetPlayerLosesLife(amount) => {
-                let target = target.as_ref().ok_or(GameError::IllegalAction)?;
-                let UnitTarget::Avatar {
-                    seat: target_seat,
-                    instance_id,
-                } = target
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                if self.position.players[seat_index(*target_seat)]
-                    .avatar
-                    .card
-                    .instance_id
-                    != *instance_id
-                {
-                    return Err(GameError::IllegalAction);
-                }
+                let target_seat = self.targeted_avatar_seat(target)?;
                 self.apply_avatar_life_loss(
-                    *target_seat,
+                    target_seat,
                     u16::from(amount),
                     card_instance_id,
                     outcomes,
@@ -18759,6 +18770,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetSiteToOwnerHand,
                 json!({ "returnTargetSiteToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::TargetPlayerGainsLife(2),
+                json!({ "targetPlayerGainsLife": 2 }),
             ),
             (
                 MagicEffect::TargetPlayerLosesLife(2),
