@@ -5144,7 +5144,7 @@ impl Game {
                 *target_nearby,
                 *untap_target_minion_after_damage,
             )?,
-            MagicEffect::SubmergeTargetMinion => {
+            MagicEffect::SubmergeTargetMinion | MagicEffect::KillTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::BurrowTargetMinionOrArtifact => {
@@ -5162,9 +5162,6 @@ impl Game {
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, true, true)?
-            }
-            MagicEffect::KillTargetMinion => {
-                self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::KillTargetWoundedMinion => self
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
