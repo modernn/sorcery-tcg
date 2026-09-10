@@ -6536,6 +6536,92 @@
         "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
         "testName": "rule_catalog_0303_deathrite_mill_sites_is_a_no_op_on_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0304",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can gain its controller a printed amount of life at the end of that player's turn. The heal uses the shared Avatar helper and is capped at printed life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0304_end_turn_controller_life_gain_heals_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0305",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same end-of-controller-turn life gain cannot take an Avatar off Death's Door. The pulse still runs, the minion remains, and the game stays active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0305_end_turn_controller_life_gain_cannot_leave_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0306",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion can make its controller lose a printed amount of life at the end of that player's turn. The ability is mandatory and does not tap the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0307",
+      "requirementIds": [
+        "RULE-01",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same end-of-controller-turn life loss can reduce the controller to 0 life and open Death's Door without immediately ending the game.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0307_end_turn_controller_life_loss_can_open_deaths_door"
+      }
     }
   ]
 }
