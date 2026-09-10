@@ -44,4 +44,10 @@ test('TypeScript legality exports open, step, and verify through Rust session-js
   });
   assert.equal(forged.accepted, false);
   if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
+
+  const sibling = stepGame(session, keep);
+  assert.equal(sibling.accepted, true);
+  if (!sibling.accepted) return;
+  assert.equal(sibling.session.state.stateVersion, northKept.session.state.stateVersion);
+  assert.equal(sibling.session.state.decisionSeat, northKept.session.state.decisionSeat);
 });
