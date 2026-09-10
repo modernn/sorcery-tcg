@@ -1003,6 +1003,35 @@ fn a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally() {
     assert_exact_replay(&spent_allies);
 }
 
+#[test]
+fn a_siege_ballista_should_not_fire_while_its_bearer_is_disabled() {
+    let mut value: Value =
+        serde_json::from_str(&ballista_scenario()).expect("Siege Ballista scenario JSON");
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    value["cards"]["ballista-bearer"]["genesisDisableSelfUntilDamaged"] = json!(true);
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical disabled-bearer Ballista scenario");
+    let mut session = Session::new(&manifest).expect("valid disabled-bearer Ballista scenario");
+    let ballista = ballista_position(&mut session);
+    assert_eq!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == ballista.bearer)
+            .expect("bearer")["disabledUntilDamaged"],
+        true
+    );
+    assert!(
+        descriptors_of_kind(&session, "activate-artifact-damage").is_empty(),
+        "a disabled bearer cannot pay the Ballista's first tap"
+    );
+    assert_exact_replay(&session);
+}
+
 /// North's Spellbook is four cards, so the one card its opening hand leaves behind is the payload
 /// it draws next turn, and every later hand card is an Atlas site.
 fn trebuchet_scenario() -> String {

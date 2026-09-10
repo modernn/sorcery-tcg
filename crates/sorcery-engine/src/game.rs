@@ -18697,6 +18697,26 @@ mod tests {
         assert!(game.position.players[seat_index(Seat::North)].avatar.tapped);
     }
 
+    #[test]
+    fn end_turn_cleanup_should_reset_both_players_air_threshold_counts() {
+        let manifest = selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn = Some(3);
+        game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn = Some(2);
+        let mut events = Vec::new();
+        let mut outcomes = OutcomeLog::Record(&mut events);
+        game.finish_end_turn_cleanup(Seat::North, &mut outcomes)
+            .expect("end-turn cleanup");
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+    }
+
     fn test_minion(
         card_id: CardId,
         instance_id: &str,
