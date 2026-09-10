@@ -25557,6 +25557,143 @@ test('RULE-04 start-turn controller life gain heals and cannot leave Death\'s Do
   await run(2, 0, 0, true);
 });
 
+test('RULE-04 start-turn here-area damage hits other units here and can destroy a visitor', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cardsFor = (defense: number): Record<string, GameCardDefinition> => ({
+    'pulser-north-avatar': avatar,
+    'pulser-north-pulser': {
+      atStartOfControllerTurnDamageEachOtherUnitHere: 1,
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'pulser-north-site': site,
+    'pulser-south-avatar': avatar,
+    'pulser-south-site': site,
+    'pulser-south-visitor': {
+      attack: 0,
+      cardType: 'minion',
+      defense,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  });
+  const run = async (defense: number, expectVisitorAlive: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-start-turn-here-damage-v1',
+      },
+      cards: cardsFor(defense),
+      decks: {
+        north: {
+          atlas: Array(6).fill('pulser-north-site'),
+          avatar: 'pulser-north-avatar',
+          spellbook: Array(6).fill('pulser-north-pulser'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('pulser-south-site'),
+          avatar: 'pulser-south-avatar',
+          spellbook: Array(6).fill('pulser-south-visitor'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'pulser-north-pulser'
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardId === 'pulser-south-site'
+          && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'pulser-south-visitor'
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      assert.equal(ctx.state.phase === 'start-turn', true);
+      const sourceId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'pulser-north-pulser')?.instanceId;
+      const visitorId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'pulser-south-visitor')?.instanceId;
+      assert.equal(typeof sourceId, 'string');
+      assert.equal(typeof visitorId, 'string');
+      if (typeof sourceId !== 'string' || typeof visitorId !== 'string') {
+        return;
+      }
+      const resolved = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'resolve-start-turn-trigger'
+          && descriptor.sourceInstanceId === sourceId));
+      assert.equal(resolved.accepted, true);
+      if (!resolved.accepted) {
+        return;
+      }
+      const allocated = resolved.receipt.events.filter(({ type }) =>
+        type === 'start-turn-damage-allocated');
+      assert.equal(allocated.length, 2);
+      assert.equal(
+        allocated.every((event) =>
+          (event.payload as { sourceInstanceId?: string }).sourceInstanceId === sourceId),
+        true,
+      );
+      assert.equal(
+        allocated.some((event) =>
+          (event.payload as { targetInstanceId?: string }).targetInstanceId
+            === ctx.state.players.north.avatar.card.instanceId),
+        true,
+      );
+      assert.equal(
+        allocated.some((event) =>
+          (event.payload as { targetInstanceId?: string }).targetInstanceId === visitorId),
+        true,
+      );
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.players.north.avatar.life, 19);
+      assert.equal(
+        ctx.state.realm.units.some((unit) => unit.instanceId === sourceId && unit.damage === 0),
+        true,
+      );
+      assert.equal(
+        ctx.state.realm.units.some((unit) => unit.instanceId === visitorId),
+        expectVisitorAlive,
+      );
+      if (expectVisitorAlive) {
+        assert.equal(
+          ctx.state.realm.units.find((unit) => unit.instanceId === visitorId)?.damage,
+          1,
+        );
+      } else {
+        assert.equal(
+          ctx.state.players.south.cemetery.some((card) => card.instanceId === visitorId),
+          true,
+        );
+      }
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(2, true);
+  await run(1, false);
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

@@ -328,6 +328,7 @@ pub struct MinionFacts {
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
     pub at_start_of_controller_turn_controller_gains_life: Option<u8>,
     pub at_start_of_controller_turn_controller_loses_life: Option<u8>,
+    pub at_start_of_controller_turn_damage_each_other_unit_here: Option<u8>,
     pub at_start_of_controller_turn_draw_sites: Option<u8>,
     pub at_start_of_controller_turn_draw_spells: Option<u8>,
     pub at_start_of_controller_turn_lure_nearby_enemy_minion: bool,
@@ -802,6 +803,7 @@ const MINION_FIELDS: &[&str] = &[
     "airborne",
     "atStartOfControllerTurnControllerGainsLife",
     "atStartOfControllerTurnControllerLosesLife",
+    "atStartOfControllerTurnDamageEachOtherUnitHere",
     "atStartOfControllerTurnDrawSites",
     "atStartOfControllerTurnDrawSpells",
     "atStartOfControllerTurnLureNearbyEnemyMinion",
@@ -1614,6 +1616,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         path,
     )?
     .map(compact_u8);
+    let at_start_of_controller_turn_damage_each_other_unit_here = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnDamageEachOtherUnitHere",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_draw_sites = optional_bounded_integer(
         object,
         "atStartOfControllerTurnDrawSites",
@@ -1714,6 +1724,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let start_turn_trigger_count =
         usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
             + usize::from(at_start_of_controller_turn_controller_loses_life.is_some())
+            + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
             + usize::from(at_start_of_controller_turn_draw_sites.is_some())
             + usize::from(at_start_of_controller_turn_draw_spells.is_some())
             + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
@@ -1761,6 +1772,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         alternative_summon_payment,
         at_start_of_controller_turn_controller_gains_life,
         at_start_of_controller_turn_controller_loses_life,
+        at_start_of_controller_turn_damage_each_other_unit_here,
         at_start_of_controller_turn_draw_sites,
         at_start_of_controller_turn_draw_spells,
         at_start_of_controller_turn_lure_nearby_enemy_minion,

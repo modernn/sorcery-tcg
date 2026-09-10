@@ -6009,6 +6009,50 @@
         "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
         "testName": "rule_catalog_0279_granted_lethal_is_required_to_kill_a_tougher_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0280",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse reaches both seats, including a Surface Avatar on the same cell, and does not hit the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0280_start_turn_here_damage_hits_other_units_sharing_the_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0281",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-of-turn here-area damage is lethal enough to destroy a 1-defense visitor sharing the cell. The source remains, the controller Avatar still takes the pulse, and the visitor enters its owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0281_start_turn_here_damage_destroys_a_wounded_visitor"
+      }
     }
   ]
 }

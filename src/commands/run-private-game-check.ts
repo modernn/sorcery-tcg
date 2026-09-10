@@ -4610,6 +4610,7 @@ function gameDefinition(
   grantAirborneToAllyThisTurn = false,
   grantRangedToAllyThisTurn = false,
   grantLethalToAllyThisTurn = false,
+  atStartOfControllerTurnDamageEachOtherUnitHere: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4845,6 +4846,9 @@ function gameDefinition(
         : {}),
       ...(atStartOfControllerTurnControllerLosesLife
         ? { atStartOfControllerTurnControllerLosesLife }
+        : {}),
+      ...(atStartOfControllerTurnDamageEachOtherUnitHere
+        ? { atStartOfControllerTurnDamageEachOtherUnitHere }
         : {}),
       ...(atStartOfControllerTurnTeleportToRandomSiteOrVoid
         ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }

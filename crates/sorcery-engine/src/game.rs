@@ -1446,6 +1446,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         alternative_summon_payment: _,
         at_start_of_controller_turn_controller_gains_life: _,
         at_start_of_controller_turn_controller_loses_life: _,
+        at_start_of_controller_turn_damage_each_other_unit_here: _,
         at_start_of_controller_turn_draw_sites: _,
         at_start_of_controller_turn_draw_spells: _,
         at_start_of_controller_turn_lure_nearby_enemy_minion: _,
@@ -15128,6 +15129,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        let here_damage = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_damage_each_other_unit_here
+        };
+        if let Some(amount) = here_damage {
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.apply_here_area_damage(
+                source_instance_id,
+                u16::from(amount),
+                "start-turn-damage-allocated",
+                outcomes,
+            )?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let unit_snapshot = self
             .position
             .units
@@ -15349,6 +15372,9 @@ impl Game {
             .is_some()
             || facts
                 .at_start_of_controller_turn_controller_loses_life
+                .is_some()
+            || facts
+                .at_start_of_controller_turn_damage_each_other_unit_here
                 .is_some()
             || facts.at_start_of_controller_turn_teleport_to_random_site_or_void
             || facts.at_start_of_controller_turn_lure_nearby_enemy_minion
@@ -18924,6 +18950,14 @@ impl Game {
         strike: bool,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if !strike {
+            return self.apply_here_area_damage(
+                source_instance_id,
+                1,
+                "genesis-damage-allocated",
+                outcomes,
+            );
+        }
         let source = self
             .position
             .units
@@ -18939,9 +18973,8 @@ impl Game {
             source.controller,
             source_instance_id,
         )?;
-        let amount = if strike { current_power } else { 1 };
         let targets = self
-            .units_sharing_footprint(&source, strike)
+            .units_sharing_footprint(&source, true)
             .into_iter()
             .map(|(instance_id, kind, seat)| {
                 let status = if kind == UnitKind::Minion {
@@ -18949,34 +18982,19 @@ impl Game {
                 } else {
                     None
                 };
-                let allocated = if strike {
-                    self.nearby_unit_strike_amount(amount, kind, seat, &instance_id)?
-                } else {
-                    amount
-                };
+                let allocated =
+                    self.nearby_unit_strike_amount(current_power, kind, seat, &instance_id)?;
                 Ok((instance_id, kind, seat, status, allocated))
             })
             .collect::<Result<Vec<_>, GameError>>()?;
         for (target_instance_id, _, _, _, allocated) in &targets {
-            outcomes.push(
-                if strike {
-                    "strike-damage-allocated"
-                } else {
-                    "genesis-damage-allocated"
-                },
-                || {
-                    let mut payload = json!({
-                        "amount": allocated,
-                        "targetInstanceId": target_instance_id,
-                    });
-                    payload[if strike {
-                        "strikerInstanceId"
-                    } else {
-                        "sourceInstanceId"
-                    }] = json!(source_instance_id);
-                    payload
-                },
-            );
+            outcomes.push("strike-damage-allocated", || {
+                json!({
+                    "amount": allocated,
+                    "strikerInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
         }
         let mut dead_minions = Vec::new();
         let mut defeated_avatars = Vec::new();
@@ -19004,7 +19022,84 @@ impl Game {
             self.begin_minion_deaths(
                 &dead_minions,
                 &defeated_avatars,
-                Phase::Main,
+                self.position.phase,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn apply_here_area_damage(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        amount: u16,
+        allocation_event: &'static str,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        if self.minion_is_disabled(&source) {
+            return Ok(());
+        }
+        let (current_power, lethal) = self.combatant_attack_and_lethal(
+            UnitKind::Minion,
+            source.controller,
+            source_instance_id,
+        )?;
+        let targets = self
+            .units_sharing_footprint(&source, false)
+            .into_iter()
+            .map(|(instance_id, kind, seat)| {
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(&instance_id)?)
+                } else {
+                    None
+                };
+                Ok((instance_id, kind, seat, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (target_instance_id, _, _, _) in &targets {
+            outcomes.push(allocation_event, || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, seat, status) in targets {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                seat,
+                &target_instance_id,
+                amount,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&seat) {
+                defeated_avatars.push(seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                self.position.phase,
                 self.position.active_seat,
                 outcomes,
             )?;

@@ -831,6 +831,24 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "competing start-turn",
         ),
         (
+            "competing start-turn here damage",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnDamageEachOtherUnitHere",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "start-turn here damage range",
+            with(
+                minion(),
+                "atStartOfControllerTurnDamageEachOtherUnitHere",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
             "start-turn lure flag",
             with(
                 minion(),
@@ -943,6 +961,21 @@ fn typed_effects_should_retain_only_normalized_values() {
     assert_eq!(
         facts.at_start_of_controller_turn_controller_gains_life,
         Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-here-damage",
+        &with(
+            minion(),
+            "atStartOfControllerTurnDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid start-turn here-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_damage_each_other_unit_here,
+        Some(1)
     );
     let CardFacts::Minion(facts) = parse_card_definition(
         "must-attack",
