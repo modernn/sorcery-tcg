@@ -76,6 +76,11 @@ ordinary debug suite because running the same workload there takes several minut
   `move-toward-enemy` would pick, but only when that unit currently has a public
   temporary power source. The selector neighborhood remains small; `seat-observation-v1`
   still omits most tactical state.
+- Demo, novelty, counterfactual, and browser South opponents select through the
+  `session-json` `selectPolicyAction` method. There is no second TypeScript
+  selector. Rust beneficial-tactic ranking stays descriptor-safe and therefore
+  omits enemy `CastMagic` and occupancy-dependent Sparkmage preferences until
+  observation grows.
 - Campaign state round-trips through a strict checkpoint with the seed set, lineage, fixed action
   bound, attempt budget, portfolio, audit state, and exact pending-suite commitment. An unattended
   caller must use `reserve_generation` or `reserve_final_audit`, publish that checkpoint atomically,

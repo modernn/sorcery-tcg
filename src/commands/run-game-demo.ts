@@ -8,9 +8,7 @@ import {
   hashGameState,
   type GameCardDefinition,
   type GameDeckSpec,
-  type GameLegalAction,
   type GameManifest,
-  type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
 import { runRustSyntheticDemo, type Sha256Hash } from '../engine/rust-engine.ts';
@@ -63,102 +61,6 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
   });
 }
 
-export function selectDeterministicGameAction(
-  session: GameSession,
-  issuedActions: readonly GameLegalAction[],
-): GameLegalAction {
-  const actions = issuedActions;
-  const seat = session.state.decisionSeat;
-  const player = session.state.players[seat];
-  const enemySeat = seat === 'north' ? 'south' : 'north';
-  // ponytail: preserve one opening-hand-sized Atlas reserve; replace when opponent strategy exists.
-  const drawZone = player.atlas.length > 3 || player.spellbook.length <= player.atlas.length
-    ? 'atlas'
-    : 'spellbook';
-  const enemyAvatar = session.state.players[enemySeat].avatar.location;
-  const movement = actions
-    .map((action) => {
-      const inPlaceAvatarAttack = action.descriptor.kind === 'move-and-attack'
-        && action.descriptor.path.length === 1
-        && action.descriptor.to.cell === enemyAvatar
-        && action.descriptor.to.region === 'surface';
-      return {
-        action,
-        distance: inPlaceAvatarAttack
-          ? -1
-          : action.descriptor.kind === 'move-and-attack' && action.descriptor.path.length > 1
-            ? Math.abs(action.descriptor.to.cell.charCodeAt(0) - enemyAvatar.charCodeAt(0))
-              + Math.abs(Number(action.descriptor.to.cell[1]) - Number(enemyAvatar[1]))
-            : Number.POSITIVE_INFINITY,
-      };
-    })
-    .sort((left, right) => left.distance - right.distance)[0];
-  // ponytail: exercise obviously beneficial supported tactics; add evaluation when the opponent needs strategy.
-  const tactic = actions.find(({ descriptor }) => {
-    if (descriptor.kind === 'cast-magic') {
-      const definition = session.state.cards[descriptor.cardId];
-      return definition?.cardType === 'magic'
-        && ((definition.damageTargetUnit !== undefined && descriptor.target?.seat === enemySeat)
-          || (definition.grantPowerToAllyThisTurn !== undefined
-            && descriptor.ally?.seat === seat
-            && movement?.action.descriptor.kind === 'move-and-attack'
-            && movement.action.descriptor.unitInstanceId === descriptor.ally.instanceId
-            && movement.action.descriptor.to.cell === enemyAvatar
-            && movement.action.descriptor.to.region === 'surface'));
-    }
-    if (descriptor.kind === 'shoot-projectile') return descriptor.hit?.seat === enemySeat;
-    if (descriptor.kind === 'shoot-drag-projectile') {
-      return descriptor.hit?.seat === enemySeat && !descriptor.fightOnArrival;
-    }
-    if (descriptor.kind !== 'activate-sparkmage'
-      || (player.airThresholdsCastThisTurn ?? 0) === 0) return false;
-    const targetControllers = [
-      ...(['north', 'south'] as const).flatMap((targetSeat) => {
-        const avatar = session.state.players[targetSeat].avatar;
-        return avatar.card.instanceId !== descriptor.sourceInstanceId
-          && avatar.location === descriptor.targetLocation.cell
-          && avatar.region === descriptor.targetLocation.region
-          ? [targetSeat]
-          : [];
-      }),
-      ...session.state.realm.units
-        .filter(({ instanceId, location, region }) =>
-          instanceId !== descriptor.sourceInstanceId
-            && location === descriptor.targetLocation.cell
-            && region === descriptor.targetLocation.region)
-        .map(({ controller }) => controller),
-    ];
-    return targetControllers.length > 0
-      && targetControllers.every((controller) => controller === enemySeat);
-  });
-  const movingUnitInstanceId = movement?.action.descriptor.kind === 'move-and-attack'
-    ? movement.action.descriptor.unitInstanceId
-    : undefined;
-  const poweredMovement = movingUnitInstanceId
-    && (player.avatar.card.instanceId === movingUnitInstanceId
-      ? (player.avatar.temporaryPowerSources?.length ?? 0) > 0
-      : session.state.realm.units.some(({ instanceId, temporaryPowerSources }) =>
-        instanceId === movingUnitInstanceId
-          && (temporaryPowerSources?.length ?? 0) > 0))
-    ? movement?.action
-    : undefined;
-  const selected = actions.find(({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0)
-    ?? actions.find(({ descriptor }) => descriptor.kind === 'play-site')
-    ?? actions.find(({ descriptor }) => descriptor.kind === 'summon-minion')
-    ?? actions.find(({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === drawZone)
-    ?? poweredMovement
-    ?? tactic
-    ?? (movement && Number.isFinite(movement.distance) ? movement.action : undefined)
-    ?? actions.find(({ descriptor }) => descriptor.kind === 'end-turn')
-    ?? actions[0];
-  if (!selected) throw new Error('deterministic demo agent has no supported legal action');
-  return selected;
-}
-
 export type DeterministicGameReport = Readonly<{
   acceptedActionCount: number;
   classification: 'unranked_partial_rules';
@@ -174,10 +76,7 @@ export async function runDeterministicGame(manifest: GameManifest): Promise<Dete
   return withRustSession(manifest, async (handle) => {
     while (handle.snapshot.state.terminal.status === 'active'
       && handle.snapshot.transcript.length < MAX_ACTIONS) {
-      const issued = await handle.legalActions();
-      const result = await handle.stepAction(
-        selectDeterministicGameAction(handle.snapshot, issued),
-      );
+      const result = await handle.stepAction(await handle.selectPolicyAction());
       if (!result.accepted) throw new Error(`deterministic demo action rejected: ${result.reason.code}`);
     }
     const session = handle.snapshot;

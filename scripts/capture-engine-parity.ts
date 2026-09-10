@@ -4,10 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { canonicalJson, type JsonValue } from '../src/authority/canonical-json.ts';
 import { identityHash } from '../src/authority/hash.ts';
-import {
-  createSyntheticDemoManifest,
-  selectDeterministicGameAction,
-} from '../src/commands/run-game-demo.ts';
+import { createSyntheticDemoManifest } from '../src/commands/run-game-demo.ts';
 import { createEngineState, drawUint32, hashEngineState } from '../src/engine/determinism.ts';
 import {
   hashGameState,
@@ -91,10 +88,7 @@ async function captureGame(client: RustSessionClient, seed: number): Promise<Jso
 
   while (snapshot.state.terminal.status === 'active' && actionIds.length < MAX_ACTIONS) {
     const legalActions = await client.legalActions(snapshot.state.decisionSeat);
-    const action = selectDeterministicGameAction(
-      snapshot,
-      legalActions as unknown as GameLegalAction[],
-    );
+    const action = await client.selectPolicyAction();
     const preStateHash = hashGameState(snapshot.state);
     const result = await client.step(action);
     if (!result.accepted) throw new Error(`issued action was rejected`);

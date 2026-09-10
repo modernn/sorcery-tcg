@@ -11,9 +11,9 @@ import type {
 } from './game.ts';
 import { RustSessionClient, type Sha256Hash } from './rust-engine.ts';
 import { bindRustExportedSession } from './rust-legality-sync.ts';
-import { asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
+import { asGameLegalAction, asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
 
-export { asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
+export { asGameLegalAction, asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
 
 export const RUST_LEGALITY_SOURCE = 'rust-legality-engine';
 
@@ -72,6 +72,11 @@ export class RustGameSessionHandle {
   async legalActions(seat?: GameSeat): Promise<readonly GameLegalAction[]> {
     const target = seat ?? this.session.state.decisionSeat;
     return asGameLegalActions(await this.client.legalActions(target));
+  }
+
+  /** Selects one engine-issued action with the shared baseline deterministic policy. */
+  async selectPolicyAction(): Promise<GameLegalAction> {
+    return asGameLegalAction(await this.client.selectPolicyAction());
   }
 
   /** Applies one bound action request. */

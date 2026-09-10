@@ -78,6 +78,24 @@ function requireHash(value: unknown, label: string): Sha256Hash {
   return value as Sha256Hash;
 }
 
+function parseLegalAction(action: unknown): RustLegalAction {
+  if (!isRecord(action)
+    || typeof action.actionId !== 'string'
+    || typeof action.label !== 'string'
+    || (action.seat !== 'north' && action.seat !== 'south')
+    || !Number.isSafeInteger(action.stateVersion)
+    || !isRecord(action.descriptor)) {
+    throw new Error('Rust session legal action was invalid');
+  }
+  return Object.freeze({
+    actionId: action.actionId,
+    descriptor: action.descriptor as Readonly<Record<string, JsonValue>>,
+    label: action.label,
+    seat: action.seat,
+    stateVersion: action.stateVersion as number,
+  });
+}
+
 function parseRustReport(value: unknown): RustDeterministicGameReport {
   if (!isRecord(value)
     || value.classification !== 'unranked_partial_rules_unverified_authority'
@@ -216,23 +234,15 @@ export class RustSessionClient {
     if (!isRecord(result) || !Array.isArray(result.actions)) {
       throw new Error('Rust session legalActions result was invalid');
     }
-    return Object.freeze(result.actions.map((action) => {
-      if (!isRecord(action)
-        || typeof action.actionId !== 'string'
-        || typeof action.label !== 'string'
-        || (action.seat !== 'north' && action.seat !== 'south')
-        || !Number.isSafeInteger(action.stateVersion)
-        || !isRecord(action.descriptor)) {
-        throw new Error('Rust session legal action was invalid');
-      }
-      return Object.freeze({
-        actionId: action.actionId,
-        descriptor: action.descriptor as Readonly<Record<string, JsonValue>>,
-        label: action.label,
-        seat: action.seat,
-        stateVersion: action.stateVersion as number,
-      });
-    }));
+    return Object.freeze(result.actions.map((action) => parseLegalAction(action)));
+  }
+
+  async selectPolicyAction(): Promise<RustLegalAction> {
+    const result = await this.call('selectPolicyAction', {});
+    if (!isRecord(result)) {
+      throw new Error('Rust session selectPolicyAction result was invalid');
+    }
+    return parseLegalAction(result.action);
   }
 
   async step(request: RustActionRequest): Promise<RustStepResult> {
