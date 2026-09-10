@@ -1357,6 +1357,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::MillSites(_)
         | MagicEffect::MillSpells(_)
+        | MagicEffect::TargetPlayerDrawsSites(_)
         | MagicEffect::TargetPlayerDrawsSpells(_)
         | MagicEffect::ReturnTargetArtifactToOwnerHand
         | MagicEffect::ReturnTargetAuraToOwnerHand
@@ -6175,6 +6176,7 @@ impl Game {
             | MagicEffect::TargetPlayerLosesLife(_)
             | MagicEffect::MillSites(_)
             | MagicEffect::MillSpells(_)
+            | MagicEffect::TargetPlayerDrawsSites(_)
             | MagicEffect::TargetPlayerDrawsSpells(_) => self.avatar_player_choices(),
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
@@ -16851,6 +16853,16 @@ impl Game {
                     outcomes,
                 );
             }
+            MagicEffect::TargetPlayerDrawsSites(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_genesis_draws(
+                    target_seat,
+                    card_instance_id,
+                    DeckZone::Atlas,
+                    count,
+                    outcomes,
+                );
+            }
             MagicEffect::TargetPlayerDrawsSpells(count) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 self.apply_genesis_draws(
@@ -21228,6 +21240,10 @@ mod tests {
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
             (MagicEffect::MillSites(2), json!({ "millSites": 2 })),
             (MagicEffect::MillSpells(2), json!({ "millSpells": 2 })),
+            (
+                MagicEffect::TargetPlayerDrawsSites(1),
+                json!({ "targetPlayerDrawsSites": 1 }),
+            ),
             (
                 MagicEffect::TargetPlayerDrawsSpells(1),
                 json!({ "targetPlayerDrawsSpells": 1 }),

@@ -1,8 +1,8 @@
-//! Direct proofs for target-player Spellbook draw (RULE-CATALOG-0286–0287).
+//! Direct proofs for target-player library draw (RULE-CATALOG-0286–0289).
 //!
-//! Official Magic can make a chosen player draw from that player's Spellbook.
-//! Drawn identities stay private. An empty library is a deck-out, not a paid
-//! no-op — the opposite of mill.
+//! Official Magic can make a chosen player draw from that player's Spellbook
+//! or Atlas. Drawn identities stay private. An empty library is a deck-out,
+//! not a paid no-op — the opposite of mill.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -37,16 +37,17 @@ fn minion() -> Value {
     })
 }
 
-fn draw_spell() -> Value {
-    json!({
+fn draw_magic(field: &str) -> Value {
+    let mut value = json!({
         "cardType": "magic",
         "manaCost": 0,
-        "targetPlayerDrawsSpells": 1,
         "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
-    })
+    });
+    value[field] = json!(1);
+    value
 }
 
-fn manifest(seed: u32, south_spellbook: usize) -> String {
+fn manifest(seed: u32, field: &str, south_spellbook: usize, south_atlas: usize) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "target-player-draw" }))
@@ -56,7 +57,7 @@ fn manifest(seed: u32, south_spellbook: usize) -> String {
         },
         "cards": {
             "north-avatar": avatar(),
-            "north-draw": draw_spell(),
+            "north-draw": draw_magic(field),
             "north-site": site(),
             "south-avatar": avatar(),
             "south-minion": minion(),
@@ -69,7 +70,7 @@ fn manifest(seed: u32, south_spellbook: usize) -> String {
                 "spellbook": vec!["north-draw"; 6],
             },
             "south": {
-                "atlas": vec!["south-site"; 6],
+                "atlas": vec!["south-site"; south_atlas],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-minion"; south_spellbook],
             },
@@ -172,7 +173,7 @@ fn assert_exact_replay(session: &Session) {
 
 #[test]
 fn rule_catalog_0286_target_player_draw_puts_opponent_library_card_in_hand() {
-    let encoded = manifest(286, 6);
+    let encoded = manifest(286, "targetPlayerDrawsSpells", 6, 6);
     let mut session = opening_main(&encoded);
     let before = state(&session);
     let library = before["players"]["south"]["spellbook"]
@@ -261,7 +262,7 @@ fn rule_catalog_0286_target_player_draw_puts_opponent_library_card_in_hand() {
 
 #[test]
 fn rule_catalog_0287_target_player_draw_decks_out_an_empty_library() {
-    let encoded = manifest(287, 3);
+    let encoded = manifest(287, "targetPlayerDrawsSpells", 3, 6);
     let mut session = opening_main(&encoded);
     assert_eq!(
         state(&session)["players"]["south"]["spellbook"]
@@ -285,6 +286,138 @@ fn rule_catalog_0287_target_player_draw_decks_out_an_empty_library() {
             .events
             .iter()
             .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "south");
+    assert_eq!(ended.payload["winner"], "north");
+    let after = state(&session);
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_eq!(after["terminal"]["loser"], "south");
+    assert_eq!(after["terminal"]["winner"], "north");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0288_target_player_draw_puts_opponent_atlas_card_in_hand() {
+    let encoded = manifest(288, "targetPlayerDrawsSites", 6, 6);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let library = before["players"]["south"]["atlas"]
+        .as_array()
+        .expect("south Atlas");
+    assert_eq!(library.len(), 3);
+    let drawn_id = library[0]["instanceId"].clone();
+    assert_eq!(
+        before["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("south Atlas hand")
+            .len(),
+        3
+    );
+    assert_eq!(
+        draw_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-draw"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-drawn", "magic-resolved"]
+    );
+    let drawn = &receipt.events[1];
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(
+        drawn.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(drawn.payload.get("cardId").is_none());
+    assert!(
+        !serde_json::to_string(&receipt.events)
+            .expect("event JSON")
+            .contains(drawn_id.as_str().expect("drawn identity"))
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "game-ended" || event.event_type == "site-discarded")
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["south"]["atlas"]
+            .as_array()
+            .expect("remaining")
+            .len(),
+        2
+    );
+    let hand = after["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("south Atlas hand");
+    assert_eq!(hand.len(), 4);
+    assert!(hand.iter().any(|card| card["instanceId"] == drawn_id));
+    let north_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(north_view["players"]["south"]["hand"]["atlas"], 4);
+    assert_eq!(north_view["players"]["south"]["atlasCount"], 2);
+    assert!(
+        !serde_json::to_string(&north_view)
+            .expect("view JSON")
+            .contains(drawn_id.as_str().expect("drawn identity"))
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("target-player-draw-sites checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized site draw");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed site draw");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed site-draw session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0289_target_player_draw_sites_decks_out_an_empty_atlas() {
+    let encoded = manifest(289, "targetPlayerDrawsSites", 6, 3);
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["south"]["atlas"]
+            .as_array()
+            .expect("empty Atlas")
+            .len(),
+        0
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-draw"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-resolved", "game-ended"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-drawn")
     );
     let ended = receipt
         .events

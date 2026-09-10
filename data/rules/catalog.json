@@ -6190,6 +6190,50 @@
         "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
         "testName": "rule_catalog_0287_target_player_draw_decks_out_an_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0288",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Atlas draw Magic makes the chosen player draw from that player's remaining Atlas. Drawn site identities stay private, including in events and the opponent's public view.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0288_target_player_draw_puts_opponent_atlas_card_in_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0289",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Atlas draw on an empty library is a deck-out for the targeted player, not a paid no-op. That is the opposite of mill, which leaves the game active when the Atlas is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0289_target_player_draw_sites_decks_out_an_empty_atlas"
+      }
     }
   ]
 }
