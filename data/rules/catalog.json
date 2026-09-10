@@ -3293,6 +3293,97 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0163",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound Disable suppresses printed abilities but the Ward mark still prevents the next damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0164",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound Disable skips end-turn Stealth and permanently reveals it; returning to Water can gain Stealth on a later End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "stealth"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "stealth-gained",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0164_waterbound_skips_end_turn_stealth_while_disabled_then_gains_it_on_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0165",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Waterbound Genesis still draws after summoning onto Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0165_waterbound_genesis_still_draws_after_summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0166",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Waterbound Stealth token enters stealthed on Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "stealth",
+        "token"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0166_waterbound_stealth_token_enters_stealthed_on_water"
+      }
     }
   ]
 }

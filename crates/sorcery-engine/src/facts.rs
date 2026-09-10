@@ -1521,26 +1521,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "token Genesis effects are unsupported",
         ));
     }
-    if token && waterbound && stealth {
-        return Err(FactError::new(
-            path,
-            "Waterbound Stealth tokens are unsupported",
-        ));
-    }
-    if waterbound
-        && (matches!(damage_prevention, Some(DamagePrevention::Ward)) || end_turn_stealth.is_some())
-    {
-        return Err(FactError::new(
-            path,
-            "Waterbound with Ward or end-turn Stealth is unsupported",
-        ));
-    }
-    if waterbound && genesis.is_some() {
-        return Err(FactError::new(
-            path,
-            "Waterbound with Genesis is unsupported",
-        ));
-    }
 
     Ok(MinionFacts {
         airborne,

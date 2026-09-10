@@ -1884,25 +1884,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.waterbound !== undefined && typeof card.waterbound !== 'boolean') {
     throw new RangeError(`${path}.waterbound must be boolean`);
   }
-  if (card.token === true && card.waterbound === true && card.stealth === true) {
-    throw new RangeError(`${path} Waterbound Stealth tokens are unsupported`);
-  }
-  if (card.waterbound
-    && (card.ward
-      || card.gainsStealthAtEndOfTurn
-      || card.gainsStealthAtEndOfTurnIfNoEnemiesNearby)) {
-    throw new RangeError(`${path} Waterbound with Ward or end-turn Stealth is unsupported`);
-  }
-  if (card.waterbound
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
-      || card.genesisDamageEachOtherUnitHere === 1
-      || card.genesisDisableSelfUntilDamaged === true
-      || card.genesisMayDamageTargetAdjacentUnit === 2
-      || card.genesisStrikeEachEnemyHere === true
-      || card.genesisHealController !== undefined
-      || card.genesisLoseControllerLife !== undefined)) {
-    throw new RangeError(`${path} Waterbound with Genesis is unsupported`);
-  }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
   }

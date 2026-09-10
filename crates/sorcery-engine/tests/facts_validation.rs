@@ -613,15 +613,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             ),
             "token Genesis",
         ),
-        (
-            "Waterbound Ward",
-            with(
-                with(minion(), "waterbound", json!(true)),
-                "ward",
-                json!(true),
-            ),
-            "Waterbound with Ward",
-        ),
     ];
 
     for (name, definition, expected_error) in invalid {

@@ -435,7 +435,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous unconditional and conditional end-turn Stealth/);
-  assert.throws(() => createGameManifest({
+  const waterboundEndTurnStealth = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -445,7 +445,30 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         waterbound: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound with Ward or end-turn Stealth/);
+  });
+  assert.equal(
+    waterboundEndTurnStealth.cards[firstSpell]?.cardType === 'minion'
+      && waterboundEndTurnStealth.cards[firstSpell].gainsStealthAtEndOfTurnIfNoEnemiesNearby
+      && waterboundEndTurnStealth.cards[firstSpell].waterbound,
+    true,
+  );
+  const waterboundUnconditionalEndTurnStealth = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        gainsStealthAtEndOfTurn: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    waterboundUnconditionalEndTurnStealth.cards[firstSpell]?.cardType === 'minion'
+      && waterboundUnconditionalEndTurnStealth.cards[firstSpell].gainsStealthAtEndOfTurn
+      && waterboundUnconditionalEndTurnStealth.cards[firstSpell].waterbound,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -1181,7 +1204,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /simultaneous Genesis healing/);
-  assert.throws(() => createGameManifest({
+  const waterboundHealGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -1191,7 +1214,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         waterbound: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound with Genesis/);
+  });
+  assert.equal(
+    waterboundHealGenesis.cards[firstSpell]?.cardType === 'minion'
+      && waterboundHealGenesis.cards[firstSpell].genesisHealController === 2
+      && waterboundHealGenesis.cards[firstSpell].waterbound,
+    true,
+  );
   const waterboundManifest = createGameManifest({
     ...input,
     cards: {
@@ -1219,7 +1248,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /waterbound must be boolean/);
-  assert.throws(() => createGameManifest({
+  const waterboundWard = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -1229,20 +1258,41 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         ward: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound with Ward or end-turn Stealth/);
-  assert.throws(() => createGameManifest({
+  });
+  assert.equal(
+    waterboundWard.cards[firstSpell]?.cardType === 'minion'
+      && waterboundWard.cards[firstSpell].waterbound
+      && waterboundWard.cards[firstSpell].ward,
+    true,
+  );
+  const waterboundStealthToken = createGameManifest({
     ...input,
     cards: {
       ...cards,
-      [firstSpell]: {
-        ...cards[firstSpell]!,
+      [decks.north.atlas[0]!]: {
+        ...cards[decks.north.atlas[0]!]!,
+        genesisPayOneManaToSummonToken: 'bound-scout',
+      } as GameCardDefinition,
+      'bound-scout': {
+        attack: 1,
+        cardType: 'minion',
+        defense: 1,
+        manaCost: 0,
         stealth: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
         token: true,
         waterbound: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound Stealth tokens are unsupported/);
-  assert.throws(() => createGameManifest({
+  });
+  assert.equal(
+    waterboundStealthToken.cards['bound-scout']?.cardType === 'minion'
+      && waterboundStealthToken.cards['bound-scout'].stealth
+      && waterboundStealthToken.cards['bound-scout'].token
+      && waterboundStealthToken.cards['bound-scout'].waterbound,
+    true,
+  );
+  const waterboundSpellGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -1252,7 +1302,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         waterbound: true,
       } as GameCardDefinition,
     },
-  }), /Waterbound with Genesis/);
+  });
+  assert.equal(
+    waterboundSpellGenesis.cards[firstSpell]?.cardType === 'minion'
+      && waterboundSpellGenesis.cards[firstSpell].genesisDrawSpells === 1
+      && waterboundSpellGenesis.cards[firstSpell].waterbound,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

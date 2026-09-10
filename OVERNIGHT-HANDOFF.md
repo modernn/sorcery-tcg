@@ -10,10 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **162 rust-supported / 0 typescript-supported** out of 162.
+`data/rules/catalog.json`: **166 rust-supported / 0 typescript-supported** out of 166.
 
-Latest catalog proof: Geomancer Rubble replacement resumes adjacent same-card Spellbook draws
-(`RULE-CATALOG-0162`). Cave-In plus Artifacts is self-play admitted.
+Latest catalog proofs: Waterbound composes with Ward, end-turn Stealth, Genesis, and Stealth tokens
+(`RULE-CATALOG-0163`–`0166`).
 
 ## TypeScript legality cutover
 
