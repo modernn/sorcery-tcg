@@ -1259,6 +1259,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
+        | MagicEffect::DrawSpells(_)
         | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
@@ -4939,6 +4940,7 @@ impl Game {
     ) -> Result<Vec<MagicChoice>, GameError> {
         Ok(match effect {
             MagicEffect::HealController(_)
+            | MagicEffect::DrawSpells(_)
             | MagicEffect::DamageEachAbovegroundMinionOne
             | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
@@ -14552,6 +14554,15 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::DrawSpells(count) => {
+                self.apply_genesis_draws(
+                    seat,
+                    card_instance_id,
+                    DeckZone::Spellbook,
+                    count,
+                    outcomes,
+                );
+            }
             MagicEffect::SummonRandomMinionFromAnyCemetery => {
                 raising = self.begin_cemetery_summon(
                     CemeterySummonRequest {
@@ -18275,6 +18286,7 @@ mod tests {
                 MagicEffect::LeapAttackAlly,
                 json!({ "leapAttackAlly": true }),
             ),
+            (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {

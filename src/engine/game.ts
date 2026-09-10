@@ -178,6 +178,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     discardSiteAsAdditionalCost?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
+    drawSpells?: number;
     fightAllyWithAdjacentEnemy?: true;
     gainControlOfTargetNearbyMinion?: true;
     grantChargeToAllyThisTurn?: true;
@@ -1005,7 +1006,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
     destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
-    grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly
+    grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly drawSpells
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby teleportAllyToTargetSite
@@ -1456,6 +1457,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
+      + Number(card.drawSpells !== undefined)
       + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
@@ -1501,6 +1503,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.healController < 1
       || card.healController > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.healController must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.drawSpells !== undefined && (!Number.isSafeInteger(card.drawSpells)
+      || card.drawSpells < 1
+      || card.drawSpells > MAX_DECK_CARDS)) {
+      throw new RangeError(`${path}.drawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -2142,6 +2149,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { lureEnemyMinionOneStepCloser: true as const }
                   : card.healController !== undefined
                     ? { healController: card.healController }
+                  : card.drawSpells !== undefined
+                    ? { drawSpells: card.drawSpells }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
                       : card.summonRandomMinionFromAnyCemetery === true

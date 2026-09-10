@@ -7082,3 +7082,124 @@ fn rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_re
         session.state_hash().expect("session state hash")
     );
 }
+
+#[test]
+fn rule_catalog_0196_draw_spells_magic_draws_hidden_spellbook_cards() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-draw": magic(("drawSpells", json!(2)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    let encoded = manifest(196, &cards, &["north-draw"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let expected: Vec<_> = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .take(2)
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(expected.len(), 2);
+    let south_before = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_before["players"]["north"]["hand"]["spellbook"], 3);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    });
+    let spell_id = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("draw Magic identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "spell-drawn", "spell-drawn", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], spell_id);
+    let after = state(&session);
+    let hand = after["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand");
+    assert_eq!(hand.len(), 4);
+    for instance_id in &expected {
+        assert!(
+            hand.iter().any(|card| &card["instanceId"] == instance_id),
+            "the drawn identities must enter the hidden Spellbook hand"
+        );
+    }
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    let south_after = session
+        .public_view(Seat::South)
+        .expect("South public view after the draws");
+    assert_eq!(
+        south_after["players"]["north"]["hand"]["spellbook"], 4,
+        "the opponent sees only the new hand count"
+    );
+    assert_eq!(south_after["players"]["north"]["spellbookCount"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library() {
+    for remaining in 0..=2 {
+        let mut cards = json!({
+            "north-avatar": avatar(20),
+            "north-draw": magic(("drawSpells", json!(2)), 1),
+            "north-site": site(false),
+            "south-avatar": avatar(20),
+            "south-minion": minion(json!({})),
+            "south-site": site(false),
+        });
+        let mut north_spells = vec!["north-draw", "north-draw", "north-draw"];
+        if remaining > 0 {
+            cards["north-filler"] = minion(json!({}));
+            north_spells.extend(std::iter::repeat("north-filler").take(remaining));
+        }
+        let encoded = manifest(
+            197 + u32::try_from(remaining).expect("small remaining count"),
+            &cards,
+            &north_spells,
+            &["south-minion"; 6],
+        );
+        let mut session = opening_main(&encoded);
+        let before = state(&session);
+        let expected = before["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .clone();
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+        });
+        let kinds = event_types(&receipt);
+        assert_eq!(kinds.first(), Some(&"magic-cast"));
+        assert_eq!(
+            kinds.iter().filter(|kind| **kind == "spell-drawn").count(),
+            expected.len()
+        );
+        assert_eq!(kinds.last(), Some(&"game-ended"));
+        assert!(kinds.contains(&"magic-resolved"));
+        let after = state(&session);
+        assert_eq!(after["players"]["north"]["spellbook"], json!([]));
+        assert_eq!(after["terminal"]["reason"], "deck_empty");
+        assert_eq!(after["terminal"]["loser"], "north");
+        for card in expected {
+            assert!(
+                after["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("north hand")
+                    .contains(&card)
+            );
+        }
+        assert_exact_replay(&session);
+    }
+}
