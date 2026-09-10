@@ -380,6 +380,7 @@ struct UnitPosition {
     temporary_airborne_sources: Vec<IdentityHash>,
     temporary_charge_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
+    temporary_ranged_sources: Vec<IdentityHash>,
     warded: bool,
 }
 
@@ -417,6 +418,7 @@ impl SummonPlacement {
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: self.warded,
         }
     }
@@ -1340,6 +1342,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantAirborneToAllyThisTurn
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::GrantRangedToAllyThisTurn
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::GainControlOfTargetNearbyMinion
@@ -3241,8 +3244,20 @@ impl Game {
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy,
                     };
-                    let label = (if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn)
-                    {
+                    let label = (if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Ranged grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Ranged to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn) {
                         let ActionDescriptor::CastMagic {
                             ally: Some(ally), ..
                         } = &descriptor
@@ -4981,7 +4996,7 @@ impl Game {
     }
 
     fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        facts.ranged || self.minion_atop_tower(unit)
+        facts.ranged || !unit.temporary_ranged_sources.is_empty() || self.minion_atop_tower(unit)
     }
 
     fn has_nearby_enemy(&self, unit: &UnitPosition) -> bool {
@@ -5848,7 +5863,8 @@ impl Game {
             }
             MagicEffect::GrantAirborneToAllyThisTurn
             | MagicEffect::GrantChargeToAllyThisTurn
-            | MagicEffect::GrantPowerTwoToAllyThisTurn => self
+            | MagicEffect::GrantPowerTwoToAllyThisTurn
+            | MagicEffect::GrantRangedToAllyThisTurn => self
                 .controlled_allies(seat)
                 .into_iter()
                 .map(|ally| MagicChoice {
@@ -12309,6 +12325,7 @@ impl Game {
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -16863,6 +16880,31 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantRangedToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_ranged_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("ranged-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantPowerTwoToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 match ally {
@@ -19492,6 +19534,20 @@ impl Game {
                 })
             })
             .collect();
+        let expired_ranged_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_ranged_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let ending_avatar = &self.position.players[seat_index(seat)].avatar;
         let mut expired_power_sources: Vec<_> = ending_avatar
             .temporary_power_sources
@@ -19532,6 +19588,7 @@ impl Game {
             unit.temporary_airborne_sources.clear();
             unit.temporary_charge_sources.clear();
             unit.temporary_power_sources.clear();
+            unit.temporary_ranged_sources.clear();
             if unit.controller == seat {
                 if gains_stealth {
                     unit.stealthed = true;
@@ -19585,6 +19642,15 @@ impl Game {
         }
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_ranged_sources {
+            outcomes.push("ranged-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -20263,6 +20329,12 @@ impl Game {
             object.insert(
                 "temporaryPowerSources".to_owned(),
                 json!(unit.temporary_power_sources),
+            );
+        }
+        if !unit.temporary_ranged_sources.is_empty() {
+            object.insert(
+                "temporaryRangedSources".to_owned(),
+                json!(unit.temporary_ranged_sources),
             );
         }
         value
@@ -21506,6 +21578,7 @@ mod tests {
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
@@ -21779,6 +21852,7 @@ mod tests {
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: false,
         }
     }
@@ -22667,6 +22741,7 @@ mod tests {
                 temporary_airborne_sources: Vec::new(),
                 temporary_charge_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
+                temporary_ranged_sources: Vec::new(),
                 warded: false,
             };
         game.position.units = vec![

@@ -227,6 +227,7 @@ pub enum MagicEffect {
     GrantAirborneToAllyThisTurn,
     GrantChargeToAllyThisTurn,
     GrantPowerTwoToAllyThisTurn,
+    GrantRangedToAllyThisTurn,
     GrantStealthToTargetMinion,
     GrantWardToTargetMinion,
     HealController(u8),
@@ -760,6 +761,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "grantAirborneToAllyThisTurn",
     "grantChargeToAllyThisTurn",
     "grantPowerToAllyThisTurn",
+    "grantRangedToAllyThisTurn",
     "grantStealthToTargetMinion",
     "grantWardToTargetMinion",
     "healController",
@@ -1359,6 +1361,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::GrantChargeToAllyThisTurn),
             fixed_integer(object, "grantPowerToAllyThisTurn", 2, path)?
                 .then_some(MagicEffect::GrantPowerTwoToAllyThisTurn),
+            true_only(object, "grantRangedToAllyThisTurn", path)?
+                .then_some(MagicEffect::GrantRangedToAllyThisTurn),
             true_only(object, "grantStealthToTargetMinion", path)?
                 .then_some(MagicEffect::GrantStealthToTargetMinion),
             true_only(object, "grantWardToTargetMinion", path)?

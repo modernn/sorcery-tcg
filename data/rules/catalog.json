@@ -5915,6 +5915,53 @@
         "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
         "testName": "rule_catalog_0275_granted_airborne_is_required_to_strike_an_airborne_enemy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0276",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant Ranged to a controlled ally for the current turn. After summoning sickness clears, the minion may shoot a projectile. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "ranged-granted",
+        "ranged-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_0276_grant_ranged_lets_a_ready_minion_shoot_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0277",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Granted Ranged does not bypass summoning sickness. Charge lets a sick minion Move and Attack; it does not let that minion shoot, and grant-Ranged Magic does not either. The opponent sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ranged-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness"
+      }
     }
   ]
 }

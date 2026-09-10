@@ -628,6 +628,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantAirborneToAllyThisTurn/);
+  const rangedGrantManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantRangedToAllyThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(rangedGrantManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantRangedToAllyThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantRangedToAllyThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantRangedToAllyThisTurn/);
   const lureManifest = createGameManifest({
     ...input,
     cards: {
@@ -25029,6 +25059,171 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
     );
     assert.equal(await canStrike(ctx, allyId, enemyId), true);
     assert.equal(ctx.observe('north').players.south.hand.spellbook, 2);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 grant-Ranged Magic lasts this turn and does not bypass summoning sickness', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const grounded = {
+    attack: 1,
+    cardType: 'minion' as const,
+    defense: 2,
+    manaCost: 0,
+    thresholds,
+  };
+  const grant = {
+    cardType: 'magic' as const,
+    grantRangedToAllyThisTurn: true as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const canShoot = async (ctx: SetupCtx, shooterId: string): Promise<boolean> =>
+    (await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.shooterInstanceId === shooterId);
+  const cards = {
+    'grant-range-north-ally': grounded,
+    'grant-range-north-avatar': avatar,
+    'grant-range-north-grant': grant,
+    'grant-range-north-site': site,
+    'grant-range-south-avatar': avatar,
+    'grant-range-south-minion': grounded,
+    'grant-range-south-site': site,
+  };
+  const decks = {
+    north: {
+      atlas: Array(6).fill('grant-range-north-site'),
+      avatar: 'grant-range-north-avatar',
+      spellbook: ['grant-range-north-ally', 'grant-range-north-grant', 'grant-range-north-grant'],
+    } satisfies GameDeckSpec,
+    south: {
+      atlas: Array(6).fill('grant-range-south-site'),
+      avatar: 'grant-range-south-avatar',
+      spellbook: Array(6).fill('grant-range-south-minion'),
+    } satisfies GameDeckSpec,
+  };
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-grant-ranged-v1',
+  };
+
+  await withSetup(createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-range-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-range-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.summoningSickness,
+      true,
+    );
+    const sickGrant = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-range-north-grant'
+        && descriptor.ally?.instanceId === allyId));
+    assert.equal(sickGrant.accepted, true);
+    if (!sickGrant.accepted) {
+      return;
+    }
+    assert.deepEqual(sickGrant.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'ranged-granted',
+      'magic-resolved',
+    ]);
+    assert.equal(await canShoot(ctx, allyId), false);
+    assert.equal(ctx.observe('north').players.south.hand.spellbook, 3);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-range-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-range-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'grant-range-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw');
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.summoningSickness,
+      false,
+    );
+    assert.equal(await canShoot(ctx, allyId), false);
+    const grantAction = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-range-north-grant'
+        && descriptor.ally?.instanceId === allyId);
+    assert.equal(grantAction.descriptor.kind === 'cast-magic', true);
+    if (grantAction.descriptor.kind !== 'cast-magic') {
+      return;
+    }
+    const granted = await ctx.step(grantAction);
+    assert.equal(granted.accepted, true);
+    if (!granted.accepted) {
+      return;
+    }
+    assert.deepEqual(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryRangedSources,
+      [grantAction.descriptor.cardInstanceId],
+    );
+    assert.equal(await canShoot(ctx, allyId), true);
+    const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    assert.equal(ended.accepted, true);
+    if (!ended.accepted) {
+      return;
+    }
+    assert.equal(
+      ended.receipt.events.some(({ type }) => type === 'ranged-expired'),
+      true,
+    );
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryRangedSources,
+      undefined,
+    );
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
