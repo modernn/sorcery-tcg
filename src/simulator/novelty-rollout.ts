@@ -11,7 +11,7 @@ import {
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
-import { withRustSession } from '../engine/rust-session-helpers.ts';
+import { withResumedRustSession, withRustSession } from '../engine/rust-session-helpers.ts';
 
 export const NOVELTY_ROLLOUT_ACTION_LIMIT = 500;
 export const NOVELTY_ROLLOUT_WIDTH_LIMIT = 128;
@@ -201,19 +201,26 @@ function checkpointFailureFrom(result: NoveltyRolloutResult): NoveltyRolloutResu
   }) as NoveltyRolloutResult;
 }
 
+function emitCheckpoints(
+  emitted: readonly JsonValue[],
+  onCheckpoint?: (checkpoint: GameCheckpoint) => void,
+): void {
+  const seen = new Set<string>();
+  for (const raw of emitted) {
+    const checkpoint = parseGameCheckpoint(canonicalJson(raw));
+    if (seen.has(checkpoint.checkpointId)) continue;
+    seen.add(checkpoint.checkpointId);
+    onCheckpoint?.(checkpoint);
+  }
+}
+
 function applyEmittedCheckpoints(
   result: NoveltyRolloutResult,
   emitted: readonly JsonValue[],
   onCheckpoint?: (checkpoint: GameCheckpoint) => void,
 ): NoveltyRolloutResult {
   try {
-    const seen = new Set<string>();
-    for (const raw of emitted) {
-      const checkpoint = parseGameCheckpoint(canonicalJson(raw));
-      if (seen.has(checkpoint.checkpointId)) continue;
-      seen.add(checkpoint.checkpointId);
-      onCheckpoint?.(checkpoint);
-    }
+    emitCheckpoints(emitted, onCheckpoint);
   } catch {
     return checkpointFailureFrom(result);
   }
@@ -228,24 +235,44 @@ function boundedMaxActions(maxActions: number | undefined): number {
   return value;
 }
 
+function freezeRollout(
+  payload: Readonly<{ emittedCheckpoints: readonly JsonValue[]; result: JsonValue }>,
+  onCheckpoint?: (checkpoint: GameCheckpoint) => void,
+): NoveltyRolloutResult {
+  if (!isRecord(payload.result)) {
+    throw new Error('Rust novelty rollout result was invalid');
+  }
+  return applyEmittedCheckpoints(
+    deepFreeze(payload.result) as NoveltyRolloutResult,
+    payload.emittedCheckpoints,
+    onCheckpoint,
+  );
+}
+
+/** Runs one-step novelty from a mid-game snapshot. */
 export async function runNoveltyRollout(
   root: GameSession,
   options: NoveltyRolloutOptions = {},
 ): Promise<NoveltyRolloutResult> {
-  const maxActions = boundedMaxActions(options.maxActions);
-  const rootCheckpoint = createGameCheckpoint(root) as unknown as JsonValue;
-  return withRustSession(root.manifest, async (handle) => {
-    await handle.resume(rootCheckpoint);
-    const payload = await handle.runNoveltyRollout({ maxActions });
-    if (!isRecord(payload.result)) {
-      throw new Error('Rust novelty rollout result was invalid');
-    }
-    return applyEmittedCheckpoints(
-      deepFreeze(payload.result) as NoveltyRolloutResult,
-      payload.emittedCheckpoints,
+  return withResumedRustSession(
+    root.manifest,
+    createGameCheckpoint(root) as unknown as JsonValue,
+    async (handle) => freezeRollout(
+      await handle.runNoveltyRollout({ maxActions: boundedMaxActions(options.maxActions) }),
       options.onCheckpoint,
-    );
-  });
+    ),
+  );
+}
+
+/** Runs one-step novelty from a fresh opening of `manifest`. */
+export async function runOpeningNoveltyRollout(
+  manifest: GameManifest,
+  options: NoveltyRolloutOptions = {},
+): Promise<NoveltyRolloutResult> {
+  return withRustSession(manifest, async (handle) => freezeRollout(
+    await handle.runNoveltyRollout({ maxActions: boundedMaxActions(options.maxActions) }),
+    options.onCheckpoint,
+  ));
 }
 
 async function dispatchForcedNovelty(
@@ -253,13 +280,11 @@ async function dispatchForcedNovelty(
   checkpoint: JsonValue,
   options: ForcedNoveltyOptions,
 ): Promise<ForcedNoveltyDispatch> {
-  const maxActions = boundedMaxActions(options.maxActions);
-  return withRustSession(manifest, async (handle) => {
-    await handle.resume(checkpoint);
+  return withResumedRustSession(manifest, checkpoint, async (handle) => {
     const payload = await handle.runNoveltyFromForcedAction({
       actionId: options.actionId,
       actionKind: options.actionKind,
-      maxActions,
+      maxActions: boundedMaxActions(options.maxActions),
       predictedEventTypes: options.predictedEventTypes,
       predictedStateHash: options.predictedStateHash,
     });
@@ -319,27 +344,23 @@ export async function runNoveltyFrontierSearch(
   root: GameSession,
   options: NoveltyFrontierSearchOptions = {},
 ): Promise<NoveltyFrontierSearchReport> {
-  const maxActions = boundedMaxActions(options.maxActions);
-  const maxBranches = boundedMaxBranches(options.maxBranches);
-  const rootCheckpoint = createGameCheckpoint(root) as unknown as JsonValue;
-  return withRustSession(root.manifest, async (handle) => {
-    await handle.resume(rootCheckpoint);
-    const payload = await handle.runNoveltyFrontierSearch({ maxActions, maxBranches });
-    if (!isRecord(payload.result)) {
-      throw new Error('Rust novelty frontier search result was invalid');
-    }
-    const report = deepFreeze(payload.result) as NoveltyFrontierSearchReport;
-    try {
-      const seen = new Set<string>();
-      for (const raw of payload.emittedCheckpoints) {
-        const checkpoint = parseGameCheckpoint(canonicalJson(raw));
-        if (seen.has(checkpoint.checkpointId)) continue;
-        seen.add(checkpoint.checkpointId);
-        options.onCheckpoint?.(checkpoint);
+  return withResumedRustSession(
+    root.manifest,
+    createGameCheckpoint(root) as unknown as JsonValue,
+    async (handle) => {
+      const payload = await handle.runNoveltyFrontierSearch({
+        maxActions: boundedMaxActions(options.maxActions),
+        maxBranches: boundedMaxBranches(options.maxBranches),
+      });
+      if (!isRecord(payload.result)) {
+        throw new Error('Rust novelty frontier search result was invalid');
       }
-    } catch {
-      throw new Error('novelty frontier checkpoint sink failed');
-    }
-    return report;
-  });
+      try {
+        emitCheckpoints(payload.emittedCheckpoints, options.onCheckpoint);
+      } catch {
+        throw new Error('novelty frontier checkpoint sink failed');
+      }
+      return deepFreeze(payload.result) as NoveltyFrontierSearchReport;
+    },
+  );
 }

@@ -192,10 +192,10 @@ mod tests {
     use super::{ForcedNoveltyInput, run_novelty_from_forced_action};
     use crate::novelty_rollout::NOVELTY_ROLLOUT_ACTION_LIMIT;
     use crate::session::Session;
-    use crate::synthetic::synthetic_demo_manifest_json;
+    use crate::synthetic::synthetic_demo_session;
 
     fn opening_session() -> Session {
-        Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session")
+        synthetic_demo_session(31)
     }
 
     #[test]

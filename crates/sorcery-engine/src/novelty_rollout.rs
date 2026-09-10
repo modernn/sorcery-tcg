@@ -630,13 +630,11 @@ fn novelty_error(error: &impl ToString) -> SessionError {
 #[cfg(test)]
 mod tests {
     use super::{NOVELTY_ROLLOUT_ACTION_LIMIT, run_novelty_rollout};
-    use crate::session::Session;
-    use crate::synthetic::synthetic_demo_manifest_json;
+    use crate::synthetic::synthetic_demo_session;
 
     #[test]
     fn zero_horizon_from_synthetic_opening_is_resumable() {
-        let session =
-            Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session");
+        let session = synthetic_demo_session(31);
         let output = run_novelty_rollout(&session, 0).expect("rollout");
         assert_eq!(output.result()["status"], "horizon");
         assert_eq!(output.result()["acceptedActionCount"], 0);
@@ -650,8 +648,7 @@ mod tests {
 
     #[test]
     fn rejects_an_oversize_horizon() {
-        let session =
-            Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session");
+        let session = synthetic_demo_session(31);
         let error =
             run_novelty_rollout(&session, NOVELTY_ROLLOUT_ACTION_LIMIT + 1).expect_err("oversize");
         assert!(error.to_string().contains("maxActions"));

@@ -5,7 +5,7 @@ import {
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
-import { withRustSession } from '../engine/rust-session-helpers.ts';
+import { withResumedRustSession } from '../engine/rust-session-helpers.ts';
 
 const MAX_CONTINUATION_ACTIONS = 32;
 
@@ -51,11 +51,11 @@ export async function runCounterfactualRollouts(
     || maxContinuationDecisions > MAX_CONTINUATION_ACTIONS) {
     throw new RangeError(`maxContinuationDecisions must be 0-${MAX_CONTINUATION_ACTIONS}`);
   }
-  const checkpoint = createGameCheckpoint(root) as unknown as JsonValue;
-  return withRustSession(root.manifest, async (handle) => {
-    await handle.resume(checkpoint);
-    return deepFreeze(
+  return withResumedRustSession(
+    root.manifest,
+    createGameCheckpoint(root) as unknown as JsonValue,
+    async (handle) => deepFreeze(
       await handle.runCounterfactual({ maxContinuationDecisions }),
-    ) as CounterfactualReport;
-  });
+    ) as CounterfactualReport,
+  );
 }

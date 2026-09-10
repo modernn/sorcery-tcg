@@ -10,14 +10,7 @@ import { SetupCtx, withSetup } from './rust-setup-session.ts';
 
 test('coverage-guided rollout reports committed novelty and a resumable horizon checkpoint', async () => {
   await withSetup(createSyntheticDemoManifest(31), async (ctx) => {
-    await ctx.keep();
-    await ctx.keep();
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'summon-minion'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'end-turn'));
+    await ctx.seed31AfterNorthOpening();
     const root = ctx.session;
     const checkpoints = new Map<string, GameCheckpoint>();
     const result = await runNoveltyRollout(root, {

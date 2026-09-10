@@ -96,6 +96,16 @@ export class SetupCtx {
         && descriptor.spellbookOrder.length === 0));
   }
 
+  /** Plays the seed-31 North site, summons, and ends the opening turn. */
+  async seed31AfterNorthOpening(): Promise<GameSession> {
+    await this.keep();
+    await this.keep();
+    await this.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await this.take(({ descriptor }) => descriptor.kind === 'summon-minion');
+    return this.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  }
+
   /** Applies one legal action without requiring acceptance. */
   async step(candidate: GameLegalAction): Promise<GameStepResult> {
     return this.handle.stepAction(candidate);

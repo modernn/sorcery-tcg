@@ -38,6 +38,18 @@ pub fn synthetic_demo_manifest_json(seed: u32) -> Result<String, CanonicalError>
     canonical_json(&manifest)
 }
 
+/// Opens one synthetic demo session for engine unit tests.
+///
+/// # Panics
+///
+/// Panics when the public synthetic manifest or its deterministic setup is invalid.
+#[cfg(test)]
+#[must_use]
+pub fn synthetic_demo_session(seed: u32) -> crate::session::Session {
+    crate::session::Session::new(&synthetic_demo_manifest_json(seed).expect("manifest"))
+        .expect("session")
+}
+
 fn demo_deck(prefix: &str) -> Value {
     json!({
         "atlas": numbered_ids(prefix, "site", 30),

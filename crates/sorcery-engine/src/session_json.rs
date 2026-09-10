@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::canonical::{CanonicalError, canonical_json, parse_json_without_duplicate_keys};
-use crate::checkpoint::{create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint};
+use crate::checkpoint::{
+    GameCheckpoint, create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+};
 use crate::contract::{ActionRequest, Seat};
 use crate::novelty::NoveltyStep;
 use crate::novelty_dispatch::ForcedNoveltyInput;
@@ -193,11 +195,13 @@ impl SessionJsonService {
         let Some(session) = &self.session else {
             return error_response(id, "session-json process has no active session");
         };
-        let committed_action_kinds = match string_list(params, "committedActionKinds") {
-            Ok(value) => value,
-            Err(message) => return error_response(id, &message),
-        };
-        let committed_event_types = match string_list(params, "committedEventTypes") {
+        let committed_action_kinds =
+            match string_list(params, "committedActionKinds", "probeNovelty") {
+                Ok(value) => value,
+                Err(message) => return error_response(id, &message),
+            };
+        let committed_event_types = match string_list(params, "committedEventTypes", "probeNovelty")
+        {
             Ok(value) => value,
             Err(message) => return error_response(id, &message),
         };
@@ -209,32 +213,21 @@ impl SessionJsonService {
 
     fn run_novelty_rollout(&self, id: u64, params: &Value) -> RpcResponse {
         let Some(session) = &self.session else {
-            return error_response(id, "session-json process has no active session");
+            return no_session(id);
         };
-        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
-            return error_response(id, "runNoveltyRollout requires maxActions");
-        };
-        let Ok(max_actions) = usize::try_from(max_actions) else {
-            return error_response(id, "runNoveltyRollout maxActions is out of range");
+        let max_actions = match usize_param(params, "maxActions", "runNoveltyRollout") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
         };
         match session.run_novelty_rollout(max_actions) {
-            Ok(output) => match serde_json::to_value(output.emitted_checkpoints()) {
-                Ok(emitted_checkpoints) => ok_response(
-                    id,
-                    json!({
-                        "emittedCheckpoints": emitted_checkpoints,
-                        "result": output.result(),
-                    }),
-                ),
-                Err(error) => error_response(id, &error.to_string()),
-            },
+            Ok(output) => emitted_ok(id, output.emitted_checkpoints(), output.result()),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
 
     fn run_novelty_from_forced_action(&mut self, id: u64, params: &Value) -> RpcResponse {
         let Some(session) = self.session.as_mut() else {
-            return error_response(id, "session-json process has no active session");
+            return no_session(id);
         };
         let Some(action_id) = params.get("actionId").and_then(Value::as_str) else {
             return error_response(id, "runNoveltyFromForcedAction requires actionId");
@@ -246,17 +239,14 @@ impl SessionJsonService {
         else {
             return error_response(id, "runNoveltyFromForcedAction requires predictedStateHash");
         };
-        let Ok(predicted_event_types) = string_list(params, "predictedEventTypes") else {
-            return error_response(
-                id,
-                "runNoveltyFromForcedAction predictedEventTypes must be an array of strings",
-            );
-        };
-        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
-            return error_response(id, "runNoveltyFromForcedAction requires maxActions");
-        };
-        let Ok(max_actions) = usize::try_from(max_actions) else {
-            return error_response(id, "runNoveltyFromForcedAction maxActions is out of range");
+        let predicted_event_types =
+            match string_list(params, "predictedEventTypes", "runNoveltyFromForcedAction") {
+                Ok(value) => value,
+                Err(message) => return error_response(id, &message),
+            };
+        let max_actions = match usize_param(params, "maxActions", "runNoveltyFromForcedAction") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
         };
         match session.run_novelty_from_forced_action(ForcedNoveltyInput {
             action_id,
@@ -282,51 +272,31 @@ impl SessionJsonService {
 
     fn run_novelty_frontier_search(&self, id: u64, params: &Value) -> RpcResponse {
         let Some(session) = &self.session else {
-            return error_response(id, "session-json process has no active session");
+            return no_session(id);
         };
-        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
-            return error_response(id, "runNoveltyFrontierSearch requires maxActions");
+        let max_actions = match usize_param(params, "maxActions", "runNoveltyFrontierSearch") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
         };
-        let Ok(max_actions) = usize::try_from(max_actions) else {
-            return error_response(id, "runNoveltyFrontierSearch maxActions is out of range");
-        };
-        let Some(max_branches) = params.get("maxBranches").and_then(Value::as_u64) else {
-            return error_response(id, "runNoveltyFrontierSearch requires maxBranches");
-        };
-        let Ok(max_branches) = usize::try_from(max_branches) else {
-            return error_response(id, "runNoveltyFrontierSearch maxBranches is out of range");
+        let max_branches = match usize_param(params, "maxBranches", "runNoveltyFrontierSearch") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
         };
         match session.run_novelty_frontier_search(max_actions, max_branches) {
-            Ok(output) => match serde_json::to_value(output.emitted_checkpoints()) {
-                Ok(emitted_checkpoints) => ok_response(
-                    id,
-                    json!({
-                        "emittedCheckpoints": emitted_checkpoints,
-                        "result": output.result(),
-                    }),
-                ),
-                Err(error) => error_response(id, &error.to_string()),
-            },
+            Ok(output) => emitted_ok(id, output.emitted_checkpoints(), output.result()),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
 
     fn run_counterfactual(&self, id: u64, params: &Value) -> RpcResponse {
         let Some(session) = &self.session else {
-            return error_response(id, "session-json process has no active session");
+            return no_session(id);
         };
-        let Some(max_continuation) = params
-            .get("maxContinuationDecisions")
-            .and_then(Value::as_u64)
-        else {
-            return error_response(id, "runCounterfactual requires maxContinuationDecisions");
-        };
-        let Ok(max_continuation) = usize::try_from(max_continuation) else {
-            return error_response(
-                id,
-                "runCounterfactual maxContinuationDecisions is out of range",
-            );
-        };
+        let max_continuation =
+            match usize_param(params, "maxContinuationDecisions", "runCounterfactual") {
+                Ok(value) => value,
+                Err(message) => return error_response(id, &message),
+            };
         match session.run_counterfactual(max_continuation) {
             Ok(report) => ok_response(id, json!({ "result": report.result() })),
             Err(error) => error_response(id, &error.to_string()),
@@ -521,19 +491,43 @@ fn observation_value(observation: &crate::game::SeatObservation) -> Value {
     })
 }
 
-fn string_list(params: &Value, key: &str) -> Result<Vec<String>, String> {
+fn no_session(id: u64) -> RpcResponse {
+    error_response(id, "session-json process has no active session")
+}
+
+fn usize_param(params: &Value, key: &str, method: &str) -> Result<usize, String> {
+    let Some(value) = params.get(key).and_then(Value::as_u64) else {
+        return Err(format!("{method} requires {key}"));
+    };
+    usize::try_from(value).map_err(|_| format!("{method} {key} is out of range"))
+}
+
+fn emitted_ok(id: u64, checkpoints: &[GameCheckpoint], result: &Value) -> RpcResponse {
+    match serde_json::to_value(checkpoints) {
+        Ok(emitted_checkpoints) => ok_response(
+            id,
+            json!({
+                "emittedCheckpoints": emitted_checkpoints,
+                "result": result,
+            }),
+        ),
+        Err(error) => error_response(id, &error.to_string()),
+    }
+}
+
+fn string_list(params: &Value, key: &str, method: &str) -> Result<Vec<String>, String> {
     let Some(value) = params.get(key) else {
-        return Err(format!("probeNovelty requires {key}"));
+        return Err(format!("{method} requires {key}"));
     };
     let Some(items) = value.as_array() else {
-        return Err(format!("probeNovelty {key} must be an array of strings"));
+        return Err(format!("{method} {key} must be an array of strings"));
     };
     items
         .iter()
         .map(|item| {
             item.as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| format!("probeNovelty {key} must be an array of strings"))
+                .ok_or_else(|| format!("{method} {key} must be an array of strings"))
         })
         .collect()
 }

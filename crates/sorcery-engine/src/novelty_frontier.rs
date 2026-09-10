@@ -535,10 +535,10 @@ mod tests {
     use super::{NOVELTY_FRONTIER_BRANCH_LIMIT, run_novelty_frontier_search};
     use crate::novelty_rollout::NOVELTY_ROLLOUT_ACTION_LIMIT;
     use crate::session::Session;
-    use crate::synthetic::synthetic_demo_manifest_json;
+    use crate::synthetic::synthetic_demo_session;
 
     fn opening_session() -> Session {
-        Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session")
+        synthetic_demo_session(31)
     }
 
     #[test]
