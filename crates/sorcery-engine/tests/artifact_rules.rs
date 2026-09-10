@@ -1012,6 +1012,10 @@ fn a_siege_ballista_should_not_fire_while_its_bearer_is_disabled() {
         .expect("manifest object")
         .remove("manifestId");
     value["cards"]["ballista-bearer"]["genesisDisableSelfUntilDamaged"] = json!(true);
+    value["cards"]["ballista-bearer"]
+        .as_object_mut()
+        .expect("bearer facts")
+        .remove("stealth");
     value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
     let manifest = canonical_json(&value).expect("canonical disabled-bearer Ballista scenario");
     let mut session = Session::new(&manifest).expect("valid disabled-bearer Ballista scenario");
