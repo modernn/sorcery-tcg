@@ -21827,13 +21827,10 @@ mod tests {
         .expect("valid start-turn Atlas mill manifest")
         .ensure_selfplay_supported()
         .expect("start-turn mill sites is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "deathriteDrawSpells",
-            json!(true),
-        )]))
-        .expect("valid Deathrite spell-draw manifest")
-        .ensure_selfplay_supported()
-        .expect("Deathrite spell draw is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteDrawSpells", json!(true))]))
+            .expect("valid Deathrite spell-draw manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell draw is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

@@ -121,7 +121,8 @@ fn state(session: &Session) -> Value {
 }
 
 fn after_north_ready_to_end(seed: u32, north_spellbook: &[&str]) -> Session {
-    let mut session = Session::new(&manifest(seed, north_spellbook)).expect("valid Deathrite session");
+    let mut session =
+        Session::new(&manifest(seed, north_spellbook)).expect("valid Deathrite session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -262,11 +263,9 @@ fn rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library() {
             .all(|event| event.event_type != "spell-drawn")
     );
     assert!(
-        receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "game-ended"
-                && event.payload["reason"] == "deck_empty")
+        receipt.events.iter().any(
+            |event| event.event_type == "game-ended" && event.payload["reason"] == "deck_empty"
+        )
     );
     let after = state(&session);
     assert_eq!(after["phase"], "terminal");
