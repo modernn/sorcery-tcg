@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/write-game-artifacts-0005`. Stack this on current `master` (`741f19b`). Do not grow already-merged landings.
+Live line: `cursor/seed-block-schedule-0005`. Stack this on current `master` (`eb5093e`). Do not grow already-merged landings.
 
-This branch writes SIM-03 artifact directories from demo (`[dir]`), record (`[dir]`), batch (`--out dir`), and batch-json (`artifactsDir`). Compact stdout is unchanged.
+This branch adds SIM-04 predeclared seed-block expansion (weight then block/global caps) and a seat-swapped synthetic schedule with abort or stop-after-pair-failure. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

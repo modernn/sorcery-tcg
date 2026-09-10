@@ -18,6 +18,7 @@ use sorcery_engine::deck::{
 };
 use sorcery_engine::game_record::{record_synthetic_demo, write_game_artifacts};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
+use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
 const SYNTHETIC_DECK_ID: &str =
@@ -41,6 +42,10 @@ enum Command {
         artifacts_dir: Option<String>,
     },
     BatchJson,
+    Schedule {
+        workers: usize,
+        seeds: Vec<u32>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -145,6 +150,17 @@ fn run() -> CliResult<()> {
             let input = read_batch_json_stdin()?;
             write_canonical_json(&run_batch_json(&input)?)
         }
+        Command::Schedule { workers, seeds } => write_canonical_json(&run_synthetic_schedule(
+            &[SeedBlock {
+                id: "cli",
+                seeds: &seeds,
+                weight: 1,
+                max_pairs: seeds.len(),
+            }],
+            seeds.len(),
+            workers,
+            FailurePolicy::Abort,
+        )?),
     }
 }
 
@@ -174,6 +190,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             })
         }
         Some("batch") => parse_batch_args(args),
+        Some("schedule") => parse_schedule_args(args),
         Some("batch-json") => {
             if args.next().is_some() {
                 return Err(io::Error::other("usage: sorcery-engine batch-json").into());
@@ -181,7 +198,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [workers] [seeds...] | batch-json",
         )
         .into()),
     }
@@ -293,6 +310,24 @@ fn parse_batch_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
         seeds,
         artifacts_dir,
     })
+}
+
+fn parse_schedule_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
+    let mut args = args;
+    let workers = args.next().map_or_else(
+        || Ok(default_batch_workers()),
+        |value| parse_workers(&value),
+    )?;
+    let mut seeds = args
+        .map(|value| parse_seed(&value))
+        .collect::<Result<Vec<_>, _>>()?;
+    if seeds.is_empty() {
+        seeds.push(1);
+    }
+    if seeds.len() > MAX_BATCH_JOBS / 2 {
+        return Err(io::Error::other("schedule must contain 1-128 seeds").into());
+    }
+    Ok(Command::Schedule { workers, seeds })
 }
 
 fn compact_report(record: &sorcery_engine::game_record::GameRecord) -> DeterministicGameReport {
@@ -455,6 +490,16 @@ mod tests {
         };
 
         assert_eq!((seed, artifacts_dir), (1, None));
+    }
+
+    #[test]
+    fn parse_args_should_default_schedule_seed() {
+        let command = parse_args(["schedule".to_owned()].into_iter()).expect("valid schedule");
+        let Command::Schedule { seeds, workers } = command else {
+            panic!("expected schedule command");
+        };
+
+        assert_eq!((seeds, (1..=8).contains(&workers)), (vec![1], true));
     }
 
     #[test]
