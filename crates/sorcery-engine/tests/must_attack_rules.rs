@@ -163,6 +163,10 @@ fn after_north_summons(seed: u32, south_cell: &str) -> Session {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one function proves the mandatory attack, Attack-phase filter, and replay"
+)]
 fn rule_catalog_0243_must_attack_a_unit_if_able_before_optional_actions() {
     let mut session = after_north_summons(243, "C4");
     assert_eq!(state(&session)["phase"], "main");
