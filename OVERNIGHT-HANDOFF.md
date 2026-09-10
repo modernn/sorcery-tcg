@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/land-powered-movement-on-master-0005`. Replays PR #6 onto current `master` (Belfry + Monument already landed via #5). Do not add catalog slices.
+Live line: `cursor/land-policy-select-on-master-0005`. Replays PR #7 onto the powered-movement landing (PR #8). Do not add catalog slices.
 
-PRs #4–#7 merged on the stack. #6 and #7 still need land-on-master follow-ups. Merge this onto `master` first, then land policy-select.
+PRs #4–#7 merged on the stack. Merge the land-on-master follow-ups onto `master` (#8 then this).
 
 `cursor/phase3-drown-bury-artifacts-36d3` was identical to `master` with PR #1 closed. It is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`).
 
@@ -15,6 +15,7 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 Latest catalog proofs: official Monument carry prohibition (`RULE-CATALOG-0314`–`0315`). A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
 Belfry nearby untap remains `RULE-CATALOG-0312`–`0313`.
 Deterministic `powered-movement` now uses public temporary-power identities on the seat observation. It does not add a new catalog family.
+Production callers now ask `session-json` `selectPolicyAction` for the shared baseline policy. The TypeScript `selectDeterministicGameAction` selector is deleted.
 Atlantean Fate remains `RULE-CATALOG-0310`–`0311`.
 Start Phase doesn't-untap remains `RULE-CATALOG-0308`–`0309`.
 End-of-controller-turn Avatar life remains `RULE-CATALOG-0304`–`0307`.
@@ -64,10 +65,11 @@ Done — do not redo:
 - Async `RustGameSessionHandle` snapshots bind their checkpoints so `SetupCtx.observe` / `observeGame` resume on the shared worker.
 - Private-check Chain Lightning extra-target mana uses a real 3-mana sibling (draw Atlas, do not play the fourth site). No constructed `GameSession` spreads remain.
 
-Still TypeScript (not a second legality or observation engine):
+Still TypeScript (not a second legality, observation, or agent engine):
 
 - Manifest validation, authority ingestion, server, and browser UI.
 - `run-private-game-check.ts` still *calls* the sync wrappers; it cannot be executed in this cloud checkout (no `.local/authority/`).
+- Production agents call `selectPolicyAction` on the live Rust session.
 
 ## Gate status on this branch
 
@@ -79,7 +81,7 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Next exact step
 
-1. Merge this land-on-master PR, then replay PR #7 (`selectPolicyAction`) onto that head. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Monument cannot-be-carried is bound — do not invent MTG keywords.
+1. Merge PR #8 then this landing onto `master`. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Monument cannot-be-carried is bound — do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 

@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
-import {
-  createSyntheticDemoManifest,
-  selectDeterministicGameAction,
-} from '../../src/commands/run-game-demo.ts';
+import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { type GameCheckpoint } from '../../src/engine/checkpoint.ts';
 import { hashGameState } from '../../src/engine/game.ts';
 import { runNoveltyRollout } from '../../src/simulator/novelty-rollout.ts';
@@ -73,8 +70,7 @@ test('coverage-guided rollout reports committed novelty and a resumable horizon 
     );
 
     for (let count = 0; count < 500 && ctx.state.terminal.status === 'active'; count += 1) {
-      const issued = await ctx.legalActions();
-      await ctx.accept(selectDeterministicGameAction(ctx.session, issued));
+      await ctx.accept(await ctx.selectPolicyAction());
     }
     assert.equal(ctx.state.terminal.status, 'finished');
     let terminalCheckpointCount = 0;

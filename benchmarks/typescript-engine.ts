@@ -4,10 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
 import { canonicalJson, type JsonValue } from '../src/authority/canonical-json.ts';
-import {
-  createSyntheticDemoManifest,
-  selectDeterministicGameAction,
-} from '../src/commands/run-game-demo.ts';
+import { createSyntheticDemoManifest } from '../src/commands/run-game-demo.ts';
 import {
   type GameSession,
 } from '../src/engine/game.ts';
@@ -85,10 +82,7 @@ async function runGame(
   return withRustSession(createSyntheticDemoManifest(seed), async (handle) => {
     while (handle.snapshot.state.terminal.status === 'active'
       && handle.snapshot.transcript.length < MAX_ACTIONS) {
-      const action = selectDeterministicGameAction(
-        handle.snapshot,
-        await handle.legalActions(),
-      );
+      const action = await handle.selectPolicyAction();
       const started = performance.now();
       const result = await handle.stepAction(action);
       const durationMs = performance.now() - started;

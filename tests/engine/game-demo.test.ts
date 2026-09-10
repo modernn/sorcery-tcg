@@ -6,7 +6,6 @@ import test from 'node:test';
 import {
   createSyntheticDemoManifest,
   runGameDemo,
-  selectDeterministicGameAction,
 } from '../../src/commands/run-game-demo.ts';
 import { SetupCtx } from './rust-setup-session.ts';
 
@@ -31,7 +30,7 @@ test('deterministic agents attack the opposing Avatar without walking away', asy
           || descriptor.kind === 'summon-minion'
           || (descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
       if (attack && !buildsFirst) {
-        const selected = selectDeterministicGameAction(session, actions).descriptor;
+        const selected = (await ctx.selectPolicyAction()).descriptor;
         assert.equal(selected.kind, 'move-and-attack');
         if (selected.kind !== 'move-and-attack') return;
         assert.equal(selected.path.length, 1);
@@ -39,7 +38,7 @@ test('deterministic agents attack the opposing Avatar without walking away', asy
         assert.equal(selected.to.region, 'surface');
         return;
       }
-      const result = await ctx.step(selectDeterministicGameAction(session, actions));
+      const result = await ctx.step(await ctx.selectPolicyAction());
       assert.equal(result.accepted, true);
       if (!result.accepted) return;
     }
