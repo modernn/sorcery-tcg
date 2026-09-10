@@ -562,6 +562,7 @@ struct MagicChoice {
     ally_destination_cells: Option<SquareArea>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
+    discard_card_instance_id: Option<IdentityHash>,
     discard_site_instance_id: Option<IdentityHash>,
     draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
@@ -3083,7 +3084,11 @@ impl Game {
                     }
                     continue;
                 }
-                for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
+                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                if facts.discard_card_as_additional_cost {
+                    choices = self.with_chosen_hand_discard(seat, &card.instance_id, choices);
+                }
+                for choice in choices {
                     let descriptor = ActionDescriptor::CastMagic {
                         ally: choice.ally,
                         ally_destination: choice.ally_destination,
@@ -3093,6 +3098,7 @@ impl Game {
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
                         cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
+                        discard_card_instance_id: choice.discard_card_instance_id,
                         discard_site_instance_id: choice.discard_site_instance_id,
                         draw_zone: choice.draw_zone,
                         target: choice.target,
@@ -5068,6 +5074,82 @@ impl Game {
                 })
             })
             .collect())
+    }
+
+    fn with_chosen_hand_discard(
+        &self,
+        seat: Seat,
+        spell_instance_id: &IdentityHash,
+        choices: Vec<MagicChoice>,
+    ) -> Vec<MagicChoice> {
+        if choices.is_empty() {
+            return Vec::new();
+        }
+        let player = &self.position.players[seat_index(seat)];
+        let mut discard_ids: Vec<_> = player
+            .hand_atlas
+            .iter()
+            .chain(&player.hand_spellbook)
+            .filter(|card| card.instance_id != *spell_instance_id)
+            .map(|card| card.instance_id.clone())
+            .collect();
+        discard_ids.sort_unstable();
+        if discard_ids.is_empty() {
+            return Vec::new();
+        }
+        let mut paid = Vec::with_capacity(choices.len() * discard_ids.len());
+        for choice in choices {
+            for discard_id in &discard_ids {
+                paid.push(MagicChoice {
+                    discard_card_instance_id: Some(discard_id.clone()),
+                    ..choice.clone()
+                });
+            }
+        }
+        paid
+    }
+
+    fn pay_chosen_hand_discard(
+        &mut self,
+        seat: Seat,
+        selected_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player = &mut self.position.players[seat_index(seat)];
+        let (zone, index) = if let Some(index) = player
+            .hand_atlas
+            .iter()
+            .position(|card| card.instance_id == *selected_id)
+        {
+            (DeckZone::Atlas, index)
+        } else if let Some(index) = player
+            .hand_spellbook
+            .iter()
+            .position(|card| card.instance_id == *selected_id)
+        {
+            (DeckZone::Spellbook, index)
+        } else {
+            return Err(GameError::IllegalAction);
+        };
+        let discarded = match zone {
+            DeckZone::Atlas => player.hand_atlas.remove(index),
+            DeckZone::Spellbook => player.hand_spellbook.remove(index),
+        };
+        outcomes.push("card-discarded", || {
+            json!({
+                "cardId": self.rules.cards[usize::from(discarded.card_id.0)].id,
+                "instanceId": discarded.instance_id,
+                "owner": discarded.owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "zone": zone.as_str(),
+            })
+        });
+        self.position.players[seat_index(seat)]
+            .cemetery
+            .push(discarded);
+        Ok(())
     }
 
     fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
@@ -14702,6 +14784,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            discard_card_instance_id,
             discard_site_instance_id,
             draw_zone,
             target,
@@ -14737,14 +14820,18 @@ impl Game {
         };
         if facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
-            || !self
-                .magic_choices(seat, caster_instance_id, &facts.effect)?
-                .contains(&MagicChoice {
+            || !{
+                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                if facts.discard_card_as_additional_cost {
+                    choices = self.with_chosen_hand_discard(seat, card_instance_id, choices);
+                }
+                choices.contains(&MagicChoice {
                     ally: ally.clone(),
                     ally_destination: *ally_destination,
                     ally_destination_cells: *ally_destination_cells,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    discard_card_instance_id: discard_card_instance_id.clone(),
                     discard_site_instance_id: discard_site_instance_id.clone(),
                     draw_zone: *draw_zone,
                     target: target.clone(),
@@ -14754,6 +14841,7 @@ impl Game {
                     tempted_destination: *tempted_destination,
                     tempted_enemy: tempted_enemy.clone(),
                 })
+            }
         {
             return Err(GameError::IllegalAction);
         }
@@ -14889,9 +14977,23 @@ impl Game {
             });
             self.position.players[player_index].cemetery.push(discarded);
         }
-        let card = self.position.players[player_index]
-            .hand_spellbook
-            .remove(hand_index);
+        if let Some(discard_card_instance_id) = discard_card_instance_id {
+            self.pay_chosen_hand_discard(
+                seat,
+                discard_card_instance_id,
+                card_instance_id,
+                outcomes,
+            )?;
+        }
+        let card = {
+            let player = &mut self.position.players[player_index];
+            let hand_index = player
+                .hand_spellbook
+                .iter()
+                .position(|card| card.instance_id == *card_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            player.hand_spellbook.remove(hand_index)
+        };
         let compact_card_id = card.card_id;
         let owner = card.owner;
         let player = &mut self.position.players[player_index];
@@ -14908,6 +15010,9 @@ impl Game {
             });
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
+            }
+            if let Some(discard_card_instance_id) = discard_card_instance_id {
+                payload["discardCardInstanceId"] = json!(discard_card_instance_id);
             }
             if let Some(discard_site_instance_id) = discard_site_instance_id {
                 payload["discardSiteInstanceId"] = json!(discard_site_instance_id);

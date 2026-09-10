@@ -265,6 +265,17 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         json!(true),
     );
     assert!(parse_card_definition("damage-grid", &grid).is_ok());
+    assert!(
+        parse_card_definition(
+            "chosen-discard-cost",
+            &with(
+                spell("magic", ("drawSites", json!(1))),
+                "discardCardAsAdditionalCost",
+                json!(true),
+            ),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -471,6 +482,43 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(true),
             ),
             "defined together",
+        ),
+        (
+            "chosen discard without an effect",
+            spell("magic", ("discardCardAsAdditionalCost", json!(true))),
+            "exactly one supported effect",
+        ),
+        (
+            "chosen discard is not a boolean false",
+            with(
+                spell("magic", ("drawSites", json!(1))),
+                "discardCardAsAdditionalCost",
+                json!(false),
+            ),
+            "must be true when defined",
+        ),
+        (
+            "competing additional discard costs",
+            with(
+                with(
+                    with(
+                        spell(
+                            "magic",
+                            (
+                                "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+                                json!([1, 2, 3, 4, 5]),
+                            ),
+                        ),
+                        "discardSiteAsAdditionalCost",
+                        json!(true),
+                    ),
+                    "destroyTargetSite",
+                    json!(true),
+                ),
+                "discardCardAsAdditionalCost",
+                json!(true),
+            ),
+            "competing additional discard costs",
         ),
         (
             "bad damage grid value",

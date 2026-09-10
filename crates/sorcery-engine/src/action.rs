@@ -408,6 +408,9 @@ pub enum ActionDescriptor {
         /// Exact own cemetery card selected by Rescue or cemetery Magic/Artifact/Site return.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
+        /// Exact hand card discarded as an additional player-chosen cost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        discard_card_instance_id: Option<IdentityHash>,
         /// Exact Atlas card in hand discarded as an additional cost.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         discard_site_instance_id: Option<IdentityHash>,
@@ -673,6 +676,7 @@ impl ActionDescriptor {
                 ally_strike_location,
                 card_id,
                 cemetery_minion_instance_id,
+                discard_card_instance_id,
                 discard_site_instance_id,
                 draw_zone,
                 target,
@@ -681,8 +685,8 @@ impl ActionDescriptor {
                 tempted_destination,
                 tempted_enemy,
                 ..
-            } => Some(
-                if let (Some(discarded), Some(location)) =
+            } => {
+                let mut label = if let (Some(discarded), Some(location)) =
                     (discard_site_instance_id, target_location)
                 {
                     format!(
@@ -764,8 +768,12 @@ impl ActionDescriptor {
                     )
                 } else {
                     format!("Cast {card_id}")
-                },
-            ),
+                };
+                if let Some(instance_id) = discard_card_instance_id {
+                    label = format!("{label}; discard card {}…", short_identity(instance_id));
+                }
+                Some(label)
+            }
             Self::CastArtifact {
                 bearer,
                 card_id,
@@ -1196,6 +1204,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
+                    discard_card_instance_id: left_discard_card,
                     discard_site_instance_id: left_discard,
                     draw_zone: left_draw_zone,
                     target: left_target,
@@ -1214,6 +1223,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
+                    discard_card_instance_id: right_discard_card,
                     discard_site_instance_id: right_discard,
                     draw_zone: right_draw_zone,
                     target: right_target,
@@ -1234,6 +1244,12 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| {
                     compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
+                })
+                .then_with(|| {
+                    compare_optional_identities(
+                        left_discard_card.as_ref(),
+                        right_discard_card.as_ref(),
+                    )
                 })
                 .then_with(|| {
                     compare_optional_identities(left_discard.as_ref(), right_discard.as_ref())

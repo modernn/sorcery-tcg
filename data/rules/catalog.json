@@ -4992,6 +4992,58 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0234_cemetery_site_return_is_a_paid_noop_without_cemetery_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0235",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "A player-chosen additional discard cost is a Storyline choice among every other hand card. It cannot select the spell being cast, pays into the owner's cemetery before the cast is announced, and then the companion effect resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0235_chosen_discard_cost_discards_another_spell_then_resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0236",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "The same additional discard cost may take an Atlas card instead of a spell. Every issued cast includes the chosen identity; there is no no-choice cast while another hand card remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card"
+      }
     }
   ]
 }

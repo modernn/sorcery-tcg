@@ -176,6 +176,7 @@ export type GameCardDefinition =
     damageEachUnitAtLocationWithinTwoSteps?: number;
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
+    discardCardAsAdditionalCost?: true;
     discardSiteAsAdditionalCost?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
     drawSites?: number;
@@ -827,6 +828,7 @@ type GameActionDescriptor =
     cardInstanceId: string;
     casterInstanceId: StateHash;
     cemeteryMinionInstanceId?: StateHash;
+    discardCardInstanceId?: StateHash;
     discardSiteInstanceId?: StateHash;
     drawZone?: DeckZone;
     kind: 'cast-magic';
@@ -1021,7 +1023,8 @@ const SUPPORTED_CARD_FIELDS = {
     burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType
     damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
     damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
-    damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
+    damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
+    discardSiteAsAdditionalCost
     destroyTargetArtifact destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
@@ -1482,9 +1485,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.damageChainNearbyUnits !== undefined && card.damageChainNearbyUnits !== true) {
       throw new RangeError(`${path}.damageChainNearbyUnits must be true when defined`);
     }
+    if (card.discardCardAsAdditionalCost !== undefined
+      && card.discardCardAsAdditionalCost !== true) {
+      throw new RangeError(`${path}.discardCardAsAdditionalCost must be true when defined`);
+    }
     if (card.discardSiteAsAdditionalCost !== undefined
       && card.discardSiteAsAdditionalCost !== true) {
       throw new RangeError(`${path}.discardSiteAsAdditionalCost must be true when defined`);
+    }
+    if (card.discardCardAsAdditionalCost === true && card.discardSiteAsAdditionalCost === true) {
+      throw new RangeError(`${path} competing additional discard costs are unsupported`);
     }
     if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
       throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
@@ -2318,6 +2328,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               thresholds: { ...card.thresholds },
               ...(card.untapTargetMinionAfterDamage === true
                 ? { untapTargetMinionAfterDamage: true as const }
+                : {}),
+              ...(card.discardCardAsAdditionalCost === true
+                ? { discardCardAsAdditionalCost: true as const }
                 : {}),
             }
           : {

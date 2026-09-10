@@ -790,6 +790,54 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /returnTargetSiteFromOwnCemetery/);
+  const chosenDiscardManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        discardCardAsAdditionalCost: true,
+        drawSites: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(chosenDiscardManifest.cards[firstSpell], {
+    cardType: 'magic',
+    discardCardAsAdditionalCost: true,
+    drawSites: 1,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        discardCardAsAdditionalCost: false,
+        drawSites: 1,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /discardCardAsAdditionalCost/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        discardCardAsAdditionalCost: true,
+        discardSiteAsAdditionalCost: true,
+        destroyTargetSite: true,
+        damageUnitsAboveAndBelowTargetSiteByManhattanDistance: [1, 2, 3, 4, 5],
+        manaCost: 1,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /competing additional discard costs/);
   const freezeManifest = createGameManifest({
     ...input,
     cards: {
@@ -22086,6 +22134,147 @@ test('RULE-03 cemetery Site return restores own cemetery Site to hidden Atlas or
     ]);
     assert.equal(ctx.state.players.north.cemetery.length, 1);
     assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 chosen discard cost pays another hand card then resolves the companion effect', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'cost-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cost-north-site': { cardType: 'site', elements: ['earth'] },
+    'cost-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cost-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'cost-south-site': { cardType: 'site', elements: ['earth'] },
+    'cost-fodder': {
+      cardType: 'magic',
+      healController: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'cost-spell': {
+      cardType: 'magic',
+      discardCardAsAdditionalCost: true,
+      drawSites: 1,
+      manaCost: 0,
+      thresholds,
+    },
+  };
+  const input = (seed: number) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-chosen-discard-cost-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('cost-north-site'),
+        avatar: 'cost-north-avatar',
+        spellbook: ['cost-spell', 'cost-fodder', 'cost-fodder'],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('cost-south-site'),
+        avatar: 'cost-south-avatar',
+        spellbook: Array(6).fill('cost-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const successManifest = createGameManifest(input(235));
+  assert.equal(successManifest.cards['cost-spell']?.cardType === 'magic'
+    && successManifest.cards['cost-spell'].discardCardAsAdditionalCost, true);
+
+  await withSetup(successManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const costId = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === 'cost-spell')?.instanceId;
+    const fodderId = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      cardId === 'cost-fodder')?.instanceId;
+    assert.ok(costId);
+    assert.ok(fodderId);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'cost-spell'
+        && descriptor.discardCardInstanceId
+        ? [descriptor.discardCardInstanceId]
+        : []);
+    assert.equal(targets.length > 0, true);
+    assert.equal(targets.includes(costId), false);
+    assert.equal(targets.includes(fodderId), true);
+    const atlasBefore = ctx.state.players.north.hand.atlas.length;
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'cost-spell'
+        && descriptor.discardCardInstanceId === fodderId);
+    const paid = await ctx.step(cast);
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), [
+      'card-discarded',
+      'magic-cast',
+      'site-drawn',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(paid.receipt.events[0]?.payload, {
+      cardId: 'cost-fodder',
+      instanceId: fodderId,
+      owner: 'north',
+      seat: 'north',
+      sourceInstanceId: costId,
+      zone: 'spellbook',
+    });
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === fodderId), true);
+    assert.equal(ctx.state.players.north.hand.atlas.length, atlasBefore + 1);
+    assert.equal(ctx.observe('south').players.north.hand.atlas, atlasBefore + 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(236)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const siteId = ctx.state.players.north.hand.atlas[0]?.instanceId;
+    assert.ok(siteId);
+    const atlasBefore = ctx.state.players.north.hand.atlas.length;
+    const paid = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'cost-spell'
+        && descriptor.discardCardInstanceId === siteId));
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), [
+      'card-discarded',
+      'magic-cast',
+      'site-drawn',
+      'magic-resolved',
+    ]);
+    assert.equal((paid.receipt.events[0]?.payload as { zone?: string }).zone, 'atlas');
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === siteId), true);
+    assert.equal(ctx.state.players.north.hand.atlas.length, atlasBefore);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

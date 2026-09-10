@@ -10315,3 +10315,247 @@ fn rule_catalog_0234_cemetery_site_return_is_a_paid_noop_without_cemetery_site()
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
+
+fn discard_cost_cards() -> Value {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-fodder": magic(("healController", json!(1)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    cards["north-cost"] = {
+        let mut cost = magic(("drawSites", json!(1)), 0);
+        cost.as_object_mut()
+            .expect("chosen-discard Magic")
+            .insert("discardCardAsAdditionalCost".to_owned(), json!(true));
+        cost
+    };
+    cards
+}
+
+fn discard_cost_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("chosen-discard actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-cost"
+        })
+        .filter_map(|action| {
+            action.descriptor["discardCardInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn discard_cost_session(seed: u32) -> Session {
+    opening_main(&manifest(
+        seed,
+        &discard_cost_cards(),
+        &["north-cost", "north-fodder", "north-fodder"],
+        &["south-minion"; 6],
+    ))
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed-zone filtering, cost payment, draw, and replay together"
+)]
+fn rule_catalog_0235_chosen_discard_cost_discards_another_spell_then_resolves() {
+    let mut session = discard_cost_session(235);
+    let before = state(&session);
+    let cost_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-cost")
+        .expect("cost Magic")["instanceId"]
+        .as_str()
+        .expect("cost identity")
+        .to_owned();
+    let fodder_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-fodder")
+        .expect("fodder Magic")["instanceId"]
+        .as_str()
+        .expect("fodder identity")
+        .to_owned();
+    let atlas_ids: Vec<_> = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("atlas identity")
+                .to_owned()
+        })
+        .collect();
+    let drawn_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas library")
+        .first()
+        .expect("next site")["instanceId"]
+        .clone();
+    let discard_ids = discard_cost_ids(&session);
+    assert!(!discard_ids.is_empty());
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(discard_ids.iter().any(|id| id == &fodder_id));
+    assert!(atlas_ids.iter().all(|id| discard_ids.contains(id)));
+    let south_observation = session.observe(Seat::South);
+    let atlas_before = atlas_ids.len();
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cost"
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["cardId"], "north-fodder");
+    assert_eq!(receipt.events[0].payload["instanceId"], fodder_id);
+    assert_eq!(receipt.events[0].payload["owner"], "north");
+    assert_eq!(receipt.events[0].payload["seat"], "north");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], cost_id);
+    assert_eq!(receipt.events[0].payload["zone"], "spellbook");
+    assert_eq!(descriptor["discardCardInstanceId"], fodder_id);
+    assert_eq!(
+        receipt.events[1].payload["discardCardInstanceId"],
+        fodder_id
+    );
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], cost_id);
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == fodder_id)
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .iter()
+            .all(|card| card["instanceId"] != fodder_id && card["instanceId"] != cost_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(
+        south_view["players"]["north"]["hand"]["atlas"],
+        atlas_before + 1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("chosen-discard checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized chosen-discard");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed chosen-discard");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed chosen-discard session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card() {
+    let mut session = discard_cost_session(236);
+    let before = state(&session);
+    let cost_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-cost")
+        .expect("cost Magic")["instanceId"]
+        .as_str()
+        .expect("cost identity")
+        .to_owned();
+    let site_id = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("Atlas card")["instanceId"]
+        .as_str()
+        .expect("site identity")
+        .to_owned();
+    let discard_ids = discard_cost_ids(&session);
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(discard_ids.iter().any(|id| id == &site_id));
+    assert!(
+        session
+            .legal_actions()
+            .expect("chosen-discard actions")
+            .into_iter()
+            .filter(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "north-cost"
+            })
+            .all(|action| action.descriptor.get("discardCardInstanceId").is_some())
+    );
+    let atlas_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cost"
+            && descriptor["discardCardInstanceId"] == site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["cardId"], "north-site");
+    assert_eq!(receipt.events[0].payload["instanceId"], site_id);
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == site_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}

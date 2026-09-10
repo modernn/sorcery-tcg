@@ -234,6 +234,7 @@ pub enum MagicEffect {
 /// Magic facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MagicFacts {
+    pub discard_card_as_additional_cost: bool,
     pub effect: MagicEffect,
     pub mana_cost: u64,
     pub thresholds: Thresholds,
@@ -708,6 +709,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "destroyTargetArtifact",
     "destroyTargetSite",
     "disableTargetNearbyMinionUntilNextTurn",
+    "discardCardAsAdditionalCost",
     "drawSites",
     "drawSpells",
     "discardSiteAsAdditionalCost",
@@ -1170,6 +1172,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         ));
     }
 
+    let discard_card = true_only(object, "discardCardAsAdditionalCost", path)?;
     let discard_site = true_only(object, "discardSiteAsAdditionalCost", path)?;
     let destroy_site = true_only(object, "destroyTargetSite", path)?;
     let damage_grid = parse_damage_grid(object, path)?;
@@ -1178,6 +1181,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         return Err(FactError::new(
             path,
             "site-destruction grid damage facts must be defined together",
+        ));
+    }
+    if discard_card && discard_site {
+        return Err(FactError::new(
+            path,
+            "competing additional discard costs are unsupported",
         ));
     }
 
@@ -1284,6 +1293,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         path,
     )?;
     Ok(MagicFacts {
+        discard_card_as_additional_cost: discard_card,
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
         thresholds: parse_thresholds(object, path)?,
