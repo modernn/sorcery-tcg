@@ -181,7 +181,8 @@ fn aura_magic_targets(session: &Session) -> Vec<String> {
                 })
         })
         .collect();
-    targets.sort();
+    targets.sort_unstable();
+    targets.dedup();
     targets
 }
 
