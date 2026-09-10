@@ -319,9 +319,15 @@ fn belfry_untaps_the_nearby_avatar_without_a_minion() {
             && descriptor["cardId"] == "belfry-north-artifact"
             && descriptor["cell"] == "C4"
     });
-    assert_eq!(state(&session)["players"]["north"]["avatar"]["tapped"], true);
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["tapped"],
+        true
+    );
     let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    assert_eq!(state(&session)["players"]["north"]["avatar"]["tapped"], false);
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["tapped"],
+        false
+    );
     assert!(
         receipt
             .events
