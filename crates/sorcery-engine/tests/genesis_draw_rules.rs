@@ -1497,7 +1497,7 @@ fn geomancer_cards(seed: u32, north_atlas: &[&str], site_facts: &Value) -> Value
     let mut geomancer = avatar(false, 20);
     geomancer["earthSitePlayCreatesAdjacentRubble"] = json!(true);
     geomancer["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
-    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 6, 4);
+    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 8, 4);
     let cards = value["cards"].as_object_mut().expect("card definitions");
     cards.remove("north-site");
     cards.remove("south-site");
@@ -1852,7 +1852,7 @@ fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site()
 
 #[test]
 fn rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws() {
-    let atlas = ["leyline-1", "leyline-2", "leyline-3", "leyline-4"];
+    let atlas = ["leyline", "leyline", "leyline", "leyline"];
     let manifest = geomancer_manifest(
         180,
         &atlas,

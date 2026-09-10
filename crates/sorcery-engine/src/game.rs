@@ -10760,10 +10760,6 @@ impl Game {
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "site placement keeps ordered Genesis effects in one authoritative transition"
-    )]
     fn site_genesis_gain_and_draws(
         &self,
         seat: Seat,
@@ -10795,6 +10791,10 @@ impl Game {
         (genesis_gain_mana, genesis_spell_draw_count)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "site placement keeps ordered Genesis effects in one authoritative transition"
+    )]
     fn apply_play_site_action(
         &mut self,
         action: &IssuedAction,
