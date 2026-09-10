@@ -5055,7 +5055,6 @@ impl Game {
 
     fn return_own_cemetery_card_to_spellbook(
         &mut self,
-        player_index: usize,
         seat: Seat,
         selected_id: &IdentityHash,
         source_instance_id: &IdentityHash,
@@ -5063,7 +5062,7 @@ impl Game {
         event_type: &'static str,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let player = &mut self.position.players[player_index];
+        let player = &mut self.position.players[seat_index(seat)];
         let selected_index = player
             .cemetery
             .iter()
@@ -15022,7 +15021,6 @@ impl Game {
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
                     self.return_own_cemetery_card_to_spellbook(
-                        player_index,
                         seat,
                         selected_id,
                         card_instance_id,
@@ -15035,7 +15033,6 @@ impl Game {
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
                     self.return_own_cemetery_card_to_spellbook(
-                        player_index,
                         seat,
                         selected_id,
                         card_instance_id,
