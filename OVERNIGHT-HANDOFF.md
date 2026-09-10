@@ -31,7 +31,7 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + `tests/ingestion` — 221 pass, 0 fail.
+- `tests/engine` + `tests/ingestion` — 222 pass, 0 fail.
 - Full `pnpm test` in this checkout: 31 authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step

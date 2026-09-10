@@ -1784,7 +1784,8 @@ impl Game {
                     cell: unit.location,
                     region: unit.region,
                 };
-                let immobile = facts.immobile
+                let disabled = self.minion_is_disabled(unit);
+                let immobile = (!disabled && facts.immobile)
                     || self.footprint_is_immobilized(
                         unit.occupied_cells,
                         unit.location,
@@ -1798,7 +1799,7 @@ impl Game {
                     "controller": unit.controller,
                     "damage": unit.damage,
                     "defense": defense,
-                    "disabled": self.minion_is_disabled(unit),
+                    "disabled": disabled,
                     "immobile": immobile,
                     "instanceId": unit.card.instance_id,
                     "location": unit.location,
