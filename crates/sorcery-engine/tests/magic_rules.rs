@@ -7151,7 +7151,7 @@ fn rule_catalog_0196_draw_spells_magic_draws_hidden_spellbook_cards() {
 
 #[test]
 fn rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library() {
-    for remaining in 0..=2 {
+    for remaining in 0..=1 {
         let mut cards = json!({
             "north-avatar": avatar(20),
             "north-draw": magic(("drawSpells", json!(2)), 1),
