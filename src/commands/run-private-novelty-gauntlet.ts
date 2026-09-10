@@ -8,7 +8,7 @@ import {
   serializeGameCheckpoint,
   type GameCheckpoint,
 } from '../engine/checkpoint.ts';
-import { deepFreeze } from '../engine/contract.ts';
+import { deepFreeze, type StateHash } from '../engine/contract.ts';
 import {
   createGameManifest,
   type GameManifest,
@@ -67,7 +67,7 @@ export type PrivateNoveltyGauntletReport = Readonly<{
     parentBranchId: string | null;
     parentJobId: string;
     predictedEventTypes: readonly string[];
-    predictedStateHash: string;
+    predictedStateHash: StateHash;
     signals: readonly NoveltyFrontierCandidate['signal'][];
   }>[];
   jobs: readonly Readonly<{
@@ -106,7 +106,7 @@ type FrontierSeed = Readonly<{
   parentBranchId: string | null;
   parentJobId: string;
   predictedEventTypes: readonly string[];
-  predictedStateHash: string;
+  predictedStateHash: StateHash;
   signals: NoveltyFrontierCandidate['signal'][];
 }>;
 
