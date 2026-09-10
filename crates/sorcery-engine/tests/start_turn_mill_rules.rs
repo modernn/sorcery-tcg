@@ -129,8 +129,8 @@ fn after_north_second_start(
     north_atlas: &[&str],
     north_spellbook: &[&str],
 ) -> Session {
-    let mut session =
-        Session::new(&manifest(seed, mill, north_atlas, north_spellbook)).expect("valid mill session");
+    let mut session = Session::new(&manifest(seed, mill, north_atlas, north_spellbook))
+        .expect("valid mill session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
