@@ -211,6 +211,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("gainControlOfTargetNearbyMinion", json!(true)),
         ("grantChargeToAllyThisTurn", json!(true)),
         ("grantPowerToAllyThisTurn", json!(2)),
+        ("grantWardToTargetMinion", json!(true)),
         ("healController", json!(2)),
         ("drawSites", json!(2)),
         ("drawSpells", json!(2)),

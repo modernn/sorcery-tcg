@@ -199,6 +199,7 @@ export type GameCardDefinition =
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyTargetArtifact?: true;
     destroyTargetSite?: true;
+    grantWardToTargetMinion?: true;
     tapTargetMinion?: true;
     targetNearby?: boolean;
     targetPlayerGainsLife?: number;
@@ -1017,7 +1018,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
     destroyTargetArtifact destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
-    grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
+    grantPowerToAllyThisTurn grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
@@ -1437,6 +1438,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
     }
+    if (card.grantWardToTargetMinion !== undefined && card.grantWardToTargetMinion !== true) {
+      throw new RangeError(`${path}.grantWardToTargetMinion must be true when defined`);
+    }
     if (card.tapTargetMinion !== undefined && card.tapTargetMinion !== true) {
       throw new RangeError(`${path}.tapTargetMinion must be true when defined`);
     }
@@ -1502,6 +1506,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.gainControlOfTargetNearbyMinion === true)
       + Number(card.grantChargeToAllyThisTurn === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
+      + Number(card.grantWardToTargetMinion === true)
       + Number(card.healController !== undefined)
       + Number(card.drawSites !== undefined)
       + Number(card.drawSpells !== undefined)
@@ -2247,6 +2252,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { targetPlayerGainsLife: card.targetPlayerGainsLife }
                         : card.targetPlayerLosesLife !== undefined
                           ? { targetPlayerLosesLife: card.targetPlayerLosesLife }
+                        : card.grantWardToTargetMinion === true
+                          ? { grantWardToTargetMinion: true as const }
                         : card.tapTargetMinion === true
                           ? { tapTargetMinion: true as const }
                         : card.untapTargetMinion === true

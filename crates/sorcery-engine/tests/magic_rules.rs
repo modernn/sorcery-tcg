@@ -9173,3 +9173,145 @@ fn rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward() {
     assert_eq!(charger["warded"], false);
     assert_exact_replay(&session);
 }
+
+fn grant_ward_manifest(seed: u32, printed_ward: bool) -> String {
+    let mut charger = json!({ "charge": true });
+    if printed_ward {
+        charger["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-ward": magic(("grantWardToTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(charger),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-ward"; 6], &["south-charger"; 6])
+}
+
+fn grant_ward_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("grant-Ward actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-ward"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0221_grant_ward_marks_an_unwarded_minion() {
+    let encoded = grant_ward_manifest(221, false);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("unwarded charger");
+    assert_eq!(charger["warded"], false);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        grant_ward_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !grant_ward_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-ward"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-warded", "magic-resolved"]
+    );
+    let granted = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-warded")
+        .expect("Ward grant");
+    assert_eq!(granted.payload["instanceId"], charger_id);
+    assert_eq!(granted.payload["seat"], "south");
+    assert_eq!(
+        granted.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("warded charger");
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("grant-Ward checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized grant-Ward");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed grant-Ward");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed grant-Ward session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0222_grant_ward_is_a_paid_noop_when_already_warded() {
+    let encoded = grant_ward_manifest(222, true);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("printed-Ward charger");
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        grant_ward_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-ward"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-warded" || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-warded charger");
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+}

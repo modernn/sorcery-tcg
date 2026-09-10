@@ -1232,6 +1232,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        grantWardToTargetMinion: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantWardToTargetMinion must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 2,
+        grantWardToTargetMinion: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const grantWard = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantWardToTargetMinion: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(grantWard.cards[firstSpell]?.cardType === 'magic'
+    && grantWard.cards[firstSpell].grantWardToTargetMinion, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         discardSiteAsAdditionalCost: true,
         manaCost: 1,
@@ -20931,6 +20970,148 @@ test('RULE-03 tap Magic exhausts a ready minion and is absorbed by enemy Ward', 
     const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
     assert.equal(after?.tapped, false);
     assert.equal(after?.warded, false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 grant-Ward Magic marks an unwarded minion and is a paid no-op when already warded', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards = (printedWard: boolean): Record<string, GameCardDefinition> => ({
+    'ward-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ward-north-site': { cardType: 'site', elements: ['earth'] },
+    'ward-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ward-south-charger': {
+      attack: 1,
+      cardType: 'minion',
+      charge: true,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+      ...(printedWard ? { ward: true } : {}),
+    },
+    'ward-south-site': { cardType: 'site', elements: ['earth'] },
+    'ward-spell': {
+      cardType: 'magic',
+      grantWardToTargetMinion: true,
+      manaCost: 0,
+      thresholds,
+    },
+  });
+  const input = (seed: number, printedWard: boolean) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-grant-ward-magic-v1',
+    },
+    cards: cards(printedWard),
+    decks: {
+      north: {
+        atlas: Array(4).fill('ward-north-site'),
+        avatar: 'ward-north-avatar',
+        spellbook: Array(4).fill('ward-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(4).fill('ward-south-site'),
+        avatar: 'ward-south-avatar',
+        spellbook: Array(4).fill('ward-south-charger'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const grantManifest = createGameManifest(input(221, false));
+  assert.equal(grantManifest.cards['ward-spell']?.cardType === 'magic'
+    && grantManifest.cards['ward-spell'].grantWardToTargetMinion, true);
+
+  const stageCharger = async (ctx: SetupCtx): Promise<string> => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ward-south-charger'
+        && descriptor.cell === 'C1');
+    const chargerId = ctx.state.realm.units.find(({ cardId }) => cardId === 'ward-south-charger')
+      ?.instanceId;
+    assert.ok(chargerId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    return chargerId;
+  };
+
+  await withSetup(grantManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const chargerId = await stageCharger(ctx);
+    const charger = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(charger?.warded, false);
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'ward-spell');
+    assert.ok(spell);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.target
+        ? [[descriptor.target.kind, descriptor.target.instanceId] as const]
+        : []);
+    assert.deepEqual(targets, [['minion', chargerId]]);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === chargerId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const granted = await ctx.step(cast);
+    assert.equal(granted.accepted, true);
+    if (!granted.accepted) return;
+    assert.deepEqual(granted.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-warded',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(granted.receipt.events[1]?.payload, {
+      instanceId: chargerId,
+      seat: 'south',
+      sourceInstanceId,
+    });
+    const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(after?.warded, true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(222, true)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const chargerId = await stageCharger(ctx);
+    const charger = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(charger?.warded, true);
+    const noop = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === chargerId));
+    assert.equal(noop.accepted, true);
+    if (!noop.accepted) return;
+    assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
+    assert.equal(after?.warded, true);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

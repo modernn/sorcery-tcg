@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **220 rust-supported / 0 typescript-supported** out of 220.
+`data/rules/catalog.json`: **222 rust-supported / 0 typescript-supported** out of 222.
 
-Latest catalog proofs: tap-minion Magic (`RULE-CATALOG-0219`–`0220`).
+Latest catalog proofs: grant-Ward Magic (`RULE-CATALOG-0221`–`0222`).
+Tap-minion remains `RULE-CATALOG-0219`–`0220`.
 Untap-minion remains `RULE-CATALOG-0217`–`0218`.
 Target-player life-gain remains `RULE-CATALOG-0215`–`0216`.
 Target-player life-loss remains `RULE-CATALOG-0213`–`0214`.
