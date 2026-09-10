@@ -4445,10 +4445,8 @@ impl Game {
         Self::unit_occupied_cells(unit).contains(&cell)
     }
 
-    fn summon_occupied_cells<'a>(cell: &'a Cell, cells: &'a Option<SquareArea>) -> &'a [Cell] {
-        cells
-            .as_ref()
-            .map_or(std::slice::from_ref(cell), |area| area.as_slice())
+    fn summon_occupied_cells<'a>(cell: &'a Cell, cells: Option<&'a SquareArea>) -> &'a [Cell] {
+        cells.map_or(std::slice::from_ref(cell), |area| area.as_slice())
     }
 
     fn footprints_nearby(source: &[Cell], target: &[Cell]) -> bool {
@@ -6713,7 +6711,7 @@ impl Game {
                     self.genesis_damage_targets(
                         seat,
                         source_instance_id,
-                        Self::summon_occupied_cells(&cell, &cells),
+                        Self::summon_occupied_cells(&cell, cells.as_ref()),
                     )
                     .into_iter()
                     .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
@@ -6743,8 +6741,7 @@ impl Game {
         &self,
         seat: Seat,
         source_instance_id: &IdentityHash,
-        cell: Cell,
-        cells: Option<SquareArea>,
+        source_cells: &[Cell],
         genesis: Option<MinionGenesis>,
         choice: Option<GenesisDamageChoice>,
         target: Option<&UnitTarget>,
@@ -6760,11 +6757,7 @@ impl Game {
                 Some(GenesisDamageChoice::Target),
                 Some(target),
             ) => self
-                .genesis_damage_targets(
-                    seat,
-                    source_instance_id,
-                    Self::summon_occupied_cells(&cell, &cells),
-                )
+                .genesis_damage_targets(seat, source_instance_id, source_cells)
                 .contains(target),
             (Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo), _, _) => false,
             (_, None, None) => true,
@@ -15883,8 +15876,7 @@ impl Game {
             || !self.valid_genesis_damage_choice(
                 seat,
                 card_instance_id,
-                *cell,
-                *cells,
+                Self::summon_occupied_cells(cell, cells.as_ref()),
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),
@@ -16223,8 +16215,7 @@ impl Game {
             || !self.valid_genesis_damage_choice(
                 seat,
                 card_instance_id,
-                *cell,
-                *cells,
+                Self::summon_occupied_cells(cell, cells.as_ref()),
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),
