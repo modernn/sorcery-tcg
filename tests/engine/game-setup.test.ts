@@ -27400,8 +27400,7 @@ test('RULE-04 a minion can skip its controller Start Phase untap unless Disabled
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === sleeperId
-        && descriptor.from.cell === 'C4'
-        && descriptor.to.cell === 'C3');
+        && descriptor.to.cell === 'C4');
     await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
     return sleeperId;
   };

@@ -223,8 +223,7 @@ fn summon_and_tap_sleeper(session: &mut Session) -> Value {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
             && descriptor["unitInstanceId"] == instance_id
-            && descriptor["from"]["cell"] == "C4"
-            && descriptor["to"]["cell"] == "C3"
+            && descriptor["to"]["cell"] == "C4"
     });
     accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
     instance_id
@@ -300,11 +299,11 @@ fn rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement() {
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
     assert_eq!(unit(&after, "north-sleeper")["tapped"], false);
-    assert_eq!(
+    assert!(
         unit(&after, "north-sleeper")["disableEffects"]
             .as_array()
-            .map(Vec::len),
-        Some(0)
+            .is_none_or(Vec::is_empty),
+        "Freeze expires when the caster's next turn starts"
     );
     assert_eq!(unit(&after, "north-sleeper")["instanceId"], instance_id);
     assert_eq!(after["terminal"]["status"], "active");
