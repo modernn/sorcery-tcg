@@ -72,6 +72,9 @@ impl SessionJsonService {
             "runNoveltyFromForcedAction" => {
                 self.run_novelty_from_forced_action(request.id, &request.params)
             }
+            "runNoveltyFrontierSearch" => {
+                self.run_novelty_frontier_search(request.id, &request.params)
+            }
             "runCounterfactual" => self.run_counterfactual(request.id, &request.params),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
@@ -268,6 +271,37 @@ impl SessionJsonService {
                     json!({
                         "emittedCheckpoints": emitted_checkpoints,
                         "entry": output.entry().to_value(),
+                        "result": output.result(),
+                    }),
+                ),
+                Err(error) => error_response(id, &error.to_string()),
+            },
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn run_novelty_frontier_search(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
+            return error_response(id, "runNoveltyFrontierSearch requires maxActions");
+        };
+        let Ok(max_actions) = usize::try_from(max_actions) else {
+            return error_response(id, "runNoveltyFrontierSearch maxActions is out of range");
+        };
+        let Some(max_branches) = params.get("maxBranches").and_then(Value::as_u64) else {
+            return error_response(id, "runNoveltyFrontierSearch requires maxBranches");
+        };
+        let Ok(max_branches) = usize::try_from(max_branches) else {
+            return error_response(id, "runNoveltyFrontierSearch maxBranches is out of range");
+        };
+        match session.run_novelty_frontier_search(max_actions, max_branches) {
+            Ok(output) => match serde_json::to_value(output.emitted_checkpoints()) {
+                Ok(emitted_checkpoints) => ok_response(
+                    id,
+                    json!({
+                        "emittedCheckpoints": emitted_checkpoints,
                         "result": output.result(),
                     }),
                 ),
@@ -750,6 +784,37 @@ mod tests {
         assert_eq!(result["entry"]["stateHash"], probe["postStateHash"]);
         assert_eq!(result["result"]["status"], "horizon");
         assert_eq!(result["result"]["initialStateHash"], probe["postStateHash"]);
+        assert_eq!(
+            result["emittedCheckpoints"]
+                .as_array()
+                .expect("checkpoints")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn service_should_run_a_zero_horizon_frontier_search() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let search = service.handle(&rpc(
+            2,
+            "runNoveltyFrontierSearch",
+            json!({ "maxActions": 0, "maxBranches": 0 }),
+        ));
+        let result = search.result.expect("frontier search");
+        assert_eq!(result["result"]["root"]["status"], "horizon");
+        assert_eq!(
+            result["result"]["policyVersion"],
+            "signal-guided-bounded-frontier-v2"
+        );
+        assert_eq!(result["result"]["totals"]["branchLimit"], 0);
         assert_eq!(
             result["emittedCheckpoints"]
                 .as_array()

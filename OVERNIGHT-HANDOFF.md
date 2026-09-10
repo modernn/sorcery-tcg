@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/rust-forced-novelty-0005`. Stack this on current `master` (`8736e1c`). Do not grow already-merged landings.
+Live line: `cursor/rust-novelty-frontier-0005`. Stack this on current `master` (`e20ef88`). Do not grow already-merged landings.
 
-Novelty probe, rollout, and counterfactual search are on master (`probeNovelty`, `runNoveltyRollout`, `runCounterfactual`). This branch moves forced-action plus novelty-from-checkpoint dispatch into Rust (`runNoveltyFromForcedAction`). The private novelty gauntlet FIFO still groups and prunes in TypeScript.
+Novelty probe, rollout, forced-action dispatch, and counterfactual search are on master. This branch moves the signal-guided bounded frontier FIFO into Rust (`runNoveltyFrontierSearch`). The private novelty gauntlet still orchestrates four lesson jobs and writes authority-private reports in TypeScript.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -72,7 +72,7 @@ Still TypeScript (not a second legality, observation, or agent engine):
 
 - Manifest validation, authority ingestion, server, and browser UI.
 - `run-private-game-check.ts` still *calls* the sync wrappers; it cannot be executed in this cloud checkout (no `.local/authority/`).
-- `run-private-novelty-gauntlet.ts` still groups frontier seeds and prunes covered signals in TypeScript. Each dispatch calls `runNoveltyFromForcedAction`.
+- `run-private-novelty-gauntlet.ts` still orchestrates four private lesson jobs and writes authority-private reports. Single-root frontier search is `runNoveltyFrontierSearch`.
 - Production agents call `selectPolicyAction` on the live Rust session.
 
 ## Gate status on this branch

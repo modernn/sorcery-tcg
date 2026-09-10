@@ -106,6 +106,17 @@ export class RustGameSessionHandle {
     return this.client.runNoveltyRollout(input);
   }
 
+  /** Runs one-step novelty, then expands unchosen signals as forced branches. */
+  async runNoveltyFrontierSearch(input: Readonly<{
+    maxActions: number;
+    maxBranches: number;
+  }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    result: JsonValue;
+  }>> {
+    return this.client.runNoveltyFrontierSearch(input);
+  }
+
   /** Forces one engine-issued action, checks its probe prediction, then rolls out novelty. */
   async runNoveltyFromForcedAction(input: Readonly<{
     actionId: string;
