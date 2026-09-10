@@ -801,6 +801,15 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be true",
         ),
         (
+            "does-not-untap flag",
+            with(
+                minion(),
+                "doesNotUntapDuringControllersStartPhase",
+                json!(false),
+            ),
+            "must be true",
+        ),
+        (
             "forced-attack source flag",
             with(minion(), "enemiesMustAttackThisIfAble", json!(false)),
             "must be true",
@@ -1228,6 +1237,18 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.must_attack_a_unit_if_able);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "does-not-untap",
+        &with(
+            minion(),
+            "doesNotUntapDuringControllersStartPhase",
+            json!(true),
+        ),
+    )
+    .expect("valid does-not-untap minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.does_not_untap_during_controllers_start_phase);
     let CardFacts::Minion(facts) = parse_card_definition(
         "forced-attack-source",
         &with(minion(), "enemiesMustAttackThisIfAble", json!(true)),

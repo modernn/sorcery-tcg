@@ -431,6 +431,7 @@ export type GameCardDefinition =
     takesLessDamage?: 1;
     thresholds: GameThresholds;
     token?: true;
+    doesNotUntapDuringControllersStartPhase?: true;
     untapsAtEndOfControllerTurn?: true;
     voidwalk?: boolean;
     waterbound?: boolean;
@@ -1234,7 +1235,7 @@ const SUPPORTED_CARD_FIELDS = {
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
     spellcaster stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
     tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage tapForMana takesLessDamage thresholds token
-    untapsAtEndOfControllerTurn voidwalk ward waterbound
+    doesNotUntapDuringControllersStartPhase untapsAtEndOfControllerTurn voidwalk ward waterbound
   `.trim().split(/\s+/)),
   site: new Set(`
     airborneMinionsAtopMoveFreelyAway blocksGroundMinionEntryWhileMinionAtop
@@ -2427,6 +2428,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (!Number.isSafeInteger(card.tapForMana) || card.tapForMana < 1 || card.tapForMana > MAX_COMBAT_STAT)) {
     throw new RangeError(path + '.tapForMana must be a safe integer between 1 and ' + MAX_COMBAT_STAT);
   }
+  if (card.doesNotUntapDuringControllersStartPhase !== undefined
+    && card.doesNotUntapDuringControllersStartPhase !== true) {
+    throw new RangeError(
+      `${path}.doesNotUntapDuringControllersStartPhase must be true when defined`,
+    );
+  }
   if (card.untapsAtEndOfControllerTurn !== undefined
     && card.untapsAtEndOfControllerTurn !== true) {
     throw new RangeError(`${path}.untapsAtEndOfControllerTurn must be true when defined`);
@@ -2995,6 +3002,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
             thresholds: { ...card.thresholds },
             ...(card.token === true ? { token: true as const } : {}),
+            ...(card.doesNotUntapDuringControllersStartPhase === true
+              ? { doesNotUntapDuringControllersStartPhase: true as const }
+              : {}),
             ...(card.untapsAtEndOfControllerTurn === true
               ? { untapsAtEndOfControllerTurn: true as const }
               : {}),

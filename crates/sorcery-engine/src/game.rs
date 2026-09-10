@@ -1481,6 +1481,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         deathrite_mill_spells: _,
         defense: _,
         dies_at_end_of_controller_turn: _,
+        does_not_untap_during_controllers_start_phase: _,
         enemies_must_attack_this_if_able: _,
         discard_spell_to_damage_random_other_unit_here: _,
         end_turn_stealth: _,
@@ -20078,6 +20079,23 @@ impl Game {
                 })
             });
         }
+        let stay_tapped: BTreeSet<_> = self
+            .position
+            .units
+            .iter()
+            .zip(&disabled_units)
+            .filter_map(|(unit, disabled)| {
+                if unit.controller != next_seat || *disabled || !unit.tapped {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts)
+                        if facts.does_not_untap_during_controllers_start_phase
+                )
+                .then(|| unit.card.instance_id.clone())
+            })
+            .collect();
         for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
             unit.temporary_airborne_sources.clear();
@@ -20096,7 +20114,8 @@ impl Game {
                     );
                 }
                 unit.summoning_sickness = false;
-            } else if unit.controller == next_seat {
+            } else if unit.controller == next_seat && !stay_tapped.contains(&unit.card.instance_id)
+            {
                 unit.tapped = false;
             }
         }
@@ -21970,6 +21989,13 @@ mod tests {
         .expect("valid end-turn life-loss manifest")
         .ensure_selfplay_supported()
         .expect("end-turn controller life loss is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "doesNotUntapDuringControllersStartPhase",
+            json!(true),
+        )]))
+        .expect("valid does-not-untap manifest")
+        .ensure_selfplay_supported()
+        .expect("does not untap during Start Phase is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

@@ -91,6 +91,7 @@ type SpellFacts = Readonly<{
   tapForMana?: number;
   takesLessDamage?: 1;
   thresholds: Readonly<{ air: number; earth: number; fire: number; water: number }>;
+  doesNotUntapDuringControllersStartPhase?: true;
   untapsAtEndOfControllerTurn?: true;
   voidwalk?: boolean;
   waterbound?: boolean;
@@ -302,6 +303,9 @@ function cardsFor(
         ...(facts.tapForMana ? { tapForMana: facts.tapForMana } : {}),
         ...(facts.takesLessDamage === 1 ? { takesLessDamage: 1 as const } : {}),
         thresholds: { ...facts.thresholds },
+        ...(facts.doesNotUntapDuringControllersStartPhase === true
+          ? { doesNotUntapDuringControllersStartPhase: true as const }
+          : {}),
         ...(facts.untapsAtEndOfControllerTurn === true
           ? { untapsAtEndOfControllerTurn: true as const }
           : {}),
@@ -2408,6 +2412,31 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /competing end-turn pulses are unsupported/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        doesNotUntapDuringControllersStartPhase: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /doesNotUntapDuringControllersStartPhase must be true when defined/);
+  const doesNotUntapManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        doesNotUntapDuringControllersStartPhase: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    doesNotUntapManifest.cards[firstSpell]?.cardType === 'minion'
+      && doesNotUntapManifest.cards[firstSpell].doesNotUntapDuringControllersStartPhase,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -27329,6 +27358,177 @@ test('RULE-04 end-turn controller life loss reduces the Avatar and can open Deat
   };
   await run(20, 18, false);
   await run(2, 0, true);
+});
+
+test('RULE-04 a minion can skip its controller Start Phase untap unless Disabled', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const sleeper = {
+    attack: 1,
+    cardType: 'minion' as const,
+    charge: true,
+    defense: 2,
+    doesNotUntapDuringControllersStartPhase: true as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const dummy = {
+    attack: 1,
+    cardType: 'minion' as const,
+    defense: 2,
+    manaCost: 0,
+    thresholds,
+  };
+  const stayTapped = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'sleeper-north-sleeper'
+        && descriptor.cell === 'C4');
+    const sleeperId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'sleeper-north-sleeper')?.instanceId;
+    assert.equal(typeof sleeperId, 'string');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === sleeperId
+        && descriptor.from.cell === 'C4'
+        && descriptor.to.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    return sleeperId;
+  };
+  const southTurn = async (ctx: SetupCtx) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'sleeper-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  await withSetup(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-does-not-untap-v1',
+    },
+    cards: {
+      'sleeper-north-avatar': avatar,
+      'sleeper-north-site': site,
+      'sleeper-north-sleeper': sleeper,
+      'sleeper-south-avatar': avatar,
+      'sleeper-south-dummy': dummy,
+      'sleeper-south-site': site,
+    },
+    decks: {
+      north: {
+        atlas: Array(6).fill('sleeper-north-site'),
+        avatar: 'sleeper-north-avatar',
+        spellbook: Array(6).fill('sleeper-north-sleeper'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('sleeper-south-site'),
+        avatar: 'sleeper-south-avatar',
+        spellbook: Array(6).fill('sleeper-south-dummy'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  }), async (ctx) => {
+    const sleeperId = await stayTapped(ctx);
+    await southTurn(ctx);
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId)?.tapped,
+      true,
+    );
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId)?.tapped,
+      true,
+    );
+    assert.equal(
+      (await ctx.legalActions()).some(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === sleeperId),
+      false,
+    );
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+  const freeze = {
+    cardType: 'magic' as const,
+    disableTargetNearbyMinionUntilNextTurn: true as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const disabledManifest = await findOpeningManifest(
+    (seed) => createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-does-not-untap-disabled-v1',
+      },
+      cards: {
+        'sleeper-north-avatar': avatar,
+        'sleeper-north-freeze': freeze,
+        'sleeper-north-site': site,
+        'sleeper-north-sleeper': sleeper,
+        'sleeper-south-avatar': avatar,
+        'sleeper-south-dummy': dummy,
+        'sleeper-south-site': site,
+      },
+      decks: {
+        north: {
+          atlas: Array(6).fill('sleeper-north-site'),
+          avatar: 'sleeper-north-avatar',
+          spellbook: [
+            ...Array(3).fill('sleeper-north-sleeper'),
+            ...Array(3).fill('sleeper-north-freeze'),
+          ],
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('sleeper-south-site'),
+          avatar: 'sleeper-south-avatar',
+          spellbook: Array(6).fill('sleeper-south-dummy'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed,
+    }),
+    (session) => {
+      const hand = session.state.players.north.hand.spellbook;
+      return hand.some((card) => card.cardId === 'sleeper-north-sleeper')
+        && hand.some((card) => card.cardId === 'sleeper-north-freeze');
+    },
+  );
+  await withSetup(disabledManifest, async (ctx) => {
+    const sleeperId = await stayTapped(ctx);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'sleeper-north-freeze'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === sleeperId);
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId)?.tapped,
+      true,
+    );
+    await southTurn(ctx);
+    const after = ctx.state.realm.units.find((unit) => unit.instanceId === sleeperId);
+    assert.equal(after?.tapped, false);
+    assert.equal(after?.disableEffects?.length ?? 0, 0);
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {

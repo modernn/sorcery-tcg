@@ -4624,6 +4624,7 @@ function gameDefinition(
   deathriteMillSites = false,
   atEndOfControllerTurnControllerGainsLife: 0 | 2 = 0,
   atEndOfControllerTurnControllerLosesLife: 0 | 2 = 0,
+  doesNotUntapDuringControllersStartPhase = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4970,6 +4971,9 @@ function gameDefinition(
       strikesFirstWhileAttacking,
       submerge,
       summonToAnySite,
+      ...(doesNotUntapDuringControllersStartPhase
+        ? { doesNotUntapDuringControllersStartPhase: true as const }
+        : {}),
       ...(untapsAtEndOfControllerTurn ? { untapsAtEndOfControllerTurn: true } : {}),
       ...(tapToDamageEachUnitAtAdjacentLocation
         ? { tapToDamageEachUnitAtAdjacentLocation: 2 as const }
