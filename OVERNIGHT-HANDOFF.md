@@ -1,51 +1,40 @@
 # Overnight handoff
 
-Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `master` is fast-forwarded to it. Superseded branches and stashes live only as `archive/*` tags (`git tag -l 'archive/*'`).
+Branch: `cursor/rust-cutover-setup-tests-0005` (PR https://github.com/modernn/sorcery-tcg/pull/2). Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with authority fixtures and `pwsh`.
 
 ## Catalog count
 
 `data/rules/catalog.json`: **161 rust-supported / 0 typescript-supported** out of 161.
 
-## Commits landed (boundary cutover line)
-
-| Hash | Change |
-| --- | --- |
-| `82c4dac` | Route synthetic demo rollouts through the Rust engine subprocess. |
-| `2d6270f` | Add session-json RPC bridge and migrate parity capture to Rust. |
-| `ca6bb4c` | Route playable-core game server through Rust session-json. |
-| `397bdf5` / `8dc140e` | Migrate action parity capture scripts to Rust session helpers. |
-| `3d30a81` | Route checkpoint resume test through Rust session-json. |
-| `2d4363f` | Record handoff + harden `RustSessionClient` launch/types (`publicView` path). |
-| `a4a81e5` | Attempted scripted migration of `game-setup.test.ts` to `SetupCtx`; left the file unparseable. |
-| `a1d0e5b` | Restored `game-setup.test.ts` from `eecfa00`; kept `tests/engine/rust-setup-session.ts` bridge. |
-| `167c6e3` | Aligned Rust `action_parity` and `drag_projectile_rules` proofs with Rust-captured fixtures (checkpoint hash is now of the object, not the serialized string). |
-
-## Gate status at tip
-
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green (2 ignored release soak gates).
-- `pnpm verify` — **404 tests, 0 fail**.
-
-## Boundary cutover status
+## TypeScript legality cutover
 
 Done:
-- Demo → Rust `sorcery-engine demo`.
-- Batch → Rust `batch-json`.
-- Play prototype → Rust `session-json` (`new` / `legalActions` / `step` / `publicView` / checkpoint / resume / verifyReplay).
-- Parity fixture regeneration → Rust session helpers.
-- Interactive UI observation → Rust `Game::public_view`.
 
-Still present:
-- `src/engine/game.ts` (~525KB) still exports `createGameSession` / `legalGameActions` / `stepGame`. Callers: `tests/engine/game-setup.test.ts`, `game-server.test.ts`, `game-novelty-rollout.test.ts`, `src/simulator/novelty-rollout.ts`, `src/engine/checkpoint.ts`, `src/commands/run-game-demo.ts`, `run-private-game-check.ts`, `run-private-novelty-gauntlet.ts`, `benchmarks/typescript-engine.ts`.
-- `tests/engine/game-setup.test.ts` is the pre-migration TypeScript version (161 tests). The `SetupCtx` / `withSetup` / `withPreview` bridge in `tests/engine/rust-setup-session.ts` is ready but unused.
+- `createGameSession` / `legalGameActions` / `stepGame` / `replayGame` / `verifyGameReplay` call a blocking `session-json` client (`src/engine/rust-legality-sync.ts`).
+- `actionDescriptors` / `applyDescriptor` and their helpers are deleted from `src/engine/game.ts`. That file keeps types, manifest validation, `observeGame`, and the thin Rust wrappers.
+- Game-setup proofs run through `SetupCtx`. Checkpoints resume only through Rust.
+- Private-check Chain Lightning extra-target mana uses a real 3-mana sibling (draw Atlas, do not play the fourth site). No constructed `GameSession` spreads remain.
+
+Still TypeScript (not a second legality engine):
+
+- Manifest validation, observation, authority ingestion, server, and browser UI.
+- `run-private-game-check.ts` still *calls* the sync wrappers; it cannot be executed in this cloud checkout (no `.local/authority/`).
+
+## Gate status at tip `bbc7fa0`
+
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
+- `pnpm typecheck` / `pnpm lint` — green.
+- `tests/engine` + `tests/ingestion` — 221 pass, 0 fail.
+- Full `pnpm test` in this checkout: 31 authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step
 
-1. Migrate `game-setup.test.ts` to `SetupCtx` in small reviewed chunks (one rule family per commit, `pnpm verify` green each time). Do not repeat the one-shot scripted rewrite; its scripts are archived under `.local/archive/2026-09-02-game-setup-migration/`.
-2. Then gut the TypeScript legality bodies in `src/engine/game.ts` once every caller above routes through Rust session-json fail-closed.
-3. Keep byte-identical Rust regeneration fixtures; do not reintroduce TypeScript as a second legality engine.
-4. Phase 4+ product surfaces stay out of scope until that deletion is complete.
+1. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
+2. Retire this handoff and fast-forward `master` only after that private-check run is green.
+3. Phase 4+ product surfaces stay out of scope until that private verification lands.
 
 ## Do not
 
 - Commit anything under `.local/` (whole directory is ignored; `.local/authority/` holds private authority bytes).
-- Run more than one agent against this working tree at a time. A Cursor agent and a Claude session overwrote each other here on 2026-09-02.
+- Reintroduce TypeScript as a second legality engine.
+- Acquire official artwork.
