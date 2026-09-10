@@ -628,7 +628,8 @@ fn composition_session(
         .map(|seed| composition_manifest(seed, giant_extra, north_spells, south_spells))
         .find(|candidate| {
             let preview = Session::new(candidate).expect("candidate session");
-            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["north"]["hand"]["spellbook"]
                 .as_array()
                 .expect("north Spellbook hand");
             required_north
