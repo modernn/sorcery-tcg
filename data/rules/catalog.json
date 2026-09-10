@@ -5267,6 +5267,47 @@
         "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
         "testName": "rule_catalog_0246_enemies_must_attack_this_does_not_constrain_out_of_range"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0247",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "An artifact that nearby minions must attack if able forces every nearby opposing minion that can attack. Those minions may take only Move and Attack actions, then must Declare Attack while they remain nearby and have a target. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0247_nearby_minions_must_attack_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0248",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-must-attack artifact does not constrain a minion that is not nearby. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0248_nearby_must_attack_does_not_constrain_when_not_nearby"
+      }
     }
   ]
 }

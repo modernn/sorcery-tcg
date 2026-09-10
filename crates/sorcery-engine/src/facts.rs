@@ -152,6 +152,7 @@ pub enum ArtifactEffect {
     BearerControllerChoosesExtraRandomOutcome,
     GrantsBearerLethal,
     GrantsBearerPowerTwo,
+    NearbyMinionsMustAttackIfAble,
     TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
     TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
     TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
@@ -687,6 +688,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "grantsBearerLethal",
     "grantsBearerPower",
     "manaCost",
+    "nearbyMinionsMustAttackIfAble",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
     "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
     "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
@@ -1050,6 +1052,8 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
                 .then_some(ArtifactEffect::GrantsBearerLethal),
             fixed_integer(object, "grantsBearerPower", 2, path)?
                 .then_some(ArtifactEffect::GrantsBearerPowerTwo),
+            true_only(object, "nearbyMinionsMustAttackIfAble", path)?
+                .then_some(ArtifactEffect::NearbyMinionsMustAttackIfAble),
             true_only(
                 object,
                 "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",

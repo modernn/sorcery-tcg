@@ -159,6 +159,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("bearerControllerChoosesExtraRandomOutcome", json!(true)),
         ("grantsBearerLethal", json!(true)),
         ("grantsBearerPower", json!(2)),
+        ("nearbyMinionsMustAttackIfAble", json!(true)),
         (
             "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
             json!(true),
@@ -421,6 +422,11 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(true),
             ),
             "exactly one",
+        ),
+        (
+            "nearby-must-attack flag",
+            spell("artifact", ("nearbyMinionsMustAttackIfAble", json!(false))),
+            "must be true",
         ),
         (
             "aura two effects",

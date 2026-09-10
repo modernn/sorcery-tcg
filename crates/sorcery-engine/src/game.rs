@@ -1275,6 +1275,7 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
+        | ArtifactEffect::NearbyMinionsMustAttackIfAble
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
         | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -1289,6 +1290,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
+            | ArtifactEffect::NearbyMinionsMustAttackIfAble
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -2358,6 +2360,13 @@ impl Game {
         let unit_targets = targets
             .iter()
             .any(|target| !matches!(target, CombatTarget::Site { .. }));
+        let nearby_must_attack = matches!(pending.attacker_kind, UnitKind::Minion)
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == pending.attacker_instance_id)
+                .is_some_and(|unit| self.minion_is_nearby_must_attack_artifact(unit));
         let (offered, omit_decline) = if !forced.is_empty() {
             (forced, true)
         } else if must_attack_a_unit && unit_targets {
@@ -2368,6 +2377,8 @@ impl Game {
                     .collect(),
                 true,
             )
+        } else if nearby_must_attack && !targets.is_empty() {
+            (targets, true)
         } else {
             (targets, false)
         };
@@ -3511,8 +3522,14 @@ impl Game {
             .filter(|instance_id| self.mover_has_forced_attack_path(instance_id, actions))
             .cloned()
             .collect();
-        actions
-            .retain(|action| self.keep_mandatory_attack_action(action, &mandatory, &forced_movers));
+        let unit_movers: Vec<_> = mandatory
+            .iter()
+            .filter(|instance_id| self.mover_has_printed_unit_attack_path(instance_id, actions))
+            .cloned()
+            .collect();
+        actions.retain(|action| {
+            self.keep_mandatory_attack_action(action, &mandatory, &forced_movers, &unit_movers)
+        });
     }
 
     fn minion_must_attack_now(
@@ -3524,12 +3541,9 @@ impl Game {
         if !self.minion_can_move_and_attack(unit, seat) {
             return false;
         }
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-        else {
-            return false;
-        };
         self.mover_has_forced_attack_path(&unit.card.instance_id, actions)
-            || (facts.must_attack_a_unit_if_able
+            || self.mover_has_printed_unit_attack_path(&unit.card.instance_id, actions)
+            || (self.minion_is_nearby_must_attack_artifact(unit)
                 && actions.iter().any(|action| {
                     matches!(
                         &action.descriptor,
@@ -3538,7 +3552,7 @@ impl Game {
                             to,
                             ..
                         } if unit_instance_id == &unit.card.instance_id
-                            && self.minion_would_have_unit_attack_target(unit, *to)
+                            && self.minion_would_have_any_attack_target(unit, *to)
                     )
                 }))
     }
@@ -3569,11 +3583,43 @@ impl Game {
         })
     }
 
+    fn mover_has_printed_unit_attack_path(
+        &self,
+        instance_id: &IdentityHash,
+        actions: &[IssuedAction],
+    ) -> bool {
+        let Some(unit) = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+        else {
+            return false;
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        facts.must_attack_a_unit_if_able
+            && actions.iter().any(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::MoveAndAttack {
+                        unit_instance_id,
+                        to,
+                        ..
+                    } if unit_instance_id == instance_id
+                        && self.minion_would_have_unit_attack_target(unit, *to)
+                )
+            })
+    }
+
     fn keep_mandatory_attack_action(
         &self,
         action: &IssuedAction,
         mandatory: &[IdentityHash],
         forced_movers: &[IdentityHash],
+        unit_movers: &[IdentityHash],
     ) -> bool {
         let ActionDescriptor::MoveAndAttack {
             unit_instance_id,
@@ -3602,9 +3648,62 @@ impl Game {
             .any(|instance_id| instance_id == unit_instance_id)
         {
             self.minion_would_attack_forced_source(unit, *to)
-        } else {
+        } else if unit_movers
+            .iter()
+            .any(|instance_id| instance_id == unit_instance_id)
+        {
             self.minion_would_have_unit_attack_target(unit, *to)
+        } else {
+            true
         }
+    }
+
+    fn minion_is_nearby_must_attack_artifact(&self, unit: &UnitPosition) -> bool {
+        let unit_cells = Self::unit_occupied_cells(unit);
+        self.position.artifacts.iter().any(|artifact| {
+            let Ok(facts) = self.artifact_facts(artifact) else {
+                return false;
+            };
+            if facts.effect != ArtifactEffect::NearbyMinionsMustAttackIfAble {
+                return false;
+            }
+            let Ok(location) = self.artifact_location(artifact) else {
+                return false;
+            };
+            location.region == unit.region
+                && Self::footprints_nearby(unit_cells, std::slice::from_ref(&location.cell))
+        })
+    }
+
+    fn minion_would_have_any_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        self.minion_would_have_unit_attack_target(unit, destination)
+            || self.minion_would_have_site_attack_target(unit, destination)
+    }
+
+    fn minion_would_have_site_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        if facts.cannot_attack_sites || destination.region != Region::Surface {
+            return false;
+        }
+        let attacker_cells =
+            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let opposing_seat = other_seat(unit.controller);
+        attacker_cells.iter().any(|cell| {
+            self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| site.controller == opposing_seat)
+        })
     }
 
     fn minion_would_have_unit_attack_target(
@@ -20134,6 +20233,17 @@ mod tests {
             .expect("valid Bury plus Lethal Artifact manifest")
             .ensure_selfplay_supported()
             .expect("Bury with Lethal Artifacts is self-play safe");
+
+        let nearby_must_attack_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_must_attack_artifact, false))
+            .expect("valid nearby-must-attack Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby-must-attack Artifacts are self-play safe");
 
         let cave_in_with_artifact = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {
