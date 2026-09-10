@@ -317,6 +317,7 @@ export type GameCardDefinition =
     millSites?: number;
     millSpells?: number;
     targetPlayerDiscardsCards?: number;
+    targetPlayerDrawsSpells?: number;
     returnMinionFromOwnCemetery?: true;
     returnTargetArtifactFromOwnCemetery?: true;
     returnTargetAuraFromOwnCemetery?: true;
@@ -1202,7 +1203,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
     submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
-    tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
+    tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
@@ -1801,6 +1802,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.millSites !== undefined)
       + Number(card.millSpells !== undefined)
+      + Number(card.targetPlayerDrawsSpells !== undefined)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.returnTargetArtifactFromOwnCemetery === true)
       + Number(card.returnTargetAuraFromOwnCemetery === true)
@@ -1882,6 +1884,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.millSpells < 1
       || card.millSpells > MAX_DECK_CARDS)) {
       throw new RangeError(`${path}.millSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
+    }
+    if (card.targetPlayerDrawsSpells !== undefined
+      && (!Number.isSafeInteger(card.targetPlayerDrawsSpells)
+        || card.targetPlayerDrawsSpells < 1
+        || card.targetPlayerDrawsSpells > MAX_DECK_CARDS)) {
+      throw new RangeError(
+        `${path}.targetPlayerDrawsSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+      );
     }
     if (card.targetPlayerDiscardsCards !== undefined
       && (!Number.isSafeInteger(card.targetPlayerDiscardsCards)
@@ -2662,6 +2672,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { millSites: card.millSites }
                   : card.millSpells !== undefined
                     ? { millSpells: card.millSpells }
+                  : card.targetPlayerDrawsSpells !== undefined
+                    ? { targetPlayerDrawsSpells: card.targetPlayerDrawsSpells }
                     : card.returnTargetMinionToOwnerHand === true
                       ? { returnTargetMinionToOwnerHand: true as const }
                     : card.returnTargetArtifactToOwnerHand === true

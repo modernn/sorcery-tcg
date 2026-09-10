@@ -258,6 +258,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("lureEnemyMinionOneStepCloser", json!(true)),
         ("millSites", json!(2)),
         ("millSpells", json!(2)),
+        ("targetPlayerDrawsSpells", json!(1)),
         ("returnMinionFromOwnCemetery", json!(true)),
         ("returnTargetArtifactFromOwnCemetery", json!(true)),
         ("returnTargetAuraFromOwnCemetery", json!(true)),

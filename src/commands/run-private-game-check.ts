@@ -4613,6 +4613,7 @@ function gameDefinition(
   atStartOfControllerTurnDamageEachOtherUnitHere: 0 | 1 = 0,
   grantFirstStrikeToAllyThisTurn = false,
   atStartOfControllerTurnControllerGainsMana: 0 | 1 = 0,
+  targetPlayerDrawsSpells: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4774,7 +4775,8 @@ function gameDefinition(
     + Number(grantAirborneToAllyThisTurn)
     + Number(grantRangedToAllyThisTurn)
     + Number(grantLethalToAllyThisTurn)
-    + Number(grantFirstStrikeToAllyThisTurn);
+    + Number(grantFirstStrikeToAllyThisTurn)
+    + Number(targetPlayerDrawsSpells !== 0);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -4801,6 +4803,7 @@ function gameDefinition(
       ...(grantRangedToAllyThisTurn ? { grantRangedToAllyThisTurn: true as const } : {}),
       ...(grantLethalToAllyThisTurn ? { grantLethalToAllyThisTurn: true as const } : {}),
       ...(grantFirstStrikeToAllyThisTurn ? { grantFirstStrikeToAllyThisTurn: true as const } : {}),
+      ...(targetPlayerDrawsSpells !== 0 ? { targetPlayerDrawsSpells } : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),

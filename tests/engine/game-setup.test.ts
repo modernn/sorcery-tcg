@@ -1602,6 +1602,47 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   });
   assert.equal(milledSpells.cards[firstSpell]?.cardType === 'magic'
     && milledSpells.cards[firstSpell].millSpells, 2);
+  for (const targetPlayerDrawsSpells of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          cardType: 'magic',
+          manaCost: 1,
+          targetPlayerDrawsSpells,
+          thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+        } as unknown as GameCardDefinition,
+      },
+    }), /targetPlayerDrawsSpells must be a safe integer between 1 and 200/);
+  }
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        millSpells: 2,
+        manaCost: 1,
+        targetPlayerDrawsSpells: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const drawnSpells = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 1,
+        targetPlayerDrawsSpells: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(drawnSpells.cards[firstSpell]?.cardType === 'magic'
+    && drawnSpells.cards[firstSpell].targetPlayerDrawsSpells, 1);
   for (const targetPlayerDiscardsCards of [0, 1.5, 201]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -21973,6 +22014,146 @@ test('RULE-03 mill Magic puts opponent library cards in the cemetery without dec
       'magic-resolved',
     ]);
     assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 target-player Spellbook draw puts a card in hand or decks out an empty library', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'draw-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-north-site': { cardType: 'site', elements: ['earth'] },
+    'draw-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'draw-south-site': { cardType: 'site', elements: ['earth'] },
+    'draw-spell': {
+      cardType: 'magic',
+      manaCost: 0,
+      targetPlayerDrawsSpells: 1,
+      thresholds,
+    },
+  };
+  const input = (seed: number, southSpellbook: number) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-target-player-draw-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('draw-north-site'),
+        avatar: 'draw-north-avatar',
+        spellbook: Array(6).fill('draw-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('draw-south-site'),
+        avatar: 'draw-south-avatar',
+        spellbook: Array(southSpellbook).fill('draw-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const drawManifest = createGameManifest(input(286, 6));
+  assert.equal(drawManifest.cards['draw-spell']?.cardType === 'magic'
+    && drawManifest.cards['draw-spell'].targetPlayerDrawsSpells, 1);
+
+  await withSetup(drawManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.south.spellbook.length, 3);
+    assert.equal(ctx.state.players.south.hand.spellbook.length, 3);
+    const seats = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'draw-spell'
+        && descriptor.target
+        ? [[descriptor.target.kind, descriptor.target.seat] as const]
+        : []).sort((left, right) => left[1].localeCompare(right[1]));
+    assert.deepEqual(seats, [['avatar', 'north'], ['avatar', 'south']]);
+    const drawnId = ctx.state.players.south.spellbook[0]?.instanceId;
+    assert.equal(typeof drawnId, 'string');
+    const drawn = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'));
+    assert.equal(drawn.accepted, true);
+    if (!drawn.accepted) {
+      return;
+    }
+    assert.deepEqual(drawn.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'spell-drawn',
+      'magic-resolved',
+    ]);
+    assert.equal(
+      (drawn.receipt.events[1]?.payload as { cardId?: string }).cardId,
+      undefined,
+    );
+    assert.equal(ctx.state.players.south.spellbook.length, 2);
+    assert.equal(ctx.state.players.south.hand.spellbook.length, 4);
+    assert.equal(
+      ctx.state.players.south.hand.spellbook.some((card) => card.instanceId === drawnId),
+      true,
+    );
+    const northView = ctx.observe('north');
+    assert.equal(northView.players.south.hand.spellbook, 4);
+    assert.equal(northView.players.south.spellbookCount, 2);
+    assert.equal(JSON.stringify(northView).includes(String(drawnId)), false);
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(287, 3)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.south.spellbook.length, 0);
+    const emptied = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'));
+    assert.equal(emptied.accepted, true);
+    if (!emptied.accepted) {
+      return;
+    }
+    assert.deepEqual(emptied.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+      'game-ended',
+    ]);
+    assert.equal(ctx.state.terminal.status, 'finished');
+    assert.equal(
+      ctx.state.terminal.status === 'finished' && ctx.state.terminal.reason,
+      'deck_empty',
+    );
+    assert.equal(
+      ctx.state.terminal.status === 'finished' && ctx.state.terminal.loser,
+      'south',
+    );
+    assert.equal(
+      ctx.state.terminal.status === 'finished' && ctx.state.terminal.winner,
+      'north',
+    );
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

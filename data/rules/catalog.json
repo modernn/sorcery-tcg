@@ -6146,6 +6146,50 @@
         "file": "crates/sorcery-engine/tests/start_turn_mana_gain_rules.rs",
         "testName": "rule_catalog_0285_start_turn_mana_gain_pays_a_two_mana_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0286",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Spellbook draw Magic makes the chosen player draw from that player's remaining Spellbook. Drawn card identities stay private, including in events and the opponent's public view.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0286_target_player_draw_puts_opponent_library_card_in_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0287",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Spellbook draw on an empty library is a deck-out for the targeted player, not a paid no-op. That is the opposite of mill, which leaves the game active when the library is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0287_target_player_draw_decks_out_an_empty_library"
+      }
     }
   ]
 }

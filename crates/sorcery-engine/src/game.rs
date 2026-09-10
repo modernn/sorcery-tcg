@@ -1357,6 +1357,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::MillSites(_)
         | MagicEffect::MillSpells(_)
+        | MagicEffect::TargetPlayerDrawsSpells(_)
         | MagicEffect::ReturnTargetArtifactToOwnerHand
         | MagicEffect::ReturnTargetAuraToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
@@ -6173,7 +6174,8 @@ impl Game {
             | MagicEffect::TargetPlayerGainsLife(_)
             | MagicEffect::TargetPlayerLosesLife(_)
             | MagicEffect::MillSites(_)
-            | MagicEffect::MillSpells(_) => self.avatar_player_choices(),
+            | MagicEffect::MillSpells(_)
+            | MagicEffect::TargetPlayerDrawsSpells(_) => self.avatar_player_choices(),
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 if caster_location.region == Region::Void {
@@ -16849,6 +16851,16 @@ impl Game {
                     outcomes,
                 );
             }
+            MagicEffect::TargetPlayerDrawsSpells(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_genesis_draws(
+                    target_seat,
+                    card_instance_id,
+                    DeckZone::Spellbook,
+                    count,
+                    outcomes,
+                );
+            }
             MagicEffect::DrawSites(count) => {
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
             }
@@ -21216,6 +21228,10 @@ mod tests {
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
             (MagicEffect::MillSites(2), json!({ "millSites": 2 })),
             (MagicEffect::MillSpells(2), json!({ "millSpells": 2 })),
+            (
+                MagicEffect::TargetPlayerDrawsSpells(1),
+                json!({ "targetPlayerDrawsSpells": 1 }),
+            ),
             (
                 MagicEffect::KillTargetMinion,
                 json!({ "killTargetMinion": true }),

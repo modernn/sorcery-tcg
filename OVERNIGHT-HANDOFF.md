@@ -10,9 +10,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **285 rust-supported / 0 typescript-supported** out of 285.
+`data/rules/catalog.json`: **287 rust-supported / 0 typescript-supported** out of 287.
 
-Latest catalog proofs: start-of-controller-turn controller mana gain (`RULE-CATALOG-0284`–`0285`) and grant-First-Strike this turn (`RULE-CATALOG-0282`–`0283`).
+Latest catalog proofs: target-player Spellbook draw (`RULE-CATALOG-0286`–`0287`) and start-of-controller-turn controller mana gain (`RULE-CATALOG-0284`–`0285`).
 Grant-Airborne this turn remains `RULE-CATALOG-0274`–`0275`.
 Cemetery Aura return remains `RULE-CATALOG-0272`–`0273`.
 Destroy- and return-target Aura Magic remains `RULE-CATALOG-0270`–`0271`.
@@ -66,12 +66,12 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 254 engine + 1 catalog pass, including catalog 0167–0285.
+- `tests/engine` + catalog proofs — 255 engine + 1 catalog pass, including catalog 0167–0287.
 - Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is `targetPlayerDrawsSites`, leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly), or more official start/end-turn slices. Target-player Spellbook draw on an empty library is a deck-out; mill remains a paid no-op. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
