@@ -24,6 +24,20 @@ test('Rust session-json client creates, views, steps, and verifies a synthetic m
     assert.deepEqual(selected.descriptor.spellbookOrder, []);
     const actions = await client.legalActions('north');
     assert.ok(actions.some(({ actionId }) => actionId === selected.actionId));
+    const novelty = await client.probeNovelty({
+      committedActionKinds: [],
+      committedEventTypes: [],
+    });
+    assert.equal(novelty.tooWide, false);
+    assert.ok(novelty.selectedIndex < novelty.probes.length);
+    assert.equal(
+      novelty.probes.filter(({ selectedByFallback }) => selectedByFallback).length,
+      1,
+    );
+    assert.ok(novelty.probes.some(({ actionId, selectedByFallback }) =>
+      actionId === selected.actionId && selectedByFallback));
+    assert.ok(novelty.probes.every(({ actionId }) =>
+      actions.some((action) => action.actionId === actionId)));
     const stepped = await client.step({
       actionId: selected.actionId,
       seat: selected.seat,

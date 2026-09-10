@@ -10,6 +10,7 @@ pub mod deck;
 pub mod facts;
 pub mod game;
 pub mod gauntlet;
+pub mod novelty;
 pub mod policy;
 pub mod prng;
 pub mod selfplay;

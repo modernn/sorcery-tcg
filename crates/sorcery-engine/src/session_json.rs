@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use crate::canonical::{CanonicalError, canonical_json, parse_json_without_duplicate_keys};
 use crate::checkpoint::{create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint};
 use crate::contract::{ActionRequest, Seat};
+use crate::novelty::NoveltyStep;
 use crate::session::{Session, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -65,6 +66,7 @@ impl SessionJsonService {
             "legalActions" => self.legal_actions(request.id, &request.params),
             "step" => self.step(request.id, &request.params),
             "selectPolicyAction" => self.select_policy_action(request.id),
+            "probeNovelty" => self.probe_novelty(request.id, &request.params),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
@@ -174,6 +176,24 @@ impl SessionJsonService {
         };
         match session.select_baseline_policy_action() {
             Ok(action) => ok_response(id, json!({ "action": action })),
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn probe_novelty(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let committed_action_kinds = match string_list(params, "committedActionKinds") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
+        };
+        let committed_event_types = match string_list(params, "committedEventTypes") {
+            Ok(value) => value,
+            Err(message) => return error_response(id, &message),
+        };
+        match session.probe_novelty(&committed_action_kinds, &committed_event_types) {
+            Ok(step) => ok_response(id, novelty_step_value(&step)),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -366,6 +386,45 @@ fn observation_value(observation: &crate::game::SeatObservation) -> Value {
     })
 }
 
+fn string_list(params: &Value, key: &str) -> Result<Vec<String>, String> {
+    let Some(value) = params.get(key) else {
+        return Err(format!("probeNovelty requires {key}"));
+    };
+    let Some(items) = value.as_array() else {
+        return Err(format!("probeNovelty {key} must be an array of strings"));
+    };
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("probeNovelty {key} must be an array of strings"))
+        })
+        .collect()
+}
+
+fn novelty_step_value(step: &NoveltyStep) -> Value {
+    json!({
+        "probes": step
+            .probes()
+            .iter()
+            .map(|probe| {
+                json!({
+                    "actionId": probe.action_id(),
+                    "actionKind": probe.action_kind(),
+                    "eventTypes": probe.event_types(),
+                    "newActionKind": probe.new_action_kind(),
+                    "newEventCount": probe.new_event_count(),
+                    "postStateHash": probe.post_state_hash(),
+                    "selectedByFallback": probe.selected_by_fallback(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "selectedIndex": step.selected_index(),
+        "tooWide": step.too_wide(),
+    })
+}
+
 fn parse_seat_param(params: &Value, id: u64) -> Result<Seat, ()> {
     let _ = id;
     match params.get("seat").and_then(Value::as_str) {
@@ -482,6 +541,47 @@ mod tests {
         assert_eq!(action["descriptor"]["atlasOrder"], json!([]));
         assert_eq!(action["descriptor"]["spellbookOrder"], json!([]));
         assert_eq!(action["seat"], "north");
+    }
+
+    #[test]
+    fn service_should_probe_one_step_novelty() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let selected = service.handle(&rpc(2, "selectPolicyAction", json!({})));
+        let action = selected.result.expect("selected action")["action"].clone();
+        let probed = service.handle(&rpc(
+            3,
+            "probeNovelty",
+            json!({
+                "committedActionKinds": [],
+                "committedEventTypes": [],
+            }),
+        ));
+        let result = probed.result.expect("novelty result");
+        let probes = result["probes"].as_array().expect("probes");
+        assert!(!probes.is_empty());
+        assert_eq!(result["tooWide"], false);
+        let selected_index = result["selectedIndex"].as_u64().expect("selectedIndex") as usize;
+        assert!(selected_index < probes.len());
+        assert_eq!(
+            probes
+                .iter()
+                .filter(|probe| probe["selectedByFallback"] == true)
+                .count(),
+            1
+        );
+        assert!(
+            probes
+                .iter()
+                .any(|probe| probe["actionId"] == action["actionId"]
+                    && probe["selectedByFallback"] == true)
+        );
     }
 
     #[test]

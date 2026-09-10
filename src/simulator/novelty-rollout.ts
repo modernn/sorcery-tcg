@@ -14,6 +14,7 @@ import {
   type GameStepResult,
   type GameTerminal,
 } from '../engine/game.ts';
+import type { RustNoveltyStep } from '../engine/rust-engine.ts';
 import {
   withRustSession,
   type RustGameSessionHandle,
@@ -24,7 +25,6 @@ export const NOVELTY_ROLLOUT_WIDTH_LIMIT = 128;
 
 type ActionKind = GameLegalAction['descriptor']['kind'];
 type FinishedTerminal = Extract<GameTerminal, { status: 'finished' }>;
-type AcceptedStep = Extract<GameStepResult, { accepted: true }>;
 
 export type NoveltyPosition = Readonly<{
   decisionIndex: number;
@@ -131,7 +131,7 @@ type Probe = Readonly<{
   index: number;
   newActionKind: boolean;
   newEventCount: number;
-  result: AcceptedStep;
+  postStateHash: StateHash;
   selectedByFallback: boolean;
 }>;
 
@@ -168,19 +168,6 @@ function sameReplay(left: GameSession, right: GameSession): boolean {
   } as unknown as JsonValue);
 }
 
-function preferredProbe(left: Probe, right: Probe): Probe {
-  if (left.newEventCount !== right.newEventCount) {
-    return left.newEventCount > right.newEventCount ? left : right;
-  }
-  if (left.newActionKind !== right.newActionKind) {
-    return left.newActionKind ? left : right;
-  }
-  if (left.selectedByFallback !== right.selectedByFallback) {
-    return left.selectedByFallback ? left : right;
-  }
-  return left.index < right.index ? left : right;
-}
-
 function preferredFrontier(left: RankedFrontier, right: RankedFrontier): RankedFrontier {
   if (left.newEventCount !== right.newEventCount) {
     return left.newEventCount > right.newEventCount ? left : right;
@@ -208,13 +195,25 @@ function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-async function probeStep(
-  probe: RustGameSessionHandle,
-  session: GameSession,
-  action: GameLegalAction,
-): Promise<GameStepResult> {
-  await probe.resume(createGameCheckpoint(session) as unknown as JsonValue);
-  return probe.stepAction(action);
+function bindProbes(
+  actions: readonly GameLegalAction[],
+  step: RustNoveltyStep,
+): Probe[] | undefined {
+  const probes: Probe[] = [];
+  for (const rustProbe of step.probes) {
+    const action = actions.find(({ actionId }) => actionId === rustProbe.actionId);
+    if (!action) return undefined;
+    probes.push({
+      action,
+      eventTypes: rustProbe.eventTypes,
+      index: actions.indexOf(action),
+      newActionKind: rustProbe.newActionKind,
+      newEventCount: rustProbe.newEventCount,
+      postStateHash: rustProbe.postStateHash,
+      selectedByFallback: rustProbe.selectedByFallback,
+    });
+  }
+  return probes;
 }
 
 export async function runNoveltyRollout(
@@ -357,83 +356,36 @@ export async function runNoveltyRollout(
           }
 
           let selected: Probe;
-          if (actions.length > NOVELTY_ROLLOUT_WIDTH_LIMIT) {
-            tooWide.push(currentPosition);
-            let fallback: GameLegalAction;
-            try {
-              const suggested = await live.selectPolicyAction();
-              fallback = actions.find(({ actionId }) => actionId === suggested.actionId)!;
-              if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
-            } catch {
-              return fail({ kind: 'exception', phase: 'selector' });
-            }
-            let result: GameStepResult;
-            try {
-              result = await probeStep(probe, session, fallback);
-            } catch {
-              return fail({ actionId: fallback.actionId, kind: 'exception', phase: 'fallback' });
-            }
-            if (!result.accepted) {
+          let probes: Probe[];
+          try {
+            const step = await live.probeNovelty({
+              committedActionKinds: [...committedActionKinds.keys()],
+              committedEventTypes: [...committedEventTypes.keys()],
+            });
+            const bound = bindProbes(actions, step);
+            const winner = bound?.[step.selectedIndex];
+            if (!bound || !winner) {
               return fail({
-                actionId: fallback.actionId,
-                code: result.reason.code,
-                kind: 'engine-rejection',
-                phase: 'fallback',
+                kind: 'exception',
+                phase: actions.length > NOVELTY_ROLLOUT_WIDTH_LIMIT ? 'selector' : 'probe',
               });
             }
-            selected = {
-              action: fallback,
-              eventTypes: [...new Set(result.receipt.events.map(({ type }) => type))].sort(),
-              index: actions.indexOf(fallback),
-              newActionKind: !committedActionKinds.has(actionKind(fallback)),
-              newEventCount: result.receipt.events.filter(({ type }, index, events) =>
-                events.findIndex((event) => event.type === type) === index
-                  && !committedEventTypes.has(type)).length,
-              result,
-              selectedByFallback: true,
-            };
-          } else {
-            let fallbackActionId: string;
-            try {
-              const suggested = await live.selectPolicyAction();
-              const fallback = actions.find(({ actionId }) => actionId === suggested.actionId);
-              if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
-              fallbackActionId = fallback.actionId;
-            } catch {
-              return fail({ kind: 'exception', phase: 'selector' });
-            }
+            probes = bound;
+            selected = winner;
+            if (step.tooWide) tooWide.push(currentPosition);
+          } catch {
+            return fail({
+              kind: 'exception',
+              phase: actions.length > NOVELTY_ROLLOUT_WIDTH_LIMIT ? 'selector' : 'probe',
+            });
+          }
 
-            const probes: Probe[] = [];
-            for (const [index, candidate] of actions.entries()) {
-              let result: GameStepResult;
-              try {
-                result = await probeStep(probe, session, candidate);
-              } catch {
-                return fail({ actionId: candidate.actionId, kind: 'exception', phase: 'probe' });
-              }
-              if (!result.accepted) {
-                return fail({
-                  actionId: candidate.actionId,
-                  code: result.reason.code,
-                  kind: 'engine-rejection',
-                  phase: 'probe',
-                });
-              }
-              const eventTypes = [...new Set(result.receipt.events.map(({ type }) => type))].sort();
-              probedActionKinds.add(actionKind(candidate));
-              eventTypes.forEach((type) => probedEventTypes.add(type));
-              probes.push({
-                action: candidate,
-                eventTypes,
-                index,
-                newActionKind: !committedActionKinds.has(actionKind(candidate)),
-                newEventCount: eventTypes.filter((type) => !committedEventTypes.has(type)).length,
-                result,
-                selectedByFallback: candidate.actionId === fallbackActionId,
-              });
-            }
-            selected = probes.reduce(preferredProbe);
+          for (const probeResult of probes) {
+            probedActionKinds.add(actionKind(probeResult.action));
+            probeResult.eventTypes.forEach((type) => probedEventTypes.add(type));
+          }
 
+          if (probes.length > 1) {
             const committedAfterAction = new Set(committedActionKinds.keys());
             committedAfterAction.add(actionKind(selected.action));
             const committedAfterEvents = new Set(committedEventTypes.keys());
@@ -457,7 +409,7 @@ export async function runNoveltyRollout(
                     actionKind: actionKind(probeResult.action),
                     checkpointId: captured.checkpointId,
                     predictedEventTypes: probeResult.eventTypes,
-                    predictedStateHash: hashGameState(probeResult.result.session.state),
+                    predictedStateHash: probeResult.postStateHash,
                     signal,
                   }),
                   decisionIndex: acceptedActionCount,
@@ -473,15 +425,15 @@ export async function runNoveltyRollout(
             }
           }
 
-          probedActionKinds.add(actionKind(selected.action));
-          selected.eventTypes.forEach((type) => probedEventTypes.add(type));
-
           let replayResult: GameStepResult;
+          let committedSession: GameSession;
           try {
             const committed = await live.stepAction(selected.action);
-            if (!committed.accepted || !sameReplay(selected.result.session, committed.session)) {
+            if (!committed.accepted
+              || hashGameState(committed.session.state) !== selected.postStateHash) {
               return fail({ kind: 'replay-mismatch' });
             }
+            committedSession = committed.session;
             replayResult = await replay.step({
               actionId: selected.action.actionId,
               seat: replay.snapshot.state.decisionSeat,
@@ -490,7 +442,7 @@ export async function runNoveltyRollout(
           } catch {
             return fail({ kind: 'replay-mismatch' });
           }
-          if (!replayResult.accepted || !sameReplay(selected.result.session, replayResult.session)) {
+          if (!replayResult.accepted || !sameReplay(committedSession, replayResult.session)) {
             return fail({ kind: 'replay-mismatch' });
           }
 
