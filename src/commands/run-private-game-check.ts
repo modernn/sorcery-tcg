@@ -4626,6 +4626,7 @@ function gameDefinition(
   atEndOfControllerTurnControllerLosesLife: 0 | 2 = 0,
   doesNotUntapDuringControllersStartPhase = false,
   affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities = false,
+  atEndOfControllerTurnUntapNearbyAllies = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4659,7 +4660,8 @@ function gameDefinition(
       + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath)
       + Number(atEndOfEachTurnSiteControllerLosesLife !== 0)
       + Number(atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== 0)
-      + Number(bearerControllerChoosesExtraRandomOutcome) === 1) {
+      + Number(bearerControllerChoosesExtraRandomOutcome)
+      + Number(atEndOfControllerTurnUntapNearbyAllies) === 1) {
     return {
       cardType: 'artifact',
       ...(grantsBearerPower === 2
@@ -4681,6 +4683,8 @@ function gameDefinition(
                   ? { bearerControllerChoosesExtraRandomOutcome: true as const }
                   : atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== 0
                     ? { atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn }
+                    : atEndOfControllerTurnUntapNearbyAllies
+                      ? { atEndOfControllerTurnUntapNearbyAllies: true as const }
                   : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,

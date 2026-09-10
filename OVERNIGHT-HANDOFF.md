@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/rust-cutover-setup-tests-0005` (PR https://github.com/modernn/sorcery-tcg/pull/2).
+Live line: `cursor/belfry-nearby-untap-0005`. Stack this on the frozen cutover PR (`cursor/rust-cutover-setup-tests-0005`, https://github.com/modernn/sorcery-tcg/pull/2). Do not add more slices to PR #2.
 
-Do not start from `master`'s copy of this file. That copy still says to migrate `game-setup.test.ts` and gut `game.ts`; that work is already on this branch. Do not open a second cutover branch.
+Do not start from `master`'s copy of this file. That copy still says to migrate `game-setup.test.ts` and gut `game.ts`; that work is already on the cutover branch. Do not open a second cutover branch.
 
 `cursor/phase3-drown-bury-artifacts-36d3` was identical to `master` with PR #1 closed. It is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`).
 
@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **311 rust-supported / 0 typescript-supported** out of 311.
+`data/rules/catalog.json`: **313 rust-supported / 0 typescript-supported** out of 313.
 
-Latest catalog proofs: official Atlantean Fate (`RULE-CATALOG-0310`–`0311`). Fate is not Flood. Affected non-Ordinary sites become Water sites, provide only Water threshold, and lose printed abilities. Ordinary sites under the same 2×2 stay printed. Genesis submerges minions atop affected sites; a minion without Submerge dies through region settlement.
+Latest catalog proofs: official Belfry (`RULE-CATALOG-0312`–`0313`). At the end of your turn, untap all nearby allies, including the Avatar. The trigger does not fire at the end of the opponent's turn.
+Atlantean Fate remains `RULE-CATALOG-0310`–`0311`.
 Start Phase doesn't-untap remains `RULE-CATALOG-0308`–`0309`.
 End-of-controller-turn Avatar life remains `RULE-CATALOG-0304`–`0307`.
 Deathrite library mill remains `RULE-CATALOG-0300`–`0303`.
@@ -68,14 +69,14 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `fac0fda`.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — RULE-06, Flood, and Fate playthroughs plus the catalog linker pass, including catalog 0167–0311.
-- Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover. Rebuild `session-json` after engine fact changes.
+- Belfry playthrough (`RULE-04 Belfry untaps nearby allies at the end of your turn`) and the catalog linker — green.
+- Remaining `pnpm test` engine and ingestion files — green. Full `pnpm verify` still fails authority-collector / some DATA-01 bundle cases (`pwsh` missing, no private authority bundle). Those are environment gaps, not this family.
+- PR #2 stays frozen. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices that are still unbound. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not break Ignited or end-turn Auras. Atlantean Fate is bound — do not conflate it with Flood. Do not invent MTG keywords.
+1. Keep new official-rules work on new `cursor/<one-family>-0005` branches. Do not grow PR #2. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Belfry is bound — do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
