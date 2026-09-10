@@ -22760,7 +22760,7 @@ test('RULE-04 must-attack-a-unit-if-able is mandatory in range and optional out 
 
   await withSetup(inRangeManifest, async (ctx) => {
     await reachAfterSummon(ctx, 'C4');
-    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.phase === 'main', true);
     const sourceId = ctx.state.realm.units.find(({ cardId }) =>
       cardId === 'must-north-source')?.instanceId;
     const targetId = ctx.state.realm.units.find(({ cardId }) =>
@@ -22780,7 +22780,7 @@ test('RULE-04 must-attack-a-unit-if-able is mandatory in range and optional out 
     while (ctx.state.phase === 'movement') {
       await ctx.take(({ descriptor }) => descriptor.kind === 'continue-basic-movement');
     }
-    assert.equal(ctx.state.phase, 'attack');
+    assert.equal(ctx.state.phase === 'attack', true);
     const attacks = await ctx.legalActions('north');
     assert.equal(attacks.some(({ descriptor }) => descriptor.kind === 'decline-attack'), false);
     assert.equal(attacks.filter(({ descriptor }) => descriptor.kind === 'declare-attack').length, 1);
@@ -22793,7 +22793,7 @@ test('RULE-04 must-attack-a-unit-if-able is mandatory in range and optional out 
     if (ctx.state.phase === 'intercept') {
       await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
     }
-    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.phase === 'main', true);
     assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === sourceId), true);
     assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === targetId), false);
     assert.equal(await ctx.verifyReplay(), true);
