@@ -15,7 +15,7 @@ const MAX_OUTPUT_BYTES = 1_048_576;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const DEFAULT_TARGET_DIR = fileURLToPath(new URL('../../target', import.meta.url));
 
-function sessionJsonLaunch(): Readonly<{ args: readonly string[]; command: string }> {
+export function sessionJsonLaunch(): Readonly<{ args: readonly string[]; command: string }> {
   const targetDir = process.env.CARGO_TARGET_DIR ?? DEFAULT_TARGET_DIR;
   const binaryName = process.platform === 'win32' ? 'session-json.exe' : 'session-json';
   const binary = join(targetDir, 'release', binaryName);

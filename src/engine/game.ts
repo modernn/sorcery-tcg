@@ -19,6 +19,13 @@ import {
   type StateHash,
 } from './contract.ts';
 import { createEngineState, drawUint32, type EngineState } from './determinism.ts';
+import {
+  createRustGameSession,
+  rustLegalGameActions,
+  rustReplayGame,
+  rustStepGame,
+  rustVerifyGameReplay,
+} from './rust-legality-sync.ts';
 
 const UINT32_RANGE = 0x1_0000_0000;
 const MAX_DECK_CARDS = 200;
@@ -3549,30 +3556,7 @@ function createPlayer(
 
 export function createGameSession(manifest: GameManifest): GameSession {
   assertCanonicalGameManifest(manifest);
-  const initialEngine = createEngineState(manifest.seed);
-  const north = createPlayer(manifest, 'north', initialEngine);
-  const south = createPlayer(manifest, 'south', north.engine);
-  const state: GameState = deepFreeze({
-    activeSeat: 'north',
-    cards: manifest.cards,
-    decisionSeat: 'north',
-    engine: south.engine,
-    pendingCombat: null,
-    phase: 'mulligan',
-    players: { north: north.player, south: south.player },
-    realm: { sites: {}, units: [] },
-    schemaVersion: 1,
-    stateVersion: 0,
-    terminal: { status: 'active' },
-    turnNumber: 0,
-  });
-  return deepFreeze({
-    attempts: [],
-    initialRandomDraws: [...north.randomDraws, ...south.randomDraws],
-    manifest,
-    state,
-    transcript: [],
-  });
+  return createRustGameSession(manifest);
 }
 
 export function hashGameState(state: GameState): StateHash {
@@ -5750,22 +5734,8 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   return 'End turn';
 }
 
-const legalActionCache = new WeakMap<GameState, Map<GameSeat, readonly GameLegalAction[]>>();
-
 export function legalGameActions(state: GameState, seat: GameSeat): readonly GameLegalAction[] {
-  const cached = legalActionCache.get(state)?.get(seat);
-  if (cached) return cached;
-  const actions = orderLegalActions(actionDescriptors(state, seat).map((descriptor) => ({
-    actionId: opaqueActionId('sorcery-core-v1', seat, state.stateVersion, descriptor),
-    descriptor,
-    label: actionLabel(state, descriptor),
-    seat,
-    stateVersion: state.stateVersion,
-  })));
-  const bySeat = legalActionCache.get(state) ?? new Map();
-  bySeat.set(seat, actions);
-  legalActionCache.set(state, bySeat);
-  return actions;
+  return rustLegalGameActions(state, seat);
 }
 
 function withStateVersion(state: GameState, changes: Partial<GameState>): GameState {
@@ -13387,153 +13357,13 @@ function applyDescriptor(
 }
 
 export function stepGame(session: GameSession, request: GameActionRequest): GameStepResult {
-  const state = session.state;
-  const command: GameActionRequest = deepFreeze({
-    actionId: request.actionId,
-    seat: request.seat,
-    stateVersion: request.stateVersion,
-  });
-  const stateHash = hashGameState(state);
-  const reject = (code: EngineRejection['code']): GameStepResult => {
-    const reason = createRejection(code, state.stateVersion, stateHash);
-    const attempt = createAttempt(
-      session.attempts.length + 1,
-      command,
-      state.stateVersion,
-      stateHash,
-      { reasonCode: code },
-    );
-    return deepFreeze({
-      accepted: false,
-      reason,
-      session: { ...session, attempts: [...session.attempts, attempt] },
-    });
-  };
-
-  if (state.terminal.status === 'finished') return reject('terminal_state');
-  if (command.stateVersion !== state.stateVersion) return reject('stale_version');
-  if (command.seat !== state.decisionSeat) return reject('wrong_seat');
-  const action = legalGameActions(state, command.seat).find(({ actionId }) => actionId === command.actionId);
-  if (!action) return reject('unknown_action');
-
-  const receiptSequence = session.transcript.length + 1;
-  const firstEventSequence = session.transcript.reduce((count, receipt) => count + receipt.events.length, 0) + 1;
-  const [appliedState, appliedOutcomes, randomDraws] = applyDescriptor(
-    state,
-    action.descriptor,
-    session.manifest,
-  );
-  const stealthSettlement = settleNearbyEnemyStealth(appliedState);
-  const powerSettlement = stealthSettlement.state.pendingDeathrites
-    ? { outcomes: [] as readonly GameOutcome[], state: stealthSettlement.state }
-    : settleStaticPowerDeaths(stealthSettlement.state);
-  const settlementOutcomes = [...stealthSettlement.outcomes, ...powerSettlement.outcomes];
-  const completionIndex = appliedOutcomes.findIndex(({ type }) =>
-    type === 'game-ended' || type === 'magic-resolved' || type === 'turn-ended');
-  const settlementEndIndex = settlementOutcomes.findIndex(({ type }) =>
-    type === 'game-ended');
-  const settlementBeforeCompletion = settlementEndIndex < 0
-    ? settlementOutcomes
-    : settlementOutcomes.slice(0, settlementEndIndex);
-  const settlementAfterCompletion = settlementEndIndex < 0
-    ? []
-    : settlementOutcomes.slice(settlementEndIndex);
-  const orderedOutcomes = settlementOutcomes.length === 0
-    ? appliedOutcomes
-    : completionIndex < 0
-      ? [...appliedOutcomes, ...settlementOutcomes]
-      : [
-        ...appliedOutcomes.slice(0, completionIndex),
-        ...settlementBeforeCompletion,
-        ...appliedOutcomes.slice(completionIndex),
-        ...settlementAfterCompletion,
-      ];
-  const deferredIndex = powerSettlement.state.pendingDeathrites
-    ? orderedOutcomes.findIndex(({ type }) => type === 'magic-resolved' || type === 'turn-ended')
-    : -1;
-  const completionState = deferredIndex < 0
-    ? powerSettlement.state
-    : deepFreeze({
-      ...powerSettlement.state,
-      pendingDeathrites: {
-        ...powerSettlement.state.pendingDeathrites!,
-        deferredOutcomes: [
-          ...(powerSettlement.state.pendingDeathrites!.deferredOutcomes ?? []),
-          orderedOutcomes[deferredIndex]!,
-        ],
-      },
-    });
-  const outcomes = deferredIndex < 0
-    ? orderedOutcomes
-    : orderedOutcomes.filter((_, index) => index !== deferredIndex);
-  const rangedState = state.phase !== 'movement'
-    && action.descriptor.kind === 'shoot-projectile' && action.descriptor.hit
-    ? queueRangedStep(completionState, action.descriptor.shooterInstanceId)
-    : completionState;
-  const nextState = exposeDeathriteOrder(rangedState);
-  const events: readonly EngineEvent[] = createEvents(
-    command.actionId,
-    receiptSequence,
-    firstEventSequence,
-    outcomes,
-  );
-  const receipt = createReceipt({
-    actionId: command.actionId,
-    events,
-    nextStateVersion: nextState.stateVersion,
-    postStateHash: hashGameState(nextState),
-    preStateHash: stateHash,
-    randomDraws,
-    receiptSequence,
-    seat: command.seat,
-    stateVersion: state.stateVersion,
-  });
-  const attempt = createAttempt(
-    session.attempts.length + 1,
-    command,
-    state.stateVersion,
-    stateHash,
-    { receiptId: receipt.receiptId },
-  );
-  return deepFreeze({
-    accepted: true,
-    receipt,
-    session: {
-      ...session,
-      attempts: [...session.attempts, attempt],
-      state: nextState,
-      transcript: [...session.transcript, receipt],
-    },
-  });
+  return rustStepGame(session, request);
 }
 
 export function replayGame(manifest: GameManifest, actionIds: readonly string[]): GameSession {
-  let session = createGameSession(manifest);
-  for (const actionId of actionIds) {
-    const result = stepGame(session, {
-      actionId,
-      seat: session.state.decisionSeat,
-      stateVersion: session.state.stateVersion,
-    });
-    if (!result.accepted) throw new Error(`game replay rejected action: ${result.reason.code}`);
-    session = result.session;
-  }
-  return session;
+  return rustReplayGame(manifest, actionIds);
 }
 
 export function verifyGameReplay(expected: GameSession): boolean {
-  try {
-    const replayed = replayGame(expected.manifest, expected.transcript.map(({ actionId }) => actionId));
-    return canonicalJson({
-      initialRandomDraws: replayed.initialRandomDraws,
-      state: replayed.state,
-      transcript: replayed.transcript,
-    }) === canonicalJson({
-      initialRandomDraws: expected.initialRandomDraws,
-      state: expected.state,
-      transcript: expected.transcript,
-    });
-  } catch {
-    return false;
-  }
+  return rustVerifyGameReplay(expected);
 }
