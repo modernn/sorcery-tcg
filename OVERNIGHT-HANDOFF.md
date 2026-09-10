@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **259 rust-supported / 0 typescript-supported** out of 259.
+`data/rules/catalog.json`: **261 rust-supported / 0 typescript-supported** out of 261.
 
-Latest catalog proofs: start-of-controller-turn occupied-site Aura destruction (`RULE-CATALOG-0258`–`0259`).
+Latest catalog proofs: start-of-controller-turn controller life loss (`RULE-CATALOG-0260`–`0261`).
+Start-of-controller-turn occupied-site Aura destruction remains `RULE-CATALOG-0258`–`0259`.
 Start-of-controller-turn nearby enemy lure remains `RULE-CATALOG-0256`–`0257`.
 Nearby double damage on Ranged and Genesis strikes remains `RULE-CATALOG-0252`–`0255`.
 Mask of Mayhem walk-away and nearby combat double damage remain `RULE-CATALOG-0249`–`0251`.
@@ -57,7 +58,7 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 241 engine + 1 catalog pass, including catalog 0167–0259.
+- `tests/engine` + catalog proofs — 242 engine + 1 catalog pass, including catalog 0167–0261.
 - Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step

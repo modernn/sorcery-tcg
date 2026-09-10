@@ -4598,6 +4598,7 @@ function gameDefinition(
   minionsHereGainVoidwalkUntilLeavingVoid = false,
   atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf = false,
   uniqueOrLegendary = false,
+  atStartOfControllerTurnControllerLosesLife: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4802,6 +4803,9 @@ function gameDefinition(
     && (card.manaCost !== null || token)) {
     return {
       airborne,
+      ...(atStartOfControllerTurnControllerLosesLife
+        ? { atStartOfControllerTurnControllerLosesLife }
+        : {}),
       ...(atStartOfControllerTurnTeleportToRandomSiteOrVoid
         ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }
         : {}),

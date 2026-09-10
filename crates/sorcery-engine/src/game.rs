@@ -1421,6 +1421,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_start_of_controller_turn_controller_loses_life: _,
         at_start_of_controller_turn_draw_sites: _,
         at_start_of_controller_turn_draw_spells: _,
         at_start_of_controller_turn_lure_nearby_enemy_minion: _,
@@ -14736,6 +14737,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        let life_loss = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_controller_loses_life
+        };
+        if let Some(amount) = life_loss {
+            self.apply_avatar_life_loss(
+                action.seat,
+                u16::from(amount),
+                source_instance_id,
+                outcomes,
+            );
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let unit_snapshot = self
             .position
             .units
@@ -14952,7 +14975,10 @@ impl Game {
         else {
             return None;
         };
-        (facts.at_start_of_controller_turn_teleport_to_random_site_or_void
+        (facts
+            .at_start_of_controller_turn_controller_loses_life
+            .is_some()
+            || facts.at_start_of_controller_turn_teleport_to_random_site_or_void
             || facts.at_start_of_controller_turn_lure_nearby_enemy_minion
             || facts.at_start_of_controller_turn_draw_sites.is_some()
             || facts.at_start_of_controller_turn_draw_spells.is_some())

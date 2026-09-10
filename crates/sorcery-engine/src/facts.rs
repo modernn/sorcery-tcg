@@ -304,6 +304,7 @@ pub enum DamagePrevention {
 pub struct MinionFacts {
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
+    pub at_start_of_controller_turn_controller_loses_life: Option<u8>,
     pub at_start_of_controller_turn_draw_sites: Option<u8>,
     pub at_start_of_controller_turn_draw_spells: Option<u8>,
     pub at_start_of_controller_turn_lure_nearby_enemy_minion: bool,
@@ -766,6 +767,7 @@ const MAGIC_FIELDS: &[&str] = &[
 
 const MINION_FIELDS: &[&str] = &[
     "airborne",
+    "atStartOfControllerTurnControllerLosesLife",
     "atStartOfControllerTurnDrawSites",
     "atStartOfControllerTurnDrawSpells",
     "atStartOfControllerTurnLureNearbyEnemyMinion",
@@ -1524,6 +1526,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     reject_unknown(object, MINION_FIELDS, path)?;
     let airborne = optional_bool(object, "airborne", path)?;
     let alternative_summon_payment = parse_alternative_summon_payment(object, path)?;
+    let at_start_of_controller_turn_controller_loses_life = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnControllerLosesLife",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_draw_sites = optional_bounded_integer(
         object,
         "atStartOfControllerTurnDrawSites",
@@ -1621,10 +1631,12 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "oversized start-turn random teleport is unsupported",
         ));
     }
-    let start_turn_trigger_count = usize::from(at_start_of_controller_turn_draw_sites.is_some())
-        + usize::from(at_start_of_controller_turn_draw_spells.is_some())
-        + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
-        + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
+    let start_turn_trigger_count =
+        usize::from(at_start_of_controller_turn_controller_loses_life.is_some())
+            + usize::from(at_start_of_controller_turn_draw_sites.is_some())
+            + usize::from(at_start_of_controller_turn_draw_spells.is_some())
+            + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
+            + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
     if start_turn_trigger_count > 1 {
         return Err(FactError::new(
             path,
@@ -1666,6 +1678,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     Ok(MinionFacts {
         airborne,
         alternative_summon_payment,
+        at_start_of_controller_turn_controller_loses_life,
         at_start_of_controller_turn_draw_sites,
         at_start_of_controller_turn_draw_spells,
         at_start_of_controller_turn_lure_nearby_enemy_minion,

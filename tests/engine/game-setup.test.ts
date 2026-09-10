@@ -24113,6 +24113,96 @@ test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and i
   });
 });
 
+test('RULE-04 start-turn controller life loss reduces the Avatar and can open Death\'s Door', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cardsFor = (life: number): Record<string, GameCardDefinition> => ({
+    'ifrit-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life,
+    },
+    'ifrit-north-site': { cardType: 'site', elements: ['earth'] },
+    'ifrit-north-source': {
+      airborne: true,
+      atStartOfControllerTurnControllerLosesLife: 2,
+      attack: 4,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      thresholds,
+    },
+    'ifrit-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ifrit-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'ifrit-south-site': { cardType: 'site', elements: ['earth'] },
+  });
+  const afterSourceSummoned = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ifrit-north-source'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ifrit-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  const run = async (life: number, expectLife: number, deathsDoor: boolean) => {
+    const gameManifest = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-start-turn-life-loss-v1',
+      },
+      cards: cardsFor(life),
+      decks: {
+        north: {
+          atlas: Array(6).fill('ifrit-north-site'),
+          avatar: 'ifrit-north-avatar',
+          spellbook: Array(6).fill('ifrit-north-source'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('ifrit-south-site'),
+          avatar: 'ifrit-south-avatar',
+          spellbook: Array(6).fill('ifrit-south-minion'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    });
+    await withSetup(gameManifest, async (ctx) => {
+      await afterSourceSummoned(ctx);
+      assert.equal(ctx.state.phase === 'start-turn', true);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.players.north.avatar.life, expectLife);
+      assert.equal(ctx.state.players.north.avatar.deathDoorTurn == null, !deathsDoor);
+      assert.equal(ctx.state.terminal.status, 'active');
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(20, 18, false);
+  await run(2, 0, true);
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

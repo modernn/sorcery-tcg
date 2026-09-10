@@ -786,6 +786,15 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "competing start-turn",
         ),
         (
+            "competing start-turn life loss",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnControllerLosesLife",
+                json!(2),
+            ),
+            "competing start-turn",
+        ),
+        (
             "start-turn lure flag",
             with(
                 minion(),
@@ -869,6 +878,21 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.at_start_of_controller_turn_lure_nearby_enemy_minion);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-life-loss",
+        &with(
+            minion(),
+            "atStartOfControllerTurnControllerLosesLife",
+            json!(2),
+        ),
+    )
+    .expect("valid start-turn life-loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_loses_life,
+        Some(2)
+    );
     let CardFacts::Minion(facts) = parse_card_definition(
         "must-attack",
         &with(minion(), "mustAttackAUnitIfAble", json!(true)),

@@ -5556,6 +5556,51 @@
         "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
         "testName": "rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0260",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn life-loss ability makes the controller lose the printed amount of life, then the Start Phase continues to the Draw step. The ability is mandatory and does not tap the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_loss_rules.rs",
+        "testName": "rule_catalog_0260_start_turn_life_loss_reduces_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0261",
+      "requirementIds": [
+        "RULE-01",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn life loss can reduce the controller to 0 life and open Death's Door without immediately ending the game. The Start Phase still continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_loss_rules.rs",
+        "testName": "rule_catalog_0261_start_turn_life_loss_can_open_deaths_door"
+      }
     }
   ]
 }
