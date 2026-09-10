@@ -15930,14 +15930,15 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       firstSeat: 'north',
       seed,
     });
+    const oversizedScarabsDefinition = oversizedScarabs.cards[scarabCardIds[0]!];
     assert.equal(
-      oversizedScarabs.cards[scarabCardIds[0]!]?.cardType === 'minion'
-        && oversizedScarabs.cards[scarabCardIds[0]!].occupiesSquareArea,
+      oversizedScarabsDefinition?.cardType === 'minion'
+        && oversizedScarabsDefinition.occupiesSquareArea,
       2,
     );
     assert.equal(
-      oversizedScarabs.cards[scarabCardIds[0]!]?.cardType === 'minion'
-        && oversizedScarabs.cards[scarabCardIds[0]!].summonToAnySite,
+      oversizedScarabsDefinition?.cardType === 'minion'
+        && oversizedScarabsDefinition.summonToAnySite,
       true,
     );
     const threeDamageManifest = createGameManifest({

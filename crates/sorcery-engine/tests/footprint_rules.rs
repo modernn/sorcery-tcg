@@ -1036,8 +1036,7 @@ fn rule_catalog_0173_oversized_discard_here_damages_units_sharing_any_footprint_
         "the C4 Avatar is the sole other unit on the oversized footprint"
     );
     assert_eq!(
-        receipt.events[1].payload["sourceLocation"]["cell"],
-        "B3",
+        receipt.events[1].payload["sourceLocation"]["cell"], "B3",
         "the activation still records the canonical anchor"
     );
     assert_eq!(receipt.events[1].payload["targetInstanceId"], avatar_id);
@@ -1076,8 +1075,7 @@ fn rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_s
     let realm = &state(&session)["realm"];
     for cell in ["B3", "B4", "C3", "C4"] {
         assert_eq!(
-            realm["sites"][cell]["controller"],
-            "north",
+            realm["sites"][cell]["controller"], "north",
             "{cell} is a North site, so South needs summonToAnySite"
         );
     }
