@@ -6241,7 +6241,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "At the end of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse hits both seats, including a Surface Avatar on the same cell, and never hits the source. End-turn cleanup then proceeds so the opponent draws.",
+      "plainLanguage": "At the end of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse hits both seats, including a Surface Avatar on the same cell, and never hits the source. End Phase then removes leftover damage from survivors before the opponent draws.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atEndOfControllerTurnDamageEachOtherUnitHere"

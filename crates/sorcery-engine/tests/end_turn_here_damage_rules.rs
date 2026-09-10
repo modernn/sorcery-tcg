@@ -160,11 +160,6 @@ fn after_north_ready_to_end_second_turn(south_defense: u8) -> Session {
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "north-pulser"
-            && descriptor["cell"] == "C4"
-    });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -182,6 +177,11 @@ fn after_north_ready_to_end_second_turn(south_defense: u8) -> Session {
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
     });
     session
 }
@@ -222,8 +222,12 @@ fn rule_catalog_0290_end_turn_here_damage_hits_other_units_sharing_the_cell() {
     let pulser = unit(&after, "north-pulser");
     assert_eq!(pulser["instanceId"], source_id);
     assert_eq!(pulser["damage"], 0);
-    assert_eq!(unit(&after, "south-visitor")["damage"], 1);
+    // End Phase removes leftover damage from surviving units. The allocation
+    // events and Avatar life loss prove the visitor was hit; leftover damage
+    // would already have been cleared before this post-state is observed.
+    assert_eq!(unit(&after, "south-visitor")["damage"], 0);
     assert_eq!(unit(&after, "south-visitor")["instanceId"], visitor_id);
+    assert_eq!(unit(&after, "south-visitor")["region"], "surface");
     assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
     assert_eq!(after["players"]["south"]["avatar"]["life"], 20);
     assert_eq!(after["phase"], "draw");

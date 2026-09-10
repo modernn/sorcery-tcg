@@ -26259,10 +26259,6 @@ test('RULE-04 end-turn here-area damage hits other units here and can destroy a 
       await ctx.keep();
       await ctx.keep();
       await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-      await ctx.take(({ descriptor }) =>
-        descriptor.kind === 'summon-minion'
-          && descriptor.cardId === 'end-pulser-north-pulser'
-          && descriptor.cell === 'C4');
       await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
       await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
       await ctx.take(({ descriptor }) =>
@@ -26275,6 +26271,10 @@ test('RULE-04 end-turn here-area damage hits other units here and can destroy a 
           && descriptor.cell === 'C4');
       await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
       await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'end-pulser-north-pulser'
+          && descriptor.cell === 'C4');
       const sourceId = ctx.state.realm.units.find((unit) =>
         unit.cardId === 'end-pulser-north-pulser')?.instanceId;
       const visitorId = ctx.state.realm.units.find((unit) =>
@@ -26320,9 +26320,11 @@ test('RULE-04 end-turn here-area damage hits other units here and can destroy a 
         expectVisitorAlive,
       );
       if (expectVisitorAlive) {
+        // End Phase removes leftover damage from survivors. Allocations and
+        // Avatar life loss already prove the visitor was hit.
         assert.equal(
           ctx.state.realm.units.find((unit) => unit.instanceId === visitorId)?.damage,
-          1,
+          0,
         );
       } else {
         assert.equal(
