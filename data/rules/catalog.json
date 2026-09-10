@@ -4898,6 +4898,53 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0230_cemetery_magic_return_is_a_paid_noop_without_cemetery_magic"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0231",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Artifact return is the Rescue sibling for Artifacts: it offers only Artifacts in the caster's own cemetery, never a Magic card, minion, site, or an opponent's cemetery card, and returns the unchanged instance to the hidden Spellbook hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0231_cemetery_artifact_return_restores_own_cemetery_artifact_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0232",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Artifact return that finds no Artifact in the caster's own cemetery is a paid no-choice resolution, even when the cemetery holds Magic. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0232_cemetery_artifact_return_is_a_paid_noop_without_cemetery_artifact"
+      }
     }
   ]
 }

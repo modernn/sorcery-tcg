@@ -1256,6 +1256,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
+        | MagicEffect::ReturnTargetArtifactFromOwnCemetery
         | MagicEffect::ReturnTargetMagicFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyTargetArtifact
@@ -5276,6 +5277,8 @@ impl Game {
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Minion(_)))
             }
+            MagicEffect::ReturnTargetArtifactFromOwnCemetery => self
+                .own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Artifact(_))),
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Magic(_)))
             }
@@ -15030,6 +15033,18 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card_to_spellbook(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        |facts| matches!(facts, CardFacts::Artifact(_)),
+                        "artifact-returned-to-hand",
+                        outcomes,
+                    )?;
+                }
+            }
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
                     self.return_own_cemetery_card_to_spellbook(
@@ -19014,6 +19029,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetArtifactToOwnerHand,
                 json!({ "returnTargetArtifactToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetArtifactFromOwnCemetery,
+                json!({ "returnTargetArtifactFromOwnCemetery": true }),
             ),
             (
                 MagicEffect::ReturnTargetMagicFromOwnCemetery,

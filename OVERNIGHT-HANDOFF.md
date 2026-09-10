@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **230 rust-supported / 0 typescript-supported** out of 230.
+`data/rules/catalog.json`: **232 rust-supported / 0 typescript-supported** out of 232.
 
-Latest catalog proofs: cemetery Magic return (`RULE-CATALOG-0229`–`0230`).
+Latest catalog proofs: cemetery Artifact return (`RULE-CATALOG-0231`–`0232`).
+Cemetery Magic return remains `RULE-CATALOG-0229`–`0230`.
 Target-player mill Magic remains `RULE-CATALOG-0225`–`0228`.
 Grant-Stealth remains `RULE-CATALOG-0223`–`0224`.
 Grant-Ward remains `RULE-CATALOG-0221`–`0222`.
@@ -44,7 +45,7 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 226 engine + 1 catalog pass, including catalog 0167–0230.
+- `tests/engine` + catalog proofs — 227 engine + 1 catalog pass, including catalog 0167–0232.
 - Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step

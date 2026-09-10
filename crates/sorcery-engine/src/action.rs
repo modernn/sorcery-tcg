@@ -405,7 +405,7 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Authoritative Spellcaster instance identity.
         caster_instance_id: IdentityHash,
-        /// Exact own cemetery card selected by Rescue or cemetery Magic return.
+        /// Exact own cemetery card selected by Rescue or cemetery Magic/Artifact return.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
         /// Exact Atlas card in hand discarded as an additional cost.
