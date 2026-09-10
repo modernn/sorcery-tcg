@@ -17,13 +17,14 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 Done — do not redo:
 
 - Game-setup proofs run through `SetupCtx`. Checkpoints resume only through Rust.
-- `createGameSession` / `legalGameActions` / `stepGame` / `replayGame` / `verifyGameReplay` call a blocking `session-json` client (`src/engine/rust-legality-sync.ts`).
-- `actionDescriptors` / `applyDescriptor` and their helpers are deleted from `src/engine/game.ts`. That file keeps types, manifest validation, `observeGame`, and the thin Rust wrappers.
+- `createGameSession` / `legalGameActions` / `stepGame` / `replayGame` / `verifyGameReplay` / `observeGame` call a blocking `session-json` client (`src/engine/rust-legality-sync.ts`).
+- `actionDescriptors` / `applyDescriptor` and their observation helpers are deleted from `src/engine/game.ts`. That file keeps types, manifest validation, and the thin Rust wrappers.
+- Async `RustGameSessionHandle` snapshots bind their checkpoints so `SetupCtx.observe` / `observeGame` resume on the shared worker.
 - Private-check Chain Lightning extra-target mana uses a real 3-mana sibling (draw Atlas, do not play the fourth site). No constructed `GameSession` spreads remain.
 
-Still TypeScript (not a second legality engine):
+Still TypeScript (not a second legality or observation engine):
 
-- Manifest validation, observation, authority ingestion, server, and browser UI.
+- Manifest validation, authority ingestion, server, and browser UI.
 - `run-private-game-check.ts` still *calls* the sync wrappers; it cannot be executed in this cloud checkout (no `.local/authority/`).
 
 ## Gate status on this branch

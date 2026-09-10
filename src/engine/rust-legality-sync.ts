@@ -10,13 +10,14 @@ import type {
   GameActionRequest,
   GameLegalAction,
   GameManifest,
+  GameObservation,
   GameSeat,
   GameSession,
   GameState,
   GameStepResult,
 } from './game.ts';
 import { sessionJsonLaunch } from './rust-engine.ts';
-import { asGameLegalActions, parseExportedSession } from './rust-session-helpers.ts';
+import { asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const MAX_LINE_BYTES = 16 * 1024 * 1024;
@@ -170,10 +171,15 @@ function bindSession(session: GameSession, checkpoint: JsonValue): void {
   bindings.set(session.state, binding);
 }
 
+/** Binds one async-exported snapshot so observe/legal/step can resume it on the shared worker. */
+export function bindRustExportedSession(session: GameSession, checkpoint: JsonValue): void {
+  bindSession(session, checkpoint);
+}
+
 function bindingFor(state: GameState): SessionBinding {
   const binding = bindings.get(state);
   if (!binding) {
-    throw new Error('legal actions require a Rust-exported session state');
+    throw new Error('Rust-exported session state is required');
   }
   return binding;
 }
@@ -216,6 +222,17 @@ export function rustLegalGameActions(state: GameState, seat: GameSeat): readonly
     throw new Error('Rust session legalActions result was invalid');
   }
   return asGameLegalActions(result.actions as Parameters<typeof asGameLegalActions>[0]);
+}
+
+/** Returns the Rust public view for one seat of a Rust-exported state. */
+export function rustObserveGame(state: GameState, viewer: GameSeat): GameObservation {
+  const binding = bindingFor(state);
+  resumeBinding(binding);
+  const result = processClient().call('publicView', { seat: viewer });
+  if (!isRecord(result) || result.view === undefined) {
+    throw new Error('Rust session publicView result was invalid');
+  }
+  return deepFreeze(result.view) as GameObservation;
 }
 
 /** Applies one bound action through the Rust legality engine. */

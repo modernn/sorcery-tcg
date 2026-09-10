@@ -9,7 +9,11 @@ import type {
   GameSession,
   GameStepResult,
 } from './game.ts';
-import { RustSessionClient, type RustLegalAction, type Sha256Hash } from './rust-engine.ts';
+import { RustSessionClient, type Sha256Hash } from './rust-engine.ts';
+import { bindRustExportedSession } from './rust-legality-sync.ts';
+import { asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
+
+export { asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
 
 export const RUST_LEGALITY_SOURCE = 'rust-legality-engine';
 
@@ -17,27 +21,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Parses one Rust `exportSession` payload into a typed session snapshot. */
-export function parseExportedSession(exported: JsonValue, manifest: GameManifest): GameSession {
-  if (!isRecord(exported)
-    || !Array.isArray(exported.attempts)
-    || !Array.isArray(exported.initialRandomDraws)
-    || !Array.isArray(exported.transcript)
-    || !isRecord(exported.state)) {
-    throw new Error('Rust exportSession result did not match GameSession');
-  }
-  return deepFreeze({
-    attempts: exported.attempts as GameSession['attempts'],
-    initialRandomDraws: exported.initialRandomDraws as GameSession['initialRandomDraws'],
-    manifest,
-    state: exported.state as GameSession['state'],
-    transcript: exported.transcript as GameSession['transcript'],
-  });
-}
-
-/** Casts Rust boundary actions to the shared engine action type. */
-export function asGameLegalActions(actions: readonly RustLegalAction[]): readonly GameLegalAction[] {
-  return actions as readonly GameLegalAction[];
+async function boundSnapshot(
+  client: RustSessionClient,
+  manifest: GameManifest,
+): Promise<GameSession> {
+  const session = parseExportedSession(await client.exportSession(), manifest);
+  bindRustExportedSession(session, await client.checkpoint());
+  return session;
 }
 
 export type RustCheckpointSnapshot = Readonly<{
@@ -60,12 +50,17 @@ export class RustGameSessionHandle {
     this.session = session;
   }
 
+  private async loadSnapshot(manifest: GameManifest = this.manifest): Promise<GameSession> {
+    this.manifest = manifest;
+    this.session = await boundSnapshot(this.client, manifest);
+    return this.session;
+  }
+
   /** Opens one fresh Rust-backed session. */
   static async open(manifest: GameManifest): Promise<RustGameSessionHandle> {
     const client = await RustSessionClient.start();
     await client.newSession(canonicalJson(manifest as unknown as JsonValue));
-    const session = parseExportedSession(await client.exportSession(), manifest);
-    return new RustGameSessionHandle(client, manifest, session);
+    return new RustGameSessionHandle(client, manifest, await boundSnapshot(client, manifest));
   }
 
   /** Returns the latest exported session snapshot. */
@@ -85,7 +80,7 @@ export class RustGameSessionHandle {
     if (!isRecord(stepped) || typeof stepped.accepted !== 'boolean') {
       throw new Error('Rust session step result was malformed');
     }
-    this.session = parseExportedSession(await this.client.exportSession(), this.manifest);
+    await this.loadSnapshot();
     if (stepped.accepted) {
       return deepFreeze({
         accepted: true,
@@ -148,17 +143,14 @@ export class RustGameSessionHandle {
 
   /** Replaces the live session with a fresh opening of one manifest. */
   async reset(manifest: GameManifest): Promise<GameSession> {
-    this.manifest = manifest;
     await this.client.newSession(canonicalJson(manifest as unknown as JsonValue));
-    this.session = parseExportedSession(await this.client.exportSession(), manifest);
-    return this.session;
+    return this.loadSnapshot(manifest);
   }
 
   /** Resumes from one validated checkpoint object. */
   async resume(checkpoint: JsonValue): Promise<GameSession> {
     await this.client.resume(checkpoint);
-    this.session = parseExportedSession(await this.client.exportSession(), this.manifest);
-    return this.session;
+    return this.loadSnapshot();
   }
 
   /** Returns the authoritative state hash for one seat observation. */
