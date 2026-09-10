@@ -11104,6 +11104,7 @@ test('RULE-03 Observatory privately reorders the next three spells without drawi
     const play = await ctx.action(({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardId === 'observatory-site' && descriptor.cell === 'C4');
     if (play.descriptor.kind !== 'play-site') throw new Error('expected Observatory play');
+    const sourceInstanceId = play.descriptor.cardInstanceId;
     const played = await ctx.step(play);
     assert.equal(played.accepted, true);
     if (!played.accepted) return;
@@ -11138,7 +11139,7 @@ test('RULE-03 Observatory privately reorders the next three spells without drawi
         assert.deepEqual(reversed.session.state.players.north.spellbook.slice(0, 3), before.slice(0, 3).reverse());
         assert.deepEqual(reversed.session.state.players.north.spellbook.slice(3), before.slice(3));
         assert.deepEqual(reversed.receipt.events.map(({ payload, type }) => ({ payload, type })), [{
-          payload: { count: 3, seat: 'north', sourceInstanceId: play.descriptor.cardInstanceId },
+          payload: { count: 3, seat: 'north', sourceInstanceId },
           type: 'spells-reordered',
         }]);
         assert.deepEqual(reversed.receipt.randomDraws, []);
