@@ -54,6 +54,11 @@ export class SetupCtx {
     return this.handle.legalActions(seat);
   }
 
+  /** Selects one engine-issued action with the shared baseline deterministic policy. */
+  async selectPolicyAction(): Promise<GameLegalAction> {
+    return this.handle.selectPolicyAction();
+  }
+
   /** Finds one legal action for the active or specified seat. */
   async action(
     predicate: (candidate: GameLegalAction) => boolean,

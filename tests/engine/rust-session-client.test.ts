@@ -18,19 +18,16 @@ test('Rust session-json client creates, views, steps, and verifies a synthetic m
       players: { south: { hand: { atlas: number } } };
     }).players.south.hand.atlas;
     assert.equal(typeof southHand, 'number');
+    const selected = await client.selectPolicyAction();
+    assert.equal(selected.descriptor.kind, 'mulligan');
+    assert.deepEqual(selected.descriptor.atlasOrder, []);
+    assert.deepEqual(selected.descriptor.spellbookOrder, []);
     const actions = await client.legalActions('north');
-    assert.ok(actions.length > 0);
-    const keep = actions.find(({ descriptor }) =>
-      descriptor.kind === 'mulligan'
-        && Array.isArray(descriptor.atlasOrder)
-        && descriptor.atlasOrder.length === 0
-        && Array.isArray(descriptor.spellbookOrder)
-        && descriptor.spellbookOrder.length === 0);
-    assert.ok(keep);
+    assert.ok(actions.some(({ actionId }) => actionId === selected.actionId));
     const stepped = await client.step({
-      actionId: keep.actionId,
-      seat: keep.seat,
-      stateVersion: keep.stateVersion,
+      actionId: selected.actionId,
+      seat: selected.seat,
+      stateVersion: selected.stateVersion,
     });
     assert.equal(stepped.accepted, true);
     assert.equal(await client.verifyReplay(), true);

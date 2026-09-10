@@ -1,4 +1,3 @@
-import { selectDeterministicGameAction } from '../commands/run-game-demo.ts';
 import { deepFreeze, type StateHash } from '../engine/contract.ts';
 import {
   createGameCheckpoint,
@@ -82,10 +81,7 @@ async function rolloutBranch(
     let decisionCount = 1;
     while (handle.snapshot.state.terminal.status === 'active'
       && decisionCount <= maxContinuationDecisions) {
-      const issuedActions = await handle.legalActions();
-      const result = await handle.stepAction(
-        selectDeterministicGameAction(handle.snapshot, issuedActions),
-      );
+      const result = await handle.stepAction(await handle.selectPolicyAction());
       if (!result.accepted) {
         throw new Error(`engine rejected issued continuation: ${result.reason.code}`);
       }

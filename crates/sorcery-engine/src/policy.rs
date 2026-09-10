@@ -14,6 +14,9 @@ use crate::canonical::{
 use crate::contract::Seat;
 use crate::game::{IssuedAction, SeatObservation};
 
+/// Deck identity used by the shared baseline selector when a match has no priced deck.
+pub const BASELINE_POLICY_DECK_ID: &str =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 /// Policy snapshot schema understood by this module.
 pub const POLICY_SCHEMA_VERSION: u8 = 1;
 /// Largest accepted lineage generation.
@@ -408,6 +411,11 @@ fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u
         }
         | ActionDescriptor::ShootDamageProjectile {
             hit: Some(target), ..
+        }
+        | ActionDescriptor::ShootDragProjectile {
+            fight_on_arrival: false,
+            hit: Some(target),
+            ..
         } if target.seat() != seat => Some(0),
         ActionDescriptor::CastMagic {
             cemetery_minion_instance_id: Some(_),
@@ -616,6 +624,44 @@ fn validate(snapshot: &PolicySnapshot) -> Result<(), PolicyError> {
         return Err(PolicyError::Invalid("policyId does not match policy body"));
     }
     Ok(())
+}
+
+/// Builds the shared baseline selector used by demo, session, and self-play defaults.
+///
+/// # Errors
+///
+/// Returns [`PolicyError`] when the snapshot cannot be canonicalized or hashed.
+pub fn baseline_policy_snapshot(
+    authority_hash: &IdentityHash,
+    engine_version: &str,
+) -> Result<PolicySnapshot, PolicyError> {
+    let deck_id = IdentityHash::parse(BASELINE_POLICY_DECK_ID)
+        .map_err(|_| PolicyError::Invalid("baseline policy deckId is invalid"))?;
+    let mut body = serde_json::json!({
+        "authorityHash": authority_hash,
+        "deckId": deck_id,
+        "engineVersion": engine_version,
+        "generation": 0,
+        "observationVersion": "seat-observation-v1",
+        "schemaVersion": 1,
+        "selector": {
+            "atlasReserve": 3,
+            "featurePriority": [
+                "keep-mulligan",
+                "play-site",
+                "summon-minion",
+                "preferred-draw",
+                "powered-movement",
+                "beneficial-tactic",
+                "move-toward-enemy",
+                "end-turn",
+                "canonical-fallback"
+            ]
+        },
+        "tieBreak": "canonical-action-order-v1"
+    });
+    body["policyId"] = serde_json::json!(identity_hash(&body)?);
+    parse_policy_snapshot(&canonical_json(&body)?)
 }
 
 /// Serializes a validated policy snapshot as its one canonical JSON representation.
@@ -830,6 +876,32 @@ mod tests {
         );
         assert_eq!(
             beneficial_tactic_index(Seat::North, actions[..4].iter()),
+            None
+        );
+    }
+
+    #[test]
+    fn beneficial_tactics_prefer_enemy_drag_projectiles_that_do_not_fight() {
+        let drag = |fight_on_arrival, hit| ActionDescriptor::ShootDragProjectile {
+            direction: ProjectileDirection::North,
+            fight_on_arrival,
+            hit,
+            path: Vec::new(),
+            shooter_instance_id: identity('b'),
+        };
+        assert_eq!(
+            beneficial_tactic_index(
+                Seat::North,
+                [
+                    drag(true, Some(target(Seat::South))),
+                    drag(false, Some(target(Seat::South)))
+                ]
+                .iter(),
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            beneficial_tactic_index(Seat::North, [drag(true, Some(target(Seat::South)))].iter()),
             None
         );
     }
