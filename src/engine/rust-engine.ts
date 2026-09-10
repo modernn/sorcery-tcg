@@ -313,6 +313,18 @@ export class RustSessionClient {
     }));
   }
 
+  async runCounterfactual(input: Readonly<{
+    maxContinuationDecisions: number;
+  }>): Promise<JsonValue> {
+    const payload = await this.call('runCounterfactual', {
+      maxContinuationDecisions: input.maxContinuationDecisions,
+    });
+    if (!isRecord(payload) || payload.result === undefined) {
+      throw new Error('Rust session runCounterfactual result was invalid');
+    }
+    return payload.result as JsonValue;
+  }
+
   async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
     emittedCheckpoints: readonly JsonValue[];
     result: JsonValue;

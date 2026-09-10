@@ -68,6 +68,7 @@ impl SessionJsonService {
             "selectPolicyAction" => self.select_policy_action(request.id),
             "probeNovelty" => self.probe_novelty(request.id, &request.params),
             "runNoveltyRollout" => self.run_novelty_rollout(request.id, &request.params),
+            "runCounterfactual" => self.run_counterfactual(request.id, &request.params),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
@@ -220,6 +221,28 @@ impl SessionJsonService {
                 ),
                 Err(error) => error_response(id, &error.to_string()),
             },
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn run_counterfactual(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(max_continuation) = params
+            .get("maxContinuationDecisions")
+            .and_then(Value::as_u64)
+        else {
+            return error_response(id, "runCounterfactual requires maxContinuationDecisions");
+        };
+        let Ok(max_continuation) = usize::try_from(max_continuation) else {
+            return error_response(
+                id,
+                "runCounterfactual maxContinuationDecisions is out of range",
+            );
+        };
+        match session.run_counterfactual(max_continuation) {
+            Ok(report) => ok_response(id, json!({ "result": report.result() })),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -633,6 +656,27 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn service_should_run_opening_counterfactual() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let report = service.handle(&rpc(
+            2,
+            "runCounterfactual",
+            json!({ "maxContinuationDecisions": 0 }),
+        ));
+        let result = report.result.expect("counterfactual result")["result"].clone();
+        assert!(result["status"] == "complete" || result["status"] == "too-wide");
+        assert_eq!(result["policyVersion"], "deterministic-demo-v1");
+        assert_eq!(result["rootActionLimit"], 128);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::contract::{
     ActionRequest, Attempt, LegalAction, Receipt, ReceiptInput, Rejection, RejectionCode, Seat,
     accepted_attempt, create_events, create_receipt, create_rejection, rejected_attempt,
 };
+use crate::counterfactual::{CounterfactualReport, run_counterfactual};
 use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
@@ -193,6 +194,18 @@ impl Session {
         max_actions: usize,
     ) -> Result<NoveltyRolloutOutput, SessionError> {
         run_novelty_rollout(self, max_actions)
+    }
+
+    /// Expands every engine-issued root action, then follows the baseline policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the continuation bound is invalid or a branch fails.
+    pub fn run_counterfactual(
+        &self,
+        max_continuation_decisions: usize,
+    ) -> Result<CounterfactualReport, SessionError> {
+        run_counterfactual(self, max_continuation_decisions)
     }
 
     /// Returns legal actions materialized at the external boundary.

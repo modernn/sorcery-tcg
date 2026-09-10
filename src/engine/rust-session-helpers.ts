@@ -91,6 +91,13 @@ export class RustGameSessionHandle {
     return this.client.probeNovelty(input);
   }
 
+  /** Expands every engine-issued root action, then follows the baseline policy. */
+  async runCounterfactual(input: Readonly<{
+    maxContinuationDecisions: number;
+  }>): Promise<JsonValue> {
+    return this.client.runCounterfactual(input);
+  }
+
   /** Runs the coverage-guided one-step novelty rollout from this snapshot. */
   async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
     emittedCheckpoints: readonly JsonValue[];
