@@ -6546,27 +6546,7 @@ impl Game {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .filter_map(|cells| {
-                    let mana_cost = if minion.must_be_cast_to_water_site {
-                        cells
-                            .into_iter()
-                            .map(summon_cell)
-                            .collect::<Option<Vec<_>>>()?
-                            .into_iter()
-                            .min()?
-                    } else {
-                        cells.into_iter().filter_map(summon_cell).min()?
-                    };
-                    cells
-                        .into_iter()
-                        .all(|cell| self.surface_location_exists(cell))
-                        .then_some(SummonDestination {
-                            cell: cells[0],
-                            cells: Some(cells),
-                            mana_cost,
-                            region: None,
-                        })
-                })
+                .flat_map(|cells| self.square_area_summon_destinations(minion, cells, summon_cell))
                 .collect()
         } else {
             let mut destinations = Cell::ALL
@@ -6580,6 +6560,61 @@ impl Game {
             destinations.extend(self.void_summon_destinations(minion, minion.mana_cost, false));
             destinations
         }
+    }
+
+    /// Surface plus every lower layer the whole 2x2 can occupy.
+    ///
+    /// Underground needs land under every cell; underwater needs Water under every cell. A mixed
+    /// square stays surface-only. Cast-region restrictions keep only the required layer.
+    fn square_area_summon_destinations(
+        &self,
+        minion: &MinionFacts,
+        cells: SquareArea,
+        summon_cell: impl Fn(Cell) -> Option<u64>,
+    ) -> Vec<SummonDestination> {
+        let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
+            cells
+                .into_iter()
+                .map(&summon_cell)
+                .collect::<Option<Vec<_>>>()
+                .and_then(|costs| costs.into_iter().min())
+        } else {
+            cells.into_iter().filter_map(summon_cell).min()
+        }) else {
+            return Vec::new();
+        };
+        if !cells
+            .into_iter()
+            .all(|cell| self.surface_location_exists(cell))
+        {
+            return Vec::new();
+        }
+        let destination = |region| SummonDestination {
+            cell: cells[0],
+            cells: Some(cells),
+            mana_cost,
+            region,
+        };
+        let mut destinations = Vec::new();
+        let required = minion.required_cast_region;
+        if required.is_none() {
+            destinations.push(destination(None));
+        }
+        if minion.burrowing
+            && required != Some(RequiredCastRegion::Underwater)
+            && cells
+                .into_iter()
+                .all(|cell| self.underground_location_exists(cell))
+        {
+            destinations.push(destination(Some(LowerRegion::Underground)));
+        }
+        if minion.submerge
+            && required != Some(RequiredCastRegion::Underground)
+            && cells.into_iter().all(|cell| self.is_water_site(cell))
+        {
+            destinations.push(destination(Some(LowerRegion::Underwater)));
+        }
+        destinations
     }
 
     /// The void beside every cell no site or rubble covers, offered only to a Voidwalk minion.
@@ -6676,12 +6711,9 @@ impl Game {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .filter(|cells| cells.iter().copied().all(may_enter))
-                .map(|cells| SummonDestination {
-                    cell: cells[0],
-                    cells: Some(cells),
-                    mana_cost: 0,
-                    region: None,
+                .flat_map(|cells| {
+                    let summon_cell = |cell: Cell| may_enter(cell).then_some(0);
+                    self.square_area_summon_destinations(minion, cells, summon_cell)
                 })
                 .collect()
         } else {

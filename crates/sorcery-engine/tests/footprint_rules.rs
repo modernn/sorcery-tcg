@@ -1733,3 +1733,91 @@ fn rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_c
     assert_eq!(unit(&state(&session), &giant)["tapped"], true);
     assert_exact_replay(&session);
 }
+
+fn summon_regions_at(session: &Session, card_id: &str, cell: &str) -> Vec<String> {
+    let mut regions = session
+        .legal_actions()
+        .expect("summon regions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == card_id
+                && action.descriptor["cell"] == cell
+        })
+        .map(|action| {
+            action.descriptor["region"]
+                .as_str()
+                .unwrap_or("surface")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    regions.sort();
+    regions.dedup();
+    regions
+}
+
+#[test]
+fn rule_catalog_0185_oversized_burrowing_summons_underground_on_an_all_land_square() {
+    let mut session = composition_session(
+        &json!({ "burrowing": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["surface", "underground"],
+        "four land sites offer both surface and underground 2x2 placements"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underground"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underground");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0186_oversized_submerge_summons_underwater_on_an_all_water_square() {
+    let mut session = composition_session_all_water(
+        &json!({ "submerge": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_all_named(&mut session, "north-water");
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["surface", "underwater"],
+        "four Water sites offer both surface and underwater 2x2 placements"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underwater"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underwater");
+    assert_exact_replay(&session);
+}

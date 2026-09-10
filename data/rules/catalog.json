@@ -3790,6 +3790,52 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0185",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Burrowing minion can be summoned underground only when every occupied cell is land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "burrowing"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0185_oversized_burrowing_summons_underground_on_an_all_land_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0186",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Submerge minion can be summoned underwater only when every occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "submerge"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0186_oversized_submerge_summons_underwater_on_an_all_water_square"
+      }
     }
   ]
 }

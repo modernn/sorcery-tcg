@@ -10009,6 +10009,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { mustBeCastToWaterSite: true as const },
     { tapToShootProjectileDamage: 1 },
     { shootsDragProjectile: true as const },
+    { burrowing: true as const },
+    { submerge: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,
@@ -19223,6 +19225,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       [conditionalId]: {
         ...cards[conditionalId],
         occupiesSquareArea: 2,
+        voidwalk: true,
       } as unknown as GameCardDefinition,
     },
     seed: 1,

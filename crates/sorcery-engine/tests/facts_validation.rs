@@ -915,3 +915,34 @@ fn oversized_activated_and_drag_projectiles_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.shoots_drag_projectile);
 }
+
+#[test]
+fn oversized_burrowing_and_submerge_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-burrowing",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "burrowing",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Burrowing minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.burrowing);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-submerge",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "submerge",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Submerge minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.submerge);
+}

@@ -1485,8 +1485,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     if occupies_square_area_two
         && (connects_top_bottom
             || required_cast_region.is_some()
-            || burrowing
-            || submerge
             || voidwalk
             || must_be_cast_to_outer_column
             || token)

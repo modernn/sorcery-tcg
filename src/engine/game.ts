@@ -1768,8 +1768,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && (card.connectsTopBottom === true
       || card.mustBeCastBurrowed === true
       || card.mustBeCastSubmerged === true
-      || card.burrowing === true
-      || card.submerge === true
       || card.voidwalk === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true)) {
