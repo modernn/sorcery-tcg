@@ -11524,6 +11524,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { gainsStealthAtEndOfTurnIfNoEnemiesNearby: true as const },
     { ranged: true as const, mayRangedStrikeOnceDuringBasicMovement: true as const },
     { ranged: true as const, mayStepAfterRangedStrike: true as const },
+    { voidwalk: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,
@@ -28404,7 +28405,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       [conditionalId]: {
         ...cards[conditionalId],
         occupiesSquareArea: 2,
-        voidwalk: true,
+        token: true,
       } as unknown as GameCardDefinition,
     },
     seed: 1,

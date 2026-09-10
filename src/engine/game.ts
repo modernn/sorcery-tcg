@@ -2392,7 +2392,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.occupiesSquareArea === 2
     && (card.connectsTopBottom === true
-      || card.voidwalk === true
       || card.mustBeCastToOuterColumn === true
       || card.token === true)) {
     throw new RangeError(

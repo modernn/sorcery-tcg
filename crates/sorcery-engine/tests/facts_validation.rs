@@ -762,7 +762,7 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "oversized ability",
             with(
                 with(minion(), "occupiesSquareArea", json!(2)),
-                "voidwalk",
+                "connectsTopBottom",
                 json!(true),
             ),
             "unsupported ability combination",

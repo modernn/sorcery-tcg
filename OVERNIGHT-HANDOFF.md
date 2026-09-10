@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/land-policy-select-on-master-0005`. Replays PR #7 onto the powered-movement landing (PR #8). Do not add catalog slices.
+Live line: `cursor/square-voidwalk-0005`. Stack this on current `master` (`ca1d466`). Do not grow the land-on-master PRs.
 
-PRs #4–#7 merged on the stack. Merge the land-on-master follow-ups onto `master` (#8 then this).
+2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
 `cursor/phase3-drown-bury-artifacts-36d3` was identical to `master` with PR #1 closed. It is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`).
 
@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **315 rust-supported / 0 typescript-supported** out of 315.
+`data/rules/catalog.json`: **317 rust-supported / 0 typescript-supported** out of 317.
 
-Latest catalog proofs: official Monument carry prohibition (`RULE-CATALOG-0314`–`0315`). A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
+Latest catalog proofs: 2×2 Voidwalk (`RULE-CATALOG-0316`–`0317`). A 2×2 Voidwalk minion summons and steps only on all-void squares. Existing helpers do not offer a surface step, because a one-cell translation overlaps.
+Official Monument carry prohibition remains `RULE-CATALOG-0314`–`0315`. A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
 Belfry nearby untap remains `RULE-CATALOG-0312`–`0313`.
 Deterministic `powered-movement` now uses public temporary-power identities on the seat observation. It does not add a new catalog family.
 Production callers now ask `session-json` `selectPolicyAction` for the shared baseline policy. The TypeScript `selectDeterministicGameAction` selector is deleted.
@@ -81,7 +82,7 @@ Still TypeScript (not a second legality, observation, or agent engine):
 
 ## Next exact step
 
-1. Merge PR #8 then this landing onto `master`. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Monument cannot-be-carried is bound — do not invent MTG keywords.
+1. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations are token, wraparound, and outer-column. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 

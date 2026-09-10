@@ -685,3 +685,115 @@ fn rule_catalog_0051_playing_a_site_should_surface_the_artifacts_its_void_held()
     );
     assert_exact_replay(&session);
 }
+
+fn oversized_voidwalker() -> Value {
+    minion(json!({
+        "occupiesSquareArea": 2,
+        "voidwalk": true,
+    }))
+}
+
+fn is_square_void_summon_at(cell: &'static str, cells: &[&str]) -> impl Fn(&Value) -> bool {
+    let expected = json!(cells);
+    move |descriptor: &Value| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"] == "void"
+            && descriptor["cells"] == expected
+    }
+}
+
+#[test]
+fn rule_catalog_0316_oversized_voidwalk_summons_only_onto_an_all_void_square() {
+    let cards = voidwalk_cards(&oversized_voidwalker(), &site(&["earth"]));
+    let mut session = Session::new(&manifest(241, &cards, "north-site", &["north-spell"; 8]))
+        .expect("valid oversized Voidwalk scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+
+    assert!(offers(
+        &session,
+        is_square_void_summon_at("A1", &["A1", "A2", "B1", "B2"])
+    ));
+    assert!(!offers(&session, is_void_summon_at("B3")));
+    assert!(!offers(&session, is_void_summon_at("C4")));
+    assert!(
+        descriptors_of_kind(&session, "summon-minion")
+            .iter()
+            .all(|descriptor| descriptor["region"] == "void")
+    );
+
+    let (summoned, _) = accept_where(
+        &mut session,
+        is_square_void_summon_at("A1", &["A1", "A2", "B1", "B2"]),
+    );
+    let giant = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned identity")
+        .to_owned();
+    let placed = realm_unit(&state(&session), &giant).expect("void occupant");
+    assert_eq!(
+        (
+            &placed["location"],
+            &placed["region"],
+            &placed["occupiedCells"]
+        ),
+        (
+            &json!("A1"),
+            &json!("void"),
+            &json!(["A1", "A2", "B1", "B2"])
+        )
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surface() {
+    let cards = voidwalk_cards(&oversized_voidwalker(), &site(&["earth"]));
+    let mut session = Session::new(&manifest(241, &cards, "north-site", &["north-spell"; 8]))
+        .expect("valid oversized Voidwalk movement scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    let (summoned, _) = accept_where(
+        &mut session,
+        is_square_void_summon_at("A1", &["A1", "A2", "B1", "B2"]),
+    );
+    let giant = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned identity")
+        .to_owned();
+
+    let void_step = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == giant.as_str()
+            && path_locations(descriptor) == ["A1/void", "A2/void"]
+    };
+    let onto_surface = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == giant.as_str()
+            && path_locations(descriptor)
+                .iter()
+                .any(|step| step.ends_with("/surface"))
+    };
+    assert!(offers(&session, void_step));
+    assert!(!offers(&session, onto_surface));
+
+    accept_where(&mut session, void_step);
+    decline_attack_if_needed(&mut session);
+    let stepped = realm_unit(&state(&session), &giant).expect("void walker");
+    assert_eq!(
+        (
+            &stepped["location"],
+            &stepped["region"],
+            &stepped["occupiedCells"]
+        ),
+        (
+            &json!("A2"),
+            &json!("void"),
+            &json!(["A2", "A3", "B2", "B3"])
+        )
+    );
+    assert_exact_replay(&session);
+}
