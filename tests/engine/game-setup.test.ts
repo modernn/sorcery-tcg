@@ -25948,7 +25948,7 @@ test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-m
     },
     'mana-north-spend': {
       cardType: 'magic',
-      drawSpells: 1,
+      drawSites: 1,
       manaCost: 2,
       thresholds,
     },

@@ -38,7 +38,7 @@ fn source() -> Value {
 fn spend() -> Value {
     json!({
         "cardType": "magic",
-        "drawSpells": 1,
+        "drawSites": 1,
         "manaCost": 2,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
