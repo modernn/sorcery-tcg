@@ -427,12 +427,17 @@ struct DisableEffect {
 
 /// Where a realm Artifact currently sits: carried by one unit, or loose in the realm.
 ///
-/// Oversized bearers would need the exact carried cell inside their footprint; manifests that mix
-/// Artifacts with oversized minions are refused for self-play instead of guessing that cell.
+/// An oversized bearer carries the Artifact at one exact cell of its footprint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ArtifactPlacement {
-    Carried { bearer: UnitTarget },
-    Loose { location: Cell, region: Region },
+    Carried {
+        bearer: UnitTarget,
+        cell: Option<Cell>,
+    },
+    Loose {
+        location: Cell,
+        region: Region,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -445,7 +450,7 @@ impl ArtifactPosition {
     /// The bearer carrying this Artifact, when it is not lying loose in the realm.
     const fn bearer(&self) -> Option<&UnitTarget> {
         match &self.placement {
-            ArtifactPlacement::Carried { bearer } => Some(bearer),
+            ArtifactPlacement::Carried { bearer, .. } => Some(bearer),
             ArtifactPlacement::Loose { .. } => None,
         }
     }
@@ -1659,7 +1664,7 @@ impl Game {
                             "owner": artifact.card.owner,
                         });
                         match &artifact.placement {
-                            ArtifactPlacement::Carried { bearer } => {
+                            ArtifactPlacement::Carried { bearer, .. } => {
                                 let carried = self.artifact_location(artifact)?;
                                 value["bearer"] = json!(bearer);
                                 value["controller"] = json!(bearer.seat());
@@ -3849,21 +3854,30 @@ impl Game {
                 continue;
             }
             for (_, caster_instance_id) in &spellcasters {
-                let conjure = |bearer, cell| ActionDescriptor::CastArtifact {
+                let conjure = |bearer, bearer_cell, cell| ActionDescriptor::CastArtifact {
                     bearer,
-                    bearer_cell: None,
+                    bearer_cell,
                     card_id: definition.id.clone(),
                     card_instance_id: card.instance_id.clone(),
                     caster_instance_id: caster_instance_id.clone(),
                     cell,
                     mana_cost: facts.mana_cost,
                 };
-                descriptors.extend(cells.iter().map(|cell| conjure(None, Some(*cell))));
-                descriptors.extend(
-                    bearers
-                        .iter()
-                        .map(|bearer| conjure(Some(bearer.clone()), None)),
-                );
+                descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
+                for bearer in &bearers {
+                    let Ok(occupied) = self.unit_target_occupied_cells(bearer) else {
+                        continue;
+                    };
+                    if occupied.len() <= 1 {
+                        descriptors.push(conjure(Some(bearer.clone()), None, None));
+                        continue;
+                    }
+                    descriptors.extend(
+                        occupied
+                            .iter()
+                            .map(|cell| conjure(Some(bearer.clone()), Some(*cell), None)),
+                    );
+                }
             }
         }
         descriptors
@@ -3951,7 +3965,7 @@ impl Game {
         {
             return Ok(None);
         }
-        let carried_at = self.unit_target_location(bearer)?;
+        let carried_at = self.artifact_location(artifact)?;
         let mut helpers = Vec::new();
         for helper in allies {
             if helper.instance_id() != bearer.instance_id()
@@ -4256,10 +4270,17 @@ impl Game {
         Ok(*facts)
     }
 
-    /// Where an Artifact currently sits: the cell its bearer stands on, or the cell it lies on.
+    /// Where an Artifact currently sits: its exact carried cell, the bearer's cell, or the cell it
+    /// lies on.
     fn artifact_location(&self, artifact: &ArtifactPosition) -> Result<Location, GameError> {
         match &artifact.placement {
-            ArtifactPlacement::Carried { bearer } => self.unit_target_location(bearer),
+            ArtifactPlacement::Carried { bearer, cell } => {
+                let location = self.unit_target_location(bearer)?;
+                Ok(Location {
+                    cell: cell.unwrap_or(location.cell),
+                    region: location.region,
+                })
+            }
             ArtifactPlacement::Loose { location, region } => Ok(Location {
                 cell: *location,
                 region: *region,
@@ -4592,10 +4613,35 @@ impl Game {
                     .ok_or(GameError::IllegalAction)?,
             );
         }
+        let from = unit.location;
+        let instance_id = unit.card.instance_id.clone();
         unit.location = location.cell;
         unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
+        self.translate_carried_artifact_cells(&instance_id, from, location.cell);
         Ok(())
+    }
+
+    fn translate_carried_artifact_cells(
+        &mut self,
+        instance_id: &IdentityHash,
+        from: Cell,
+        to: Cell,
+    ) {
+        if from == to {
+            return;
+        }
+        for artifact in &mut self.position.artifacts {
+            let ArtifactPlacement::Carried { bearer, cell } = &mut artifact.placement else {
+                continue;
+            };
+            if bearer.instance_id() != instance_id {
+                continue;
+            }
+            if let Some(current) = *cell {
+                *cell = current.translated(from, to);
+            }
+        }
     }
 
     fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
@@ -13844,12 +13890,12 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastArtifact {
             bearer,
+            bearer_cell,
             card_id,
             card_instance_id,
             caster_instance_id,
             cell,
             mana_cost,
-            ..
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -13868,6 +13914,7 @@ impl Game {
         let placement = match (bearer, cell) {
             (Some(bearer), _) => ArtifactPlacement::Carried {
                 bearer: bearer.clone(),
+                cell: *bearer_cell,
             },
             (None, Some(cell)) => ArtifactPlacement::Loose {
                 location: *cell,
@@ -13920,6 +13967,9 @@ impl Game {
                     payload["bearerInstanceId"] = json!(bearer.instance_id());
                     payload["bearerKind"] = json!(bearer.kind());
                     payload["bearerSeat"] = json!(bearer.seat());
+                    if let Some(cell) = bearer_cell {
+                        payload["cell"] = json!(cell);
+                    }
                 }
                 (None, Some(cell)) => {
                     payload["cell"] = json!(cell);
@@ -13940,8 +13990,8 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::PickUpArtifacts {
             artifact_instance_ids,
+            cell,
             unit,
-            ..
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -13959,6 +14009,7 @@ impl Game {
             if selected.contains(&artifact.card.instance_id) {
                 artifact.placement = ArtifactPlacement::Carried {
                     bearer: unit.clone(),
+                    cell: *cell,
                 };
             }
         }
@@ -14000,8 +14051,12 @@ impl Game {
         let selected: BTreeSet<_> = artifact_instance_ids.iter().cloned().collect();
         for artifact in &mut self.position.artifacts {
             if selected.contains(&artifact.card.instance_id) {
+                let location = match &artifact.placement {
+                    ArtifactPlacement::Carried { cell, .. } => cell.unwrap_or(fell_at.cell),
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location,
                     region: fell_at.region,
                 };
             }
@@ -14058,7 +14113,7 @@ impl Game {
         Ok(())
     }
 
-    /// Releases every Artifact the unit carried onto the location where it stood.
+    /// Releases every Artifact the unit carried onto the cell it occupied, or the bearer's cell.
     fn release_carried_artifacts(
         &mut self,
         kind: UnitKind,
@@ -14070,20 +14125,24 @@ impl Game {
         let mut dropped = Vec::new();
         for artifact in &mut self.position.artifacts {
             if artifact.carried_by(kind, seat, instance_id) {
+                let cell = match &artifact.placement {
+                    ArtifactPlacement::Carried { cell, .. } => cell.unwrap_or(fell_at.cell),
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location: cell,
                     region: fell_at.region,
                 };
-                dropped.push(artifact.card.clone());
+                dropped.push((artifact.card.clone(), cell));
             }
         }
-        for card in dropped {
+        for (card, cell) in dropped {
             let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
             outcomes.push("artifact-dropped", || {
                 json!({
                     "bearerInstanceId": instance_id,
                     "cardId": card_id,
-                    "cell": fell_at.cell,
+                    "cell": cell,
                     "instanceId": card.instance_id,
                     "owner": card.owner,
                     "region": fell_at.region,
@@ -17416,8 +17475,11 @@ impl Game {
         let mut value = self.card_value(&artifact.card);
         if let Value::Object(object) = &mut value {
             match &artifact.placement {
-                ArtifactPlacement::Carried { bearer } => {
+                ArtifactPlacement::Carried { bearer, cell } => {
                     object.insert("bearer".to_owned(), json!(bearer));
+                    if let Some(cell) = cell {
+                        object.insert("bearerCell".to_owned(), json!(cell));
+                    }
                 }
                 ArtifactPlacement::Loose { location, region } => {
                     object.insert("location".to_owned(), json!(location));
