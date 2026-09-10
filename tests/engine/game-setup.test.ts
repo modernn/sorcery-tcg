@@ -24855,12 +24855,12 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
     },
     decks: {
       north: {
-        atlas: Array(3).fill('grant-air-north-site'),
+        atlas: Array(6).fill('grant-air-north-site'),
         avatar: 'grant-air-north-avatar',
         spellbook: ['grant-air-north-ally', 'grant-air-north-grant', 'grant-air-north-grant'],
       } satisfies GameDeckSpec,
       south: {
-        atlas: Array(3).fill('grant-air-south-site'),
+        atlas: Array(6).fill('grant-air-south-site'),
         avatar: 'grant-air-south-avatar',
         spellbook: Array(3).fill('grant-air-south-minion'),
       } satisfies GameDeckSpec,
@@ -24966,14 +24966,14 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
     },
     decks: {
       north: {
-        atlas: Array(3).fill('grant-air-north-site'),
+        atlas: Array(6).fill('grant-air-north-site'),
         avatar: 'grant-air-north-avatar',
         spellbook: ['grant-air-north-ally', 'grant-air-north-grant', 'grant-air-north-grant'],
       } satisfies GameDeckSpec,
       south: {
-        atlas: Array(3).fill('grant-air-south-site'),
+        atlas: Array(6).fill('grant-air-south-site'),
         avatar: 'grant-air-south-avatar',
-        spellbook: Array(3).fill('grant-air-south-airborne'),
+        spellbook: Array(6).fill('grant-air-south-airborne'),
       } satisfies GameDeckSpec,
     },
     firstSeat: 'north',

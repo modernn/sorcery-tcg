@@ -90,14 +90,14 @@ fn manifest(south_spell: &str) -> String {
         "cards": cards,
         "decks": {
             "north": {
-                "atlas": vec!["north-site"; 3],
+                "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
                 "spellbook": ["north-ally", "north-grant", "north-grant"],
             },
             "south": {
-                "atlas": vec!["south-site"; 3],
+                "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec![south_spell; 3],
+                "spellbook": vec![south_spell; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
