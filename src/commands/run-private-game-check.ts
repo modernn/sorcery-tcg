@@ -19839,6 +19839,16 @@ function runAirChainLightning(
   endTurn();
 
   take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  const afterDraw = session;
+  const lowBegin = stepGame(afterDraw, action(afterDraw, ({ descriptor }) =>
+    descriptor.kind === 'begin-chain-magic'
+      && descriptor.cardInstanceId === opening.chainLightningInstanceId
+      && descriptor.target.instanceId === opening.targetInstanceIds[0]));
+  const lowManaStopsExtraTarget = afterDraw.state.players.north.mana === 3
+    && lowBegin.accepted
+    && !legalGameActions(lowBegin.session.state, 'north').some(({ descriptor }) =>
+      descriptor.kind === 'extend-chain-magic');
+
   playSite(opening.northDrawnSiteInstanceId, 'D4');
   const checkpoint = session;
   const begins = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
@@ -19847,24 +19857,6 @@ function runAirChainLightning(
   const beginAction = begins.find(({ descriptor }) => descriptor.kind === 'begin-chain-magic'
     && descriptor.target.instanceId === opening.targetInstanceIds[0]);
   if (!beginAction) throw new Error('private Chain Lightning lacks its first actual target');
-
-  const lowMana: GameSession = {
-    ...checkpoint,
-    state: {
-      ...checkpoint.state,
-      players: {
-        ...checkpoint.state.players,
-        north: { ...checkpoint.state.players.north, mana: 3 },
-      },
-    },
-  };
-  const lowBegin = stepGame(lowMana, action(lowMana, ({ descriptor }) =>
-    descriptor.kind === 'begin-chain-magic'
-      && descriptor.cardInstanceId === opening.chainLightningInstanceId
-      && descriptor.target.instanceId === opening.targetInstanceIds[0]));
-  const lowManaStopsExtraTarget = lowBegin.accepted
-    && !legalGameActions(lowBegin.session.state, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'extend-chain-magic');
 
   const beforeMana = checkpoint.state.players.north.mana;
   const begin = stepGame(checkpoint, beginAction);
