@@ -752,3 +752,34 @@ fn oversized_discard_here_and_any_site_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.summon_to_any_site);
 }
+
+#[test]
+fn oversized_waterbound_and_threshold_suppression_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-waterbound",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "waterbound",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Waterbound minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.waterbound);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-rats",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "siteProvidesNoThreshold",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized threshold-suppression minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.site_provides_no_threshold);
+}

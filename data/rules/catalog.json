@@ -3561,6 +3561,50 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_square"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0175",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 Waterbound minion stays enabled when any occupied cell is a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "waterbound"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0176",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Threshold suppression from a 2x2 covers every occupied site, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "siteProvidesNoThreshold"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site"
+      }
     }
   ]
 }

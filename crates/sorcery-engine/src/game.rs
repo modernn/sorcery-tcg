@@ -4377,17 +4377,9 @@ impl Game {
             return true;
         };
         facts.waterbound
-            && !self.position.sites[unit.location.index()]
-                .as_ref()
-                .and_then(|site| {
-                    let CardFacts::Site(facts) =
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                    else {
-                        return None;
-                    };
-                    Some(facts.elements.contains(Element::Water))
-                })
-                .unwrap_or(false)
+            && !Self::unit_occupied_cells(unit)
+                .iter()
+                .any(|cell| self.is_water_site(*cell))
     }
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
@@ -6347,7 +6339,9 @@ impl Game {
                 &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
                 CardFacts::Minion(minion) if minion.site_provides_no_threshold
             ) {
-                suppressed_sites[unit.location.index()] = true;
+                for cell in Self::unit_occupied_cells(unit) {
+                    suppressed_sites[cell.index()] = true;
+                }
             }
         }
         let site_elements = Cell::ALL

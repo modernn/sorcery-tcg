@@ -182,6 +182,14 @@ fn play_site(session: &mut Session, cell: &str) {
     });
 }
 
+fn play_named_site(session: &mut Session, card_id: &str, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == cell
+    });
+}
+
 fn end_and_draw_zone(session: &mut Session, zone: &str) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -609,6 +617,17 @@ fn composition_manifest(
             .extend(south_extra.as_object().expect("extra south facts").clone());
         cards["south-minion"] = south;
     }
+    let wants_water = giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true);
+    if wants_water {
+        cards["north-water"] = json!({ "cardType": "site", "elements": ["water"] });
+    }
+    let north_atlas = if wants_water {
+        let mut atlas = vec!["north-site"; 8];
+        atlas.insert(0, "north-water");
+        atlas
+    } else {
+        vec!["north-site"; 9]
+    };
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "footprint-composition-rules" }))
@@ -619,7 +638,7 @@ fn composition_manifest(
         "cards": cards,
         "decks": {
             "north": {
-                "atlas": vec!["north-site"; 9],
+                "atlas": north_atlas,
                 "avatar": "north-avatar",
                 "spellbook": north_spells,
             },
@@ -655,9 +674,14 @@ fn composition_session(
             let hand = preview_state["players"]["north"]["hand"]["spellbook"]
                 .as_array()
                 .expect("north Spellbook hand");
+            let atlas = preview_state["players"]["north"]["hand"]["atlas"]
+                .as_array()
+                .expect("north Atlas hand");
+            let wants_water = giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true);
             required_north
                 .iter()
                 .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
+                && (!wants_water || atlas.iter().any(|card| card["cardId"] == "north-water"))
         })
         .expect("opening hand with the required north spells");
     Session::new(&manifest).expect("composition session")
@@ -681,6 +705,32 @@ fn establish_north_square(session: &mut Session) {
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
     play_site(session, "B3");
+}
+
+fn establish_north_square_water_at_c4(session: &mut Session) {
+    keep(session);
+    keep(session);
+    play_named_site(session, "north-water", "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    play_named_site(session, "north-site", "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_named_site(session, "north-site", "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_named_site(session, "north-site", "B3");
+}
+
+fn offers_summon(session: &Session, card_id: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "summon-minion" && action.descriptor["cardId"] == card_id
+        })
 }
 
 fn establish_north_square_and_south_c2(session: &mut Session) -> String {
@@ -1079,5 +1129,65 @@ fn rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_s
             "{cell} is a North site, so South needs summonToAnySite"
         );
     }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site() {
+    let mut session = composition_session(
+        &json!({ "waterbound": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_water_at_c4(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let current = state(&session);
+    assert_eq!(
+        unit(&current, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(current["realm"]["sites"]["C4"]["elements"], json!(["water"]));
+    assert_eq!(current["realm"]["sites"]["B3"]["elements"], json!(["earth"]));
+    assert_eq!(
+        unit(&current, &giant)["disabled"],
+        false,
+        "C4 Water shares the oversized footprint, so Waterbound is not disabled at the B3 land anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site() {
+    let mut session = composition_session(
+        &json!({
+            "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+        }),
+        &json!({
+            "occupiesSquareArea": 2,
+            "siteProvidesNoThreshold": true,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    assert!(
+        offers_summon(&session, "north-giant"),
+        "four Earth sites should meet the oversized minion's threshold before suppression"
+    );
+    end_and_draw(&mut session);
+    let (rats, _) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        unit(&state(&session), &rats)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    end_and_draw(&mut session);
+    assert!(
+        !offers_summon(&session, "north-giant"),
+        "enabled Rats must suppress every occupied Earth site, not only the B3 anchor"
+    );
     assert_exact_replay(&session);
 }

@@ -9975,9 +9975,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
   }), /occupiesSquareArea must be 2/);
   for (const incompatibleFact of [
     { connectsTopBottom: true as const },
-    { siteProvidesNoThreshold: true as const },
     { ranged: true as const },
-    { waterbound: true as const },
   ]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -10003,6 +10001,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { genesisMayDamageTargetAdjacentUnit: 2 as const },
     { discardSpellToDamageRandomOtherUnitHere: 3 as const },
     { summonToAnySite: true as const },
+    { waterbound: true as const },
+    { siteProvidesNoThreshold: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,

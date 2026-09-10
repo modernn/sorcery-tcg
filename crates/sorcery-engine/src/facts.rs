@@ -1496,11 +1496,9 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             || burrowing
             || submerge
             || voidwalk
-            || waterbound
             || ranged
             || tap_to_shoot_projectile_damage.is_some()
             || shoots_drag_projectile
-            || site_provides_no_threshold
             || gains_power_ranged_and_spellcaster_atop_tower
             || must_be_cast_to_outer_column
             || token)
