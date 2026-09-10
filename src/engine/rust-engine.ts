@@ -67,6 +67,22 @@ export type RustStepResult = Readonly<{
   rejection?: JsonValue;
 }>;
 
+export type RustNoveltyProbe = Readonly<{
+  actionId: string;
+  actionKind: string;
+  eventTypes: readonly string[];
+  newActionKind: boolean;
+  newEventCount: number;
+  postStateHash: Sha256Hash;
+  selectedByFallback: boolean;
+}>;
+
+export type RustNoveltyStep = Readonly<{
+  probes: readonly RustNoveltyProbe[];
+  selectedIndex: number;
+  tooWide: boolean;
+}>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -76,6 +92,48 @@ function requireHash(value: unknown, label: string): Sha256Hash {
     throw new Error(`Rust engine ${label} was not a sha256 hash`);
   }
   return value as Sha256Hash;
+}
+
+function parseNoveltyProbe(value: unknown): RustNoveltyProbe {
+  if (!isRecord(value)
+    || typeof value.actionId !== 'string'
+    || typeof value.actionKind !== 'string'
+    || !Array.isArray(value.eventTypes)
+    || !value.eventTypes.every((eventType) => typeof eventType === 'string')
+    || typeof value.newActionKind !== 'boolean'
+    || !Number.isSafeInteger(value.newEventCount)
+    || typeof value.selectedByFallback !== 'boolean') {
+    throw new Error('Rust session novelty probe was invalid');
+  }
+  return Object.freeze({
+    actionId: value.actionId,
+    actionKind: value.actionKind,
+    eventTypes: Object.freeze(value.eventTypes.slice() as string[]),
+    newActionKind: value.newActionKind,
+    newEventCount: value.newEventCount as number,
+    postStateHash: requireHash(value.postStateHash, 'postStateHash'),
+    selectedByFallback: value.selectedByFallback,
+  });
+}
+
+function parseNoveltyStep(value: unknown): RustNoveltyStep {
+  if (!isRecord(value)
+    || !Array.isArray(value.probes)
+    || typeof value.selectedIndex !== 'number'
+    || !Number.isSafeInteger(value.selectedIndex)
+    || typeof value.tooWide !== 'boolean') {
+    throw new Error('Rust session probeNovelty result was invalid');
+  }
+  const probes = value.probes.map((probe) => parseNoveltyProbe(probe));
+  const selectedIndex = value.selectedIndex;
+  if (selectedIndex < 0 || selectedIndex >= probes.length) {
+    throw new Error('Rust session probeNovelty selectedIndex was out of range');
+  }
+  return Object.freeze({
+    probes: Object.freeze(probes),
+    selectedIndex,
+    tooWide: value.tooWide,
+  });
 }
 
 function parseLegalAction(action: unknown): RustLegalAction {
@@ -243,6 +301,16 @@ export class RustSessionClient {
       throw new Error('Rust session selectPolicyAction result was invalid');
     }
     return parseLegalAction(result.action);
+  }
+
+  async probeNovelty(input: Readonly<{
+    committedActionKinds: readonly string[];
+    committedEventTypes: readonly string[];
+  }>): Promise<RustNoveltyStep> {
+    return parseNoveltyStep(await this.call('probeNovelty', {
+      committedActionKinds: [...input.committedActionKinds],
+      committedEventTypes: [...input.committedEventTypes],
+    }));
   }
 
   async step(request: RustActionRequest): Promise<RustStepResult> {

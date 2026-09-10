@@ -13,7 +13,9 @@ use crate::contract::{
 use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
+use crate::novelty::{NoveltyStep, probe_novelty};
 use crate::policy::{PolicyError, baseline_policy_snapshot};
+use crate::simulator::SimulatorError;
 
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,6 +52,8 @@ pub enum SessionError {
     SequenceExhausted,
     /// The deterministic policy could not select a legal action.
     Policy(PolicyError),
+    /// One-step novelty search could not score the current decision.
+    Novelty { message: String },
 }
 
 impl fmt::Display for SessionError {
@@ -61,6 +65,7 @@ impl fmt::Display for SessionError {
             Self::ReplayRejected(code) => write!(formatter, "replay rejected action: {code:?}"),
             Self::SequenceExhausted => formatter.write_str("session journal sequence exhausted"),
             Self::Policy(error) => error.fmt(formatter),
+            Self::Novelty { message } => formatter.write_str(message),
         }
     }
 }
@@ -71,7 +76,7 @@ impl Error for SessionError {
             Self::Game(error) => Some(error),
             Self::Canonical(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::ReplayRejected(_) | Self::SequenceExhausted => None,
+            Self::ReplayRejected(_) | Self::SequenceExhausted | Self::Novelty { .. } => None,
             Self::Policy(error) => Some(error),
         }
     }
@@ -152,6 +157,29 @@ impl Session {
             .select_action(&observation, &actions)?
             .to_legal_action()
             .map_err(SessionError::Game)
+    }
+
+    /// Scores one-step novelty over engine-issued legal actions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the position has no legal actions or a probe fails.
+    pub fn probe_novelty(
+        &self,
+        committed_action_kinds: &[String],
+        committed_event_types: &[String],
+    ) -> Result<NoveltyStep, SessionError> {
+        let policy = baseline_policy_snapshot(
+            self.game.rules().authority_hash(),
+            self.game.rules().engine_version(),
+        )?;
+        probe_novelty(
+            &self.game,
+            &policy,
+            committed_action_kinds,
+            committed_event_types,
+        )
+        .map_err(map_novelty_error)
     }
 
     /// Returns legal actions materialized at the external boundary.
@@ -428,6 +456,20 @@ impl Session {
             code,
         ));
         Ok(StepResult::Rejected(rejection))
+    }
+}
+
+fn map_novelty_error(error: SimulatorError) -> SessionError {
+    match error {
+        SimulatorError::Game(error) => SessionError::Game(error),
+        SimulatorError::Policy(error) => SessionError::Policy(error),
+        SimulatorError::Session(error) => error,
+        SimulatorError::InvalidLimit => SessionError::Novelty {
+            message: "novelty search requires at least one legal action".to_owned(),
+        },
+        SimulatorError::ReplayDiverged => SessionError::Novelty {
+            message: "novelty search could not identify the baseline fallback".to_owned(),
+        },
     }
 }
 

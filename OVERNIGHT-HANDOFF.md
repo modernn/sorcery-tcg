@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Live line: `cursor/square-voidwalk-0005`. Stack this on current `master` (`ca1d466`). Do not grow the land-on-master PRs.
+Live line: `cursor/rust-novelty-probe-0005`. Stack this on current `master` (`8d6ccc3`). Do not grow already-merged landings.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

@@ -9,7 +9,11 @@ import type {
   GameSession,
   GameStepResult,
 } from './game.ts';
-import { RustSessionClient, type Sha256Hash } from './rust-engine.ts';
+import {
+  RustSessionClient,
+  type RustNoveltyStep,
+  type Sha256Hash,
+} from './rust-engine.ts';
 import { bindRustExportedSession } from './rust-legality-sync.ts';
 import { asGameLegalAction, asGameLegalActions, parseExportedSession } from './rust-session-parse.ts';
 
@@ -77,6 +81,14 @@ export class RustGameSessionHandle {
   /** Selects one engine-issued action with the shared baseline deterministic policy. */
   async selectPolicyAction(): Promise<GameLegalAction> {
     return asGameLegalAction(await this.client.selectPolicyAction());
+  }
+
+  /** Scores one-step novelty over the current engine-issued legal actions. */
+  async probeNovelty(input: Readonly<{
+    committedActionKinds: readonly string[];
+    committedEventTypes: readonly string[];
+  }>): Promise<RustNoveltyStep> {
+    return this.client.probeNovelty(input);
   }
 
   /** Applies one bound action request. */
