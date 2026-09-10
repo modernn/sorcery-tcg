@@ -4986,7 +4986,7 @@ impl Game {
             .collect()
     }
 
-    fn targeted_avatar_seat(&self, target: &Option<UnitTarget>) -> Result<Seat, GameError> {
+    fn targeted_avatar_seat(&self, target: Option<&UnitTarget>) -> Result<Seat, GameError> {
         let Some(UnitTarget::Avatar {
             seat: target_seat,
             instance_id,
@@ -14876,11 +14876,11 @@ impl Game {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
             MagicEffect::TargetPlayerGainsLife(amount) => {
-                let target_seat = self.targeted_avatar_seat(target)?;
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
             }
             MagicEffect::TargetPlayerLosesLife(amount) => {
-                let target_seat = self.targeted_avatar_seat(target)?;
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 self.apply_avatar_life_loss(
                     target_seat,
                     u16::from(amount),
