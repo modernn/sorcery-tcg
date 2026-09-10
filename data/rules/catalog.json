@@ -6740,7 +6740,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "The same Monument does not untap nearby units at the end of the opponent's turn. A nearby enemy that taps during that turn stays tapped.",
+      "plainLanguage": "The same Monument does not emit nearby-ally untap events at the end of the opponent's turn. A nearby ally can tap to Defend during that turn; Start Phase may later ready it silently.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atEndOfControllerTurnUntapNearbyAllies"

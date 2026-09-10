@@ -25335,26 +25335,31 @@ test('RULE-04 Belfry untaps nearby allies at the end of your turn', async () => 
     firstSeat: 'north' as const,
     seed: 1,
   });
+  const belfry = gameManifest.cards['belfry-north-artifact'];
+  assert.equal(
+    belfry?.cardType === 'artifact' && belfry.atEndOfControllerTurnUntapNearbyAllies,
+    true,
+  );
   await withSetup(gameManifest, async (ctx) => {
     await ctx.keep();
     await ctx.keep();
     await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
     assert.equal(ctx.state.players.north.avatar.tapped, true);
-    const cast = await ctx.step(await ctx.action(({ descriptor }) =>
+    await ctx.take(({ descriptor }) =>
       descriptor.kind === 'cast-artifact'
         && descriptor.cardId === 'belfry-north-artifact'
-        && descriptor.cell === 'C4'));
-    assert.equal(cast.accepted, true);
+        && descriptor.cell === 'C4');
     const ended = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
     assert.equal(ended.accepted, true);
     if (!ended.accepted) {
       return;
     }
+    assert.deepEqual(ended.receipt.events.map(({ type }) => type), [
+      'avatar-untapped',
+      'turn-ended',
+      'turn-started',
+    ]);
     assert.equal(ctx.state.players.north.avatar.tapped, false);
-    assert.equal(
-      ended.receipt.events.some(({ type }) => type === 'avatar-untapped'),
-      true,
-    );
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

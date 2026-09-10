@@ -100,7 +100,7 @@ fn nearby_manifest(seed: u32) -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn opponent_turn_manifest() -> String {
+fn opponent_turn_manifest(seed: u32) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "belfry-opponent-turn" }))
@@ -111,6 +111,7 @@ fn opponent_turn_manifest() -> String {
         "cards": {
             "north-avatar": avatar(),
             "north-belfry": belfry(),
+            "north-near": charger(),
             "north-site": site(),
             "south-avatar": avatar(),
             "south-near": charger(),
@@ -120,7 +121,14 @@ fn opponent_turn_manifest() -> String {
             "north": {
                 "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
-                "spellbook": vec!["north-belfry"; 6],
+                "spellbook": [
+                    "north-belfry",
+                    "north-belfry",
+                    "north-belfry",
+                    "north-near",
+                    "north-near",
+                    "north-near"
+                ],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
@@ -131,10 +139,24 @@ fn opponent_turn_manifest() -> String {
         "engineVersion": "sorcery-core-v1",
         "firstSeat": "north",
         "schemaVersion": 1,
-        "seed": 1,
+        "seed": seed,
     });
     value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn opponent_turn_opening_manifest() -> String {
+    (1..=4096)
+        .map(opponent_turn_manifest)
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("Belfry opponent-turn candidate"));
+            let hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north opening spellbook");
+            hand.iter().any(|card| card["cardId"] == "north-belfry")
+                && hand.iter().any(|card| card["cardId"] == "north-near")
+        })
+        .expect("bounded seed opening with Belfry and a nearby ally")
 }
 
 fn nearby_opening_manifest() -> String {
@@ -152,12 +174,28 @@ fn nearby_opening_manifest() -> String {
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
-    let action = session
-        .legal_actions()
-        .expect("legal actions")
-        .into_iter()
+    accept_named(session, "expected engine-issued action", predicate)
+}
+
+fn accept_named(
+    session: &mut Session,
+    label: &str,
+    predicate: impl Fn(&Value) -> bool,
+) -> (Value, Receipt) {
+    let legal = session.legal_actions().expect("legal actions");
+    let action = legal
+        .iter()
         .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .unwrap_or_else(|| {
+            panic!(
+                "{label}; legal={:?}",
+                legal
+                    .iter()
+                    .map(|action| action.descriptor["kind"].clone())
+                    .collect::<Vec<_>>()
+            )
+        })
+        .clone();
     let descriptor = action.descriptor.clone();
     let result = session
         .step(ActionRequest {
@@ -204,11 +242,14 @@ fn artifact_id(session: &Session, card_id: &str) -> Value {
 }
 
 fn tap_charger(session: &mut Session, card_id: &str) -> Value {
-    let instance_id = unit(&state(session), card_id)["instanceId"].clone();
+    let snapshot = state(session);
+    let charger = unit(&snapshot, card_id);
+    let instance_id = charger["instanceId"].clone();
+    let cell = charger["location"].clone();
     accept_where(session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
             && descriptor["unitInstanceId"] == instance_id
-            && descriptor["to"]["cell"] == unit(&state(session), card_id)["location"]
+            && descriptor["to"]["cell"] == cell
     });
     accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
     instance_id
@@ -227,6 +268,72 @@ fn assert_exact_replay(session: &Session) {
     );
     assert_eq!(replayed.transcript(), session.transcript());
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn avatar_only_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "belfry-avatar-only" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-belfry-v1",
+        },
+        "cards": {
+            "belfry-north-artifact": belfry(),
+            "belfry-north-avatar": avatar(),
+            "belfry-north-site": site(),
+            "belfry-south-avatar": avatar(),
+            "belfry-south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["belfry-north-site"; 6],
+                "avatar": "belfry-north-avatar",
+                "spellbook": vec!["belfry-north-artifact"; 6],
+            },
+            "south": {
+                "atlas": vec!["belfry-south-site"; 6],
+                "avatar": "belfry-south-avatar",
+                "spellbook": vec!["belfry-north-artifact"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn belfry_untaps_the_nearby_avatar_without_a_minion() {
+    let mut session = Session::new(&avatar_only_manifest()).expect("valid avatar-only Belfry");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "belfry-north-artifact"
+            && descriptor["cell"] == "C4"
+    });
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["tapped"], true);
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["tapped"], false);
+    assert!(
+        receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-untapped"),
+        "{:?}",
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -284,50 +391,86 @@ fn rule_catalog_0312_belfry_untaps_nearby_allies_at_end_of_your_turn() {
 
 #[test]
 fn rule_catalog_0313_belfry_does_not_untap_on_the_opponents_turn() {
-    let mut session =
-        Session::new(&opponent_turn_manifest()).expect("valid Belfry opponent-turn session");
+    let mut session = Session::new(&opponent_turn_opening_manifest())
+        .expect("valid Belfry opponent-turn session");
     keep(&mut session);
     keep(&mut session);
-    accept_where(&mut session, |descriptor| {
+    accept_named(&mut session, "north play-site C4", |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
-    accept_where(&mut session, |descriptor| {
+    accept_named(&mut session, "north cast Belfry", |descriptor| {
         descriptor["kind"] == "cast-artifact"
             && descriptor["cardId"] == "north-belfry"
             && descriptor["cell"] == "C4"
     });
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
+    accept_named(&mut session, "north summon ally", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-near"
+            && descriptor["cell"] == "C4"
+    });
+    let ally_id = tap_charger(&mut session, "north-near");
+    accept_named(&mut session, "north end T1", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    let after_belfry = state(&session);
+    assert_eq!(unit(&after_belfry, "north-near")["tapped"], false);
+    accept_named(&mut session, "south draw atlas", |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
-    accept_where(&mut session, |descriptor| {
+    accept_named(&mut session, "south play-site C1", |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardId"] == "south-site"
             && descriptor["cell"] == "C1"
     });
-    accept_where(&mut session, |descriptor| {
+    accept_named(&mut session, "south summon to C4", |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "south-near"
             && descriptor["cell"] == "C4"
     });
-    let minion_id = tap_charger(&mut session, "south-near");
+    let attacker_id = unit(&state(&session), "south-near")["instanceId"].clone();
+    accept_named(&mut session, "south move-and-attack C4", |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["to"]["cell"] == "C4"
+    });
+    accept_named(&mut session, "south declare-attack avatar", |descriptor| {
+        descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "avatar"
+    });
+    accept_named(&mut session, "north defend", |descriptor| {
+        descriptor["kind"] == "defend" && descriptor["unitInstanceId"] == ally_id
+    });
+    accept_named(&mut session, "close-defend", |descriptor| {
+        descriptor["kind"] == "close-defend"
+    });
+    if session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == "close-intercept")
+    {
+        accept_named(&mut session, "close-intercept", |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
     let before = state(&session);
-    assert_eq!(unit(&before, "south-near")["tapped"], true);
-    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    let after = state(&session);
-    assert_eq!(unit(&after, "south-near")["tapped"], true);
-    assert_eq!(unit(&after, "south-near")["instanceId"], minion_id);
+    assert_eq!(unit(&before, "north-near")["tapped"], true);
+    assert_eq!(unit(&before, "north-near")["instanceId"], ally_id);
+    let (_, south_end) = accept_named(&mut session, "south end-turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
     assert!(
-        receipt.events.iter().all(|event| {
+        south_end.events.iter().all(|event| {
             event.event_type != "minion-untapped" && event.event_type != "avatar-untapped"
         }),
         "Belfry does not fire at the end of the opponent's turn: {:?}",
-        receipt
+        south_end
             .events
             .iter()
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>()
     );
+    let after = state(&session);
+    assert_eq!(unit(&after, "north-near")["instanceId"], ally_id);
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }

@@ -2618,45 +2618,48 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
-            ...(card.atEndOfEachTurnSiteControllerLosesLife !== undefined
-              ? {
-                atEndOfEachTurnSiteControllerLosesLife:
-                  card.atEndOfEachTurnSiteControllerLosesLife,
-                }
-              : card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined
+            ...(card.atEndOfControllerTurnUntapNearbyAllies === true
+              ? { atEndOfControllerTurnUntapNearbyAllies: true as const }
+              : card.atEndOfEachTurnSiteControllerLosesLife !== undefined
                 ? {
-                  atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn:
-                    card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn,
+                  atEndOfEachTurnSiteControllerLosesLife:
+                    card.atEndOfEachTurnSiteControllerLosesLife,
                 }
-              : card.bearerControllerChoosesExtraRandomOutcome === true
-                ? { bearerControllerChoosesExtraRandomOutcome: true as const }
-              : card.grantsBearerPower === 2
-              ? { grantsBearerPower: 2 as const }
-              : card.grantsBearerLethal === true
-                ? { grantsBearerLethal: true as const }
-              : card.nearbyMinionsMustAttackIfAble === true
-                ? {
-                  nearbyMinionsMustAttackIfAble: true as const,
-                  ...(card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
-                    ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
-                    : {}),
-                }
-              : card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
-                ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
-                : card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3
+                : card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined
                   ? {
-                    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const,
+                    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn:
+                      card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn,
                   }
-                  : card
-                    .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
-                      === true
-                    ? {
-                    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
-                      true as const,
-                    }
-                    : {
-                      tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4 as const,
-                  }),
+                  : card.bearerControllerChoosesExtraRandomOutcome === true
+                    ? { bearerControllerChoosesExtraRandomOutcome: true as const }
+                    : card.grantsBearerPower === 2
+                      ? { grantsBearerPower: 2 as const }
+                      : card.grantsBearerLethal === true
+                        ? { grantsBearerLethal: true as const }
+                        : card.nearbyMinionsMustAttackIfAble === true
+                          ? {
+                            nearbyMinionsMustAttackIfAble: true as const,
+                            ...(card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
+                              ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
+                              : {}),
+                          }
+                          : card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
+                            ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
+                            : card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3
+                              ? {
+                                tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const,
+                              }
+                              : card
+                                .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
+                                  === true
+                                ? {
+                                  tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps:
+                                    true as const,
+                                }
+                                : {
+                                  tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath:
+                                    4 as const,
+                                }),
             manaCost: card.manaCost,
             thresholds: { ...card.thresholds },
           }
