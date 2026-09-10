@@ -393,6 +393,9 @@ pub enum ActionDescriptor {
         /// Optional one-step destination chosen for a Leap Attack ally.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally_destination: Option<Location>,
+        /// Exact canonical two-by-two footprint a Teleport or Blink ally occupies on arrival.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ally_destination_cells: Option<SquareArea>,
         /// Selected strike cell inside an oversized Leap Attack footprint.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally_strike_location: Option<Location>,
@@ -1187,6 +1190,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 ActionDescriptor::CastMagic {
                     ally: left_ally,
                     ally_destination: left_destination,
+                    ally_destination_cells: left_destination_cells,
                     ally_strike_location: left_strike,
                     card_id: left_card,
                     card_instance_id: left_instance,
@@ -1204,6 +1208,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 ActionDescriptor::CastMagic {
                     ally: right_ally,
                     ally_destination: right_destination,
+                    ally_destination_cells: right_destination_cells,
                     ally_strike_location: right_strike,
                     card_id: right_card,
                     card_instance_id: right_instance,
@@ -1220,6 +1225,9 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 },
             ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
                 .then_with(|| compare_optional_locations(*left_destination, *right_destination))
+                .then_with(|| {
+                    compare_optional_square_areas(*left_destination_cells, *right_destination_cells)
+                })
                 .then_with(|| compare_optional_locations(*left_strike, *right_strike))
                 .then_with(|| compare_json_strings(left_card, right_card))
                 .then_with(|| left_instance.cmp(right_instance))

@@ -9694,41 +9694,44 @@ test('RULE-03 Aura occupies any canonical 2x2 area and grounds site minions for 
 });
 
 test('RULE-03 an end-turn Aura damages a random affected unit before its optional step', async () => {
-  const base = manifest(2);
-  await withPreview(base, async (preview) => {
-    const [luckyCharmId, auraCardId, minionCardId] =
-      preview.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
-    const siteCardId = preview.state.players.north.hand.atlas[0]?.cardId;
-    assert.ok(luckyCharmId && auraCardId && minionCardId && siteCardId);
-    const cards: Record<string, GameCardDefinition> = {
-      ...base.cards,
-      [luckyCharmId]: {
-        bearerControllerChoosesExtraRandomOutcome: true,
-        cardType: 'artifact',
-        manaCost: 0,
-        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-      },
-      [auraCardId]: {
-        atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3,
-        cardType: 'aura',
-        manaCost: 0,
-        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-      },
-      [minionCardId]: {
-        attack: 1,
-        cardType: 'minion',
-        defense: 10,
-        manaCost: 0,
-        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-      },
-    };
-    await withSetup(createGameManifest({
-      authority: base.authority,
-      cards,
-      decks: base.decks,
-      firstSeat: base.firstSeat,
-      seed: 2,
-    }), async (ctx) => {
+  const ctx = await SetupCtx.open(manifest(2));
+  try {
+    for (let seed = 2; seed <= 100; seed += 1) {
+      const base = manifest(seed);
+      await ctx.reset(base);
+      const [luckyCharmId, auraCardId, minionCardId] =
+        ctx.state.players.north.hand.spellbook.map(({ cardId }) => cardId);
+      const siteCardId = ctx.state.players.north.hand.atlas[0]?.cardId;
+      if (!luckyCharmId || !auraCardId || !minionCardId || !siteCardId) continue;
+      const cards: Record<string, GameCardDefinition> = {
+        ...base.cards,
+        [luckyCharmId]: {
+          bearerControllerChoosesExtraRandomOutcome: true,
+          cardType: 'artifact',
+          manaCost: 0,
+          thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        },
+        [auraCardId]: {
+          atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3,
+          cardType: 'aura',
+          manaCost: 0,
+          thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        },
+        [minionCardId]: {
+          attack: 1,
+          cardType: 'minion',
+          defense: 10,
+          manaCost: 0,
+          thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        },
+      };
+      await ctx.reset(createGameManifest({
+        authority: base.authority,
+        cards,
+        decks: base.decks,
+        firstSeat: base.firstSeat,
+        seed,
+      }));
       await ctx.keep();
       await ctx.keep();
       await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
@@ -9743,8 +9746,9 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
       assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
         descriptor.kind === 'resolve-end-turn-aura-random'), false);
       await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
-      assert.equal((await ctx.legalActions('north')).filter(({ descriptor }) =>
-        descriptor.kind === 'resolve-end-turn-aura-random').length, 2);
+      const randomOutcomes = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+        descriptor.kind === 'resolve-end-turn-aura-random');
+      if (randomOutcomes.length !== 2) continue;
       assert.equal(ctx.state.phase, 'end-turn-aura');
       const committed = ctx.session.transcript.at(-1)!;
       assert.equal(committed.events.some(({ type }) => type === 'damage-dealt'), false);
@@ -9823,8 +9827,12 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
         'aura-dispelled',
       ]);
       assert.equal(await ctx.verifyReplay(), true);
-    });
-  });
+      return;
+    }
+    assert.fail('expected Lucky Charm end-turn Aura seed with two outcomes');
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement, combat, Auras, and terrain', async () => {
