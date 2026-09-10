@@ -5371,6 +5371,98 @@
         "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
         "testName": "rule_catalog_0251_nearby_double_damage_does_not_apply_when_the_struck_unit_is_not_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0252",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location, not the shooter's.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0252_ranged_strike_deals_double_damage_when_the_struck_unit_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0253",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Ranged strike whose struck unit is not nearby the source. A 1-power undoubled projectile leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0253_ranged_strike_is_not_doubled_when_the_struck_unit_is_not_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0254",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Genesis strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0254_genesis_strike_deals_double_damage_when_the_struck_unit_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0255",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Genesis strike whose struck unit is not nearby the source. A 1-power undoubled Genesis strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_nearby"
+      }
     }
   ]
 }

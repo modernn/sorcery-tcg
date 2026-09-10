@@ -8119,22 +8119,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         };
-        outcomes.push("strike-damage-allocated", || {
-            json!({
-                "amount": strike.amount,
-                "strikerInstanceId": shooter_instance_id,
-                "targetInstanceId": target.instance_id(),
-            })
-        });
         let target_kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
+        let amount = self.nearby_unit_strike_amount(
+            strike.amount,
+            target_kind,
+            target.seat(),
+            target.instance_id(),
+        )?;
+        outcomes.push("strike-damage-allocated", || {
+            json!({
+                "amount": amount,
+                "strikerInstanceId": shooter_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
         let damage = self.apply_simple_damage(
             target_kind,
             target.seat(),
             target.instance_id(),
-            strike.amount,
+            amount,
             UnitDamageSource {
                 current_power: strike.current_power,
                 lethal: strike.lethal,
@@ -17815,10 +17821,15 @@ impl Game {
                 } else {
                     None
                 };
-                Ok((instance_id, kind, seat, status))
+                let allocated = if strike {
+                    self.nearby_unit_strike_amount(amount, kind, seat, &instance_id)?
+                } else {
+                    amount
+                };
+                Ok((instance_id, kind, seat, status, allocated))
             })
             .collect::<Result<Vec<_>, GameError>>()?;
-        for (target_instance_id, _, _, _) in &targets {
+        for (target_instance_id, _, _, _, allocated) in &targets {
             outcomes.push(
                 if strike {
                     "strike-damage-allocated"
@@ -17827,7 +17838,7 @@ impl Game {
                 },
                 || {
                     let mut payload = json!({
-                        "amount": amount,
+                        "amount": allocated,
                         "targetInstanceId": target_instance_id,
                     });
                     payload[if strike {
@@ -17841,12 +17852,12 @@ impl Game {
         }
         let mut dead_minions = Vec::new();
         let mut defeated_avatars = Vec::new();
-        for (target_instance_id, kind, seat, status) in targets {
+        for (target_instance_id, kind, seat, status, allocated) in targets {
             let result = self.apply_simple_damage_with_status(
                 kind,
                 seat,
                 &target_instance_id,
-                amount,
+                allocated,
                 UnitDamageSource {
                     current_power,
                     lethal,

@@ -23456,6 +23456,307 @@ test('RULE-04 nearby strikes against units deal double damage only while the str
   });
 });
 
+test('RULE-04 Ranged strikes deal double damage only while the struck unit is nearby', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'ranged-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ranged-north-site': { cardType: 'site', elements: ['earth'] },
+    'ranged-north-shooter': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      ranged: true,
+      thresholds,
+    },
+    'ranged-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ranged-south-mask': {
+      cardType: 'artifact',
+      manaCost: 0,
+      nearbyStrikesAgainstUnitsDealDoubleDamage: true,
+      thresholds,
+    },
+    'ranged-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'ranged-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = await findOpeningManifest(
+    (seed) => createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-nearby-ranged-double-strike-v1',
+      },
+      cards,
+      decks: {
+        north: {
+          atlas: Array(6).fill('ranged-north-site'),
+          avatar: 'ranged-north-avatar',
+          spellbook: Array(6).fill('ranged-north-shooter'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('ranged-south-site'),
+          avatar: 'ranged-south-avatar',
+          spellbook: [
+            'ranged-south-mask',
+            'ranged-south-minion',
+            'ranged-south-minion',
+            'ranged-south-mask',
+            'ranged-south-minion',
+            'ranged-south-minion',
+          ],
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed,
+    }),
+    (session) => {
+      const opening = session.state.players.south.hand.spellbook;
+      return opening.some(({ cardId }) => cardId === 'ranged-south-mask')
+        && opening.some(({ cardId }) => cardId === 'ranged-south-minion');
+    },
+  );
+  const reachShot = async (ctx: SetupCtx, carryMask: boolean) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ranged-north-shooter'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ranged-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ranged-north-site'
+        && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ranged-south-minion'
+        && descriptor.cell === 'C3');
+    const bearerId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ranged-south-minion')?.instanceId;
+    assert.ok(bearerId);
+    if (carryMask) {
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+          && descriptor.cardId === 'ranged-south-mask'
+          && descriptor.bearer?.instanceId === bearerId);
+    } else {
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+          && descriptor.cardId === 'ranged-south-mask'
+          && descriptor.cell === 'C1'
+          && descriptor.bearer == null);
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  };
+
+  await withSetup(gameManifest, async (ctx) => {
+    await reachShot(ctx, true);
+    const shooterId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ranged-north-shooter')?.instanceId;
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ranged-south-minion')?.instanceId;
+    assert.ok(shooterId);
+    assert.ok(targetId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.direction === 'south'
+        && descriptor.shooterInstanceId === shooterId
+        && descriptor.hit?.instanceId === targetId);
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === targetId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(gameManifest, async (ctx) => {
+    await reachShot(ctx, false);
+    const shooterId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ranged-north-shooter')?.instanceId;
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ranged-south-minion')?.instanceId;
+    assert.ok(shooterId);
+    assert.ok(targetId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.direction === 'south'
+        && descriptor.shooterInstanceId === shooterId
+        && descriptor.hit?.instanceId === targetId);
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === targetId)?.damage, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 Genesis strikes deal double damage only while the struck unit is nearby', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'genesis-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'genesis-north-site': { cardType: 'site', elements: ['earth'] },
+    'genesis-north-titan': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      genesisStrikeEachEnemyHere: true,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'genesis-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'genesis-south-mask': {
+      cardType: 'artifact',
+      manaCost: 0,
+      nearbyStrikesAgainstUnitsDealDoubleDamage: true,
+      thresholds,
+    },
+    'genesis-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'genesis-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = await findOpeningManifest(
+    (seed) => createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-nearby-genesis-double-strike-v1',
+      },
+      cards,
+      decks: {
+        north: {
+          atlas: Array(6).fill('genesis-north-site'),
+          avatar: 'genesis-north-avatar',
+          spellbook: Array(6).fill('genesis-north-titan'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('genesis-south-site'),
+          avatar: 'genesis-south-avatar',
+          spellbook: [
+            'genesis-south-mask',
+            'genesis-south-minion',
+            'genesis-south-minion',
+            'genesis-south-mask',
+            'genesis-south-minion',
+            'genesis-south-minion',
+          ],
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed,
+    }),
+    (session) => {
+      const opening = session.state.players.south.hand.spellbook;
+      return opening.some(({ cardId }) => cardId === 'genesis-south-mask')
+        && opening.some(({ cardId }) => cardId === 'genesis-south-minion');
+    },
+  );
+  const reachSummon = async (ctx: SetupCtx, carryMask: boolean) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'genesis-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'genesis-south-minion'
+        && descriptor.cell === 'C4');
+    const bearerId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'genesis-south-minion')?.instanceId;
+    assert.ok(bearerId);
+    if (carryMask) {
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+          && descriptor.cardId === 'genesis-south-mask'
+          && descriptor.bearer?.instanceId === bearerId);
+    } else {
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+          && descriptor.cardId === 'genesis-south-mask'
+          && descriptor.cell === 'C1'
+          && descriptor.bearer == null);
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  };
+
+  await withSetup(gameManifest, async (ctx) => {
+    await reachSummon(ctx, true);
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'genesis-south-minion')?.instanceId;
+    assert.ok(targetId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'genesis-north-titan'
+        && descriptor.cell === 'C4');
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === targetId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(gameManifest, async (ctx) => {
+    await reachSummon(ctx, false);
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'genesis-south-minion')?.instanceId;
+    assert.ok(targetId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'genesis-north-titan'
+        && descriptor.cell === 'C4');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === targetId)?.damage, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {
