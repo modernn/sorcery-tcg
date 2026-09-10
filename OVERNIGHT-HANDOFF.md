@@ -10,10 +10,11 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **309 rust-supported / 0 typescript-supported** out of 309.
+`data/rules/catalog.json`: **311 rust-supported / 0 typescript-supported** out of 311.
 
-Latest catalog proofs: Start Phase doesn't-untap (`RULE-CATALOG-0308`–`0309`) and end-of-controller-turn Avatar life (`RULE-CATALOG-0304`–`0307`).
-A printed minion can replace the controller Start Phase untap and stay tapped into that player's next Main phase. Disable suppresses the replacement, so a frozen copy still readies, then Freeze expires at the caster's next turn start. This is not a start-turn trigger. End-turn controller life gain and loss reuse the shared Avatar helpers. Healing is capped at printed life and cannot leave Death's Door. Life loss can open Death's Door without ending the game. The three end-turn pulses — life gain, life loss, and here-area damage — are exclusive; Ignited is not a pulse. Disabled minions do not fire.
+Latest catalog proofs: official Atlantean Fate (`RULE-CATALOG-0310`–`0311`). Fate is not Flood. Affected non-Ordinary sites become Water sites, provide only Water threshold, and lose printed abilities. Ordinary sites under the same 2×2 stay printed. Genesis submerges minions atop affected sites; a minion without Submerge dies through region settlement.
+Start Phase doesn't-untap remains `RULE-CATALOG-0308`–`0309`.
+End-of-controller-turn Avatar life remains `RULE-CATALOG-0304`–`0307`.
 Deathrite library mill remains `RULE-CATALOG-0300`–`0303`.
 Heal-target-minion Magic remains `RULE-CATALOG-0298`–`0299`.
 Grant-Airborne this turn remains `RULE-CATALOG-0274`–`0275`.
@@ -67,14 +68,14 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `b8e8587`.
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `fac0fda`.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 263 engine + 1 catalog pass, including catalog 0167–0309.
+- `tests/engine` + catalog proofs — RULE-06, Flood, and Fate playthroughs plus the catalog linker pass, including catalog 0167–0311.
 - Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices that are still unbound. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not break Ignited or end-turn Auras. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices that are still unbound. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not break Ignited or end-turn Auras. Atlantean Fate is bound — do not conflate it with Flood. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
