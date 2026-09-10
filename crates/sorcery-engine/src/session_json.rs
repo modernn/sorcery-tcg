@@ -9,6 +9,7 @@ use crate::canonical::{CanonicalError, canonical_json, parse_json_without_duplic
 use crate::checkpoint::{create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint};
 use crate::contract::{ActionRequest, Seat};
 use crate::novelty::NoveltyStep;
+use crate::novelty_dispatch::ForcedNoveltyInput;
 use crate::session::{Session, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -68,6 +69,9 @@ impl SessionJsonService {
             "selectPolicyAction" => self.select_policy_action(request.id),
             "probeNovelty" => self.probe_novelty(request.id, &request.params),
             "runNoveltyRollout" => self.run_novelty_rollout(request.id, &request.params),
+            "runNoveltyFromForcedAction" => {
+                self.run_novelty_from_forced_action(request.id, &request.params)
+            }
             "runCounterfactual" => self.run_counterfactual(request.id, &request.params),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
@@ -216,6 +220,54 @@ impl SessionJsonService {
                     id,
                     json!({
                         "emittedCheckpoints": emitted_checkpoints,
+                        "result": output.result(),
+                    }),
+                ),
+                Err(error) => error_response(id, &error.to_string()),
+            },
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn run_novelty_from_forced_action(&mut self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = self.session.as_mut() else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(action_id) = params.get("actionId").and_then(Value::as_str) else {
+            return error_response(id, "runNoveltyFromForcedAction requires actionId");
+        };
+        let Some(action_kind) = params.get("actionKind").and_then(Value::as_str) else {
+            return error_response(id, "runNoveltyFromForcedAction requires actionKind");
+        };
+        let Some(predicted_state_hash) = params.get("predictedStateHash").and_then(Value::as_str)
+        else {
+            return error_response(id, "runNoveltyFromForcedAction requires predictedStateHash");
+        };
+        let Ok(predicted_event_types) = string_list(params, "predictedEventTypes") else {
+            return error_response(
+                id,
+                "runNoveltyFromForcedAction predictedEventTypes must be an array of strings",
+            );
+        };
+        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
+            return error_response(id, "runNoveltyFromForcedAction requires maxActions");
+        };
+        let Ok(max_actions) = usize::try_from(max_actions) else {
+            return error_response(id, "runNoveltyFromForcedAction maxActions is out of range");
+        };
+        match session.run_novelty_from_forced_action(ForcedNoveltyInput {
+            action_id,
+            action_kind,
+            max_actions,
+            predicted_event_types: &predicted_event_types,
+            predicted_state_hash,
+        }) {
+            Ok(output) => match serde_json::to_value(output.emitted_checkpoints()) {
+                Ok(emitted_checkpoints) => ok_response(
+                    id,
+                    json!({
+                        "emittedCheckpoints": emitted_checkpoints,
+                        "entry": output.entry().to_value(),
                         "result": output.result(),
                     }),
                 ),
@@ -649,6 +701,55 @@ mod tests {
         let result = rollout.result.expect("rollout result");
         assert_eq!(result["result"]["status"], "horizon");
         assert_eq!(result["result"]["acceptedActionCount"], 0);
+        assert_eq!(
+            result["emittedCheckpoints"]
+                .as_array()
+                .expect("checkpoints")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn service_should_force_an_action_then_roll_out_novelty() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let novelty = service.handle(&rpc(
+            2,
+            "probeNovelty",
+            json!({
+                "committedActionKinds": [],
+                "committedEventTypes": [],
+            }),
+        ));
+        let scored = novelty.result.expect("probe");
+        let probes = scored["probes"].as_array().expect("probes");
+        let selected_index =
+            usize::try_from(scored["selectedIndex"].as_u64().expect("selectedIndex"))
+                .expect("selectedIndex fits");
+        let probe = probes[selected_index].clone();
+        let forced = service.handle(&rpc(
+            3,
+            "runNoveltyFromForcedAction",
+            json!({
+                "actionId": probe["actionId"],
+                "actionKind": probe["actionKind"],
+                "maxActions": 0,
+                "predictedEventTypes": probe["eventTypes"],
+                "predictedStateHash": probe["postStateHash"],
+            }),
+        ));
+        let result = forced.result.expect("forced novelty");
+        assert_eq!(result["entry"]["actionId"], probe["actionId"]);
+        assert_eq!(result["entry"]["stateHash"], probe["postStateHash"]);
+        assert_eq!(result["result"]["status"], "horizon");
+        assert_eq!(result["result"]["initialStateHash"], probe["postStateHash"]);
         assert_eq!(
             result["emittedCheckpoints"]
                 .as_array()

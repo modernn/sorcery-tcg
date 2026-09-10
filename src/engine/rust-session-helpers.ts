@@ -106,6 +106,28 @@ export class RustGameSessionHandle {
     return this.client.runNoveltyRollout(input);
   }
 
+  /** Forces one engine-issued action, checks its probe prediction, then rolls out novelty. */
+  async runNoveltyFromForcedAction(input: Readonly<{
+    actionId: string;
+    actionKind: string;
+    maxActions: number;
+    predictedEventTypes: readonly string[];
+    predictedStateHash: string;
+  }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    entry: Readonly<{
+      actionId: string;
+      actionKind: string;
+      eventTypes: readonly string[];
+      stateHash: Sha256Hash;
+    }>;
+    result: JsonValue;
+  }>> {
+    const payload = await this.client.runNoveltyFromForcedAction(input);
+    await this.loadSnapshot();
+    return payload;
+  }
+
   /** Applies one bound action request. */
   async step(request: GameActionRequest): Promise<GameStepResult> {
     const stepped = await this.client.step(request);
