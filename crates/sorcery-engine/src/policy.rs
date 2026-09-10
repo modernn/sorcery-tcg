@@ -256,7 +256,7 @@ impl PolicySnapshot {
     /// Returns [`PolicyError`] for an empty or wrong-seat action set.
     pub fn select_action<'a>(
         &self,
-        observation: SeatObservation,
+        observation: &SeatObservation,
         legal_actions: &'a [IssuedAction],
     ) -> Result<&'a IssuedAction, PolicyError> {
         if legal_actions.is_empty() {
@@ -276,7 +276,7 @@ impl PolicySnapshot {
             if let Some(action) = select_feature(
                 feature,
                 self.selector.atlas_reserve,
-                &observation,
+                observation,
                 legal_actions,
             ) {
                 return Ok(action);
