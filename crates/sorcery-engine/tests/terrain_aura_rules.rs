@@ -135,9 +135,7 @@ fn state(session: &Session) -> Value {
 }
 
 fn north_affinity(session: &Session) -> (u64, u64) {
-    let view = session
-        .public_view(Seat::North)
-        .expect("North public view");
+    let view = session.public_view(Seat::North).expect("North public view");
     (
         view["players"]["north"]["affinity"]["earth"]
             .as_u64()
@@ -201,9 +199,9 @@ fn rule_catalog_0266_flood_adds_water_and_keeps_other_affinities() {
         })
         .collect::<Vec<_>>();
     assert!(
-        flood_casts
-            .iter()
-            .all(|action| action.descriptor["cells"].as_array().is_some_and(|cells| cells.len() == 4)),
+        flood_casts.iter().all(|action| action.descriptor["cells"]
+            .as_array()
+            .is_some_and(|cells| cells.len() == 4)),
         "Flood uses the default 2×2 footprint"
     );
     assert!(

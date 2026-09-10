@@ -20,8 +20,7 @@ use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
     BasicMovementRestriction, CardFacts, DamagePrevention, Element, ElementSet, EndTurnStealth,
     FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts,
-    Thresholds,
-    parse_card_definition, validate_identifier,
+    Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -14130,13 +14129,14 @@ impl Game {
         let CardFacts::Aura(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
+        let effect = facts.effect;
         let holds_immobilizing_area = matches!(
-            facts.effect,
+            effect,
             AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
                 | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
         );
         let tracks_visited_cells = matches!(
-            facts.effect,
+            effect,
             AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
         );
         let air = u16::try_from(facts.thresholds.get(Element::Air))
@@ -14187,7 +14187,7 @@ impl Game {
             })
         });
         if matches!(
-            facts.effect,
+            effect,
             AuraEffect::AffectedSitesAreFlooded
                 | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
         ) {
