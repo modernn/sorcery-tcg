@@ -8751,11 +8751,7 @@ fn rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door() {
             && descriptor["target"]["seat"] == "north"
             && descriptor["target"]["instanceId"] == north_avatar
     });
-    assert!(
-        event_types(&damage)
-            .iter()
-            .any(|event_type| *event_type == "avatar-reached-deaths-door")
-    );
+    assert!(event_types(&damage).contains(&"avatar-reached-deaths-door"));
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
     let death_door_turn = state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].clone();
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
