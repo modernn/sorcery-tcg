@@ -658,6 +658,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantRangedToAllyThisTurn/);
+  const lethalGrantManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantLethalToAllyThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(lethalGrantManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantLethalToAllyThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantLethalToAllyThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantLethalToAllyThisTurn/);
   const lureManifest = createGameManifest({
     ...input,
     cards: {
@@ -25224,6 +25254,206 @@ test('RULE-04 grant-Ranged Magic lasts this turn and does not bypass summoning s
       ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryRangedSources,
       undefined,
     );
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 grant-Lethal Magic lasts this turn and is required to kill a tougher minion', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const grant = {
+    cardType: 'magic' as const,
+    grantLethalToAllyThisTurn: true as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards = {
+    'grant-lethal-north-ally': {
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'grant-lethal-north-avatar': avatar,
+    'grant-lethal-north-grant': grant,
+    'grant-lethal-north-site': site,
+    'grant-lethal-south-avatar': avatar,
+    'grant-lethal-south-site': site,
+    'grant-lethal-south-tough': {
+      attack: 0,
+      cardType: 'minion' as const,
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  };
+  const decks = {
+    north: {
+      atlas: Array(6).fill('grant-lethal-north-site'),
+      avatar: 'grant-lethal-north-avatar',
+      spellbook: ['grant-lethal-north-ally', 'grant-lethal-north-grant', 'grant-lethal-north-grant'],
+    } satisfies GameDeckSpec,
+    south: {
+      atlas: Array(6).fill('grant-lethal-south-site'),
+      avatar: 'grant-lethal-south-avatar',
+      spellbook: Array(6).fill('grant-lethal-south-tough'),
+    } satisfies GameDeckSpec,
+  };
+  const authority = {
+    contentHash: SYNTHETIC_AUTHORITY_HASH,
+    mode: 'synthetic' as const,
+    revisionId: 'synthetic-grant-lethal-v1',
+  };
+  const strike = async (ctx: SetupCtx, attackerId: string, enemyId: string) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerId
+        && descriptor.to.cell === 'C4');
+    while (ctx.state.phase === 'movement') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'continue-basic-movement');
+    }
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === enemyId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    if (ctx.state.phase === 'intercept') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    }
+  };
+
+  await withSetup(createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-lethal-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-lethal-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    const grantAction = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-lethal-north-grant'
+        && descriptor.ally?.instanceId === allyId);
+    assert.equal(grantAction.descriptor.kind === 'cast-magic', true);
+    if (grantAction.descriptor.kind !== 'cast-magic') {
+      return;
+    }
+    const granted = await ctx.step(grantAction);
+    assert.equal(granted.accepted, true);
+    if (!granted.accepted) {
+      return;
+    }
+    assert.deepEqual(granted.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'lethal-granted',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryLethalSources,
+      [grantAction.descriptor.cardInstanceId],
+    );
+    const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    assert.equal(ended.accepted, true);
+    if (!ended.accepted) {
+      return;
+    }
+    assert.equal(
+      ended.receipt.events.some(({ type }) => type === 'lethal-expired'),
+      true,
+    );
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryLethalSources,
+      undefined,
+    );
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest({
+    authority,
+    cards,
+    decks,
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-lethal-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-lethal-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'grant-lethal-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-lethal-south-tough'
+        && descriptor.cell === 'C4');
+    const enemyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-lethal-south-tough')?.instanceId;
+    assert.equal(typeof enemyId, 'string');
+    if (typeof enemyId !== 'string') {
+      return;
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw');
+    await withFork(ctx, async (fork) => {
+      await strike(fork, allyId, enemyId);
+      assert.equal(
+        fork.state.realm.units.find((unit) => unit.instanceId === enemyId)?.damage,
+        1,
+      );
+      assert.equal(
+        fork.state.players.south.cemetery.some((card) => card.instanceId === enemyId),
+        false,
+      );
+    });
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-lethal-north-grant'
+        && descriptor.ally?.instanceId === allyId);
+    await strike(ctx, allyId, enemyId);
+    assert.equal(
+      ctx.state.players.south.cemetery.some((card) => card.instanceId === enemyId),
+      true,
+    );
+    assert.equal(
+      ctx.state.realm.units.some((unit) => unit.instanceId === enemyId),
+      false,
+    );
+    assert.equal(ctx.observe('north').players.south.hand.spellbook, 2);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

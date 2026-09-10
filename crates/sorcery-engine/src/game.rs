@@ -379,6 +379,7 @@ struct UnitPosition {
     tapped: bool,
     temporary_airborne_sources: Vec<IdentityHash>,
     temporary_charge_sources: Vec<IdentityHash>,
+    temporary_lethal_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     temporary_ranged_sources: Vec<IdentityHash>,
     warded: bool,
@@ -417,6 +418,7 @@ impl SummonPlacement {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: self.warded,
@@ -1341,6 +1343,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantAirborneToAllyThisTurn
         | MagicEffect::GrantChargeToAllyThisTurn
+        | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantRangedToAllyThisTurn
         | MagicEffect::GrantStealthToTargetMinion
@@ -3244,7 +3247,20 @@ impl Game {
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy,
                     };
-                    let label = (if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
+                    let label = (if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn) {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Lethal grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Lethal to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
                         let ActionDescriptor::CastMagic {
                             ally: Some(ally), ..
                         } = &descriptor
@@ -5383,6 +5399,7 @@ impl Game {
             )?)
             .ok_or(GameError::IllegalAction)?;
         let lethal = facts.lethal
+            || !unit.temporary_lethal_sources.is_empty()
             || self.carried_lethal(UnitKind::Minion, unit.controller, &unit.card.instance_id)?;
         Ok((
             u16::from(facts.attack)
@@ -5863,6 +5880,7 @@ impl Game {
             }
             MagicEffect::GrantAirborneToAllyThisTurn
             | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantLethalToAllyThisTurn
             | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantRangedToAllyThisTurn => self
                 .controlled_allies(seat)
@@ -12324,6 +12342,7 @@ impl Game {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
@@ -16855,6 +16874,31 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantLethalToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_lethal_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("lethal-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantChargeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -19534,6 +19578,20 @@ impl Game {
                 })
             })
             .collect();
+        let expired_lethal_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_lethal_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let expired_ranged_sources: Vec<_> = self
             .position
             .units
@@ -19587,6 +19645,7 @@ impl Game {
             unit.damage = 0;
             unit.temporary_airborne_sources.clear();
             unit.temporary_charge_sources.clear();
+            unit.temporary_lethal_sources.clear();
             unit.temporary_power_sources.clear();
             unit.temporary_ranged_sources.clear();
             if unit.controller == seat {
@@ -19642,6 +19701,15 @@ impl Game {
         }
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_lethal_sources {
+            outcomes.push("lethal-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -20323,6 +20391,12 @@ impl Game {
             object.insert(
                 "temporaryChargeSources".to_owned(),
                 json!(unit.temporary_charge_sources),
+            );
+        }
+        if !unit.temporary_lethal_sources.is_empty() {
+            object.insert(
+                "temporaryLethalSources".to_owned(),
+                json!(unit.temporary_lethal_sources),
             );
         }
         if !unit.temporary_power_sources.is_empty() {
@@ -21577,6 +21651,7 @@ mod tests {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: false,
@@ -21851,6 +21926,7 @@ mod tests {
             tapped: true,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: false,
@@ -22740,6 +22816,7 @@ mod tests {
                 tapped: false,
                 temporary_airborne_sources: Vec::new(),
                 temporary_charge_sources: Vec::new(),
+                temporary_lethal_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 temporary_ranged_sources: Vec::new(),
                 warded: false,

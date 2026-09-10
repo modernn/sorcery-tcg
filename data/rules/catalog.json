@@ -5962,6 +5962,53 @@
         "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
         "testName": "rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0278",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant Lethal to a controlled ally for the current turn. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0279",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A 1-power minion without Lethal only wounds a 2-defense enemy. After grant-Lethal Magic, the same strike destroys that enemy. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "lethal-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_0279_granted_lethal_is_required_to_kill_a_tougher_minion"
+      }
     }
   ]
 }
