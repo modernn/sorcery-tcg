@@ -91,6 +91,14 @@ export class RustGameSessionHandle {
     return this.client.probeNovelty(input);
   }
 
+  /** Runs the coverage-guided one-step novelty rollout from this snapshot. */
+  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    result: JsonValue;
+  }>> {
+    return this.client.runNoveltyRollout(input);
+  }
+
   /** Applies one bound action request. */
   async step(request: GameActionRequest): Promise<GameStepResult> {
     const stepped = await this.client.step(request);

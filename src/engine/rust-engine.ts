@@ -313,6 +313,22 @@ export class RustSessionClient {
     }));
   }
 
+  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    result: JsonValue;
+  }>> {
+    const payload = await this.call('runNoveltyRollout', { maxActions: input.maxActions });
+    if (!isRecord(payload)
+      || !Array.isArray(payload.emittedCheckpoints)
+      || payload.result === undefined) {
+      throw new Error('Rust session runNoveltyRollout result was invalid');
+    }
+    return Object.freeze({
+      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
+      result: payload.result as JsonValue,
+    });
+  }
+
   async step(request: RustActionRequest): Promise<RustStepResult> {
     const result = await this.call('step', request as unknown as JsonValue);
     if (!isRecord(result) || typeof result.accepted !== 'boolean') {

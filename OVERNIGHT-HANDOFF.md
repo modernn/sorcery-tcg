@@ -1,6 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/rust-novelty-probe-0005`. Stack this on current `master` (`8d6ccc3`). Do not grow already-merged landings.
+Live line: `cursor/rust-novelty-rollout-0005`. Stack this on current `master` (`3c1db3c`). Do not grow already-merged landings.
+
+One-step novelty probing is on master (`probeNovelty`). This branch moves the coverage-guided rollout loop into Rust.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

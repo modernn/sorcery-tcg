@@ -14,6 +14,7 @@ use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
 use crate::novelty::{NoveltyStep, probe_novelty};
+use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
 use crate::policy::{PolicyError, baseline_policy_snapshot};
 use crate::simulator::SimulatorError;
 
@@ -180,6 +181,18 @@ impl Session {
             committed_event_types,
         )
         .map_err(map_novelty_error)
+    }
+
+    /// Runs the coverage-guided one-step novelty rollout from this snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the horizon is invalid or report materialization fails.
+    pub fn run_novelty_rollout(
+        &self,
+        max_actions: usize,
+    ) -> Result<NoveltyRolloutOutput, SessionError> {
+        run_novelty_rollout(self, max_actions)
     }
 
     /// Returns legal actions materialized at the external boundary.
