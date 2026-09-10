@@ -150,6 +150,7 @@ pub struct SiteFacts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArtifactEffect {
     AtEndOfEachTurnSiteControllerLosesLife(u8),
+    AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(u8),
     BearerControllerChoosesExtraRandomOutcome,
     GrantsBearerLethal,
     GrantsBearerPowerTwo,
@@ -691,6 +692,7 @@ const SITE_FIELDS: &[&str] = &[
 
 const ARTIFACT_FIELDS: &[&str] = &[
     "atEndOfEachTurnSiteControllerLosesLife",
+    "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
     "cardType",
     "grantsBearerLethal",
@@ -1056,6 +1058,16 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
             path,
         )?
         .map(|value| ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(compact_u8(value))),
+        optional_bounded_integer(
+            object,
+            "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
+            1,
+            MAX_COMBAT_STAT,
+            path,
+        )?
+        .map(|value| {
+            ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(compact_u8(value))
+        }),
         true_only(
             object,
             "bearerControllerChoosesExtraRandomOutcome",

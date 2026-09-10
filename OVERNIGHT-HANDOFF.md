@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **263 rust-supported / 0 typescript-supported** out of 263.
+`data/rules/catalog.json`: **265 rust-supported / 0 typescript-supported** out of 265.
 
-Latest catalog proofs: end-of-each-turn wandering Aura (`RULE-CATALOG-0262`–`0263`).
+Latest catalog proofs: site-granted start-of-controller-turn life loss plus this-turn mana (`RULE-CATALOG-0264`–`0265`).
+End-of-each-turn wandering Aura remains `RULE-CATALOG-0262`–`0263`.
 Start-of-controller-turn controller life loss remains `RULE-CATALOG-0260`–`0261`.
 Start-of-controller-turn occupied-site Aura destruction remains `RULE-CATALOG-0258`–`0259`.
 Start-of-controller-turn nearby enemy lure remains `RULE-CATALOG-0256`–`0257`.
@@ -59,12 +60,12 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 243 engine + 1 catalog pass, including catalog 0167–0263.
+- `tests/engine` + catalog proofs — 244 engine + 1 catalog pass, including catalog 0167–0265.
 - Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is Black Obelisk (site-granted start-turn life loss plus mana), leftover 2×2 fail-closed combinations, or terrain beyond Water↔Rubble and Geomancer. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations or terrain beyond Water↔Rubble and Geomancer. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 

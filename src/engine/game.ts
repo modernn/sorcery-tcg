@@ -45,6 +45,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -59,6 +60,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal: true;
@@ -73,6 +75,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -87,6 +90,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -101,6 +105,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -115,6 +120,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife: number;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -129,6 +135,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -143,6 +150,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -157,6 +165,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -164,6 +173,21 @@ export type GameCardDefinition =
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
     nearbyStrikesAgainstUnitsDealDoubleDamage: true;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: number;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -1094,7 +1118,9 @@ function requireCardId(value: string, path: string): void {
 
 const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
-    atEndOfEachTurnSiteControllerLosesLife bearerControllerChoosesExtraRandomOutcome cardType
+    atEndOfEachTurnSiteControllerLosesLife
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn
+    bearerControllerChoosesExtraRandomOutcome cardType
     grantsBearerLethal grantsBearerPower manaCost nearbyMinionsMustAttackIfAble
     nearbyStrikesAgainstUnitsDealDoubleDamage
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
@@ -1374,6 +1400,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.atEndOfEachTurnSiteControllerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
       );
     }
+    if (card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined
+      && (!Number.isSafeInteger(card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn)
+        || card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn < 1
+        || card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn > MAX_COMBAT_STAT)) {
+      throw new RangeError(
+        `${path}.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+      );
+    }
     if (card.grantsBearerPower !== undefined && card.grantsBearerPower !== 2) {
       throw new RangeError(`${path}.grantsBearerPower must be 2`);
     }
@@ -1417,6 +1451,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     const exclusiveArtifactEffects = Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
+      + Number(card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined)
       + Number(card.bearerControllerChoosesExtraRandomOutcome === true)
       + Number(card.grantsBearerPower === 2)
       + Number(card.grantsBearerLethal === true)
@@ -2304,6 +2339,11 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? {
                 atEndOfEachTurnSiteControllerLosesLife:
                   card.atEndOfEachTurnSiteControllerLosesLife,
+                }
+              : card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined
+                ? {
+                  atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn:
+                    card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn,
                 }
               : card.bearerControllerChoosesExtraRandomOutcome === true
                 ? { bearerControllerChoosesExtraRandomOutcome: true as const }

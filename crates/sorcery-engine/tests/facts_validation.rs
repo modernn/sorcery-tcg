@@ -156,6 +156,10 @@ fn parse_should_use_utf16_length_and_ecmascript_whitespace_for_card_ids() {
 fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
     let artifact_effects = [
         ("atEndOfEachTurnSiteControllerLosesLife", json!(2)),
+        (
+            "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
+            json!(2),
+        ),
         ("bearerControllerChoosesExtraRandomOutcome", json!(true)),
         ("grantsBearerLethal", json!(true)),
         ("grantsBearerPower", json!(2)),

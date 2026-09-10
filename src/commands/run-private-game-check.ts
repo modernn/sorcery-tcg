@@ -4600,6 +4600,7 @@ function gameDefinition(
   uniqueOrLegendary = false,
   atStartOfControllerTurnControllerLosesLife: 0 | 2 = 0,
   atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 0 | 3 = 0,
+  atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4632,6 +4633,7 @@ function gameDefinition(
       )
       + Number(tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath)
       + Number(atEndOfEachTurnSiteControllerLosesLife !== 0)
+      + Number(atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== 0)
       + Number(bearerControllerChoosesExtraRandomOutcome) === 1) {
     return {
       cardType: 'artifact',
@@ -4652,6 +4654,8 @@ function gameDefinition(
                 }
                 : bearerControllerChoosesExtraRandomOutcome
                   ? { bearerControllerChoosesExtraRandomOutcome: true as const }
+                  : atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== 0
+                    ? { atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn }
                   : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,

@@ -24207,6 +24207,106 @@ test('RULE-04 start-turn controller life loss reduces the Avatar and can open De
   await run(2, 0, true);
 });
 
+test('RULE-04 start-turn site Artifact loses life, gains mana, and can open Death\'s Door', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cardsFor = (life: number): Record<string, GameCardDefinition> => ({
+    'obelisk-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life,
+    },
+    'obelisk-north-obelisk': {
+      atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: 2,
+      cardType: 'artifact',
+      manaCost: 0,
+      thresholds,
+    },
+    'obelisk-north-site': { cardType: 'site', elements: ['earth'] },
+    'obelisk-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'obelisk-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'obelisk-south-site': { cardType: 'site', elements: ['earth'] },
+  });
+  const afterObeliskOnC4 = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === 'obelisk-north-obelisk'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'obelisk-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  const run = async (life: number, expectLife: number, deathsDoor: boolean) => {
+    const gameManifest = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-start-turn-site-artifact-v1',
+      },
+      cards: cardsFor(life),
+      decks: {
+        north: {
+          atlas: Array(6).fill('obelisk-north-site'),
+          avatar: 'obelisk-north-avatar',
+          spellbook: Array(6).fill('obelisk-north-obelisk'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('obelisk-south-site'),
+          avatar: 'obelisk-south-avatar',
+          spellbook: Array(6).fill('obelisk-south-minion'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    });
+    await withSetup(gameManifest, async (ctx) => {
+      await afterObeliskOnC4(ctx);
+      assert.equal(ctx.state.phase === 'start-turn', true);
+      assert.equal(ctx.state.players.north.mana, 1);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.players.north.avatar.life, expectLife);
+      assert.equal(ctx.state.players.north.mana, 3);
+      assert.equal(ctx.state.players.north.avatar.deathDoorTurn == null, !deathsDoor);
+      if (deathsDoor) {
+        assert.equal(ctx.state.turnNumber, 3);
+        assert.equal(ctx.state.players.north.avatar.deathDoorTurn, 3);
+      }
+      assert.equal(
+        ctx.state.realm.artifacts?.some((artifact) =>
+          artifact.cardId === 'obelisk-north-obelisk'
+            && 'location' in artifact
+            && artifact.location === 'C4') === true,
+        true,
+      );
+      assert.equal(ctx.state.terminal.status, 'active');
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(20, 18, false);
+  await run(2, 0, true);
+});
+
 test('RULE-04 end-of-each-turn wandering Aura damages units here then must move or dispel', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

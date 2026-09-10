@@ -1275,6 +1275,7 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::NearbyMinionsMustAttackIfAble
@@ -1291,6 +1292,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+            | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
             | ArtifactEffect::NearbyMinionsMustAttackIfAble
@@ -14517,6 +14519,24 @@ impl Game {
         }
         for source_instance_id in &pending.remaining_trigger_instance_ids {
             if self
+                .start_turn_site_artifact_life_loss_and_mana(pending.seat, source_instance_id)
+                .is_some()
+            {
+                self.push_action(
+                    actions,
+                    ActionDescriptor::ResolveStartTurnTrigger {
+                        lure_destination: None,
+                        lure_target_instance_id: None,
+                        source_instance_id: source_instance_id.clone(),
+                    },
+                    format!(
+                        "Resolve start-turn site life loss for {}…",
+                        &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
+                    ),
+                );
+                continue;
+            }
+            if self
                 .start_turn_destroy_aura(pending.seat, source_instance_id)
                 .is_some()
             {
@@ -14762,6 +14782,42 @@ impl Game {
                 return Err(GameError::IllegalAction);
             }
             self.apply_start_turn_destroy_occupied_site(action.seat, source_instance_id, outcomes)?;
+            return Ok(());
+        }
+        if let Some((amount, site_instance_id)) =
+            self.start_turn_site_artifact_life_loss_and_mana(action.seat, source_instance_id)
+        {
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
+            self.apply_avatar_life_loss(
+                action.seat,
+                u16::from(amount),
+                source_instance_id,
+                outcomes,
+            );
+            let player = &mut self.position.players[seat_index(action.seat)];
+            player.mana = player
+                .mana
+                .checked_add(u16::from(amount))
+                .ok_or(GameError::IllegalAction)?;
+            outcomes.push("mana-gained", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            outcomes.push("start-turn-site-life-loss-triggered", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "siteInstanceId": site_instance_id,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
             return Ok(());
         }
         if lure_destination.is_some() || lure_target_instance_id.is_some() {
@@ -15187,7 +15243,36 @@ impl Game {
             self.start_turn_destroy_aura(seat, &aura.card.instance_id)
                 .map(|aura| aura.card.instance_id.clone())
         }));
+        ids.extend(self.position.artifacts.iter().filter_map(|artifact| {
+            self.start_turn_site_artifact_life_loss_and_mana(seat, &artifact.card.instance_id)
+                .map(|_| artifact.card.instance_id.clone())
+        }));
         ids
+    }
+
+    /// An Artifact whose current Surface site is controlled by the starting seat grants that site
+    /// "at the start of your turn, lose N life and gain (N) this turn."
+    fn start_turn_site_artifact_life_loss_and_mana(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+    ) -> Option<(u8, IdentityHash)> {
+        let artifact = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *source_instance_id)?;
+        let ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(amount) =
+            self.artifact_facts(artifact).ok()?.effect
+        else {
+            return None;
+        };
+        let location = self.artifact_location(artifact).ok()?;
+        if location.region != Region::Surface {
+            return None;
+        }
+        let site = self.position.sites[location.cell.index()].as_ref()?;
+        (site.controller == seat).then(|| (amount, site.card.instance_id.clone()))
     }
 
     fn finish_start_turn_trigger(
@@ -15207,6 +15292,9 @@ impl Game {
                     .is_some()
                     || self
                         .start_turn_destroy_aura(pending.seat, instance_id)
+                        .is_some()
+                    || self
+                        .start_turn_site_artifact_life_loss_and_mana(pending.seat, instance_id)
                         .is_some()
             })
             .cloned()

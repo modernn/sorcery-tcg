@@ -5649,6 +5649,54 @@
         "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
         "testName": "rule_catalog_0263_far_sites_are_illegal_and_each_turn_can_box_the_aura_out"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0264",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "An Artifact can grant its current site a start-of-controller-turn ability that makes that player lose the printed life and gain the same amount of mana this turn. The Artifact remains, and the Start Phase continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "mana-gained",
+        "start-turn-site-life-loss-triggered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_artifact_rules.rs",
+        "testName": "rule_catalog_0264_site_artifact_loses_life_and_gains_mana_this_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0265",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same site-granted start-of-turn life loss can reduce the site controller to 0 life and open Death's Door without immediately ending the game. The printed mana gain still happens, and the Start Phase still continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_artifact_rules.rs",
+        "testName": "rule_catalog_0265_site_artifact_can_open_deaths_door_and_still_gain_mana"
+      }
     }
   ]
 }
