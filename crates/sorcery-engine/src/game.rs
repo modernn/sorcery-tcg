@@ -1417,6 +1417,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_start_of_controller_turn_draw_sites: _,
         at_start_of_controller_turn_draw_spells: _,
         at_start_of_controller_turn_teleport_to_random_site_or_void: _,
         attack: _,
@@ -14130,7 +14131,7 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let draw_spells = {
+        let draw = {
             let unit = self
                 .start_turn_trigger_unit(action.seat, source_instance_id)
                 .ok_or(GameError::IllegalAction)?;
@@ -14139,16 +14140,15 @@ impl Game {
             else {
                 return Err(GameError::IllegalAction);
             };
-            facts.at_start_of_controller_turn_draw_spells
+            facts
+                .at_start_of_controller_turn_draw_sites
+                .map(|count| (DeckZone::Atlas, count))
+                .or(facts
+                    .at_start_of_controller_turn_draw_spells
+                    .map(|count| (DeckZone::Spellbook, count)))
         };
-        if let Some(count) = draw_spells {
-            self.apply_genesis_draws(
-                action.seat,
-                source_instance_id,
-                DeckZone::Spellbook,
-                count,
-                outcomes,
-            );
+        if let Some((zone, count)) = draw {
+            self.apply_genesis_draws(action.seat, source_instance_id, zone, count, outcomes);
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());
@@ -14273,6 +14273,7 @@ impl Game {
             return None;
         };
         (facts.at_start_of_controller_turn_teleport_to_random_site_or_void
+            || facts.at_start_of_controller_turn_draw_sites.is_some()
             || facts.at_start_of_controller_turn_draw_spells.is_some())
         .then_some(unit)
     }
@@ -19803,6 +19804,13 @@ mod tests {
         .expect("valid start-turn draw manifest")
         .ensure_selfplay_supported()
         .expect("start-turn draw spells is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnDrawSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw sites is self-play safe");
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

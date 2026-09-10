@@ -10,9 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **240 rust-supported / 0 typescript-supported** out of 240.
+`data/rules/catalog.json`: **242 rust-supported / 0 typescript-supported** out of 242.
 
-Latest catalog proofs: target-player discard Magic (`RULE-CATALOG-0239`–`0240`).
+Latest catalog proofs: start-of-controller-turn Atlas draw (`RULE-CATALOG-0241`–`0242`).
+Target-player discard Magic remains `RULE-CATALOG-0239`–`0240`.
 Start-of-controller-turn Spellbook draw remains `RULE-CATALOG-0237`–`0238`.
 Player-chosen additional Magic discard remains `RULE-CATALOG-0235`–`0236`.
 Cemetery Site return remains `RULE-CATALOG-0233`–`0234`.
@@ -49,12 +50,12 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 231 engine + 1 catalog pass, including catalog 0167–0240.
+- `tests/engine` + catalog proofs — 233 engine + 1 catalog pass, including catalog 0167–0242.
 - Full `pnpm test` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is combat beyond attacking and defending first strike, terrain beyond Water↔Rubble and Geomancer, leftover 2×2 fail-closed combinations, or broader start/main/end triggers. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is combat beyond attacking and defending first strike, terrain beyond Water↔Rubble and Geomancer, leftover 2×2 fail-closed combinations, or broader start/main/end triggers such as start-turn damage. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 

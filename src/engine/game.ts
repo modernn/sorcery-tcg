@@ -251,6 +251,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    atStartOfControllerTurnDrawSites?: number;
     atStartOfControllerTurnDrawSpells?: number;
     atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
@@ -1053,7 +1054,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atStartOfControllerTurnDrawSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -1867,6 +1868,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.mayStepAfterRangedStrike === true) {
     throw new RangeError(`${path} simultaneous during-movement and post-Ranged movement is unsupported`);
   }
+  if (card.atStartOfControllerTurnDrawSites !== undefined
+    && (!Number.isSafeInteger(card.atStartOfControllerTurnDrawSites)
+      || card.atStartOfControllerTurnDrawSites < 1
+      || card.atStartOfControllerTurnDrawSites > MAX_DECK_CARDS)) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnDrawSites must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+    );
+  }
   if (card.atStartOfControllerTurnDrawSpells !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDrawSpells)
       || card.atStartOfControllerTurnDrawSpells < 1
@@ -1893,8 +1902,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path} oversized start-turn random teleport is unsupported`,
     );
   }
-  if (card.atStartOfControllerTurnDrawSpells !== undefined
-    && card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true) {
+  const startTurnTriggerCount = [
+    card.atStartOfControllerTurnDrawSites !== undefined,
+    card.atStartOfControllerTurnDrawSpells !== undefined,
+    card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true,
+  ].filter(Boolean).length;
+  if (startTurnTriggerCount > 1) {
     throw new RangeError(`${path} competing start-turn triggers are unsupported`);
   }
   if (card.movementBonus !== undefined
@@ -2374,6 +2387,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             }
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
+            ...(card.atStartOfControllerTurnDrawSites !== undefined
+              ? { atStartOfControllerTurnDrawSites: card.atStartOfControllerTurnDrawSites }
+              : {}),
             ...(card.atStartOfControllerTurnDrawSpells !== undefined
               ? { atStartOfControllerTurnDrawSpells: card.atStartOfControllerTurnDrawSpells }
               : {}),

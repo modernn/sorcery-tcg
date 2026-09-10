@@ -1,5 +1,6 @@
-//! Direct proofs for start-turn triggers: random teleports (RULE-CATALOG-0158) and
-//! controller Spellbook draws (RULE-CATALOG-0237–0238).
+//! Direct proofs for start-turn triggers: random teleports (RULE-CATALOG-0158),
+//! controller Spellbook draws (RULE-CATALOG-0237–0238), and controller Atlas
+//! draws (RULE-CATALOG-0241–0242).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -562,6 +563,200 @@ fn rule_catalog_0238_start_turn_draw_spells_decks_out_on_an_empty_library() {
     let mut session = draw_spells_start_turn(238, &["north-source"; 3]);
     assert_eq!(state(&session)["phase"], "start-turn");
     assert_eq!(state(&session)["players"]["north"]["spellbook"], json!([]));
+    let source_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["game-ended"]);
+    assert_eq!(receipt.events[0].payload["reason"], "deck_empty");
+    assert_eq!(receipt.events[0].payload["loser"], "north");
+    let after = state(&session);
+    assert_eq!(after["phase"], "terminal");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_eq!(after["terminal"]["loser"], "north");
+    assert_exact_replay(&session);
+}
+
+fn draw_sites_manifest(seed: u32, north_atlas: &[&str]) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-sites" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-sites-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": north_atlas,
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_sites_start_turn(seed: u32, north_atlas: &[&str]) -> Session {
+    let mut session = Session::new(&draw_sites_manifest(seed, north_atlas)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0241_start_turn_draw_sites_draws_a_hidden_site_before_the_draw_step() {
+    let mut session = draw_sites_start_turn(241, &["north-site"; 6]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let drawn_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("next site")["instanceId"]
+        .clone();
+    let hand_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand")
+        .len();
+    let library_before = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let south_before = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(
+        south_before["players"]["north"]["hand"]["atlas"],
+        hand_before
+    );
+    let checkpoint = session.clone();
+    let triggers: Vec<_> = session
+        .legal_actions()
+        .expect("start-turn triggers")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .collect();
+    assert_eq!(triggers.len(), 1);
+    assert_eq!(triggers[0].descriptor["sourceInstanceId"], source_id);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["site-drawn"]);
+    assert_eq!(receipt.events[0].payload["seat"], "north");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    assert!(receipt.events[0].payload.get("instanceId").is_none());
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    let hand = after["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand");
+    assert_eq!(hand.len(), hand_before + 1);
+    assert!(hand.iter().any(|card| card["instanceId"] == drawn_id));
+    assert_eq!(
+        after["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        library_before - 1
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_after = session
+        .public_view(Seat::South)
+        .expect("South public view after the draw");
+    assert_eq!(
+        south_after["players"]["north"]["hand"]["atlas"],
+        hand_before + 1
+    );
+    assert_eq!(
+        south_after["players"]["north"]["atlasCount"],
+        library_before - 1
+    );
+    let south_json = south_after.to_string();
+    assert!(
+        !south_json.contains(drawn_id.as_str().expect("drawn identity")),
+        "the opponent must not see the drawn identity"
+    );
+    let legal = session.legal_actions().expect("draw-step actions");
+    assert!(
+        legal
+            .iter()
+            .any(|action| action.descriptor["kind"] == "draw")
+    );
+    assert!(
+        legal
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger")
+    );
+    assert_eq!(state(&checkpoint)["phase"], "start-turn");
+    let mut resumed = checkpoint;
+    accept_where(&mut resumed, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(
+        resumed.replay_value().expect("resumed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0242_start_turn_draw_sites_decks_out_on_an_empty_library() {
+    let mut session = draw_sites_start_turn(242, &["north-site"; 3]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    assert_eq!(state(&session)["players"]["north"]["atlas"], json!([]));
     let source_id = state(&session)["realm"]["units"]
         .as_array()
         .expect("units")
