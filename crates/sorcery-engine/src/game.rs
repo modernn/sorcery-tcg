@@ -18744,6 +18744,183 @@ mod tests {
         );
     }
 
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Fatality proof keeps Ward, Stealth, underground, healthy, and allied copies together"
+    )]
+    fn fatality_should_break_ward_and_ignore_healthy_stealthed_and_underground_copies() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "killTargetWoundedMinion": true,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            for ordinal in 1..=3 {
+                manifest["cards"][format!("south-spell-{ordinal}")]["defense"] = json!(3);
+                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
+            }
+            manifest["cards"]["south-spell-1"]["ward"] = json!(true);
+            manifest["cards"]["south-spell-2"]["stealth"] = json!(true);
+            manifest["cards"]["north-spell-50"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "stealth": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Fatality filter game");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "fatality-filter-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        game.position.units.clear();
+        let mut identities = BTreeMap::new();
+        for (name, card, controller, region, stealthed, warded, damage) in [
+            (
+                "warded",
+                "south-spell-1",
+                Seat::South,
+                Region::Surface,
+                false,
+                true,
+                1,
+            ),
+            (
+                "hidden",
+                "south-spell-2",
+                Seat::South,
+                Region::Surface,
+                true,
+                false,
+                1,
+            ),
+            (
+                "underground",
+                "south-spell-3",
+                Seat::South,
+                Region::Underground,
+                false,
+                false,
+                1,
+            ),
+            (
+                "healthy",
+                "south-spell-3",
+                Seat::South,
+                Region::Surface,
+                false,
+                false,
+                0,
+            ),
+            (
+                "ally",
+                "north-spell-50",
+                Seat::North,
+                Region::Surface,
+                true,
+                false,
+                1,
+            ),
+        ] {
+            let instance_id = identity_hash(&json!({ "fixture": name, "kind": "fatality-filter" }))
+                .expect("fixture identity");
+            let mut unit = test_minion(card_id(card), instance_id.as_str(), controller, c4, None);
+            unit.damage = damage;
+            unit.region = region;
+            unit.stealthed = stealthed;
+            unit.tapped = false;
+            unit.warded = warded;
+            identities.insert(name, instance_id);
+            game.position.units.push(unit);
+        }
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+        north.mana = 1;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let fatality_targets: Vec<_> = game
+            .legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::CastMagic {
+                    target: Some(UnitTarget::Minion { instance_id, .. }),
+                    ..
+                } => Some(instance_id),
+                _ => None,
+            })
+            .collect();
+        let expected = [identities["warded"].clone(), identities["ally"].clone()];
+        assert_eq!(fatality_targets.len(), 2);
+        assert!(expected.iter().all(|id| fatality_targets.contains(id)));
+        assert!(!fatality_targets.contains(&identities["hidden"]));
+        assert!(!fatality_targets.contains(&identities["underground"]));
+        assert!(!fatality_targets.contains(&identities["healthy"]));
+
+        let warded_id = identities["warded"].clone();
+        let warded_cast = game
+            .legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target: Some(UnitTarget::Minion { instance_id, .. }),
+                        ..
+                    } if *instance_id == warded_id
+                )
+            })
+            .expect("Ward Fatality");
+        let (events, random_draws) = game
+            .apply_action_recorded(&warded_cast)
+            .expect("Fatality Ward cast");
+        assert!(random_draws.is_empty());
+        assert_eq!(
+            events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["magic-cast", "ward-broken", "magic-resolved"]
+        );
+        let surviving = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == warded_id)
+            .expect("warded target");
+        assert_eq!((surviving.damage, surviving.warded), (1, false));
+    }
+
     fn test_minion(
         card_id: CardId,
         instance_id: &str,

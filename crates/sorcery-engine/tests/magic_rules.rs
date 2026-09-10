@@ -7082,3 +7082,170 @@ fn rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_re
         session.state_hash().expect("session state hash")
     );
 }
+
+fn fatality_filter_manifest() -> String {
+    let cards = json!({
+        "north-ally": minion(json!({ "defense": 3, "stealth": true })),
+        "north-avatar": avatar(20),
+        "north-fatality": magic(("killTargetWoundedMinion", json!(true)), 0),
+        "north-lash": magic(("damageTargetUnit", json!(1)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-burrower": minion(json!({ "burrowing": true, "defense": 3 })),
+        "south-healthy": minion(json!({ "defense": 3 })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-ally",
+        "north-lash",
+        "north-fatality",
+        "north-lash",
+        "north-lash",
+        "north-fatality",
+    ];
+    let south_spellbook = [
+        "south-healthy",
+        "south-burrower",
+        "south-healthy",
+        "south-burrower",
+        "south-healthy",
+        "south-burrower",
+    ];
+    (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &south_spellbook))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Fatality filter seed");
+            let opening = state(&preview);
+            let north_hand = opening["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            let south_hand = opening["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("South opening hand");
+            let north_library = opening["players"]["north"]["spellbook"]
+                .as_array()
+                .expect("North library");
+            let has =
+                |hand: &[Value], card_id: &str| hand.iter().any(|card| card["cardId"] == card_id);
+            has(north_hand, "north-ally")
+                && has(north_hand, "north-lash")
+                && has(north_hand, "north-fatality")
+                && north_library
+                    .first()
+                    .is_some_and(|card| card["cardId"] == "north-lash")
+                && has(south_hand, "south-healthy")
+                && has(south_hand, "south-burrower")
+        })
+        .expect("bounded seed with Fatality filter participants in hand")
+}
+
+fn maybe_decline_attack(session: &mut Session) {
+    let Some(action) = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| action.descriptor["kind"] == "decline-attack")
+    else {
+        return;
+    };
+    let StepResult::Accepted(_) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("authoritative decline")
+    else {
+        panic!("engine-issued decline must be accepted");
+    };
+}
+
+#[test]
+fn rule_catalog_0147_fatality_should_ignore_healthy_and_underground_minions() {
+    let manifest = fatality_filter_manifest();
+    let mut session = opening_main(&manifest);
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("allied identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut south_ids = std::collections::BTreeMap::new();
+    for card_id in ["south-healthy", "south-burrower"] {
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C1"
+                && descriptor["region"].is_null()
+        });
+        south_ids.insert(
+            card_id,
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("south identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let burrower_id = south_ids["south-burrower"].clone();
+    let healthy_id = south_ids["south-healthy"].clone();
+    for target_id in [&ally_id, &burrower_id] {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic"
+                && descriptor["cardId"] == "north-lash"
+                && descriptor["target"]["instanceId"] == target_id.as_str()
+        });
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == burrower_id.as_str()
+            && descriptor["to"]["cell"] == "C1"
+            && descriptor["to"]["region"] == "underground"
+    });
+    maybe_decline_attack(&mut session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let finished = state(&session);
+    let burrower = realm_unit(&finished, &burrower_id).expect("burrowed enemy");
+    let ally_unit = realm_unit(&finished, &ally_id).expect("allied stealth");
+    assert_eq!(burrower["region"], "underground");
+    assert_eq!(burrower["damage"], 1);
+    assert_eq!(ally_unit["stealthed"], true);
+    assert_eq!(ally_unit["damage"], 1);
+    assert_eq!(
+        realm_unit(&finished, &healthy_id).expect("healthy")["damage"],
+        0
+    );
+
+    let targets = fatality_targets(&session);
+    assert_eq!(targets, [ally_id.as_str()]);
+    assert!(!targets.iter().any(|instance_id| {
+        *instance_id == burrower_id
+            || *instance_id == healthy_id
+            || *instance_id == finished["players"]["north"]["avatar"]["card"]["instanceId"]
+            || *instance_id == finished["players"]["south"]["avatar"]["card"]["instanceId"]
+    }));
+    assert_exact_replay(&session);
+}

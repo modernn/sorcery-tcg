@@ -638,6 +638,34 @@ fn rule_catalog_0107_scent_hounds_permanently_remove_nearby_enemy_stealth() {
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
     });
+    let mut disabled_before_move = session.clone();
+    accept_where(&mut disabled_before_move, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["target"]["instanceId"] == hound_id
+    });
+    let (_, quiet_move) = accept_where(&mut disabled_before_move, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == target_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    assert_eq!(
+        quiet_move
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["move-and-attack-activated"]
+    );
+    assert_eq!(
+        state(&disabled_before_move)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == target_id)
+            .expect("Stealth target")["stealthed"],
+        true
+    );
+    assert_exact_replay(&disabled_before_move);
+
     let (_, movement_loss) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
             && descriptor["unitInstanceId"] == target_id
