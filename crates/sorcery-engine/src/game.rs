@@ -1274,6 +1274,8 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::MillSites(_)
+        | MagicEffect::MillSpells(_)
         | MagicEffect::ReturnTargetArtifactToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::ReturnTargetSiteToOwnerHand
@@ -5317,9 +5319,10 @@ impl Game {
             MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
                 self.artifact_target_choices(seat, caster_instance_id)?
             }
-            MagicEffect::TargetPlayerGainsLife(_) | MagicEffect::TargetPlayerLosesLife(_) => {
-                self.avatar_player_choices()
-            }
+            MagicEffect::TargetPlayerGainsLife(_)
+            | MagicEffect::TargetPlayerLosesLife(_)
+            | MagicEffect::MillSites(_)
+            | MagicEffect::MillSpells(_) => self.avatar_player_choices(),
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 if caster_location.region == Region::Void {
@@ -11275,26 +11278,7 @@ impl Game {
             );
         }
         if facts.genesis_discard_top_spells {
-            for _ in 0..2 {
-                let Some(card) = (!self.position.players[player_index].spellbook.is_empty())
-                    .then(|| self.position.players[player_index].spellbook.remove(0))
-                else {
-                    break;
-                };
-                let discarded_card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
-                let instance_id = card.instance_id.clone();
-                let owner = card.owner;
-                self.position.players[player_index].cemetery.push(card);
-                outcomes.push("spell-discarded", || {
-                    json!({
-                        "cardId": discarded_card_id,
-                        "instanceId": instance_id,
-                        "owner": owner,
-                        "seat": seat,
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-            }
+            self.apply_mill_library(seat, DeckZone::Spellbook, 2, &card_instance_id, outcomes);
         }
         if self.position.terminal.is_none() && defer_token {
             self.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
@@ -14946,6 +14930,26 @@ impl Game {
                     outcomes,
                 );
             }
+            MagicEffect::MillSites(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_mill_library(
+                    target_seat,
+                    DeckZone::Atlas,
+                    count,
+                    card_instance_id,
+                    outcomes,
+                );
+            }
+            MagicEffect::MillSpells(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_mill_library(
+                    target_seat,
+                    DeckZone::Spellbook,
+                    count,
+                    card_instance_id,
+                    outcomes,
+                );
+            }
             MagicEffect::DrawSites(count) => {
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
             }
@@ -17294,6 +17298,48 @@ impl Game {
         Ok(())
     }
 
+    fn apply_mill_library(
+        &mut self,
+        seat: Seat,
+        zone: DeckZone,
+        count: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let player_index = seat_index(seat);
+        for _ in 0..count {
+            let Some(card) = ({
+                let library = match zone {
+                    DeckZone::Atlas => &mut self.position.players[player_index].atlas,
+                    DeckZone::Spellbook => &mut self.position.players[player_index].spellbook,
+                };
+                (!library.is_empty()).then(|| library.remove(0))
+            }) else {
+                break;
+            };
+            let discarded_card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
+            let instance_id = card.instance_id.clone();
+            let owner = card.owner;
+            self.position.players[player_index].cemetery.push(card);
+            outcomes.push(
+                if zone == DeckZone::Atlas {
+                    "site-discarded"
+                } else {
+                    "spell-discarded"
+                },
+                || {
+                    json!({
+                        "cardId": discarded_card_id,
+                        "instanceId": instance_id,
+                        "owner": owner,
+                        "seat": seat,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                },
+            );
+        }
+    }
+
     fn apply_genesis_draws(
         &mut self,
         seat: Seat,
@@ -18876,6 +18922,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn supported_magic_effects_should_be_selfplay_supported() {
         for (effect, facts) in [
             (
@@ -18916,6 +18963,8 @@ mod tests {
             ),
             (MagicEffect::DrawSites(2), json!({ "drawSites": 2 })),
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
+            (MagicEffect::MillSites(2), json!({ "millSites": 2 })),
+            (MagicEffect::MillSpells(2), json!({ "millSpells": 2 })),
             (
                 MagicEffect::KillTargetMinion,
                 json!({ "killTargetMinion": true }),

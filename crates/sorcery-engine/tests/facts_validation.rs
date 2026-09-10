@@ -220,6 +220,8 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("killTargetWoundedMinion", json!(true)),
         ("leapAttackAlly", json!(true)),
         ("lureEnemyMinionOneStepCloser", json!(true)),
+        ("millSites", json!(2)),
+        ("millSpells", json!(2)),
         ("returnMinionFromOwnCemetery", json!(true)),
         ("returnTargetArtifactToOwnerHand", json!(true)),
         ("returnTargetMinionToOwnerHand", json!(true)),

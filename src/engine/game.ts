@@ -190,6 +190,8 @@ export type GameCardDefinition =
     leapAttackAlly?: true;
     lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
+    millSites?: number;
+    millSpells?: number;
     returnMinionFromOwnCemetery?: true;
     returnTargetArtifactToOwnerHand?: true;
     returnTargetMinionToOwnerHand?: true;
@@ -1020,7 +1022,7 @@ const SUPPORTED_CARD_FIELDS = {
     destroyTargetArtifact destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
-    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
+    lureEnemyMinionOneStepCloser manaCost millSites millSpells returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
@@ -1520,6 +1522,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
+      + Number(card.millSites !== undefined)
+      + Number(card.millSpells !== undefined)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.returnTargetArtifactToOwnerHand === true)
       + Number(card.returnTargetMinionToOwnerHand === true)
@@ -1585,6 +1589,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.drawSpells < 1
       || card.drawSpells > MAX_DECK_CARDS)) {
       throw new RangeError(`${path}.drawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
+    }
+    if (card.millSites !== undefined && (!Number.isSafeInteger(card.millSites)
+      || card.millSites < 1
+      || card.millSites > MAX_DECK_CARDS)) {
+      throw new RangeError(`${path}.millSites must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
+    }
+    if (card.millSpells !== undefined && (!Number.isSafeInteger(card.millSpells)
+      || card.millSpells < 1
+      || card.millSpells > MAX_DECK_CARDS)) {
+      throw new RangeError(`${path}.millSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -2239,6 +2253,10 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { drawSites: card.drawSites }
                   : card.drawSpells !== undefined
                     ? { drawSpells: card.drawSpells }
+                  : card.millSites !== undefined
+                    ? { millSites: card.millSites }
+                  : card.millSpells !== undefined
+                    ? { millSpells: card.millSpells }
                     : card.returnTargetMinionToOwnerHand === true
                       ? { returnTargetMinionToOwnerHand: true as const }
                     : card.returnTargetArtifactToOwnerHand === true

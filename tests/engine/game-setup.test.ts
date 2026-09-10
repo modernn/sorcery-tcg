@@ -1310,6 +1310,84 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        millSpells: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /millSpells/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSpells: 2,
+        millSpells: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const milledSpells = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        millSpells: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(milledSpells.cards[firstSpell]?.cardType === 'magic'
+    && milledSpells.cards[firstSpell].millSpells, 2);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        millSites: 0,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /millSites/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        millSites: 2,
+        millSpells: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  const milledSites = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        millSites: 2,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(milledSites.cards[firstSpell]?.cardType === 'magic'
+    && milledSites.cards[firstSpell].millSites, 2);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         discardSiteAsAdditionalCost: true,
         manaCost: 1,
@@ -21285,6 +21363,166 @@ test('RULE-03 grant-Stealth Magic hides an enemy minion from later targeting', a
     assert.equal(charger?.stealthed, true);
     assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
       descriptor.kind === 'cast-magic' && descriptor.cardId === 'stealth-spell'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 mill Magic puts opponent library cards in the cemetery without decking', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards = (field: 'millSpells' | 'millSites'): Record<string, GameCardDefinition> => ({
+    'mill-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'mill-north-site': { cardType: 'site', elements: ['earth'] },
+    'mill-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'mill-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'mill-south-site': { cardType: 'site', elements: ['earth'] },
+    'mill-spell': {
+      cardType: 'magic',
+      manaCost: 0,
+      thresholds,
+      ...(field === 'millSpells' ? { millSpells: 2 } : { millSites: 2 }),
+    },
+  });
+  const input = (
+    seed: number,
+    field: 'millSpells' | 'millSites',
+    southSpellbook: number,
+    southAtlas: number,
+  ) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-mill-magic-v1',
+    },
+    cards: cards(field),
+    decks: {
+      north: {
+        atlas: Array(6).fill('mill-north-site'),
+        avatar: 'mill-north-avatar',
+        spellbook: Array(6).fill('mill-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(southAtlas).fill('mill-south-site'),
+        avatar: 'mill-south-avatar',
+        spellbook: Array(southSpellbook).fill('mill-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const spellManifest = createGameManifest(input(225, 'millSpells', 6, 6));
+  assert.equal(spellManifest.cards['mill-spell']?.cardType === 'magic'
+    && spellManifest.cards['mill-spell'].millSpells, 2);
+
+  const millSouth = async (ctx: SetupCtx, eventType: 'spell-discarded' | 'site-discarded') => {
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'mill-spell');
+    assert.ok(spell);
+    const seats = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.target
+        ? [[descriptor.target.kind, descriptor.target.seat] as const]
+        : []);
+    assert.deepEqual(seats, [['avatar', 'north'], ['avatar', 'south']]);
+    const milled = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'));
+    assert.equal(milled.accepted, true);
+    if (!milled.accepted) return;
+    assert.deepEqual(milled.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      eventType,
+      eventType,
+      'magic-resolved',
+    ]);
+    assert.equal(milled.receipt.events.some(({ type }) => type === 'game-ended'), false);
+  };
+
+  await withSetup(spellManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const expected = ctx.state.players.south.spellbook.slice(0, 2).map(({ instanceId }) => instanceId);
+    assert.equal(expected.length, 2);
+    await millSouth(ctx, 'spell-discarded');
+    assert.equal(ctx.state.players.south.spellbook.length, 1);
+    for (const instanceId of expected) {
+      assert.equal(ctx.state.players.south.cemetery.some((card) => card.instanceId === instanceId), true);
+    }
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(226, 'millSpells', 3, 6)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.south.spellbook.length, 0);
+    const noop = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'));
+    assert.equal(noop.accepted, true);
+    if (!noop.accepted) return;
+    assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  const siteManifest = createGameManifest(input(227, 'millSites', 6, 6));
+  assert.equal(siteManifest.cards['mill-spell']?.cardType === 'magic'
+    && siteManifest.cards['mill-spell'].millSites, 2);
+  await withSetup(siteManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const expected = ctx.state.players.south.atlas.slice(0, 2).map(({ instanceId }) => instanceId);
+    assert.equal(expected.length, 2);
+    await millSouth(ctx, 'site-discarded');
+    assert.equal(ctx.state.players.south.atlas.length, 1);
+    for (const instanceId of expected) {
+      assert.equal(ctx.state.players.south.cemetery.some((card) => card.instanceId === instanceId), true);
+    }
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(228, 'millSites', 6, 3)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.south.atlas.length, 0);
+    const noop = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'));
+    assert.equal(noop.accepted, true);
+    if (!noop.accepted) return;
+    assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.terminal.status, 'active');
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

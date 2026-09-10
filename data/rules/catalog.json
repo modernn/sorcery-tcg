@@ -4757,6 +4757,100 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0224_grant_stealth_cannot_target_an_enemy_already_stealthed"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0225",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic offers only both Avatars, never a minion, and puts the printed number of the chosen player's top Spellbook cards into that owner's cemetery in deck order. Identities are public. The game stays active when cards remain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0225_mill_spells_puts_opponent_library_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0226",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic that finds an empty Spellbook is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0226_mill_spells_is_a_paid_noop_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0227",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic is the Atlas sibling of mill-spell Magic: it offers only both Avatars and puts top Atlas cards into the owner's cemetery in deck order without drawing or decking.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0227_mill_sites_puts_opponent_atlas_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0228",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic that finds an empty Atlas is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas"
+      }
     }
   ]
 }

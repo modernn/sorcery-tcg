@@ -211,6 +211,8 @@ pub enum MagicEffect {
     KillTargetWoundedMinion,
     LeapAttackAlly,
     LureEnemyMinionOneStepCloser,
+    MillSites(u8),
+    MillSpells(u8),
     ReturnMinionFromOwnCemetery,
     ReturnTargetArtifactToOwnerHand,
     ReturnTargetMinionToOwnerHand,
@@ -718,6 +720,8 @@ const MAGIC_FIELDS: &[&str] = &[
     "leapAttackAlly",
     "lureEnemyMinionOneStepCloser",
     "manaCost",
+    "millSites",
+    "millSpells",
     "returnMinionFromOwnCemetery",
     "returnTargetArtifactToOwnerHand",
     "returnTargetMinionToOwnerHand",
@@ -1237,6 +1241,10 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             true_only(object, "leapAttackAlly", path)?.then_some(MagicEffect::LeapAttackAlly),
             true_only(object, "lureEnemyMinionOneStepCloser", path)?
                 .then_some(MagicEffect::LureEnemyMinionOneStepCloser),
+            optional_bounded_integer(object, "millSites", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::MillSites(compact_u8(count))),
+            optional_bounded_integer(object, "millSpells", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::MillSpells(compact_u8(count))),
             true_only(object, "returnMinionFromOwnCemetery", path)?
                 .then_some(MagicEffect::ReturnMinionFromOwnCemetery),
             true_only(object, "returnTargetArtifactToOwnerHand", path)?

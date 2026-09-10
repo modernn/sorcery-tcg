@@ -9451,3 +9451,283 @@ fn rule_catalog_0224_grant_stealth_cannot_target_an_enemy_already_stealthed() {
     );
     assert_exact_replay(&session);
 }
+
+fn mill_player_manifest(
+    seed: u32,
+    field: &str,
+    south_spellbook: usize,
+    south_atlas: usize,
+) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-mill": magic((field, json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-mill"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; south_atlas],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; south_spellbook],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn mill_player_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("mill actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-mill"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn mill_south_library(session: &Session, zone: &str) -> Vec<Value> {
+    state(session)["players"]["south"][zone]
+        .as_array()
+        .expect("south library")
+        .clone()
+}
+
+#[test]
+fn rule_catalog_0225_mill_spells_puts_opponent_library_cards_in_the_cemetery() {
+    let encoded = mill_player_manifest(225, "millSpells", 6, 6);
+    let mut session = opening_main(&encoded);
+    let before = mill_south_library(&session, "spellbook");
+    let expected: Vec<_> = before.iter().take(2).cloned().collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "spell-discarded",
+            "spell-discarded",
+            "magic-resolved"
+        ]
+    );
+    let discarded: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "spell-discarded")
+        .collect();
+    assert_eq!(
+        discarded[0].payload["instanceId"],
+        expected[0]["instanceId"]
+    );
+    assert_eq!(discarded[0].payload["cardId"], "south-minion");
+    assert_eq!(discarded[0].payload["seat"], "south");
+    assert_eq!(
+        discarded[0].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        discarded[1].payload["instanceId"],
+        expected[1]["instanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "game-ended"
+                || event.event_type == "spell-drawn"
+                || event.event_type == "damage-dealt")
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["south"]["spellbook"]
+            .as_array()
+            .expect("remaining")
+            .len(),
+        1
+    );
+    let cemetery = after["players"]["south"]["cemetery"]
+        .as_array()
+        .expect("south cemetery");
+    for card in &expected {
+        assert!(
+            cemetery
+                .iter()
+                .any(|entry| entry["instanceId"] == card["instanceId"])
+        );
+    }
+    let south_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(south_view["players"]["south"]["spellbookCount"], 1);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("mill-spells checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized mill-spells");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed mill-spells");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed mill-spells session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0226_mill_spells_is_a_paid_noop_on_an_empty_library() {
+    let encoded = mill_player_manifest(226, "millSpells", 3, 6);
+    let mut session = opening_main(&encoded);
+    assert_eq!(mill_south_library(&session, "spellbook").len(), 0);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-discarded" || event.event_type == "game-ended")
+    );
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["spellbook"], json!([]));
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0227_mill_sites_puts_opponent_atlas_cards_in_the_cemetery() {
+    let encoded = mill_player_manifest(227, "millSites", 6, 6);
+    let mut session = opening_main(&encoded);
+    let before = mill_south_library(&session, "atlas");
+    let expected: Vec<_> = before.iter().take(2).cloned().collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-discarded",
+            "site-discarded",
+            "magic-resolved"
+        ]
+    );
+    let discarded: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-discarded")
+        .collect();
+    assert_eq!(
+        discarded[0].payload["instanceId"],
+        expected[0]["instanceId"]
+    );
+    assert_eq!(discarded[0].payload["cardId"], "south-site");
+    assert_eq!(
+        discarded[0].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        discarded[1].payload["instanceId"],
+        expected[1]["instanceId"]
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["south"]["atlas"]
+            .as_array()
+            .expect("remaining")
+            .len(),
+        1
+    );
+    let cemetery = after["players"]["south"]["cemetery"]
+        .as_array()
+        .expect("south cemetery");
+    for card in &expected {
+        assert!(
+            cemetery
+                .iter()
+                .any(|entry| entry["instanceId"] == card["instanceId"])
+        );
+    }
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas() {
+    let encoded = mill_player_manifest(228, "millSites", 6, 3);
+    let mut session = opening_main(&encoded);
+    assert_eq!(mill_south_library(&session, "atlas").len(), 0);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-discarded" || event.event_type == "game-ended")
+    );
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["atlas"], json!([]));
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
