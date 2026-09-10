@@ -9944,6 +9944,10 @@ fn cemetery_artifact_cast_ids(session: &Session) -> Vec<String> {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed cemetery filtering, hidden-hand, and replay together"
+)]
 fn rule_catalog_0231_cemetery_artifact_return_restores_own_cemetery_artifact_to_hidden_hand() {
     let encoded = manifest(
         231,
