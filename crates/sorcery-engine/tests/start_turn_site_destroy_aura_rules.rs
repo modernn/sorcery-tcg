@@ -52,7 +52,7 @@ fn minion() -> Value {
     })
 }
 
-fn manifest(south_site: Value) -> String {
+fn manifest(unique_south: bool) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "start-turn-site-destroy-aura" }))
@@ -66,7 +66,7 @@ fn manifest(south_site: Value) -> String {
             "north-site": site(),
             "south-avatar": avatar(),
             "south-minion": minion(),
-            "south-site": south_site,
+            "south-site": if unique_south { unique_site() } else { site() },
         },
         "decks": {
             "north": {
@@ -141,8 +141,9 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn after_aura_on_c4(south_site: Value) -> Session {
-    let mut session = Session::new(&manifest(south_site)).expect("valid site-destroy aura session");
+fn after_aura_on_c4(unique_south: bool) -> Session {
+    let mut session =
+        Session::new(&manifest(unique_south)).expect("valid site-destroy aura session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -179,7 +180,7 @@ fn resolve_start_turn_destroy(session: &mut Session, source_id: &Value) -> Recei
 
 #[test]
 fn rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop_it() {
-    let mut session = after_aura_on_c4(site());
+    let mut session = after_aura_on_c4(false);
     let source_id = aura_id(&session);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -245,7 +246,7 @@ fn rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop
 
 #[test]
 fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
-    let mut session = after_aura_on_c4(unique_site());
+    let mut session = after_aura_on_c4(true);
     let source_id = aura_id(&session);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
