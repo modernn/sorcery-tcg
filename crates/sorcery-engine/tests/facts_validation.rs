@@ -1013,3 +1013,34 @@ fn oversized_area_damage_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.tap_to_damage_each_unit_at_adjacent_location);
 }
+
+#[test]
+fn oversized_nearby_aura_and_stealth_loss_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-nearby-aura",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "otherNearbyAlliesPowerBonus",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized nearby-aura minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.other_nearby_allies_power_bonus);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-scent-hounds",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "nearbyEnemiesPermanentlyLoseStealth",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Scent Hounds minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.nearby_enemies_permanently_lose_stealth);
+}

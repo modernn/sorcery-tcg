@@ -670,6 +670,9 @@ fn composition_manifest(
     if north_spells.contains(&"north-fodder") {
         cards["north-fodder"] = minion(&json!({}));
     }
+    if north_spells.contains(&"north-ally") {
+        cards["north-ally"] = minion(&json!({ "defense": 1 }));
+    }
     if let Some((card_id, definition)) = special_north_site(giant_extra) {
         cards[card_id] = definition;
     }
@@ -1347,6 +1350,14 @@ fn stage_south_on_north_d4(session: &mut Session) -> String {
     stage_south_on_north_cell(session, "D4")
 }
 
+fn stage_north_ally_on_d4(session: &mut Session) -> String {
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D4");
+    let (ally, _) = summon_at(session, "north-ally", "D4");
+    ally
+}
+
 #[test]
 fn rule_catalog_0177_oversized_ranged_originates_from_every_footprint_cell() {
     let mut session = composition_session(
@@ -1944,5 +1955,91 @@ fn rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footpri
     );
     assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
     assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0190_oversized_nearby_ally_aura_reaches_units_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "otherNearbyAlliesPowerBonus": 1 }),
+        &json!({}),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-ally",
+            "north-ally",
+            "north-ally",
+            "north-ally",
+        ],
+        &["south-zap"; 8],
+        &["north-giant", "north-ally"],
+    );
+    establish_north_square(&mut session);
+    let ally = stage_north_ally_on_d4(&mut session);
+    assert_eq!(unit(&state(&session), &ally)["location"], "D4");
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    end_and_draw(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-zap"
+            && descriptor["target"]["instanceId"] == ally
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "magic-resolved"
+        ]
+    );
+    let after = state(&session);
+    assert_eq!(
+        unit(&after, &ally)["damage"],
+        1,
+        "C4 is nearby to D4, so the 1/1 ally is a 2/2 and survives one Zap"
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != ally)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0191_oversized_scent_hounds_strip_stealth_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "nearbyEnemiesPermanentlyLoseStealth": true }),
+        &json!({
+            "stealth": true,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let enemy = stage_south_on_north_d4(&mut session);
+    let after = state(&session);
+    assert_eq!(unit(&after, &enemy)["location"], "D4");
+    assert_eq!(
+        unit(&after, &enemy)["stealthed"],
+        false,
+        "C4 is nearby to D4, so the B3-anchored 2x2 must strip that Stealth"
+    );
     assert_exact_replay(&session);
 }
