@@ -7829,6 +7829,12 @@ impl Game {
         summon_cell: impl Fn(Cell) -> Option<u64>,
         anywhere: bool,
     ) -> Vec<SummonDestination> {
+        if cells
+            .into_iter()
+            .all(|cell| !self.surface_location_exists(cell))
+        {
+            return self.square_area_void_destination(minion, cells, anywhere);
+        }
         let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
             cells
                 .into_iter()
@@ -7840,12 +7846,6 @@ impl Game {
         }) else {
             return Vec::new();
         };
-        if cells
-            .into_iter()
-            .all(|cell| !self.surface_location_exists(cell))
-        {
-            return self.square_area_void_destination(minion, cells, anywhere);
-        }
         if !cells
             .into_iter()
             .all(|cell| self.surface_location_exists(cell))

@@ -706,7 +706,7 @@ fn is_square_void_summon_at(cell: &'static str, cells: &[&str]) -> impl Fn(&Valu
 #[test]
 fn rule_catalog_0316_oversized_voidwalk_summons_only_onto_an_all_void_square() {
     let cards = voidwalk_cards(&oversized_voidwalker(), &site(&["earth"]));
-    let mut session = Session::new(&manifest(241, &cards, "north-site", &["north-spell"; 8]))
+    let mut session = Session::new(&manifest(141, &cards, "north-site", &["north-spell"; 8]))
         .expect("valid oversized Voidwalk scenario");
     keep(&mut session);
     keep(&mut session);
@@ -751,7 +751,7 @@ fn rule_catalog_0316_oversized_voidwalk_summons_only_onto_an_all_void_square() {
 #[test]
 fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surface() {
     let cards = voidwalk_cards(&oversized_voidwalker(), &site(&["earth"]));
-    let mut session = Session::new(&manifest(241, &cards, "north-site", &["north-spell"; 8]))
+    let mut session = Session::new(&manifest(141, &cards, "north-site", &["north-spell"; 8]))
         .expect("valid oversized Voidwalk movement scenario");
     keep(&mut session);
     keep(&mut session);
@@ -764,6 +764,9 @@ fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surf
         .as_str()
         .expect("summoned identity")
         .to_owned();
+    pass_turn(&mut session);
+    play_site(&mut session, "C1");
+    pass_turn(&mut session);
 
     let void_step = |descriptor: &Value| {
         descriptor["kind"] == "move-and-attack"
