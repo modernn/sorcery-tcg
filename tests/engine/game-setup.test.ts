@@ -12293,6 +12293,46 @@ test('RULE-04 defending first strike resolves deaths before the attacker strikes
       .some(({ instanceId }) => instanceId === targetInstanceId), true);
     assert.equal(await ctx.verifyReplay(), true);
   });
+
+  const printedFirstStrike = {
+    ...vanilla,
+    strikesFirstWhileAttacking: true,
+    strikesFirstWhileDefending: true,
+  };
+  await withNorthAttacksAtC2(206, printedFirstStrike, undefined, false, vanilla, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.damage, 0);
+    assert.equal(ctx.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+  await withNorthAttacksAtC2(207, vanilla, undefined, false, printedFirstStrike, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 0);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes', async () => {

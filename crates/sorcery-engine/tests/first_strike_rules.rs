@@ -425,6 +425,78 @@ fn rule_catalog_0205_defending_only_first_strike_should_be_inactive_while_attack
 }
 
 #[test]
+fn rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_defending() {
+    let vanilla = minion(json!({ "attack": 3, "defense": 3 }));
+    let first_strike = minion(json!({
+        "attack": 3,
+        "defense": 3,
+        "strikesFirstWhileAttacking": true,
+        "strikesFirstWhileDefending": true,
+    }));
+
+    let attacking = resolve_single_target(prepare_attack(
+        206,
+        &first_strike,
+        &vanilla,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&attacking.session);
+    assert_eq!(
+        unit(&position, &attacking.attacker_id).expect("surviving attacker")["damage"],
+        0
+    );
+    assert!(in_cemetery(&position, "south", &attacking.target_id));
+    assert!(
+        attacking
+            .session
+            .transcript()
+            .last()
+            .expect("fight receipt")
+            .events
+            .iter()
+            .all(|event| {
+                event.event_type != "damage-dealt"
+                    || event.payload["instanceId"] != attacking.attacker_id
+            })
+    );
+    assert_exact_replay(&attacking.session);
+
+    let defending = resolve_single_target(prepare_attack(
+        207,
+        &vanilla,
+        &first_strike,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&defending.session);
+    assert!(in_cemetery(&position, "north", &defending.attacker_id));
+    assert_eq!(
+        unit(&position, &defending.target_id).expect("surviving defender")["damage"],
+        0
+    );
+    assert!(
+        defending
+            .session
+            .transcript()
+            .last()
+            .expect("fight receipt")
+            .events
+            .iter()
+            .all(|event| {
+                event.event_type != "damage-dealt"
+                    || event.payload["instanceId"] != defending.target_id
+            })
+    );
+    assert_exact_replay(&defending.session);
+    assert_checkpoint_round_trip(&defending.session);
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "the direct continuation proof keeps allocation, ordering, resume, and event order together"

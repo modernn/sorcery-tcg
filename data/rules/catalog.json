@@ -4302,6 +4302,31 @@
         "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
         "testName": "rule_catalog_0205_defending_only_first_strike_should_be_inactive_while_attacking"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0206",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Printed first strike is the combination of attacking and defending first strike: the same minion kills before a return strike while attacking and takes no damage from a simultaneous attacker while defending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_defending"
+      }
     }
   ]
 }
