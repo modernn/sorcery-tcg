@@ -198,6 +198,11 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
     assert!(facts.nearby_strikes_against_units_deal_double_damage);
 
     let aura_effects = [
+        ("affectedSitesAreFlooded", json!(true)),
+        (
+            "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+            json!(true),
+        ),
         (
             "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
             json!(3),

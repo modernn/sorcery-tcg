@@ -4601,6 +4601,8 @@ function gameDefinition(
   atStartOfControllerTurnControllerLosesLife: 0 | 2 = 0,
   atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 0 | 3 = 0,
   atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: 0 | 2 = 0,
+  affectedSitesAreFlooded = false,
+  affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4711,7 +4713,9 @@ function gameDefinition(
     && Number(immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns)
       + Number(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
       + Number(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf)
-      + Number(atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3) === 1) {
+      + Number(atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
+      + Number(affectedSitesAreFlooded)
+      + Number(affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold) === 1) {
     return {
       ...(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
         ? { atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true as const }
@@ -4719,6 +4723,10 @@ function gameDefinition(
           ? { atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep }
           : atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3
             ? { atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent }
+          : affectedSitesAreFlooded
+            ? { affectedSitesAreFlooded: true as const }
+            : affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+              ? { affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true as const }
           : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
       cardType: 'aura',
       manaCost: card.manaCost,

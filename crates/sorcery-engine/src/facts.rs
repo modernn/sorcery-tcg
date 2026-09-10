@@ -55,6 +55,18 @@ impl ElementSet {
         self.0 & (1 << element.index()) != 0
     }
 
+    /// Returns this set with `element` present.
+    #[must_use]
+    pub const fn with(self, element: Element) -> Self {
+        Self(self.0 | (1 << element.index()))
+    }
+
+    /// Returns this set with `element` absent.
+    #[must_use]
+    pub const fn without(self, element: Element) -> Self {
+        Self(self.0 & !(1 << element.index()))
+    }
+
     /// Iterates present elements in canonical rules order.
     pub fn iter(self) -> impl Iterator<Item = Element> {
         Element::ALL
@@ -173,6 +185,8 @@ pub struct ArtifactFacts {
 /// The single supported effect carried by an Aura.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuraEffect {
+    AffectedSitesAreFlooded,
+    AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold,
     AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
     AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
     AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
@@ -707,6 +721,8 @@ const ARTIFACT_FIELDS: &[&str] = &[
 ];
 
 const AURA_FIELDS: &[&str] = &[
+    "affectedSitesAreFlooded",
+    "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
     "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
     "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
     "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
@@ -1143,6 +1159,14 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
     reject_unknown(object, AURA_FIELDS, path)?;
     let effect = one_effect(
         [
+            true_only(object, "affectedSitesAreFlooded", path)?
+                .then_some(AuraEffect::AffectedSitesAreFlooded),
+            true_only(
+                object,
+                "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+                path,
+            )?
+            .then_some(AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold),
             fixed_integer(
                 object,
                 "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",

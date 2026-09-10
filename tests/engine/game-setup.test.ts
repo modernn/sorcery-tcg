@@ -24407,6 +24407,99 @@ test('RULE-04 end-of-each-turn wandering Aura damages units here then must move 
   });
 });
 
+test('RULE-04 Flood adds Water affinity and later Drought wins the timestamp', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'flood-north-aura': {
+      affectedSitesAreFlooded: true,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'flood-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'flood-north-site': { cardType: 'site', elements: ['earth'] },
+    'flood-south-aura': {
+      affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'flood-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'flood-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-terrain-aura-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('flood-north-site'),
+        avatar: 'flood-north-avatar',
+        spellbook: Array(6).fill('flood-north-aura'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('flood-south-site'),
+        avatar: 'flood-south-avatar',
+        spellbook: Array(6).fill('flood-south-aura'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+    assert.equal(ctx.observe('north').players.north.affinity.water, 0);
+    const floodCasts = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) =>
+        descriptor.kind === 'cast-aura' && descriptor.cardId === 'flood-north-aura');
+    assert.equal(floodCasts.every(({ descriptor }) =>
+      descriptor.kind === 'cast-aura' && descriptor.cells.length === 4), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'flood-north-aura'
+        && descriptor.cells.includes('C4'));
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+    assert.equal(ctx.observe('north').players.north.affinity.water, 1);
+    assert.equal(ctx.state.realm.immobileAreas == null, true);
+    assert.equal(ctx.state.realm.auras?.[0]?.cardId, 'flood-north-aura');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'flood-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'flood-south-aura'
+        && descriptor.cells.includes('C4'));
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+    assert.equal(ctx.observe('north').players.north.affinity.water, 0);
+    assert.equal(ctx.state.realm.auras?.length, 2);
+    assert.equal(ctx.state.realm.auras?.[0]?.cardId, 'flood-north-aura');
+    assert.equal(ctx.state.realm.auras?.[1]?.cardId, 'flood-south-aura');
+    assert.equal(ctx.state.realm.immobileAreas == null, true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

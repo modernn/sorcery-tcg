@@ -5697,6 +5697,50 @@
         "file": "crates/sorcery-engine/tests/start_turn_site_artifact_rules.rs",
         "testName": "rule_catalog_0265_site_artifact_can_open_deaths_door_and_still_gain_mana"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0266",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A persistent 2×2 Aura can flood affected sites. Those sites become Water sites and still provide their other elemental affinities. The Aura does not immobilize, does not use the 3-turn duration machine, and remains after the controller's next turn starts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0266_flood_adds_water_and_keeps_other_affinities"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0267",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A later-entered persistent 2×2 Drought Aura covering the same site wins the timestamp: the site is no longer a Water site and provides no Water threshold, while its other affinities remain. Flood entered first stays in the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0267_later_drought_wins_over_flood"
+      }
     }
   ]
 }

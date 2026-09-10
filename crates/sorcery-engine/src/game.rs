@@ -18,8 +18,9 @@ use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
-    BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
-    MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds,
+    BasicMovementRestriction, CardFacts, DamagePrevention, Element, ElementSet, EndTurnStealth,
+    FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts,
+    Thresholds,
     parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
@@ -1256,7 +1257,9 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
 
 const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
     match facts.effect {
-        AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+        AuraEffect::AffectedSitesAreFlooded
+        | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+        | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
         | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
         | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
         | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf => None,
@@ -4881,7 +4884,9 @@ impl Game {
             };
             if matches!(
                 facts.effect,
-                AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+                AuraEffect::AffectedSitesAreFlooded
+                    | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
                     | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
             ) {
                 continue;
@@ -7010,16 +7015,41 @@ impl Game {
                 })
     }
 
-    /// Whether a played Water site currently stands at one cell.
+    /// Whether a played site is currently a Water site, after Flooded/Drought overlays.
+    ///
+    /// Official Flooded gives a site a minimum of one Water affinity. Official Drought says
+    /// affected sites are not Water sites and provide no Water threshold. Later-entered Auras
+    /// win when both cover the same cell.
     fn is_water_site(&self, cell: Cell) -> bool {
-        self.position.sites[cell.index()]
-            .as_ref()
-            .is_some_and(|site| {
-                matches!(
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                    CardFacts::Site(facts) if facts.elements.contains(Element::Water)
-                )
-            })
+        let Some(site) = self.position.sites[cell.index()].as_ref() else {
+            return false;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        let mut water = facts.elements.contains(Element::Water);
+        for aura in &self.position.auras {
+            if !aura.cells.contains(&cell) {
+                continue;
+            }
+            let CardFacts::Aura(aura_facts) =
+                &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            match aura_facts.effect {
+                AuraEffect::AffectedSitesAreFlooded => water = true,
+                AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold => {
+                    water = false;
+                }
+                AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+                | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+                | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {}
+            }
+        }
+        water
     }
 
     fn underground_location_exists(&self, cell: Cell) -> bool {
@@ -7260,7 +7290,7 @@ impl Game {
                 if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified {
                     return None;
                 }
-                Some(facts.elements)
+                Some(self.effective_site_elements(cell, facts.elements))
             })
             .flat_map(crate::facts::ElementSet::iter);
         let provider_elements = self
@@ -7288,6 +7318,14 @@ impl Game {
         affinities
     }
 
+    fn effective_site_elements(&self, cell: Cell, printed: ElementSet) -> ElementSet {
+        if self.is_water_site(cell) {
+            printed.with(Element::Water)
+        } else {
+            printed.without(Element::Water)
+        }
+    }
+
     fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
         self.elemental_affinities(seat)
             .into_iter()
@@ -7312,7 +7350,9 @@ impl Game {
             }
             for (_, caster_instance_id) in &spellcasters {
                 match facts.effect {
-                    AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                    AuraEffect::AffectedSitesAreFlooded
+                    | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
                     | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
                         descriptors.extend(Cell::SQUARE_AREAS.into_iter().map(|cells| {
                             ActionDescriptor::CastAura {
@@ -7467,7 +7507,7 @@ impl Game {
             else {
                 return None;
             };
-            if minion.must_be_cast_to_water_site && !site_facts.elements.contains(Element::Water) {
+            if minion.must_be_cast_to_water_site && !self.is_water_site(cell) {
                 return None;
             }
             if site_facts
@@ -14049,11 +14089,11 @@ impl Game {
 
     /// Conjures one Aura across its engine-issued cells.
     ///
-    /// Two-by-two Auras keep that area immobilized, and ground the Airborne minions standing on a
-    /// site inside it, until the controller's third turn ends and dispels it. A start-turn site
-    /// destruction Aura occupies one Ordinary or Exceptional site and does not hold the area. An
-    /// end-of-each-turn wandering Aura occupies one nearby site, remembers visited cells, and does
-    /// not hold the area.
+    /// Two-by-two immobilize and Thunderstorm Auras keep that area grounded until the controller's
+    /// third turn ends and dispels them. Flood and Drought use the same 2×2 footprint but do not
+    /// hold the area or count controller turns. A start-turn site destruction Aura occupies one
+    /// Ordinary or Exceptional site. An end-of-each-turn wandering Aura occupies one nearby site,
+    /// remembers visited cells, and does not hold the area.
     fn apply_cast_aura_action(
         &mut self,
         action: &IssuedAction,
@@ -14146,6 +14186,14 @@ impl Game {
                 "seat": seat,
             })
         });
+        if matches!(
+            facts.effect,
+            AuraEffect::AffectedSitesAreFlooded
+                | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+        ) {
+            self.settle_region_occupancy(outcomes)?;
+            self.settle_nearby_enemy_stealth(outcomes);
+        }
         self.position.state_version += 1;
         Ok(())
     }
@@ -15318,7 +15366,9 @@ impl Game {
                 aura.controller == ending_seat
             }
             AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => true,
-            AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+            AuraEffect::AffectedSitesAreFlooded
+            | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+            | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
             | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {
                 false
             }

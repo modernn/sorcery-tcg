@@ -220,6 +220,8 @@ export type GameCardDefinition =
     uniqueOrLegendary?: true;
   }>
   | Readonly<{
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
@@ -229,6 +231,8 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3;
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
@@ -238,6 +242,8 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true;
@@ -247,8 +253,32 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    affectedSitesAreFlooded: true;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true;
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
@@ -1128,6 +1158,8 @@ const SUPPORTED_CARD_FIELDS = {
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
   `.trim().split(/\s+/)),
   aura: new Set(`
+    affectedSitesAreFlooded
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf cardType
@@ -1504,10 +1536,21 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent must be 3`,
       );
     }
+    if (card.affectedSitesAreFlooded !== undefined && card.affectedSitesAreFlooded !== true) {
+      throw new RangeError(`${path}.affectedSitesAreFlooded must be true`);
+    }
+    if (card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold !== undefined
+      && card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold !== true) {
+      throw new RangeError(
+        `${path}.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold must be true`,
+      );
+    }
     if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
       + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
       + Number(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true)
       + Number(card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
+      + Number(card.affectedSitesAreFlooded === true)
+      + Number(card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold === true)
         !== 1) {
       throw new RangeError(`${path} must define exactly one supported Aura effect`);
     }
@@ -2458,10 +2501,16 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? {
                       atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3 as const,
                     }
-                  : {
-                    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
-                      true as const,
-                  }),
+                  : card.affectedSitesAreFlooded === true
+                    ? { affectedSitesAreFlooded: true as const }
+                    : card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold === true
+                      ? {
+                        affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true as const,
+                      }
+                    : {
+                      immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
+                        true as const,
+                    }),
               cardType: 'aura' as const,
               manaCost: card.manaCost,
               thresholds: { ...card.thresholds },
