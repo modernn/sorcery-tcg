@@ -329,6 +329,7 @@ pub enum DamagePrevention {
 pub struct MinionFacts {
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
+    pub at_end_of_controller_turn_damage_each_other_unit_here: Option<u8>,
     pub at_start_of_controller_turn_controller_gains_life: Option<u8>,
     pub at_start_of_controller_turn_controller_gains_mana: Option<u8>,
     pub at_start_of_controller_turn_controller_loses_life: Option<u8>,
@@ -808,6 +809,7 @@ const MAGIC_FIELDS: &[&str] = &[
 
 const MINION_FIELDS: &[&str] = &[
     "airborne",
+    "atEndOfControllerTurnDamageEachOtherUnitHere",
     "atStartOfControllerTurnControllerGainsLife",
     "atStartOfControllerTurnControllerGainsMana",
     "atStartOfControllerTurnControllerLosesLife",
@@ -1614,6 +1616,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     reject_unknown(object, MINION_FIELDS, path)?;
     let airborne = optional_bool(object, "airborne", path)?;
     let alternative_summon_payment = parse_alternative_summon_payment(object, path)?;
+    let at_end_of_controller_turn_damage_each_other_unit_here = optional_bounded_integer(
+        object,
+        "atEndOfControllerTurnDamageEachOtherUnitHere",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_controller_gains_life = optional_bounded_integer(
         object,
         "atStartOfControllerTurnControllerGainsLife",
@@ -1793,6 +1803,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     Ok(MinionFacts {
         airborne,
         alternative_summon_payment,
+        at_end_of_controller_turn_damage_each_other_unit_here,
         at_start_of_controller_turn_controller_gains_life,
         at_start_of_controller_turn_controller_gains_mana,
         at_start_of_controller_turn_controller_loses_life,

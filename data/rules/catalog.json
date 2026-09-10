@@ -6234,6 +6234,51 @@
         "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
         "testName": "rule_catalog_0289_target_player_draw_sites_decks_out_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0290",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the end of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse hits both seats, including a Surface Avatar on the same cell, and never hits the source. End-turn cleanup then proceeds so the opponent draws.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0290_end_turn_here_damage_hits_other_units_sharing_the_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0291",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "End-of-controller-turn here-area damage can destroy a 1-defense visitor on the same cell. The source remains, Deathrites resolve through the existing end-turn continuation, and the opponent then draws.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0291_end_turn_here_damage_destroys_a_wounded_visitor"
+      }
     }
   ]
 }

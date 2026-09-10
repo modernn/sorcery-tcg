@@ -2171,6 +2171,33 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /atStartOfControllerTurnLureNearbyEnemyMinion must be true when defined/);
+  for (const atEndOfControllerTurnDamageEachOtherUnitHere of [0, 1.5, 101]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atEndOfControllerTurnDamageEachOtherUnitHere,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atEndOfControllerTurnDamageEachOtherUnitHere must be a safe integer between 1 and 100/);
+  }
+  const endTurnHereDamageManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atEndOfControllerTurnDamageEachOtherUnitHere: 1,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    endTurnHereDamageManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnHereDamageManifest.cards[firstSpell].atEndOfControllerTurnDamageEachOtherUnitHere,
+    1,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -26129,6 +26156,142 @@ test('RULE-04 start-turn here-area damage hits other units here and can destroy 
       }
       const allocated = resolved.receipt.events.filter(({ type }) =>
         type === 'start-turn-damage-allocated');
+      assert.equal(allocated.length, 2);
+      assert.equal(
+        allocated.every((event) =>
+          (event.payload as { sourceInstanceId?: string }).sourceInstanceId === sourceId),
+        true,
+      );
+      assert.equal(
+        allocated.some((event) =>
+          (event.payload as { targetInstanceId?: string }).targetInstanceId
+            === ctx.state.players.north.avatar.card.instanceId),
+        true,
+      );
+      assert.equal(
+        allocated.some((event) =>
+          (event.payload as { targetInstanceId?: string }).targetInstanceId === visitorId),
+        true,
+      );
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.players.north.avatar.life, 19);
+      assert.equal(
+        ctx.state.realm.units.some((unit) => unit.instanceId === sourceId && unit.damage === 0),
+        true,
+      );
+      assert.equal(
+        ctx.state.realm.units.some((unit) => unit.instanceId === visitorId),
+        expectVisitorAlive,
+      );
+      if (expectVisitorAlive) {
+        assert.equal(
+          ctx.state.realm.units.find((unit) => unit.instanceId === visitorId)?.damage,
+          1,
+        );
+      } else {
+        assert.equal(
+          ctx.state.players.south.cemetery.some((card) => card.instanceId === visitorId),
+          true,
+        );
+      }
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(2, true);
+  await run(1, false);
+});
+
+test('RULE-04 end-turn here-area damage hits other units here and can destroy a visitor', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cardsFor = (defense: number): Record<string, GameCardDefinition> => ({
+    'end-pulser-north-avatar': avatar,
+    'end-pulser-north-pulser': {
+      atEndOfControllerTurnDamageEachOtherUnitHere: 1,
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'end-pulser-north-site': site,
+    'end-pulser-south-avatar': avatar,
+    'end-pulser-south-site': site,
+    'end-pulser-south-visitor': {
+      attack: 0,
+      cardType: 'minion',
+      defense,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  });
+  const run = async (defense: number, expectVisitorAlive: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-end-turn-here-damage-v1',
+      },
+      cards: cardsFor(defense),
+      decks: {
+        north: {
+          atlas: Array(6).fill('end-pulser-north-site'),
+          avatar: 'end-pulser-north-avatar',
+          spellbook: Array(6).fill('end-pulser-north-pulser'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('end-pulser-south-site'),
+          avatar: 'end-pulser-south-avatar',
+          spellbook: Array(6).fill('end-pulser-south-visitor'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'end-pulser-north-pulser'
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardId === 'end-pulser-south-site'
+          && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'end-pulser-south-visitor'
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      const sourceId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'end-pulser-north-pulser')?.instanceId;
+      const visitorId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'end-pulser-south-visitor')?.instanceId;
+      assert.equal(typeof sourceId, 'string');
+      assert.equal(typeof visitorId, 'string');
+      if (typeof sourceId !== 'string' || typeof visitorId !== 'string') {
+        return;
+      }
+      const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'end-turn'));
+      assert.equal(ended.accepted, true);
+      if (!ended.accepted) {
+        return;
+      }
+      const allocated = ended.receipt.events.filter(({ type }) =>
+        type === 'end-turn-damage-allocated');
       assert.equal(allocated.length, 2);
       assert.equal(
         allocated.every((event) =>

@@ -380,6 +380,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    atEndOfControllerTurnDamageEachOtherUnitHere?: number;
     atStartOfControllerTurnControllerGainsLife?: number;
     atStartOfControllerTurnControllerGainsMana?: number;
     atStartOfControllerTurnControllerLosesLife?: number;
@@ -1208,7 +1209,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -2163,6 +2164,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnControllerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
     );
   }
+  if (card.atEndOfControllerTurnDamageEachOtherUnitHere !== undefined
+    && (!Number.isSafeInteger(card.atEndOfControllerTurnDamageEachOtherUnitHere)
+      || card.atEndOfControllerTurnDamageEachOtherUnitHere < 1
+      || card.atEndOfControllerTurnDamageEachOtherUnitHere > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.atEndOfControllerTurnDamageEachOtherUnitHere must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
   if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDamageEachOtherUnitHere)
       || card.atStartOfControllerTurnDamageEachOtherUnitHere < 1
@@ -2756,6 +2765,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? {
                 atStartOfControllerTurnControllerLosesLife:
                   card.atStartOfControllerTurnControllerLosesLife,
+              }
+              : {}),
+            ...(card.atEndOfControllerTurnDamageEachOtherUnitHere !== undefined
+              ? {
+                atEndOfControllerTurnDamageEachOtherUnitHere:
+                  card.atEndOfControllerTurnDamageEachOtherUnitHere,
               }
               : {}),
             ...(card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined

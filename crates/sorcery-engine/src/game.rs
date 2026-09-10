@@ -739,6 +739,7 @@ struct LuckyRandomRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct EndTurnContinuation {
+    remaining_here_damage_ids: Vec<IdentityHash>,
     remaining_instance_ids: Vec<IdentityHash>,
     seat: Seat,
 }
@@ -1449,6 +1450,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_end_of_controller_turn_damage_each_other_unit_here: _,
         at_start_of_controller_turn_controller_gains_life: _,
         at_start_of_controller_turn_controller_gains_mana: _,
         at_start_of_controller_turn_controller_loses_life: _,
@@ -11559,8 +11561,9 @@ impl Game {
                 restore();
                 self.continue_drag_projectile(&continuation, false, outcomes)
             }
-            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
+            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_effects(
                 continuation.seat,
+                &continuation.remaining_here_damage_ids,
                 &continuation.remaining_instance_ids,
                 outcomes,
                 None,
@@ -15202,6 +15205,7 @@ impl Game {
                 source_instance_id,
                 u16::from(amount),
                 "start-turn-damage-allocated",
+                None,
                 outcomes,
             )?;
             self.position.state_version += 1;
@@ -19055,12 +19059,14 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         if !strike {
-            return self.apply_here_area_damage(
+            self.apply_here_area_damage(
                 source_instance_id,
                 1,
                 "genesis-damage-allocated",
+                None,
                 outcomes,
-            );
+            )?;
+            return Ok(());
         }
         let source = self
             .position
@@ -19139,8 +19145,9 @@ impl Game {
         source_instance_id: &IdentityHash,
         amount: u16,
         allocation_event: &'static str,
+        continuation: Option<DeathriteContinuation>,
         outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
+    ) -> Result<bool, GameError> {
         let source = self
             .position
             .units
@@ -19149,7 +19156,7 @@ impl Game {
             .cloned()
             .ok_or(GameError::IllegalAction)?;
         if self.minion_is_disabled(&source) {
-            return Ok(());
+            return Ok(false);
         }
         let (current_power, lethal) = self.combatant_attack_and_lethal(
             UnitKind::Minion,
@@ -19200,15 +19207,17 @@ impl Game {
             }
         }
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
-            self.begin_minion_deaths(
+            self.begin_minion_deaths_with_continuation(
                 &dead_minions,
                 &defeated_avatars,
                 self.position.phase,
                 self.position.active_seat,
+                continuation,
                 outcomes,
             )?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn apply_targeted_genesis_damage(
@@ -19525,6 +19534,22 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         self.resolve_end_of_each_turn_site_controller_life_loss(seat, outcomes)?;
+        let pulses: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts)
+                        if facts.at_end_of_controller_turn_damage_each_other_unit_here.is_some()
+                )
+                .then(|| unit.card.instance_id.clone())
+            })
+            .collect();
         let triggered: Vec<_> = self
             .position
             .units
@@ -19540,7 +19565,7 @@ impl Game {
                 .then(|| unit.card.instance_id.clone())
             })
             .collect();
-        self.continue_end_turn_deaths(seat, &triggered, outcomes, random_draws)?;
+        self.continue_end_turn_effects(seat, &pulses, &triggered, outcomes, random_draws)?;
         self.position.state_version += 1;
         Ok(())
     }
@@ -19631,6 +19656,51 @@ impl Game {
         Ok(())
     }
 
+    fn continue_end_turn_effects(
+        &mut self,
+        seat: Seat,
+        remaining_pulse_ids: &[IdentityHash],
+        remaining_death_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        for (index, instance_id) in remaining_pulse_ids.iter().enumerate() {
+            let Some(amount) = self.end_turn_here_damage_amount(seat, instance_id) else {
+                continue;
+            };
+            let began_deaths = self.apply_here_area_damage(
+                instance_id,
+                u16::from(amount),
+                "end-turn-damage-allocated",
+                Some(DeathriteContinuation::EndTurn(EndTurnContinuation {
+                    remaining_here_damage_ids: remaining_pulse_ids[index + 1..].to_vec(),
+                    remaining_instance_ids: remaining_death_ids.to_vec(),
+                    seat,
+                })),
+                outcomes,
+            )?;
+            if began_deaths || self.position.terminal.is_some() {
+                return Ok(());
+            }
+        }
+        self.continue_end_turn_deaths(seat, remaining_death_ids, outcomes, random_draws)
+    }
+
+    fn end_turn_here_damage_amount(&self, seat: Seat, instance_id: &IdentityHash) -> Option<u8> {
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)?;
+        if unit.controller != seat || self.minion_is_disabled(unit) {
+            return None;
+        }
+        match &self.rules.cards[usize::from(unit.card.card_id.0)].facts {
+            CardFacts::Minion(facts) => facts.at_end_of_controller_turn_damage_each_other_unit_here,
+            _ => None,
+        }
+    }
+
     fn continue_end_turn_deaths(
         &mut self,
         seat: Seat,
@@ -19653,6 +19723,7 @@ impl Game {
                 Phase::Main,
                 seat,
                 Some(DeathriteContinuation::EndTurn(EndTurnContinuation {
+                    remaining_here_damage_ids: Vec::new(),
                     remaining_instance_ids: remaining_instance_ids[index + 1..].to_vec(),
                     seat,
                 })),
@@ -20296,11 +20367,18 @@ impl Game {
                 "shooter": continuation.shooter,
                 "target": continuation.target,
             }),
-            DeathriteContinuation::EndTurn(continuation) => json!({
-                "kind": "end-turn",
-                "remainingInstanceIds": continuation.remaining_instance_ids,
-                "seat": continuation.seat,
-            }),
+            DeathriteContinuation::EndTurn(continuation) => {
+                let mut value = json!({
+                    "kind": "end-turn",
+                    "remainingInstanceIds": continuation.remaining_instance_ids,
+                    "seat": continuation.seat,
+                });
+                if !continuation.remaining_here_damage_ids.is_empty() {
+                    value["remainingHereDamageInstanceIds"] =
+                        json!(continuation.remaining_here_damage_ids);
+                }
+                value
+            }
             DeathriteContinuation::FirstStrike(continuation) => json!({
                 "attackerStrikesFirst": continuation.attacker_struck,
                 "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,

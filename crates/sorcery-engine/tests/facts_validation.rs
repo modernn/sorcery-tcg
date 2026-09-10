@@ -870,6 +870,15 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be between",
         ),
         (
+            "end-turn here damage range",
+            with(
+                minion(),
+                "atEndOfControllerTurnDamageEachOtherUnitHere",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
             "start-turn lure flag",
             with(
                 minion(),
@@ -1011,6 +1020,21 @@ fn typed_effects_should_retain_only_normalized_values() {
     };
     assert_eq!(
         facts.at_start_of_controller_turn_damage_each_other_unit_here,
+        Some(1)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-here-damage",
+        &with(
+            minion(),
+            "atEndOfControllerTurnDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid end-turn here-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_damage_each_other_unit_here,
         Some(1)
     );
     let CardFacts::Minion(facts) = parse_card_definition(

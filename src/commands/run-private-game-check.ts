@@ -4615,6 +4615,7 @@ function gameDefinition(
   atStartOfControllerTurnControllerGainsMana: 0 | 1 = 0,
   targetPlayerDrawsSpells: 0 | 1 = 0,
   targetPlayerDrawsSites: 0 | 1 = 0,
+  atEndOfControllerTurnDamageEachOtherUnitHere: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4859,6 +4860,9 @@ function gameDefinition(
         : {}),
       ...(atStartOfControllerTurnControllerLosesLife
         ? { atStartOfControllerTurnControllerLosesLife }
+        : {}),
+      ...(atEndOfControllerTurnDamageEachOtherUnitHere
+        ? { atEndOfControllerTurnDamageEachOtherUnitHere }
         : {}),
       ...(atStartOfControllerTurnDamageEachOtherUnitHere
         ? { atStartOfControllerTurnDamageEachOtherUnitHere }
