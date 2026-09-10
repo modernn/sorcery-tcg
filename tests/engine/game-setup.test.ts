@@ -19211,7 +19211,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
     },
     seed: 1,
   }), /gainsPowerRangedAndSpellcasterAtopTower must be 2/);
-  const oversizedTower = createGameManifest({
+  assert.throws(() => createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -19221,18 +19221,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       } as unknown as GameCardDefinition,
     },
     seed: 1,
-  });
-  const oversizedTowerDefinition = oversizedTower.cards[conditionalId];
-  assert.equal(
-    oversizedTowerDefinition?.cardType === 'minion'
-      && oversizedTowerDefinition.occupiesSquareArea,
-    2,
-  );
-  assert.equal(
-    oversizedTowerDefinition?.cardType === 'minion'
-      && oversizedTowerDefinition.gainsPowerRangedAndSpellcasterAtopTower,
-    2,
-  );
+  }), /occupiesSquareArea has an unsupported ability combination/);
 
   const gameManifest = await findOpeningManifest(
     (seed) => createGameManifest({ ...input, seed }),

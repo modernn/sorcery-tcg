@@ -1227,7 +1227,7 @@ fn rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site(
 
 fn stage_south_on_north_d3(session: &mut Session) -> String {
     end_and_draw(session);
-    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
     play_site(session, "D3");
     end_and_draw(session);
     let (enemy, _) = summon_at(session, "south-minion", "D3");
@@ -1324,8 +1324,7 @@ fn rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower() {
         ["projectile-shot", "strike-damage-allocated"]
     );
     assert_eq!(
-        receipt.events[1].payload["amount"],
-        3,
+        receipt.events[1].payload["amount"], 3,
         "the C4 Tower shares the oversized footprint, so derived power is 1+2"
     );
     assert_exact_replay(&session);

@@ -3655,11 +3655,12 @@ impl Game {
             loop {
                 let location = path.last().copied().unwrap_or(origin);
                 let mut hits = Vec::new();
+                let on_own_footprint = Self::unit_occupies_cell(shooter, location.cell);
                 for target_seat in [Seat::North, Seat::South] {
                     let avatar = &self.position.players[seat_index(target_seat)].avatar;
                     if avatar.card.instance_id != *shooter_instance_id
                         && avatar.location == location.cell
-                        && (path.len() > 1 || target_seat != seat)
+                        && (!on_own_footprint || target_seat != seat)
                     {
                         hits.push(UnitTarget::Avatar {
                             instance_id: avatar.card.instance_id.clone(),
@@ -3676,7 +3677,7 @@ impl Game {
                                 && unit.region == Region::Surface
                                 && Self::unit_occupies_cell(unit, location.cell)
                                 && !self.minion_has_active_stealth(unit)
-                                && (path.len() > 1 || unit.controller != seat)
+                                && (!on_own_footprint || unit.controller != seat)
                         })
                         .map(|unit| UnitTarget::Minion {
                             instance_id: unit.card.instance_id.clone(),
