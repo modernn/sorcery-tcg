@@ -7163,7 +7163,7 @@ fn rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library() {
         let mut north_spells = vec!["north-draw", "north-draw", "north-draw"];
         if remaining > 0 {
             cards["north-filler"] = minion(json!({}));
-            north_spells.extend(std::iter::repeat("north-filler").take(remaining));
+            north_spells.extend(std::iter::repeat_n("north-filler", remaining));
         }
         let encoded = manifest(
             197 + u32::try_from(remaining).expect("small remaining count"),
