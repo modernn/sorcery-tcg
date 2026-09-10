@@ -10017,6 +10017,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { otherNearbyAlliesPowerBonus: 1 as const },
     { nearbyEnemiesPermanentlyLoseStealth: true as const },
     { gainsStealthAtEndOfTurnIfNoEnemiesNearby: true as const },
+    { ranged: true as const, mayRangedStrikeOnceDuringBasicMovement: true as const },
+    { ranged: true as const, mayStepAfterRangedStrike: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,

@@ -1350,6 +1350,13 @@ fn stage_south_on_north_d4(session: &mut Session) -> String {
     stage_south_on_north_cell(session, "D4")
 }
 
+fn stage_d3_and_south_on_north_d4(session: &mut Session) -> String {
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D3");
+    stage_south_on_north_d4(session)
+}
+
 fn stage_north_ally_on_d4(session: &mut Session) -> String {
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
@@ -2113,5 +2120,157 @@ fn rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar() 
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0194_oversized_during_movement_ranged_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "mayRangedStrikeOnceDuringBasicMovement": true,
+            "ranged": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_d3_and_south_on_north_d4(&mut session);
+    let staged = state(&session);
+    assert_eq!(
+        unit(&staged, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, started) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == giant
+            && descriptor["path"]
+                == json!([
+                    { "cell": "B3", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                ])
+    });
+    assert_eq!(event_types(&started), ["basic-movement-started"]);
+    let after_start = state(&session);
+    assert_eq!(after_start["phase"], "movement");
+    assert_eq!(unit(&after_start, &giant)["location"], "B3");
+    assert_eq!(
+        unit(&after_start, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let actions = session
+        .legal_actions()
+        .expect("during-movement Ranged actions");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    let after_shot = state(&session);
+    assert_eq!(unit(&after_shot, &enemy)["damage"], 1);
+    assert_eq!(after_shot["phase"], "movement");
+    let (_, continued) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement" && descriptor["unitInstanceId"] == giant
+    });
+    assert_eq!(event_types(&continued), ["basic-movement-continued"]);
+    let after_step = state(&session);
+    assert_eq!(unit(&after_step, &giant)["location"], "C3");
+    assert_eq!(
+        unit(&after_step, &giant)["occupiedCells"],
+        json!(["C3", "C4", "D3", "D4"]),
+        "the east step needs D3 and D4, so the paused shot must happen before the square translates"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0195_oversized_post_ranged_step_translates_the_whole_footprint() {
+    let mut session = composition_session(
+        &json!({
+            "mayStepAfterRangedStrike": true,
+            "ranged": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_d3_and_south_on_north_d4(&mut session);
+    let staged = state(&session);
+    assert_eq!(
+        unit(&staged, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let actions = session.legal_actions().expect("main-phase Ranged actions");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    let after_shot = state(&session);
+    assert_eq!(unit(&after_shot, &enemy)["damage"], 1);
+    assert_eq!(after_shot["phase"], "ranged-step");
+    assert_eq!(after_shot["pendingRangedStep"]["sourceInstanceId"], giant);
+    let (_, stepped) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-ranged-step"
+            && descriptor["choice"] == "step"
+            && descriptor["to"] == json!({ "cell": "C3", "region": "surface" })
+    });
+    assert_eq!(event_types(&stepped), ["unit-stepped"]);
+    let after_step = state(&session);
+    assert_eq!(after_step["phase"], "main");
+    assert!(after_step["pendingRangedStep"].is_null());
+    assert_eq!(unit(&after_step, &giant)["location"], "C3");
+    assert_eq!(
+        unit(&after_step, &giant)["occupiedCells"],
+        json!(["C3", "C4", "D3", "D4"]),
+        "the post-shot step must translate every occupied cell, not only the B3 anchor"
+    );
     assert_exact_replay(&session);
 }

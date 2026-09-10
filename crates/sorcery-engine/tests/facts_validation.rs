@@ -1064,3 +1064,44 @@ fn oversized_conditional_end_turn_stealth_should_parse() {
         Some(EndTurnStealth::IfNoEnemiesNearby)
     );
 }
+
+#[test]
+fn oversized_during_movement_and_post_ranged_step_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-during-movement-ranged",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "ranged",
+                json!(true),
+            ),
+            "mayRangedStrikeOnceDuringBasicMovement",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized during-movement Ranged minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+    assert!(facts.may_ranged_strike_once_during_basic_movement);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-post-ranged-step",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "ranged",
+                json!(true),
+            ),
+            "mayStepAfterRangedStrike",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized post-Ranged step minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+    assert!(facts.may_step_after_ranged_strike);
+}

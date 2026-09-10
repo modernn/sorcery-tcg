@@ -4003,6 +4003,60 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0194",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that may Ranged strike once during basic movement can fire from any occupied footprint cell while the square is still on its starting cells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayRangedStrikeOnceDuringBasicMovement"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "shoot-projectile",
+        "continue-basic-movement"
+      ],
+      "eventHints": [
+        "basic-movement-started",
+        "projectile-shot",
+        "basic-movement-continued"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0194_oversized_during_movement_ranged_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0195",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that may step after a Ranged strike translates every occupied footprint cell when it takes that optional step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "shoot-projectile",
+        "resolve-ranged-step"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0195_oversized_post_ranged_step_translates_the_whole_footprint"
+      }
     }
   ]
 }
