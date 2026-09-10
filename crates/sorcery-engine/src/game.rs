@@ -3128,18 +3128,11 @@ impl Game {
                         AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo,
                     )
                 {
-                    let mut sacrifice_candidates = self
-                        .position
-                        .units
-                        .iter()
-                        .filter(|unit| {
-                            unit.controller == seat
-                                && unit.region == Region::Surface
-                                && Self::unit_occupies_cell(unit, destination.cell)
-                        })
-                        .map(|unit| unit.card.instance_id.clone())
-                        .collect::<Vec<_>>();
-                    sacrifice_candidates.sort_unstable();
+                    let sacrifice_candidates = self.sacrifice_minions_at_summoning_location(
+                        seat,
+                        destination.cell,
+                        destination.cells.as_ref(),
+                    );
                     let useful_count = usize::try_from(destination.mana_cost.div_ceil(2))
                         .unwrap_or(usize::MAX)
                         .min(sacrifice_candidates.len());
@@ -4461,6 +4454,31 @@ impl Game {
 
     fn summon_occupied_cells<'a>(cell: &'a Cell, cells: Option<&'a SquareArea>) -> &'a [Cell] {
         cells.map_or(std::slice::from_ref(cell), |area| area.as_slice())
+    }
+
+    /// Controlled surface minions standing on any cell of the summoning footprint.
+    fn sacrifice_minions_at_summoning_location(
+        &self,
+        seat: Seat,
+        cell: Cell,
+        cells: Option<&SquareArea>,
+    ) -> Vec<IdentityHash> {
+        let occupied = Self::summon_occupied_cells(&cell, cells);
+        let mut candidates = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.controller == seat
+                    && unit.region == Region::Surface
+                    && occupied
+                        .iter()
+                        .any(|occupied_cell| Self::unit_occupies_cell(unit, *occupied_cell))
+            })
+            .map(|unit| unit.card.instance_id.clone())
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates
     }
 
     fn footprints_nearby(source: &[Cell], target: &[Cell]) -> bool {
@@ -6529,7 +6547,7 @@ impl Game {
             Cell::SQUARE_AREAS
                 .into_iter()
                 .filter_map(|cells| {
-                    let mana_cost = cells.into_iter().find_map(summon_cell)?;
+                    let mana_cost = cells.into_iter().filter_map(summon_cell).min()?;
                     cells
                         .into_iter()
                         .all(|cell| self.surface_location_exists(cell))
@@ -15868,18 +15886,8 @@ impl Game {
         let sacrifice_payment_matches = if sacrifices.is_empty() {
             false
         } else {
-            let mut sacrifice_candidates = self
-                .position
-                .units
-                .iter()
-                .filter(|unit| {
-                    unit.controller == seat
-                        && unit.region == Region::Surface
-                        && Self::unit_occupies_cell(unit, *cell)
-                })
-                .map(|unit| unit.card.instance_id.clone())
-                .collect::<Vec<_>>();
-            sacrifice_candidates.sort_unstable();
+            let sacrifice_candidates =
+                self.sacrifice_minions_at_summoning_location(seat, *cell, cells.as_ref());
             let useful_sacrifice_count = usize::try_from(destination.mana_cost.div_ceil(2))
                 .unwrap_or(usize::MAX)
                 .min(sacrifice_candidates.len());

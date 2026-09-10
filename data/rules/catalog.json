@@ -3651,6 +3651,54 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0179",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Ordinary minion pays Hamlet's destination discount when any occupied cell is that Site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ordinary",
+        "ordinaryMinionManaDiscount"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0179_oversized_ordinary_uses_any_occupied_hamlet"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0180",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 sacrifice discount selects controlled minions on every occupied summoning cell, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell"
+      }
     }
   ]
 }

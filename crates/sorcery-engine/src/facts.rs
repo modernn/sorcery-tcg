@@ -1483,14 +1483,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     )?
     .map(compact_u8);
     if occupies_square_area_two
-        && (ordinary
-            || connects_top_bottom
-            || matches!(
-                alternative_summon_payment,
-                Some(
-                    AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo
-                )
-            )
+        && (connects_top_bottom
             || required_cast_region.is_some()
             || must_be_cast_to_water_site
             || burrowing

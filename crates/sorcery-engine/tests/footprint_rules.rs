@@ -36,6 +36,15 @@ fn special_north_site(giant_extra: &Value) -> Option<(&'static str, Value)> {
             "north-tower",
             json!({ "cardType": "site", "elements": ["earth"], "isTower": true }),
         ))
+    } else if giant_extra.get("ordinary").and_then(Value::as_bool) == Some(true) {
+        Some((
+            "north-hamlet",
+            json!({
+                "cardType": "site",
+                "elements": ["earth"],
+                "ordinaryMinionManaDiscount": 1,
+            }),
+        ))
     } else {
         None
     }
@@ -636,6 +645,9 @@ fn composition_manifest(
             .extend(south_extra.as_object().expect("extra south facts").clone());
         cards["south-minion"] = south;
     }
+    if north_spells.contains(&"north-fodder") {
+        cards["north-fodder"] = minion(&json!({}));
+    }
     if let Some((card_id, definition)) = special_north_site(giant_extra) {
         cards[card_id] = definition;
     }
@@ -748,6 +760,10 @@ fn establish_north_square_water_at_c4(session: &mut Session) {
 
 fn establish_north_square_tower_at_c4(session: &mut Session) {
     establish_north_square_named_at_c4(session, "north-tower");
+}
+
+fn establish_north_square_hamlet_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-hamlet");
 }
 
 fn offers_summon(session: &Session, card_id: &str) -> bool {
@@ -1326,6 +1342,135 @@ fn rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower() {
     assert_eq!(
         receipt.events[1].payload["amount"], 3,
         "the C4 Tower shares the oversized footprint, so derived power is 1+2"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0179_oversized_ordinary_uses_any_occupied_hamlet() {
+    let mut session = composition_session(
+        &json!({ "manaCost": 1, "ordinary": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_hamlet_at_c4(&mut session);
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-hamlet");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    let costs = session
+        .legal_actions()
+        .expect("Ordinary oversized summon actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-giant"
+                && action.descriptor["cell"] == "B3"
+        })
+        .map(|action| action.descriptor["manaCost"].as_u64().expect("summon cost"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        costs,
+        [0],
+        "C4 Hamlet shares the oversized footprint, so the B3-anchor summon is free"
+    );
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["manaPaid"],
+        0
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell() {
+    let mut session = composition_session(
+        &json!({
+            "manaCost": 6,
+            "sacrificeMinionAtSummoningLocationForManaDiscount": 2,
+        }),
+        &json!({}),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+        ],
+        &["south-minion"; 8],
+        &["north-giant", "north-fodder"],
+    );
+    establish_north_square(&mut session);
+    let (fodder, _) = summon_at(&mut session, "north-fodder", "C4");
+    assert_eq!(
+        unit(&state(&session), &fodder)["location"],
+        "C4",
+        "the sacrifice candidate stands on a non-anchor footprint cell"
+    );
+    let actions = session
+        .legal_actions()
+        .expect("sacrifice summon actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-giant"
+                && action.descriptor["cell"] == "B3"
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|descriptor| descriptor["sacrificedMinionInstanceIds"].is_null()),
+        "four mana cannot pay the printed six without a footprint sacrifice"
+    );
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0]["manaCost"], 4);
+    assert_eq!(
+        actions[0]["sacrificedMinionInstanceIds"],
+        json!([fodder]),
+        "the C4 minion shares the oversized summoning location, not only the B3 anchor"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["sacrificedMinionInstanceIds"] == json!([fodder])
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == fodder)
+    );
+    assert!(
+        !after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|candidate| candidate["instanceId"] == fodder)
     );
     assert_exact_replay(&session);
 }

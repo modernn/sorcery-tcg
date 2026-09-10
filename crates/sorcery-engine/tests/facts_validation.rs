@@ -814,3 +814,37 @@ fn oversized_ranged_and_tower_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.gains_power_ranged_and_spellcaster_atop_tower);
 }
+
+#[test]
+fn oversized_ordinary_and_sacrifice_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-ordinary",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "ordinary",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Ordinary minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ordinary);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-sacrifice",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "sacrificeMinionAtSummoningLocationForManaDiscount",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized sacrifice-discount minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.alternative_summon_payment,
+        Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
+    );
+}

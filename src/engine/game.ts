@@ -1765,9 +1765,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path}.occupiesSquareArea must be 2`);
   }
   if (card.occupiesSquareArea === 2
-    && (card.ordinary === true
-      || card.connectsTopBottom === true
-      || card.sacrificeMinionAtSummoningLocationForManaDiscount === 2
+    && (card.connectsTopBottom === true
       || card.mustBeCastBurrowed === true
       || card.mustBeCastSubmerged === true
       || card.mustBeCastToWaterSite === true
