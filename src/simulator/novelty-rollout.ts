@@ -1,4 +1,3 @@
-import { selectDeterministicGameAction } from '../commands/run-game-demo.ts';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import {
@@ -362,7 +361,7 @@ export async function runNoveltyRollout(
             tooWide.push(currentPosition);
             let fallback: GameLegalAction;
             try {
-              const suggested = selectDeterministicGameAction(session, actions);
+              const suggested = await live.selectPolicyAction();
               fallback = actions.find(({ actionId }) => actionId === suggested.actionId)!;
               if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
             } catch {
@@ -396,7 +395,7 @@ export async function runNoveltyRollout(
           } else {
             let fallbackActionId: string;
             try {
-              const suggested = selectDeterministicGameAction(session, actions);
+              const suggested = await live.selectPolicyAction();
               const fallback = actions.find(({ actionId }) => actionId === suggested.actionId);
               if (!fallback) return fail({ kind: 'exception', phase: 'selector' });
               fallbackActionId = fallback.actionId;

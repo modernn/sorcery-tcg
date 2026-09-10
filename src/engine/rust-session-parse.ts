@@ -25,6 +25,11 @@ export function parseExportedSession(exported: JsonValue, manifest: GameManifest
   });
 }
 
+/** Casts one Rust boundary action to the shared engine action type. */
+export function asGameLegalAction(action: RustLegalAction): GameLegalAction {
+  return action as GameLegalAction;
+}
+
 /** Casts Rust boundary actions to the shared engine action type. */
 export function asGameLegalActions(actions: readonly RustLegalAction[]): readonly GameLegalAction[] {
   return actions as readonly GameLegalAction[];

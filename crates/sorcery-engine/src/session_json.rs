@@ -64,6 +64,7 @@ impl SessionJsonService {
             "new" => self.new_session(request.id, &request.params),
             "legalActions" => self.legal_actions(request.id, &request.params),
             "step" => self.step(request.id, &request.params),
+            "selectPolicyAction" => self.select_policy_action(request.id),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
@@ -163,6 +164,16 @@ impl SessionJsonService {
         };
         match session.step(request) {
             Ok(result) => ok_response(id, step_result_value(result)),
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn select_policy_action(&self, id: u64) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        match session.select_baseline_policy_action() {
+            Ok(action) => ok_response(id, json!({ "action": action })),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -452,6 +463,26 @@ mod tests {
         assert!(view["view"]["players"]["north"]["hand"]["atlas"].is_array());
         assert!(view["view"]["players"]["south"]["hand"]["atlas"].is_number());
         assert!(view["stateHash"].as_str().is_some());
+    }
+
+    #[test]
+    fn service_should_select_the_baseline_policy_action() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let selected = service.handle(&rpc(2, "selectPolicyAction", json!({})));
+        let action = selected.result.expect("selected action")["action"]
+            .as_object()
+            .expect("action object");
+        assert_eq!(action["descriptor"]["kind"], "mulligan");
+        assert_eq!(action["descriptor"]["atlasOrder"], json!([]));
+        assert_eq!(action["descriptor"]["spellbookOrder"], json!([]));
+        assert_eq!(action["seat"], "north");
     }
 
     #[test]

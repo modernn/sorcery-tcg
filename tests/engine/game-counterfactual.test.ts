@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
-import {
-  createSyntheticDemoManifest,
-  selectDeterministicGameAction,
-} from '../../src/commands/run-game-demo.ts';
+import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
 import { hashGameState } from '../../src/engine/game.ts';
 import { runCounterfactualRollouts } from '../../src/simulator/counterfactual.ts';
 import { withSetup } from './rust-setup-session.ts';
@@ -41,10 +38,7 @@ test('counterfactual rollouts cover every root choice reproducibly without scori
 
     let terminalRoot = session;
     for (let count = 0; count < 500; count += 1) {
-      const issuedActions = await ctx.legalActions();
-      const result = await ctx.step(
-        selectDeterministicGameAction(terminalRoot, issuedActions),
-      );
+      const result = await ctx.step(await ctx.selectPolicyAction());
       assert.equal(result.accepted, true);
       if (!result.accepted) return;
       if (result.session.state.terminal.status === 'finished') break;

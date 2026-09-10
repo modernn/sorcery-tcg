@@ -13,6 +13,7 @@ use crate::contract::{
 use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
+use crate::policy::{PolicyError, baseline_policy_snapshot};
 
 /// An accepted receipt or stable rejection.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,6 +48,8 @@ pub enum SessionError {
     ReplayRejected(RejectionCode),
     /// A journal sequence exhausted its supported range.
     SequenceExhausted,
+    /// The deterministic policy could not select a legal action.
+    Policy(PolicyError),
 }
 
 impl fmt::Display for SessionError {
@@ -57,6 +60,7 @@ impl fmt::Display for SessionError {
             Self::Json(error) => error.fmt(formatter),
             Self::ReplayRejected(code) => write!(formatter, "replay rejected action: {code:?}"),
             Self::SequenceExhausted => formatter.write_str("session journal sequence exhausted"),
+            Self::Policy(error) => error.fmt(formatter),
         }
     }
 }
@@ -68,6 +72,7 @@ impl Error for SessionError {
             Self::Canonical(error) => Some(error),
             Self::Json(error) => Some(error),
             Self::ReplayRejected(_) | Self::SequenceExhausted => None,
+            Self::Policy(error) => Some(error),
         }
     }
 }
@@ -87,6 +92,12 @@ impl From<CanonicalError> for SessionError {
 impl From<serde_json::Error> for SessionError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<PolicyError> for SessionError {
+    fn from(error: PolicyError) -> Self {
+        Self::Policy(error)
     }
 }
 
@@ -122,6 +133,25 @@ impl Session {
     /// Returns [`SessionError`] when derived presentation stats cannot be built.
     pub fn public_view(&self, seat: Seat) -> Result<Value, SessionError> {
         Ok(self.game.public_view(seat)?)
+    }
+
+    /// Selects one engine-issued action with the shared baseline deterministic policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when observation, legal actions, or policy selection fails.
+    pub fn select_baseline_policy_action(&self) -> Result<LegalAction, SessionError> {
+        let seat = self.decision_seat();
+        let observation = self.game.observe(seat);
+        let actions = self.game.legal_actions()?;
+        let policy = baseline_policy_snapshot(
+            self.game.rules().authority_hash(),
+            self.game.rules().engine_version(),
+        )?;
+        policy
+            .select_action(&observation, &actions)?
+            .to_legal_action()
+            .map_err(SessionError::Game)
     }
 
     /// Returns legal actions materialized at the external boundary.
