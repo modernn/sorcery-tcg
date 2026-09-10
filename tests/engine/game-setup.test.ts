@@ -946,6 +946,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        returnTargetSiteToOwnerHand: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /returnTargetSiteToOwnerHand must be true/);
+  const bouncedSite = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        returnTargetSiteToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(bouncedSite.cards[firstSpell]?.cardType === 'magic'
+    && bouncedSite.cards[firstSpell].returnTargetSiteToOwnerHand, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyTargetSite: true,
+        returnTargetSiteToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         discardSiteAsAdditionalCost: true,
         manaCost: 1,
@@ -19659,6 +19698,188 @@ test('RULE-03 destroy-site Magic replaces a site with Rubble and is prevented on
     assert.equal(ctx.state.realm.sites.C1?.instanceId, southSiteId);
     assert.equal('rubble' in (ctx.state.realm.sites.C1 ?? {}), false);
     assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === southSiteId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 return-site Magic returns a site to its owner Atlas and banishes surface minions', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('return-north-site'),
+    avatar: 'return-north-avatar',
+    spellbook: Array(4).fill('return-site'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('return-south-site'),
+    avatar: 'return-south-avatar',
+    spellbook: Array(4).fill('return-south-minion'),
+  };
+  const cards = (protectedSite: boolean): Record<string, GameCardDefinition> => ({
+    'return-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'return-north-site': { cardType: 'site', elements: ['earth'] },
+    'return-site': {
+      cardType: 'magic',
+      manaCost: 1,
+      returnTargetSiteToOwnerHand: true,
+      thresholds,
+    },
+    'return-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'return-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'return-south-site': {
+      cardType: 'site',
+      ...(protectedSite ? { cannotBeMovedDestroyedOrModified: true as const } : {}),
+      elements: ['earth'],
+    },
+  });
+  const input = (seed: number, protectedSite: boolean) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-return-site-v1',
+    },
+    cards: cards(protectedSite),
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const ordinaryManifest = createGameManifest(input(209, false));
+  assert.equal(ordinaryManifest.cards['return-site']?.cardType === 'magic'
+    && ordinaryManifest.cards['return-site'].returnTargetSiteToOwnerHand, true);
+
+  await withSetup(ordinaryManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const northSiteId = ctx.state.realm.sites.C4?.instanceId;
+    assert.ok(northSiteId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    const southSite = ctx.state.realm.sites.C1;
+    assert.ok(southSite && !('rubble' in southSite));
+    const southSiteId = southSite.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'return-south-minion' && descriptor.cell === 'C1');
+    const minion = ctx.state.realm.units.find(({ cardId }) => cardId === 'return-south-minion');
+    assert.ok(minion);
+    const minionId = minion.instanceId;
+    const southAtlasBefore = ctx.state.players.south.hand.atlas.length;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'return-site');
+    assert.ok(spell);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.targetSiteInstanceId
+        && descriptor.targetLocation
+        ? [{
+          cell: descriptor.targetLocation.cell,
+          instanceId: descriptor.targetSiteInstanceId,
+        }]
+        : []).sort((left, right) => left.cell.localeCompare(right.cell));
+    assert.deepEqual(targets, [
+      { cell: 'C1', instanceId: southSiteId },
+      { cell: 'C4', instanceId: northSiteId },
+    ]);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.targetLocation?.cell === 'C1'
+        && descriptor.targetSiteInstanceId === southSiteId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const returned = await ctx.step(cast);
+    assert.equal(returned.accepted, true);
+    if (!returned.accepted) return;
+    assert.deepEqual(returned.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'site-returned-to-hand',
+      'minion-banished',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(returned.receipt.events[1]?.payload, {
+      cardId: 'return-south-site',
+      cell: 'C1',
+      instanceId: southSiteId,
+      owner: 'south',
+      seat: 'south',
+      sourceInstanceId,
+    });
+    assert.equal(returned.receipt.events.some(({ type }) =>
+      type === 'minion-died' || type === 'rubble-created' || type === 'site-destroyed'), false);
+    assert.deepEqual(returned.receipt.randomDraws, []);
+    assert.equal(ctx.state.realm.sites.C1, undefined);
+    assert.equal(ctx.state.realm.sites.C4?.instanceId, northSiteId);
+    assert.equal(ctx.state.players.south.avatar.location, 'C1');
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === minionId), false);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === southSiteId || instanceId === minionId), false);
+    assert.equal(ctx.state.players.south.hand.atlas.some(({ instanceId }) =>
+      instanceId === southSiteId), true);
+    assert.equal(ctx.state.players.south.hand.atlas.length, southAtlasBefore + 1);
+    assert.equal(ctx.observe('north').players.south.hand.atlas, southAtlasBefore + 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(210, true)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    const southSite = ctx.state.realm.sites.C1;
+    assert.ok(southSite && !('rubble' in southSite));
+    const southSiteId = southSite.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'return-south-minion' && descriptor.cell === 'C1');
+    const minionId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'return-south-minion')?.instanceId;
+    assert.ok(minionId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'return-site');
+    assert.ok(spell);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.targetLocation?.cell === 'C1');
+    const prevented = await ctx.step(cast);
+    assert.equal(prevented.accepted, true);
+    if (!prevented.accepted) return;
+    assert.deepEqual(prevented.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'site-return-prevented',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.realm.sites.C1?.instanceId, southSiteId);
+    assert.equal('rubble' in (ctx.state.realm.sites.C1 ?? {}), false);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === minionId), true);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === southSiteId), false);
+    assert.equal(ctx.state.players.south.hand.atlas.some(({ instanceId }) =>
       instanceId === southSiteId), false);
     assert.equal(await ctx.verifyReplay(), true);
   });

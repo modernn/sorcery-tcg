@@ -1272,6 +1272,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::ReturnTargetMinionToOwnerHand
+        | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TeleportAllyToTargetSite
@@ -5242,7 +5243,7 @@ impl Game {
                     Vec::new()
                 }
             }
-            MagicEffect::DestroyTargetSite => {
+            MagicEffect::DestroyTargetSite | MagicEffect::ReturnTargetSiteToOwnerHand => {
                 self.destroy_target_site_choices(seat, caster_instance_id)?
             }
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
@@ -11745,6 +11746,72 @@ impl Game {
         Ok(())
     }
 
+    /// Returns a real site to its owner's Atlas hand and remaps surface occupants into the void so
+    /// they banish instead of dying as if stranded on missing terrain.
+    fn apply_return_target_site_to_owner_hand(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_site = self.position.sites[cell.index()]
+            .as_ref()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let target_protected = matches!(
+            &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
+            CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+        );
+        let owner = target_site.card.owner;
+        let card_id = self.rules.cards[usize::from(target_site.card.card_id.0)]
+            .id
+            .clone();
+        if target_protected {
+            outcomes.push("site-return-prevented", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            return Ok(());
+        }
+        for unit in &mut self.position.units {
+            if unit.location == cell && unit.region == Region::Surface {
+                unit.region = Region::Void;
+                unit.planar_gate_voidwalk = false;
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && *location == cell
+                && *region == Region::Surface
+            {
+                *region = Region::Void;
+            }
+        }
+        let card = target_site.card;
+        self.position.sites[cell.index()] = None;
+        self.position.players[seat_index(owner)]
+            .hand_atlas
+            .push(card);
+        outcomes.push("site-returned-to-hand", || {
+            json!({
+                "cardId": card_id,
+                "cell": cell,
+                "instanceId": target_site_instance_id,
+                "owner": owner,
+                "seat": owner,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        self.settle_region_occupancy(outcomes)?;
+        Ok(())
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -15571,6 +15638,18 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::ReturnTargetSiteToOwnerHand => {
+                let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_site_to_owner_hand(
+                    cell,
+                    target_site_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DestroyTargetSiteWithDamageGrid(grid) => {
                 let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
                 let target_site_instance_id = target_site_instance_id
@@ -18483,6 +18562,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetMinionToOwnerHand,
                 json!({ "returnTargetMinionToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetSiteToOwnerHand,
+                json!({ "returnTargetSiteToOwnerHand": true }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);

@@ -7914,3 +7914,241 @@ fn rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site() {
     );
     assert_exact_replay(&session);
 }
+
+fn return_site_manifest(seed: u32, protected: bool) -> String {
+    let mut south_site = site(false);
+    if protected {
+        south_site["cannotBeMovedDestroyedOrModified"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bounce-site": magic(("returnTargetSiteToOwnerHand", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": south_site,
+    });
+    manifest(
+        seed,
+        &cards,
+        &["north-bounce-site"; 6],
+        &["south-minion"; 6],
+    )
+}
+
+fn return_site_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("return-site actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-bounce-site"
+        })
+        .filter_map(|action| {
+            Some((
+                action.descriptor["targetLocation"]["cell"]
+                    .as_str()?
+                    .to_owned(),
+                action.descriptor["targetSiteInstanceId"]
+                    .as_str()?
+                    .to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0209_return_target_site_returns_owners_site_and_banishes_surface_minions() {
+    let encoded = return_site_manifest(209, false);
+    let mut session = opening_main(&encoded);
+    let north_site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("North site identity")
+        .to_owned();
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let south_site_id = before["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let south_atlas_before = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("South Atlas hand")
+        .len();
+    assert_eq!(
+        return_site_targets(&session),
+        [
+            ("C1".to_owned(), south_site_id.clone()),
+            ("C4".to_owned(), north_site_id.clone()),
+        ]
+    );
+    assert_eq!(before["realm"]["sites"]["C1"]["cardId"], "south-site");
+    assert!(realm_unit(&before, &minion_id).is_some());
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce-site"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        descriptor["targetLocation"],
+        json!({ "cell": "C1", "region": "surface" })
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-returned-to-hand",
+            "minion-banished",
+            "magic-resolved"
+        ]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-returned-to-hand")
+        .expect("site return");
+    assert_eq!(returned.payload["cardId"], "south-site");
+    assert_eq!(returned.payload["cell"], "C1");
+    assert_eq!(returned.payload["instanceId"], south_site_id);
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert_eq!(
+        returned.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let banished = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-banished")
+        .expect("surface minion banishment");
+    assert_eq!(banished.payload["cardId"], "south-minion");
+    assert_eq!(banished.payload["instanceId"], minion_id);
+    assert_eq!(banished.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died"
+                || event.event_type == "rubble-created"
+                || event.event_type == "site-destroyed"
+                || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    assert!(after["realm"]["sites"].get("C1").is_none());
+    assert_eq!(after["realm"]["sites"]["C4"]["instanceId"], north_site_id);
+    assert_eq!(after["players"]["south"]["avatar"]["location"], "C1");
+    assert!(realm_unit(&after, &minion_id).is_none());
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id
+                || card["instanceId"] == minion_id.as_str())
+    );
+    assert!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .len(),
+        south_atlas_before + 1
+    );
+    let north_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["atlas"],
+        json!(south_atlas_before + 1)
+    );
+    assert_eq!(
+        return_site_targets(&session),
+        [("C4".to_owned(), north_site_id)]
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("return-site checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized return-site");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed return-site");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed return-site session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site() {
+    let encoded = return_site_manifest(210, true);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let south_site = before["realm"]["sites"]["C1"].clone();
+    let south_site_id = south_site["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let south_atlas_before = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("South Atlas hand")
+        .len();
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce-site"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-return-prevented", "magic-resolved"]
+    );
+    let prevented = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-return-prevented")
+        .expect("protected-site return prevention");
+    assert_eq!(prevented.payload["cell"], "C1");
+    assert_eq!(prevented.payload["instanceId"], south_site_id);
+    assert_eq!(prevented.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-returned-to-hand"
+                || event.event_type == "minion-banished"
+                || event.event_type == "minion-died"
+                || event.event_type == "rubble-created")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"], south_site);
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .len(),
+        south_atlas_before
+    );
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_exact_replay(&session);
+}

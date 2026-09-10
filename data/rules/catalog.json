@@ -4377,6 +4377,56 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0209",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-site Magic pays its cost, offers every real site including the caster's own, never offers Rubble or a void, returns the chosen site to its owner's Atlas hand, leaves no Rubble, and banishes surface minions that occupied the site. Avatars remain at the emptied cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0209_return_target_site_returns_owners_site_and_banishes_surface_minions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0210",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-site Magic that would return a site that cannot be moved, destroyed, or modified is prevented, leaves the site and its occupants in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeMovedDestroyedOrModified",
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-return-prevented",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site"
+      }
     }
   ]
 }

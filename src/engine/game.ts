@@ -192,6 +192,7 @@ export type GameCardDefinition =
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
     returnTargetMinionToOwnerHand?: true;
+    returnTargetSiteToOwnerHand?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
@@ -1011,7 +1012,8 @@ const SUPPORTED_CARD_FIELDS = {
     destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
-    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetMinionToOwnerHand submergeTargetMinion
+    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetMinionToOwnerHand
+    returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
@@ -1374,6 +1376,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnTargetMinionToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetMinionToOwnerHand must be true when defined`);
     }
+    if (card.returnTargetSiteToOwnerHand !== undefined
+      && card.returnTargetSiteToOwnerHand !== true) {
+      throw new RangeError(`${path}.returnTargetSiteToOwnerHand must be true when defined`);
+    }
     if (card.summonRandomMinionFromAnyCemetery !== undefined
       && card.summonRandomMinionFromAnyCemetery !== true) {
       throw new RangeError(
@@ -1481,6 +1487,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
       + Number(card.returnTargetMinionToOwnerHand === true)
+      + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
@@ -2186,6 +2193,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { drawSpells: card.drawSpells }
                     : card.returnTargetMinionToOwnerHand === true
                       ? { returnTargetMinionToOwnerHand: true as const }
+                    : card.returnTargetSiteToOwnerHand === true
+                      ? { returnTargetSiteToOwnerHand: true as const }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
                       : card.summonRandomMinionFromAnyCemetery === true
