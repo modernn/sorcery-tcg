@@ -200,6 +200,7 @@ export type GameCardDefinition =
     destroyTargetArtifact?: true;
     destroyTargetSite?: true;
     targetNearby?: boolean;
+    targetPlayerLosesLife?: number;
     teleportAllyToTargetSite?: true;
     teleportNearbyAllyThenDrawCard?: true;
     thresholds: GameThresholds;
@@ -1017,7 +1018,7 @@ const SUPPORTED_CARD_FIELDS = {
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
-    targetNearby teleportAllyToTargetSite
+    targetNearby targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
@@ -1501,6 +1502,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
+      + Number(card.targetPlayerLosesLife !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
       + Number(card.teleportNearbyAllyThenDrawCard === true);
     if (effectCount !== 1) {
@@ -1540,6 +1542,11 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.healController < 1
       || card.healController > MAX_COMBAT_STAT)) {
       throw new RangeError(`${path}.healController must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.targetPlayerLosesLife !== undefined && (!Number.isSafeInteger(card.targetPlayerLosesLife)
+      || card.targetPlayerLosesLife < 1
+      || card.targetPlayerLosesLife > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.targetPlayerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
     }
     if (card.drawSites !== undefined && (!Number.isSafeInteger(card.drawSites)
       || card.drawSites < 1
@@ -2219,6 +2226,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           summonTokenToEachControlledSiteBorderingEnemySite:
                             card.summonTokenToEachControlledSiteBorderingEnemySite,
                         }
+                        : card.targetPlayerLosesLife !== undefined
+                          ? { targetPlayerLosesLife: card.targetPlayerLosesLife }
                         : card.teleportNearbyAllyThenDrawCard === true
                           ? { teleportNearbyAllyThenDrawCard: true as const }
                           : { teleportAllyToTargetSite: true as const }),

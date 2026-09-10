@@ -8386,3 +8386,218 @@ fn rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_ow
     assert_eq!(artifact_magic_targets(&session), Vec::<String>::new());
     assert_exact_replay(&session);
 }
+
+fn life_loss_magic_manifest(seed: u32, north_life: u8, south_life: u8) -> String {
+    let cards = json!({
+        "north-avatar": avatar(north_life),
+        "north-life-loss": magic(("targetPlayerLosesLife", json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(south_life),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-life-loss"; 6], &["south-minion"; 6])
+}
+
+fn life_loss_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("life-loss actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-loss"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0213_target_player_life_loss_reduces_avatar_life_without_dealing_damage() {
+    let encoded = life_loss_magic_manifest(213, 20, 20);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        life_loss_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("life-loss actions")
+            .into_iter()
+            .filter(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-loss")
+            .all(|action| {
+                action.descriptor["target"]["kind"] == "avatar"
+                    && action.descriptor["target"]["instanceId"] != minion_id
+            })
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "avatar-life-lost", "magic-resolved"]
+    );
+    let lost = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-life-lost")
+        .expect("life-loss event");
+    assert_eq!(lost.payload["amount"], 2);
+    assert_eq!(lost.payload["life"], 18);
+    assert_eq!(lost.payload["seat"], "south");
+    assert_eq!(
+        lost.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "avatar-reached-deaths-door")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 18);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(
+        after["players"]["south"]["avatar"]["card"]["instanceId"],
+        south_avatar
+    );
+    assert_eq!(
+        after["players"]["north"]["avatar"]["card"]["instanceId"],
+        north_avatar
+    );
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("life-loss checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized life-loss");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed life-loss");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed life-loss session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow() {
+    let encoded = life_loss_magic_manifest(214, 2, 20);
+    let mut session = opening_main(&encoded);
+    let north_avatar = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+
+    let (descriptor, first) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(
+        event_types(&first),
+        [
+            "magic-cast",
+            "avatar-life-lost",
+            "avatar-reached-deaths-door",
+            "magic-resolved"
+        ]
+    );
+    let lost = first
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-life-lost")
+        .expect("life-loss event");
+    assert_eq!(lost.payload["amount"], 2);
+    assert_eq!(lost.payload["life"], 0);
+    assert_eq!(lost.payload["seat"], "north");
+    assert_eq!(
+        lost.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let door = first
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-reached-deaths-door")
+        .expect("Death's Door event");
+    assert_eq!(door.payload["seat"], "north");
+    assert_eq!(
+        door.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !first
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt" || event.event_type == "death-blow")
+    );
+
+    let after_first = state(&session);
+    assert_eq!(after_first["players"]["north"]["avatar"]["life"], 0);
+    let death_door_turn = after_first["players"]["north"]["avatar"]["deathDoorTurn"].clone();
+    assert!(!death_door_turn.is_null());
+    assert_eq!(after_first["terminal"]["status"], "active");
+
+    let (_, second) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-life-lost"
+                || event.event_type == "avatar-reached-deaths-door"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "game-ended")
+    );
+
+    let after_second = state(&session);
+    assert_eq!(after_second["players"]["north"]["avatar"]["life"], 0);
+    assert_eq!(
+        after_second["players"]["north"]["avatar"]["deathDoorTurn"],
+        death_door_turn
+    );
+    assert_eq!(after_second["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}

@@ -1277,6 +1277,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
+        | MagicEffect::TargetPlayerLosesLife(_)
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
     }
@@ -4967,6 +4968,23 @@ impl Game {
             .collect())
     }
 
+    fn avatar_player_choices(&self) -> Vec<MagicChoice> {
+        [Seat::North, Seat::South]
+            .into_iter()
+            .map(|target_seat| MagicChoice {
+                target: Some(UnitTarget::Avatar {
+                    instance_id: self.position.players[seat_index(target_seat)]
+                        .avatar
+                        .card
+                        .instance_id
+                        .clone(),
+                    seat: target_seat,
+                }),
+                ..MagicChoice::default()
+            })
+            .collect()
+    }
+
     fn artifact_target_choices(
         &self,
         seat: Seat,
@@ -5271,6 +5289,7 @@ impl Game {
             MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
                 self.artifact_target_choices(seat, caster_instance_id)?
             }
+            MagicEffect::TargetPlayerLosesLife(_) => self.avatar_player_choices(),
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 if caster_location.region == Region::Void {
@@ -14834,6 +14853,30 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::TargetPlayerLosesLife(amount) => {
+                let target = target.as_ref().ok_or(GameError::IllegalAction)?;
+                let UnitTarget::Avatar {
+                    seat: target_seat,
+                    instance_id,
+                } = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                if self.position.players[seat_index(*target_seat)]
+                    .avatar
+                    .card
+                    .instance_id
+                    != *instance_id
+                {
+                    return Err(GameError::IllegalAction);
+                }
+                self.apply_avatar_life_loss(
+                    *target_seat,
+                    u16::from(amount),
+                    card_instance_id,
+                    outcomes,
+                );
+            }
             MagicEffect::DrawSites(count) => {
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
             }
@@ -16782,32 +16825,7 @@ impl Game {
                 self.heal_avatar(seat, 2, source_instance_id, outcomes)?;
             }
             Some(MinionGenesis::LoseControllerLifeTwo) => {
-                let player = &mut self.position.players[seat_index(seat)];
-                let old_life = player.avatar.life;
-                player.avatar.life = old_life.saturating_sub(2);
-                let amount = old_life - player.avatar.life;
-                if amount > 0 {
-                    let life = player.avatar.life;
-                    outcomes.push("avatar-life-lost", || {
-                        json!({
-                            "amount": amount,
-                            "life": life,
-                            "seat": seat,
-                            "sourceInstanceId": source_instance_id,
-                        })
-                    });
-                    if life == 0 {
-                        player.avatar.death_door_turn = Some(self.position.turn_number);
-                        let turn_number = self.position.turn_number;
-                        outcomes.push("avatar-reached-deaths-door", || {
-                            json!({
-                                "seat": seat,
-                                "sourceInstanceId": source_instance_id,
-                                "turnNumber": turn_number,
-                            })
-                        });
-                    }
-                }
+                self.apply_avatar_life_loss(seat, 2, source_instance_id, outcomes);
             }
             Some(MinionGenesis::DisableSelfUntilDamaged) => {
                 let unit = self
@@ -17031,6 +17049,42 @@ impl Game {
             )?;
         }
         Ok(())
+    }
+
+    fn apply_avatar_life_loss(
+        &mut self,
+        seat: Seat,
+        attempted: u16,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let player = &mut self.position.players[seat_index(seat)];
+        let old_life = player.avatar.life;
+        player.avatar.life = old_life.saturating_sub(attempted);
+        let amount = old_life - player.avatar.life;
+        if amount == 0 {
+            return;
+        }
+        let life = player.avatar.life;
+        outcomes.push("avatar-life-lost", || {
+            json!({
+                "amount": amount,
+                "life": life,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        if life == 0 {
+            player.avatar.death_door_turn = Some(self.position.turn_number);
+            let turn_number = self.position.turn_number;
+            outcomes.push("avatar-reached-deaths-door", || {
+                json!({
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                    "turnNumber": turn_number,
+                })
+            });
+        }
     }
 
     fn heal_avatar(
@@ -18705,6 +18759,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetSiteToOwnerHand,
                 json!({ "returnTargetSiteToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::TargetPlayerLosesLife(2),
+                json!({ "targetPlayerLosesLife": 2 }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);

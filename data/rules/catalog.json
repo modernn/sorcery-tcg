@@ -4475,6 +4475,55 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0213",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-loss Magic pays its cost, offers only both Avatars, never offers a minion, and reduces the chosen Avatar's life without dealing damage. The loss is not a death blow.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-life-lost",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0213_target_player_life_loss_reduces_avatar_life_without_dealing_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0214",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-loss Magic that reduces an Avatar to zero life reaches Death's Door without ending the game. Further life loss against that Avatar is a no-op and is never a death blow.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-life-lost",
+        "avatar-reached-deaths-door",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow"
+      }
     }
   ]
 }
