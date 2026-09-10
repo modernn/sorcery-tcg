@@ -270,7 +270,7 @@ fn continue_game(
         let seat = game.position().decision_seat();
         let actions = game.legal_actions()?;
         let selected = policy_for(seat, north_policy, south_policy)
-            .select_action(game.observe(seat), &actions)?;
+            .select_action(&game.observe(seat), &actions)?;
         let selected_index = actions
             .iter()
             .position(|action| std::ptr::eq(action, selected))
