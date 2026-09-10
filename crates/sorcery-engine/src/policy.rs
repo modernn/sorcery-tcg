@@ -878,6 +878,10 @@ mod tests {
             beneficial_tactic_index(Seat::North, actions[..4].iter()),
             None
         );
+    }
+
+    #[test]
+    fn beneficial_tactics_prefer_enemy_drag_projectiles_that_do_not_fight() {
         let drag = |fight_on_arrival, hit| ActionDescriptor::ShootDragProjectile {
             direction: ProjectileDirection::North,
             fight_on_arrival,
