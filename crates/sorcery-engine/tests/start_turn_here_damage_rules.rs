@@ -220,9 +220,9 @@ fn rule_catalog_0280_start_turn_here_damage_hits_other_units_sharing_the_cell() 
     let north_avatar_id = avatar_id(&session, "north");
     let receipt = resolve_start_turn_here_damage(&mut session, &source_id);
     let mut targets = allocated_targets(&receipt, &source_id);
-    targets.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+    targets.sort_by_key(Value::to_string);
     let mut expected = vec![north_avatar_id, visitor_id.clone()];
-    expected.sort_by(|left, right| left.to_string().cmp(&right.to_string()));
+    expected.sort_by_key(Value::to_string);
     assert_eq!(targets, expected);
     assert!(
         receipt
