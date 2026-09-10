@@ -3888,12 +3888,12 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
   assert.equal(new Set(branches.map(({ state }) => hashGameState(state))).size, 1);
 });
 
-test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', () => {
-  const targetIsLegal = (
+test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth', async () => {
+  const targetIsLegal = async (
     spell: SpellFacts,
     region: 'surface' | 'underground',
     targetNearby = false,
-  ): boolean => {
+  ): Promise<boolean> => {
     const decks = { north: deck('target-north', 4, 6), south: deck('target-south', 4, 6) };
     const cards = cardsFor(decks, spell, undefined, { elements: ['air'] });
     for (const cardId of decks.north.spellbook) {
@@ -3905,7 +3905,8 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
         thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
       };
     }
-    let session = keep(createGameSession(createGameManifest({
+    let legal = false;
+    await withSetup(createGameManifest({
       authority: {
         contentHash: SYNTHETIC_AUTHORITY_HASH,
         mode: 'synthetic',
@@ -3915,49 +3916,53 @@ test('RULE-03 Magic targets stay in the caster region and exclude enemy Stealth'
       decks,
       firstSeat: 'north',
       seed: region === 'surface' ? 149 : 150,
-    })));
-    session = keep(session);
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'summon-minion' && (descriptor.region ?? 'surface') === region));
-    const target = session.state.realm.units.find(({ controller }) => controller === 'south');
-    assert.ok(target);
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    assert.equal(verifyGameReplay(session), true);
-    if (targetNearby) {
-      assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && (descriptor.region ?? 'surface') === region);
+      const target = ctx.state.realm.units.find(({ controller }) => controller === 'south');
+      assert.ok(target);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      assert.equal(await ctx.verifyReplay(), true);
+      const actions = await ctx.legalActions('north');
+      if (targetNearby) {
+        assert.equal(actions.some(({ descriptor }) =>
+          descriptor.kind === 'cast-magic'
+            && descriptor.target !== undefined
+            && descriptor.target.kind === 'avatar'
+            && descriptor.target.seat === 'north'), true);
+      }
+      legal = actions.some(({ descriptor }) =>
         descriptor.kind === 'cast-magic'
           && descriptor.target !== undefined
-          && descriptor.target.kind === 'avatar'
-          && descriptor.target.seat === 'north'), true);
-    }
-    return legalGameActions(session.state, 'north').some(({ descriptor }) =>
-      descriptor.kind === 'cast-magic'
-        && descriptor.target !== undefined
-        && descriptor.target.kind === 'minion'
-        && descriptor.target.instanceId === target.instanceId);
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === target.instanceId);
+    });
+    return legal;
   };
 
-  assert.equal(targetIsLegal({
+  assert.equal(await targetIsLegal({
     manaCost: 1,
     stealth: true,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface'), false);
-  assert.equal(targetIsLegal({
+  assert.equal(await targetIsLegal({
     burrowing: true,
     manaCost: 1,
     mustBeCastBurrowed: true,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'underground'), false);
-  assert.equal(targetIsLegal({
+  assert.equal(await targetIsLegal({
     manaCost: 1,
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
   }, 'surface', true), false);
