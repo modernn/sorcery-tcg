@@ -1171,6 +1171,138 @@ fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "one Chain Magic filter proof keeps low-mana and underground hop exclusion together"
+)]
+fn chain_magic_should_require_mana_and_same_region_hops() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-burrower": minion(json!({
+            "burrowing": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "north-chain": {
+            "cardType": "magic",
+            "damageChainNearbyUnits": true,
+            "manaCost": 2,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "north-site": site(false),
+        "north-target": minion(json!({
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-chain",
+        "north-target",
+        "north-burrower",
+        "north-chain",
+        "north-target",
+        "north-burrower",
+    ];
+    let chosen = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Chain Magic filter candidate");
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            ["north-chain", "north-target", "north-burrower"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("seed with Chain Magic and both minions");
+    let mut session = opening_main(&chosen);
+    let chain_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-chain")
+        .expect("Chain Magic in hand")["instanceId"]
+        .as_str()
+        .expect("Chain Magic identity")
+        .to_owned();
+    assert_eq!(state(&session)["players"]["north"]["mana"], 1);
+    assert!(
+        session
+            .legal_actions()
+            .expect("low-mana actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "begin-chain-magic"
+                    || action.descriptor["cardInstanceId"] != chain_id
+            })
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-target"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-burrower"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+    });
+
+    let target_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-target")
+        .expect("surface target")["instanceId"]
+        .as_str()
+        .expect("target identity")
+        .to_owned();
+    let burrower_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-burrower")
+        .expect("burrower")["instanceId"]
+        .as_str()
+        .expect("burrower identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    assert!(
+        session
+            .legal_actions()
+            .expect("staged Chain Magic")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "extend-chain-magic"
+                    || action.descriptor["target"]["instanceId"] != burrower_id
+            })
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "one direct proof retains region filtering, Stealth, Ward, Deathrite, and replay"
 )]
 fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion() {

@@ -146,6 +146,14 @@ export class RustGameSessionHandle {
     });
   }
 
+  /** Replaces the live session with a fresh opening of one manifest. */
+  async reset(manifest: GameManifest): Promise<GameSession> {
+    this.manifest = manifest;
+    await this.client.newSession(canonicalJson(manifest as unknown as JsonValue));
+    this.session = parseExportedSession(await this.client.exportSession(), manifest);
+    return this.session;
+  }
+
   /** Resumes from one validated checkpoint object. */
   async resume(checkpoint: JsonValue): Promise<GameSession> {
     await this.client.resume(checkpoint);

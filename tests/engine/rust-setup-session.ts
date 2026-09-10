@@ -128,6 +128,11 @@ export class SetupCtx {
     return forked;
   }
 
+  /** Replaces the live session with a fresh opening of one manifest. */
+  async reset(manifest: GameManifest): Promise<GameSession> {
+    return this.handle.reset(manifest);
+  }
+
   /** Resumes one parsed checkpoint into this live session. */
   async resume(checkpoint: GameCheckpoint): Promise<GameSession> {
     return this.handle.resume(checkpoint as unknown as JsonValue);
