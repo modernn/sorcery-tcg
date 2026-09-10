@@ -80,6 +80,7 @@ type SpellFacts = Readonly<{
   tapToShootProjectileDamage?: number;
   stealth?: boolean;
   strikesFirstWhileAttacking?: boolean;
+  strikesFirstWhileDefending?: boolean;
   submerge?: boolean;
   summonToAnySite?: boolean;
   mustBeCastToOuterColumn?: boolean;
@@ -284,6 +285,7 @@ function cardsFor(
         shootsDragProjectile: facts.shootsDragProjectile ?? false,
         stealth: facts.stealth ?? false,
         strikesFirstWhileAttacking: facts.strikesFirstWhileAttacking ?? false,
+        strikesFirstWhileDefending: facts.strikesFirstWhileDefending ?? false,
         submerge: facts.submerge ?? false,
         summonToAnySite: facts.summonToAnySite ?? false,
         mustBeCastToOuterColumn: facts.mustBeCastToOuterColumn ?? false,
@@ -1388,6 +1390,33 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /waterbound must be boolean/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        strikesFirstWhileDefending: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /strikesFirstWhileDefending must be boolean/);
+  const defendingFirstStrike = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        strikesFirstWhileAttacking: true,
+        strikesFirstWhileDefending: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    defendingFirstStrike.cards[firstSpell]?.cardType === 'minion'
+      && defendingFirstStrike.cards[firstSpell].strikesFirstWhileAttacking
+      && defendingFirstStrike.cards[firstSpell].strikesFirstWhileDefending,
+    true,
+  );
   const waterboundWard = createGameManifest({
     ...input,
     cards: {
@@ -12203,6 +12232,51 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
   );
 
   await withNorthAttacksAtC2(118, vanilla, undefined, false, firstStrike, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 defending first strike resolves deaths before the attacker strikes and is inactive while attacking', async () => {
+  const vanilla = {
+    attack: 3,
+    defense: 3,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  } as const;
+  const defendingFirstStrike = { ...vanilla, strikesFirstWhileDefending: true };
+  await withNorthAttacksAtC2(204, vanilla, undefined, false, defendingFirstStrike, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 0);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withNorthAttacksAtC2(205, defendingFirstStrike, undefined, false, vanilla, 0, async ({
     attackerInstanceId,
     ctx,
     targetInstanceId,

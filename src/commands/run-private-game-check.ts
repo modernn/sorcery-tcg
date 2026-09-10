@@ -13410,6 +13410,7 @@ function runEarthMountainGiant(
         'spellcaster',
         'stealth',
         'strikesFirstWhileAttacking',
+        'strikesFirstWhileDefending',
         'submerge',
         'summonToAnySite',
         'thresholds',

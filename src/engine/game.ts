@@ -260,6 +260,7 @@ export type GameCardDefinition =
     spellcaster?: boolean;
     stealth?: boolean;
     strikesFirstWhileAttacking?: boolean;
+    strikesFirstWhileDefending?: boolean;
     submerge?: boolean;
     summonToAnySite?: boolean;
     mustBeCastToOuterColumn?: boolean;
@@ -1031,7 +1032,7 @@ const SUPPORTED_CARD_FIELDS = {
     nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
-    spellcaster stealth strikesFirstWhileAttacking submerge summonToAnySite
+    spellcaster stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
     tapToDamageEachUnitAtAdjacentLocation tapToShootProjectileDamage tapForMana takesLessDamage thresholds token
     untapsAtEndOfControllerTurn voidwalk ward waterbound
   `.trim().split(/\s+/)),
@@ -1852,6 +1853,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.strikesFirstWhileAttacking !== undefined && typeof card.strikesFirstWhileAttacking !== 'boolean') {
     throw new RangeError(`${path}.strikesFirstWhileAttacking must be boolean`);
   }
+  if (card.strikesFirstWhileDefending !== undefined && typeof card.strikesFirstWhileDefending !== 'boolean') {
+    throw new RangeError(`${path}.strikesFirstWhileDefending must be boolean`);
+  }
   if (card.submerge !== undefined && typeof card.submerge !== 'boolean') {
     throw new RangeError(`${path}.submerge must be boolean`);
   }
@@ -2303,6 +2307,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.spellcaster === true ? { spellcaster: true } : {}),
             ...(card.stealth === true ? { stealth: true } : {}),
             ...(card.strikesFirstWhileAttacking === true ? { strikesFirstWhileAttacking: true } : {}),
+            ...(card.strikesFirstWhileDefending === true ? { strikesFirstWhileDefending: true } : {}),
             ...(card.submerge === true ? { submerge: true } : {}),
             ...(card.summonToAnySite === true ? { summonToAnySite: true } : {}),
             ...(card.mustBeCastToOuterColumn === true ? { mustBeCastToOuterColumn: true } : {}),

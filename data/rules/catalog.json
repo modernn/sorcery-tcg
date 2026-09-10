@@ -4254,6 +4254,54 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0203_bounce_ward_absorbs_the_return"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0204",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defending first strike resolves the defender's strike, deaths, and Deathrites before the attacker can strike, so a lethal defender takes no return damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0204_defending_first_strike_should_kill_before_the_attacker_strikes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0205",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defending-only first strike is inactive while attacking, so a defending-only first-strike attacker and a vanilla defender trade simultaneously.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0205_defending_only_first_strike_should_be_inactive_while_attacking"
+      }
     }
   ]
 }

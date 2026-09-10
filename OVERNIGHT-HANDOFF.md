@@ -10,10 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **203 rust-supported / 0 typescript-supported** out of 203.
+`data/rules/catalog.json`: **205 rust-supported / 0 typescript-supported** out of 205.
 
-Latest catalog proofs: bounce Magic (`RULE-CATALOG-0202`–`0203`).
-Targetless draw-site Magic remains `RULE-CATALOG-0200`–`0201`.
+Latest catalog proofs: defending first strike (`RULE-CATALOG-0204`–`0205`).
+Bounce Magic remains `RULE-CATALOG-0202`–`0203`.
 
 ## TypeScript legality cutover
 

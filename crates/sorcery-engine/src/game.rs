@@ -1394,6 +1394,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         spellcaster: _,
         stealth: _,
         strikes_first_while_attacking: _,
+        strikes_first_while_defending: _,
         submerge: _,
         summon_to_any_site: _,
         tap_for_mana: _,
@@ -9142,7 +9143,12 @@ impl Game {
                     .find(|unit| unit.card.instance_id == *target.instance_id())
                     .filter(|unit| !self.minion_is_disabled(unit))
                     .and_then(|unit| {
-                        (unit.carried_lance_count > 0).then(|| target.instance_id().clone())
+                        let strikes_first = unit.carried_lance_count > 0
+                            || matches!(
+                                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                                CardFacts::Minion(facts) if facts.strikes_first_while_defending
+                            );
+                        strikes_first.then(|| target.instance_id().clone())
                     })
             })
             .collect::<Vec<_>>();
