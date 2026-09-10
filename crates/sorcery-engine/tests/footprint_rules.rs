@@ -1354,7 +1354,13 @@ fn stage_d3_and_south_on_north_d4(session: &mut Session) -> String {
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
     play_site(session, "D3");
-    stage_south_on_north_d4(session)
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D4");
+    end_and_draw_zone(session, "atlas");
+    let (enemy, _) = summon_at(session, "south-minion", "D4");
+    end_and_draw(session);
+    enemy
 }
 
 fn stage_north_ally_on_d4(session: &mut Session) -> String {
