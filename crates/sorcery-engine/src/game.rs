@@ -7833,7 +7833,7 @@ impl Game {
             .into_iter()
             .all(|cell| !self.surface_location_exists(cell))
         {
-            return self.square_area_void_destination(minion, cells, anywhere);
+            return Self::square_area_void_destination(minion, cells, anywhere);
         }
         let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
             cells
@@ -7888,7 +7888,6 @@ impl Game {
     /// control. A free placement ignores printed casting restrictions, so `anywhere` keeps
     /// every all-void square.
     fn square_area_void_destination(
-        &self,
         minion: &MinionFacts,
         cells: SquareArea,
         anywhere: bool,
