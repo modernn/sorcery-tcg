@@ -69,8 +69,10 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- Verify on this branch before merge. PR #2 stays frozen.
-- Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps. Rebuild `session-json` after engine fact changes.
+- `pnpm typecheck` / `pnpm lint` — green.
+- Belfry playthrough (`RULE-04 Belfry untaps nearby allies at the end of your turn`) and the catalog linker — green.
+- Remaining `pnpm test` engine and ingestion files — green. Full `pnpm verify` still fails authority-collector / some DATA-01 bundle cases (`pwsh` missing, no private authority bundle). Those are environment gaps, not this family.
+- PR #2 stays frozen. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
 
