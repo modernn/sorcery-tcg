@@ -29,6 +29,12 @@ import {
   type GameSeat,
   type GameSession,
 } from '../engine/game.ts';
+import {
+  RustGameSessionHandle,
+  parseExportedSession,
+  withRustSession,
+} from '../engine/rust-session-helpers.ts';
+import { RustSessionClient } from '../engine/rust-engine.ts';
 import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -6132,6 +6138,40 @@ function accept(session: GameSession, candidate: GameLegalAction): GameSession {
   return result.session;
 }
 
+async function withPrivateRustSession<T>(
+  manifest: GameManifest,
+  run: (handle: RustGameSessionHandle) => Promise<T>,
+): Promise<T> {
+  return withRustSession(manifest, run);
+}
+
+async function rustAction(
+  handle: RustGameSessionHandle,
+  predicate: (candidate: GameLegalAction) => boolean,
+): Promise<GameLegalAction> {
+  const found = (await handle.legalActions()).find(predicate);
+  if (!found) {
+    throw new Error(`actual-card scenario has no expected action in ${handle.snapshot.state.phase}`);
+  }
+  return found;
+}
+
+async function rustAccept(
+  handle: RustGameSessionHandle,
+  candidate: GameLegalAction,
+): Promise<GameSession> {
+  const result = await handle.stepAction(candidate);
+  if (!result.accepted) throw new Error(`actual-card scenario action rejected: ${result.reason.code}`);
+  return result.session;
+}
+
+async function rustKeep(handle: RustGameSessionHandle): Promise<GameSession> {
+  return rustAccept(handle, await rustAction(handle, ({ descriptor }) =>
+    descriptor.kind === 'mulligan'
+      && descriptor.atlasOrder.length === 0
+      && descriptor.spellbookOrder.length === 0));
+}
+
 function openingPair(
   session: GameSession,
   seat: GameSeat,
@@ -8140,45 +8180,50 @@ function findEarthShallowGraveOpening(
   throw new Error('private site discard Genesis scenario no longer produces its supported opening');
 }
 
-function findStarterOpening(
+async function findStarterOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   scenario: StarterScenario | 'fire-granary-rats',
   baseSeed: number,
   site: NormalizedCard,
   minion: NormalizedCard,
   featuredSpell?: NormalizedCard,
-): Readonly<{
+): Promise<Readonly<{
   manifest: GameManifest;
   minionInstanceId: string;
   names: ReadonlyMap<string, string>;
-  session: GameSession;
   siteInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another private config field.
-  for (let offset = 1; offset <= 256; offset += 1) {
-    const built = buildManifest(input, baseSeed + offset, scenario);
-    const session = createGameSession(built.manifest);
-    const siteInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === site.stableId)?.instanceId;
-    const minionInstanceId = session.state.players.north.hand.spellbook
-      .find(({ cardId }) => cardId === minion.stableId)?.instanceId;
-    const featuredSpellInstanceId = featuredSpell
-      ? session.state.players.north.hand.spellbook
-        .find(({ cardId }) => cardId === featuredSpell.stableId)?.instanceId
-      : undefined;
-    const hasSecondFireSite = scenario !== 'fire-starter'
-      || session.state.players.north.hand.atlas.some(({ cardId, instanceId }) => {
-        const definition = session.state.cards[cardId];
-        return instanceId !== siteInstanceId
-          && definition?.cardType === 'site'
-          && definition.elements.includes('fire');
-      });
-    if (siteInstanceId
-      && minionInstanceId
-      && (!featuredSpell || featuredSpellInstanceId)
-      && hasSecondFireSite) {
-      return { ...built, minionInstanceId, session, siteInstanceId };
+  const client = await RustSessionClient.start();
+  try {
+    for (let offset = 1; offset <= 256; offset += 1) {
+      const built = buildManifest(input, baseSeed + offset, scenario);
+      await client.newSession(canonicalJson(built.manifest as unknown as JsonValue));
+      const session = parseExportedSession(await client.exportSession(), built.manifest);
+      const siteInstanceId = session.state.players.north.hand.atlas
+        .find(({ cardId }) => cardId === site.stableId)?.instanceId;
+      const minionInstanceId = session.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === minion.stableId)?.instanceId;
+      const featuredSpellInstanceId = featuredSpell
+        ? session.state.players.north.hand.spellbook
+          .find(({ cardId }) => cardId === featuredSpell.stableId)?.instanceId
+        : undefined;
+      const hasSecondFireSite = scenario !== 'fire-starter'
+        || session.state.players.north.hand.atlas.some(({ cardId, instanceId }) => {
+          const definition = session.state.cards[cardId];
+          return instanceId !== siteInstanceId
+            && definition?.cardType === 'site'
+            && definition.elements.includes('fire');
+        });
+      if (siteInstanceId
+        && minionInstanceId
+        && (!featuredSpell || featuredSpellInstanceId)
+        && hasSecondFireSite) {
+        return { ...built, minionInstanceId, siteInstanceId };
+      }
     }
+  } finally {
+    await client.close();
   }
   throw new Error(`private ${scenario} scenario no longer produces its supported opening`);
 }
@@ -8235,46 +8280,50 @@ export async function loadPrivateStarterCatalog(
   return Object.freeze([
     ...lessons.map(([id, label, seed]) =>
       preset(id, label, buildManifest(input, seed, id))),
-    ...starters.map(([id, label, seed, site, minion, featuredSpell]) =>
-      preset(id, label, findStarterOpening(input, id, seed, site, minion, featuredSpell))),
+    ...await Promise.all(starters.map(async ([id, label, seed, site, minion, featuredSpell]) =>
+      preset(id, label, await findStarterOpening(input, id, seed, site, minion, featuredSpell)))),
   ]);
 }
 
-function findFireHamletOpening(
+async function findFireHamletOpening(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): Readonly<{
+): Promise<Readonly<{
   hamletInstanceId: string;
   manifest: GameManifest;
   names: ReadonlyMap<string, string>;
   raalInstanceId: string;
   seed: number;
-  session: GameSession;
   southSiteInstanceId: string;
   wastelandInstanceId: string;
-}> {
+}>> {
   // ponytail: bounded seed scan avoids another strict private config field.
-  for (let offset = 1; offset <= 256; offset += 1) {
-    const seed = input.config.fireSeed + offset;
-    const built = buildManifest(input, seed, 'fire-hamlet');
-    const session = createGameSession(built.manifest);
-    const hamletInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === input.hamlet.stableId)?.instanceId;
-    const wastelandInstanceId = session.state.players.north.hand.atlas
-      .find(({ cardId }) => cardId === input.wasteland.stableId)?.instanceId;
-    const raalInstanceId = session.state.players.north.hand.spellbook
-      .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
-    const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
-    if (hamletInstanceId && wastelandInstanceId && raalInstanceId && southSiteInstanceId) {
-      return {
-        ...built,
-        hamletInstanceId,
-        raalInstanceId,
-        seed,
-        session,
-        southSiteInstanceId,
-        wastelandInstanceId,
-      };
+  const client = await RustSessionClient.start();
+  try {
+    for (let offset = 1; offset <= 256; offset += 1) {
+      const seed = input.config.fireSeed + offset;
+      const built = buildManifest(input, seed, 'fire-hamlet');
+      await client.newSession(canonicalJson(built.manifest as unknown as JsonValue));
+      const session = parseExportedSession(await client.exportSession(), built.manifest);
+      const hamletInstanceId = session.state.players.north.hand.atlas
+        .find(({ cardId }) => cardId === input.hamlet.stableId)?.instanceId;
+      const wastelandInstanceId = session.state.players.north.hand.atlas
+        .find(({ cardId }) => cardId === input.wasteland.stableId)?.instanceId;
+      const raalInstanceId = session.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === input.raalDromedary.stableId)?.instanceId;
+      const southSiteInstanceId = session.state.players.south.hand.atlas[0]?.instanceId;
+      if (hamletInstanceId && wastelandInstanceId && raalInstanceId && southSiteInstanceId) {
+        return {
+          ...built,
+          hamletInstanceId,
+          raalInstanceId,
+          seed,
+          southSiteInstanceId,
+          wastelandInstanceId,
+        };
+      }
     }
+  } finally {
+    await client.close();
   }
   throw new Error('private Hamlet scenario no longer produces its supported opening');
 }
@@ -11309,315 +11358,321 @@ function deckList(deck: GameDeckSpec, names: ReadonlyMap<string, string>): DeckL
   };
 }
 
-function runStarter(
+async function runStarter(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   scenario: StarterScenario,
   baseSeed: number,
   siteCard: NormalizedCard,
   minionCard: NormalizedCard,
-): StarterCheck {
-  const opening = findStarterOpening(input, scenario, baseSeed, siteCard, minionCard);
-  let session = keep(opening.session);
-  session = keep(session);
+): Promise<StarterCheck> {
+  const opening = await findStarterOpening(input, scenario, baseSeed, siteCard, minionCard);
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+    let session = await rustKeep(handle);
+    session = await rustKeep(handle);
 
-  const siteResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.siteInstanceId
-      && descriptor.cell === 'C4'
-      && descriptor.genesisTokenChoice !== 'pay-one-mana'));
-  if (!siteResult.accepted) throw new Error(`private ${siteCard.name} play was rejected`);
-  session = siteResult.session;
-  if (session.state.phase === 'genesis') {
-    const genesisResult = stepGame(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next'));
-    if (!genesisResult.accepted) throw new Error(`private ${siteCard.name} Genesis was rejected`);
-    session = genesisResult.session;
-  }
-  const manaBeforeSummon = session.state.players.north.mana;
+    const siteResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.siteInstanceId
+        && descriptor.cell === 'C4'
+        && descriptor.genesisTokenChoice !== 'pay-one-mana'));
+    if (!siteResult.accepted) throw new Error(`private ${siteCard.name} play was rejected`);
+    session = siteResult.session;
+    if (session.state.phase === 'genesis') {
+      const genesisResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+        descriptor.kind === 'resolve-genesis-spell' && descriptor.choice === 'keep-next'));
+      if (!genesisResult.accepted) throw new Error(`private ${siteCard.name} Genesis was rejected`);
+      session = genesisResult.session;
+    }
+    const manaBeforeSummon = session.state.players.north.mana;
 
-  const summonResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.minionInstanceId
-      && descriptor.cell === 'C4'));
-  if (!summonResult.accepted) throw new Error(`private ${minionCard.name} summon was rejected`);
-  session = summonResult.session;
+    const summonResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === opening.minionInstanceId
+        && descriptor.cell === 'C4'));
+    if (!summonResult.accepted) throw new Error(`private ${minionCard.name} summon was rejected`);
+    session = summonResult.session;
 
-  const sitePayload = siteResult.receipt.events[0]
-    && isJsonRecord(siteResult.receipt.events[0].payload)
-    ? siteResult.receipt.events[0].payload
-    : undefined;
-  const summonPayload = summonResult.receipt.events[0]
-    && isJsonRecord(summonResult.receipt.events[0].payload)
-    ? summonResult.receipt.events[0].payload
-    : undefined;
-  const site = session.state.realm.sites.C4;
-  const minion = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === opening.minionInstanceId);
+    const sitePayload = siteResult.receipt.events[0]
+      && isJsonRecord(siteResult.receipt.events[0].payload)
+      ? siteResult.receipt.events[0].payload
+      : undefined;
+    const summonPayload = summonResult.receipt.events[0]
+      && isJsonRecord(summonResult.receipt.events[0].payload)
+      ? summonResult.receipt.events[0].payload
+      : undefined;
+    const site = session.state.realm.sites.C4;
+    const minion = session.state.realm.units.find(({ instanceId }) =>
+      instanceId === opening.minionInstanceId);
 
-  return Object.freeze({
-    acceptedActionCount: session.transcript.length,
-    causalEventsVerified: siteResult.receipt.events.map(({ type }) => type).join(',')
-      === (scenario === 'earth-starter' ? 'site-played,rubble-created' : 'site-played')
-      && summonResult.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned'
-      && sitePayload?.cardId === siteCard.stableId
-      && sitePayload.instanceId === opening.siteInstanceId
-      && sitePayload.cell === 'C4'
-      && summonPayload?.cardId === minionCard.stableId
-      && summonPayload.instanceId === opening.minionInstanceId
-      && summonPayload.cell === 'C4'
-      && summonPayload.manaPaid === 1,
-    deck: deckList(opening.manifest.decks.north, opening.names),
-    manaPaid: manaBeforeSummon - session.state.players.north.mana,
-    minion: minionCard.name,
-    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
-    site: siteCard.name,
-    siteAndMinionStateVerified: site?.instanceId === opening.siteInstanceId
-      && 'cardId' in site
-      && site.cardId === siteCard.stableId
-      && site.controller === 'north'
-      && minion?.cardId === minionCard.stableId
-      && minion.controller === 'north'
-      && minion.owner === 'north'
-      && minion.location === 'C4'
-      && minion.region === 'surface'
-      && minion.damage === 0
-      && !minion.tapped
-      && minion.summoningSickness,
+    return Object.freeze({
+      acceptedActionCount: session.transcript.length,
+      causalEventsVerified: siteResult.receipt.events.map(({ type }) => type).join(',')
+        === (scenario === 'earth-starter' ? 'site-played,rubble-created' : 'site-played')
+        && summonResult.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned'
+        && sitePayload?.cardId === siteCard.stableId
+        && sitePayload.instanceId === opening.siteInstanceId
+        && sitePayload.cell === 'C4'
+        && summonPayload?.cardId === minionCard.stableId
+        && summonPayload.instanceId === opening.minionInstanceId
+        && summonPayload.cell === 'C4'
+        && summonPayload.manaPaid === 1,
+      deck: deckList(opening.manifest.decks.north, opening.names),
+      manaPaid: manaBeforeSummon - session.state.players.north.mana,
+      minion: minionCard.name,
+      noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+      replayVerified: await handle.verifyReplay(),
+      site: siteCard.name,
+      siteAndMinionStateVerified: site?.instanceId === opening.siteInstanceId
+        && 'cardId' in site
+        && site.cardId === siteCard.stableId
+        && site.controller === 'north'
+        && minion?.cardId === minionCard.stableId
+        && minion.controller === 'north'
+        && minion.owner === 'north'
+        && minion.location === 'C4'
+        && minion.region === 'surface'
+        && minion.damage === 0
+        && !minion.tapped
+        && minion.summoningSickness,
+    });
   });
 }
 
-function runFireGranaryRats(
+async function runFireGranaryRats(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireGranaryRats'] {
-  const opening = findStarterOpening(
+): Promise<PrivateGameCheck['fireGranaryRats']> {
+  const opening = await findStarterOpening(
     input,
     'fire-granary-rats',
     input.config.fireSeed,
     input.wasteland,
     input.granaryRats,
   );
-  let session = keep(opening.session);
-  session = keep(session);
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+    let session = await rustKeep(handle);
+    session = await rustKeep(handle);
 
-  const siteResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.siteInstanceId
-      && descriptor.cell === 'C4'));
-  if (!siteResult.accepted) throw new Error('private Granary Rats Wasteland play was rejected');
-  session = siteResult.session;
-  const beforeSummon = observeGame(session.state, 'north');
-  const manaBeforeSummon = session.state.players.north.mana;
-  const summonAction = action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.minionInstanceId
-      && descriptor.cell === 'C4');
-  if (summonAction.descriptor.kind !== 'summon-minion') {
-    throw new Error('private Granary Rats summon action has the wrong kind');
-  }
-  const summonResult = stepGame(session, summonAction);
-  if (!summonResult.accepted) throw new Error('private Granary Rats summon was rejected');
-  session = summonResult.session;
+    const siteResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.siteInstanceId
+        && descriptor.cell === 'C4'));
+    if (!siteResult.accepted) throw new Error('private Granary Rats Wasteland play was rejected');
+    session = siteResult.session;
+    const beforeSummon = observeGame(session.state, 'north');
+    const manaBeforeSummon = session.state.players.north.mana;
+    const summonAction = await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === opening.minionInstanceId
+        && descriptor.cell === 'C4');
+    if (summonAction.descriptor.kind !== 'summon-minion') {
+      throw new Error('private Granary Rats summon action has the wrong kind');
+    }
+    const summonResult = await handle.stepAction(summonAction);
+    if (!summonResult.accepted) throw new Error('private Granary Rats summon was rejected');
+    session = summonResult.session;
 
-  const sitePayload = siteResult.receipt.events[0]
-    && isJsonRecord(siteResult.receipt.events[0].payload)
-    ? siteResult.receipt.events[0].payload
-    : undefined;
-  const summonPayload = summonResult.receipt.events[0]
-    && isJsonRecord(summonResult.receipt.events[0].payload)
-    ? summonResult.receipt.events[0].payload
-    : undefined;
-  const afterSummon = observeGame(session.state, 'north');
-  const site = session.state.realm.sites.C4;
-  const rats = afterSummon.realm.units.find(({ instanceId }) =>
-    instanceId === opening.minionInstanceId);
+    const sitePayload = siteResult.receipt.events[0]
+      && isJsonRecord(siteResult.receipt.events[0].payload)
+      ? siteResult.receipt.events[0].payload
+      : undefined;
+    const summonPayload = summonResult.receipt.events[0]
+      && isJsonRecord(summonResult.receipt.events[0].payload)
+      ? summonResult.receipt.events[0].payload
+      : undefined;
+    const afterSummon = observeGame(session.state, 'north');
+    const site = session.state.realm.sites.C4;
+    const rats = afterSummon.realm.units.find(({ instanceId }) =>
+      instanceId === opening.minionInstanceId);
 
-  return Object.freeze({
-    acceptedActionCount: session.transcript.length,
-    causalEventsVerified: siteResult.receipt.events.length === 1
-      && siteResult.receipt.events[0]?.type === 'site-played'
-      && canonicalJson(sitePayload ?? null) === canonicalJson({
-        cardId: input.wasteland.stableId,
-        cell: 'C4',
-        instanceId: opening.siteInstanceId,
-        seat: 'north',
-      })
-      && summonResult.receipt.events.length === 1
-      && summonResult.receipt.events[0]?.type === 'minion-summoned'
-      && canonicalJson(summonPayload ?? null) === canonicalJson({
-        cardId: input.granaryRats.stableId,
-        casterInstanceId: summonAction.descriptor.casterInstanceId,
-        cell: 'C4',
-        instanceId: opening.minionInstanceId,
-        manaPaid: 1,
-        seat: 'north',
-      }),
-    deck: deckList(opening.manifest.decks.north, opening.names),
-    fireAffinityBeforeSummon: beforeSummon.players.north.affinity.fire === 1
-      && beforeSummon.players.north.affinity.air === 0
-      && beforeSummon.players.north.affinity.earth === 0
-      && beforeSummon.players.north.affinity.water === 0,
-    granaryRats: input.granaryRats.name,
-    manaPaid: manaBeforeSummon - session.state.players.north.mana,
-    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    replayVerified: verifyGameReplay(session),
-    seed: opening.manifest.seed,
-    siteAndMinionStateVerified: site !== undefined
-      && 'cardId' in site
-      && site.cardId === input.wasteland.stableId
-      && site.instanceId === opening.siteInstanceId
-      && site.controller === 'north'
-      && rats?.cardId === input.granaryRats.stableId
-      && rats.attack === 1
-      && rats.defense === 1
-      && rats.controller === 'north'
-      && rats.owner === 'north'
-      && rats.location === 'C4'
-      && rats.region === 'surface'
-      && rats.damage === 0
-      && !rats.tapped
-      && rats.summoningSickness,
-    siteThresholdSuppressed: afterSummon.players.north.affinity.fire === 0
-      && afterSummon.players.north.affinity.air === 0
-      && afterSummon.players.north.affinity.earth === 0
-      && afterSummon.players.north.affinity.water === 0,
-    wasteland: input.wasteland.name,
+    return Object.freeze({
+      acceptedActionCount: session.transcript.length,
+      causalEventsVerified: siteResult.receipt.events.length === 1
+        && siteResult.receipt.events[0]?.type === 'site-played'
+        && canonicalJson(sitePayload ?? null) === canonicalJson({
+          cardId: input.wasteland.stableId,
+          cell: 'C4',
+          instanceId: opening.siteInstanceId,
+          seat: 'north',
+        })
+        && summonResult.receipt.events.length === 1
+        && summonResult.receipt.events[0]?.type === 'minion-summoned'
+        && canonicalJson(summonPayload ?? null) === canonicalJson({
+          cardId: input.granaryRats.stableId,
+          casterInstanceId: summonAction.descriptor.casterInstanceId,
+          cell: 'C4',
+          instanceId: opening.minionInstanceId,
+          manaPaid: 1,
+          seat: 'north',
+        }),
+      deck: deckList(opening.manifest.decks.north, opening.names),
+      fireAffinityBeforeSummon: beforeSummon.players.north.affinity.fire === 1
+        && beforeSummon.players.north.affinity.air === 0
+        && beforeSummon.players.north.affinity.earth === 0
+        && beforeSummon.players.north.affinity.water === 0,
+      granaryRats: input.granaryRats.name,
+      manaPaid: manaBeforeSummon - session.state.players.north.mana,
+      noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+      replayVerified: await handle.verifyReplay(),
+      seed: opening.manifest.seed,
+      siteAndMinionStateVerified: site !== undefined
+        && 'cardId' in site
+        && site.cardId === input.wasteland.stableId
+        && site.instanceId === opening.siteInstanceId
+        && site.controller === 'north'
+        && rats?.cardId === input.granaryRats.stableId
+        && rats.attack === 1
+        && rats.defense === 1
+        && rats.controller === 'north'
+        && rats.owner === 'north'
+        && rats.location === 'C4'
+        && rats.region === 'surface'
+        && rats.damage === 0
+        && !rats.tapped
+        && rats.summoningSickness,
+      siteThresholdSuppressed: afterSummon.players.north.affinity.fire === 0
+        && afterSummon.players.north.affinity.air === 0
+        && afterSummon.players.north.affinity.earth === 0
+        && afterSummon.players.north.affinity.water === 0,
+      wasteland: input.wasteland.name,
+    });
   });
 }
 
-function runFireHamlet(
+async function runFireHamlet(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['fireHamlet'] {
-  const opening = findFireHamletOpening(input);
-  let session = keep(opening.session);
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+): Promise<PrivateGameCheck['fireHamlet']> {
+  const opening = await findFireHamletOpening(input);
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+    let session = await rustKeep(handle);
+    session = await rustKeep(handle);
+    const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+      session = await rustAccept(handle, await rustAction(handle, predicate));
+    };
 
-  const wastelandResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.wastelandInstanceId
-      && descriptor.cell === 'C4'));
-  if (!wastelandResult.accepted) throw new Error('private Wasteland play was rejected');
-  session = wastelandResult.session;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === opening.southSiteInstanceId
-    && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const hamletResult = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === opening.hamletInstanceId
-      && descriptor.cell === 'C3'));
-  if (!hamletResult.accepted) throw new Error('private Hamlet play was rejected');
-  session = hamletResult.session;
+    const wastelandResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.wastelandInstanceId
+        && descriptor.cell === 'C4'));
+    if (!wastelandResult.accepted) throw new Error('private Wasteland play was rejected');
+    session = wastelandResult.session;
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === opening.southSiteInstanceId
+      && descriptor.cell === 'C1');
+    await take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const hamletResult = await handle.stepAction(await rustAction(handle, ({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardInstanceId === opening.hamletInstanceId
+        && descriptor.cell === 'C3'));
+    if (!hamletResult.accepted) throw new Error('private Hamlet play was rejected');
+    session = hamletResult.session;
 
-  const beforeSummon = observeGame(session.state, 'north');
-  const manaBeforeSummon = session.state.players.north.mana;
-  const raalSummons = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === opening.raalInstanceId
-      && descriptor.region === undefined
-      && (descriptor.cell === 'C3' || descriptor.cell === 'C4'));
-  const hamletSummon = raalSummons.find(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C3'
-      && descriptor.manaCost === 0);
-  const wastelandSummon = raalSummons.find(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C4'
-      && descriptor.manaCost === 1);
-  if (!hamletSummon || !wastelandSummon) {
-    throw new Error('private Hamlet and Wasteland destination costs are unavailable');
-  }
-  const summonResult = stepGame(session, hamletSummon);
-  if (!summonResult.accepted) throw new Error('private zero-cost Raal summon was rejected');
-  session = summonResult.session;
+    const beforeSummon = observeGame(session.state, 'north');
+    const manaBeforeSummon = session.state.players.north.mana;
+    const raalSummons = (await handle.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardInstanceId === opening.raalInstanceId
+        && descriptor.region === undefined
+        && (descriptor.cell === 'C3' || descriptor.cell === 'C4'));
+    const hamletSummon = raalSummons.find(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C3'
+        && descriptor.manaCost === 0);
+    const wastelandSummon = raalSummons.find(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C4'
+        && descriptor.manaCost === 1);
+    if (!hamletSummon || !wastelandSummon) {
+      throw new Error('private Hamlet and Wasteland destination costs are unavailable');
+    }
+    const summonResult = await handle.stepAction(hamletSummon);
+    if (!summonResult.accepted) throw new Error('private zero-cost Raal summon was rejected');
+    session = summonResult.session;
 
-  const wastelandPayload = wastelandResult.receipt.events[0]
-    && isJsonRecord(wastelandResult.receipt.events[0].payload)
-    ? wastelandResult.receipt.events[0].payload
-    : undefined;
-  const hamletPayload = hamletResult.receipt.events[0]
-    && isJsonRecord(hamletResult.receipt.events[0].payload)
-    ? hamletResult.receipt.events[0].payload
-    : undefined;
-  const summonPayload = summonResult.receipt.events[0]
-    && isJsonRecord(summonResult.receipt.events[0].payload)
-    ? summonResult.receipt.events[0].payload
-    : undefined;
-  const wastelandSite = session.state.realm.sites.C4;
-  const hamletSite = session.state.realm.sites.C3;
-  const raal = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
-    instanceId === opening.raalInstanceId);
-  const sameCaster = hamletSummon.descriptor.kind === 'summon-minion'
-    && wastelandSummon.descriptor.kind === 'summon-minion'
-    && hamletSummon.descriptor.casterInstanceId === wastelandSummon.descriptor.casterInstanceId;
+    const wastelandPayload = wastelandResult.receipt.events[0]
+      && isJsonRecord(wastelandResult.receipt.events[0].payload)
+      ? wastelandResult.receipt.events[0].payload
+      : undefined;
+    const hamletPayload = hamletResult.receipt.events[0]
+      && isJsonRecord(hamletResult.receipt.events[0].payload)
+      ? hamletResult.receipt.events[0].payload
+      : undefined;
+    const summonPayload = summonResult.receipt.events[0]
+      && isJsonRecord(summonResult.receipt.events[0].payload)
+      ? summonResult.receipt.events[0].payload
+      : undefined;
+    const wastelandSite = session.state.realm.sites.C4;
+    const hamletSite = session.state.realm.sites.C3;
+    const raal = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+      instanceId === opening.raalInstanceId);
+    const sameCaster = hamletSummon.descriptor.kind === 'summon-minion'
+      && wastelandSummon.descriptor.kind === 'summon-minion'
+      && hamletSummon.descriptor.casterInstanceId === wastelandSummon.descriptor.casterInstanceId;
 
-  return Object.freeze({
-    acceptedActionCount: session.transcript.length,
-    causalEventsVerified: wastelandResult.receipt.events.length === 1
-      && wastelandResult.receipt.events[0]?.type === 'site-played'
-      && canonicalJson(wastelandPayload ?? null) === canonicalJson({
-        cardId: input.wasteland.stableId,
-        cell: 'C4',
-        instanceId: opening.wastelandInstanceId,
-        seat: 'north',
-      })
-      && hamletResult.receipt.events.length === 1
-      && hamletResult.receipt.events[0]?.type === 'site-played'
-      && canonicalJson(hamletPayload ?? null) === canonicalJson({
-        cardId: input.hamlet.stableId,
-        cell: 'C3',
-        instanceId: opening.hamletInstanceId,
-        seat: 'north',
-      })
-      && summonResult.receipt.events.length === 1
-      && summonResult.receipt.events[0]?.type === 'minion-summoned'
-      && hamletSummon.descriptor.kind === 'summon-minion'
-      && canonicalJson(summonPayload ?? null) === canonicalJson({
-        cardId: input.raalDromedary.stableId,
-        casterInstanceId: hamletSummon.descriptor.casterInstanceId,
-        cell: 'C3',
-        instanceId: opening.raalInstanceId,
-        manaPaid: 0,
-        seat: 'north',
-      }),
-    deck: deckList(opening.manifest.decks.north, opening.names),
-    exactDestinationCosts: raalSummons.length === 2 && sameCaster,
-    fireAffinityVerified: beforeSummon.players.north.affinity.fire === 1
-      && beforeSummon.players.north.affinity.air === 0
-      && beforeSummon.players.north.affinity.earth === 0
-      && beforeSummon.players.north.affinity.water === 0
-      && manaBeforeSummon === 2,
-    hamlet: input.hamlet.name,
-    manaPaid: manaBeforeSummon - session.state.players.north.mana,
-    noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
-    raalDromedary: input.raalDromedary.name,
-    replayVerified: verifyGameReplay(session),
-    seed: opening.seed,
-    siteAndMinionStateVerified: wastelandSite !== undefined
-      && 'cardId' in wastelandSite
-      && wastelandSite.cardId === input.wasteland.stableId
-      && wastelandSite.controller === 'north'
-      && hamletSite !== undefined
-      && 'cardId' in hamletSite
-      && hamletSite.cardId === input.hamlet.stableId
-      && hamletSite.controller === 'north'
-      && raal?.cardId === input.raalDromedary.stableId
-      && raal.controller === 'north'
-      && raal.owner === 'north'
-      && raal.location === 'C3'
-      && raal.region === 'surface'
-      && raal.attack === 2
-      && raal.defense === 2
-      && raal.damage === 0
-      && !raal.tapped
-      && raal.summoningSickness,
-    wasteland: input.wasteland.name,
+    return Object.freeze({
+      acceptedActionCount: session.transcript.length,
+      causalEventsVerified: wastelandResult.receipt.events.length === 1
+        && wastelandResult.receipt.events[0]?.type === 'site-played'
+        && canonicalJson(wastelandPayload ?? null) === canonicalJson({
+          cardId: input.wasteland.stableId,
+          cell: 'C4',
+          instanceId: opening.wastelandInstanceId,
+          seat: 'north',
+        })
+        && hamletResult.receipt.events.length === 1
+        && hamletResult.receipt.events[0]?.type === 'site-played'
+        && canonicalJson(hamletPayload ?? null) === canonicalJson({
+          cardId: input.hamlet.stableId,
+          cell: 'C3',
+          instanceId: opening.hamletInstanceId,
+          seat: 'north',
+        })
+        && summonResult.receipt.events.length === 1
+        && summonResult.receipt.events[0]?.type === 'minion-summoned'
+        && hamletSummon.descriptor.kind === 'summon-minion'
+        && canonicalJson(summonPayload ?? null) === canonicalJson({
+          cardId: input.raalDromedary.stableId,
+          casterInstanceId: hamletSummon.descriptor.casterInstanceId,
+          cell: 'C3',
+          instanceId: opening.raalInstanceId,
+          manaPaid: 0,
+          seat: 'north',
+        }),
+      deck: deckList(opening.manifest.decks.north, opening.names),
+      exactDestinationCosts: raalSummons.length === 2 && sameCaster,
+      fireAffinityVerified: beforeSummon.players.north.affinity.fire === 1
+        && beforeSummon.players.north.affinity.air === 0
+        && beforeSummon.players.north.affinity.earth === 0
+        && beforeSummon.players.north.affinity.water === 0
+        && manaBeforeSummon === 2,
+      hamlet: input.hamlet.name,
+      manaPaid: manaBeforeSummon - session.state.players.north.mana,
+      noRandomDraws: session.transcript.every(({ randomDraws }) => randomDraws.length === 0),
+      raalDromedary: input.raalDromedary.name,
+      replayVerified: await handle.verifyReplay(),
+      seed: opening.seed,
+      siteAndMinionStateVerified: wastelandSite !== undefined
+        && 'cardId' in wastelandSite
+        && wastelandSite.cardId === input.wasteland.stableId
+        && wastelandSite.controller === 'north'
+        && hamletSite !== undefined
+        && 'cardId' in hamletSite
+        && hamletSite.cardId === input.hamlet.stableId
+        && hamletSite.controller === 'north'
+        && raal?.cardId === input.raalDromedary.stableId
+        && raal.controller === 'north'
+        && raal.owner === 'north'
+        && raal.location === 'C3'
+        && raal.region === 'surface'
+        && raal.attack === 2
+        && raal.defense === 2
+        && raal.damage === 0
+        && !raal.tapped
+        && raal.summoningSickness,
+      wasteland: input.wasteland.name,
+    });
   });
 }
 
@@ -24308,7 +24363,7 @@ function runWaterHealing(
 
 export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<PrivateGameCheck> {
   const input = await readPrivateInputs(path);
-  const airStarter = runStarter(
+  const airStarter = await runStarter(
     input,
     'air-starter',
     input.config.airSeed,
@@ -24345,7 +24400,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
   const earthBurrowing = runEarthBurrowing(input);
-  const earthStarter = runStarter(
+  const earthStarter = await runStarter(
     input,
     'earth-starter',
     input.config.earthSeed,
@@ -24387,15 +24442,15 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthRanged = runEarthRanged(input);
   const earthSecretTunnel = runEarthSecretTunnel(input);
   const earthWard = runEarthWard(input);
-  const fireStarter = runStarter(
+  const fireStarter = await runStarter(
     input,
     'fire-starter',
     input.config.fireSeed,
     input.wasteland,
     input.raalDromedary,
   );
-  const fireGranaryRats = runFireGranaryRats(input);
-  const fireHamlet = runFireHamlet(input);
+  const fireGranaryRats = await runFireGranaryRats(input);
+  const fireHamlet = await runFireHamlet(input);
   const fireAramos = runFireAramos(input);
   const fireCharge = runFireCharge(input);
   const fireGenesisLifeLoss = runFireGenesisLifeLoss(input);
@@ -24424,7 +24479,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const waterRiver = runWaterRiver(input);
   const waterSidewaysMovement = runWaterSidewaysMovement(input);
   const waterSubmerge = runWaterSubmerge(input);
-  const waterStarter = runStarter(
+  const waterStarter = await runStarter(
     input,
     'water-starter',
     input.config.waterSeed,
