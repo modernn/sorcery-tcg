@@ -198,16 +198,17 @@ fn rule_catalog_0260_start_turn_life_loss_reduces_the_controller_avatar() {
             && event.payload["sourceInstanceId"] == source_id
     }));
     let after = state(&session);
-    let source = after["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .find(|unit| unit["cardId"] == "north-source")
-        .expect("life-loss source");
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["cardId"] == "north-source" && unit["instanceId"] == source_id)
+    );
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
     assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
-    assert_eq!(source["airborne"], true);
+    assert_eq!(after["cards"]["north-source"]["airborne"], true);
     assert_exact_replay(&session);
 }
 
@@ -232,7 +233,8 @@ fn rule_catalog_0261_start_turn_life_loss_can_open_deaths_door() {
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
-    assert_eq!(after["players"]["north"]["avatar"]["deathDoorTurn"], 2);
+    assert_eq!(after["turnNumber"], 3);
+    assert_eq!(after["players"]["north"]["avatar"]["deathDoorTurn"], 3);
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }

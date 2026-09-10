@@ -24195,6 +24195,10 @@ test('RULE-04 start-turn controller life loss reduces the Avatar and can open De
       assert.equal(ctx.state.phase === 'draw', true);
       assert.equal(ctx.state.players.north.avatar.life, expectLife);
       assert.equal(ctx.state.players.north.avatar.deathDoorTurn == null, !deathsDoor);
+      if (deathsDoor) {
+        assert.equal(ctx.state.turnNumber, 3);
+        assert.equal(ctx.state.players.north.avatar.deathDoorTurn, 3);
+      }
       assert.equal(ctx.state.terminal.status, 'active');
       assert.equal(await ctx.verifyReplay(), true);
     });
