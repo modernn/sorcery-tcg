@@ -7405,12 +7405,12 @@ fn draw_sites_manifest(seed: u32, atlas_count: usize) -> String {
             "north": {
                 "atlas": vec!["north-site"; atlas_count],
                 "avatar": "north-avatar",
-                "spellbook": ["north-draw"; 6],
+                "spellbook": vec!["north-draw"; 6],
             },
             "south": {
-                "atlas": ["south-site"; 6],
+                "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": ["south-minion"; 6],
+                "spellbook": vec!["south-minion"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
