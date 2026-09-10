@@ -190,6 +190,7 @@ pub enum ArtifactEffect {
 /// Artifact facts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArtifactFacts {
+    pub cannot_be_carried: bool,
     pub effect: ArtifactEffect,
     pub mana_cost: u64,
     pub nearby_strikes_against_units_deal_double_damage: bool,
@@ -747,6 +748,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "atEndOfEachTurnSiteControllerLosesLife",
     "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
+    "cannotBeCarried",
     "cardType",
     "grantsBearerLethal",
     "grantsBearerPower",
@@ -1213,6 +1215,7 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
     };
     Ok(ArtifactFacts {
+        cannot_be_carried: true_only(object, "cannotBeCarried", path)?,
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
         nearby_strikes_against_units_deal_double_damage: nearby_double,

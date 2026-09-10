@@ -48,6 +48,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower: 2;
@@ -64,6 +65,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal: true;
     grantsBearerPower?: never;
@@ -80,6 +82,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -96,6 +99,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -112,6 +116,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -128,6 +133,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife: number;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -144,6 +150,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome: true;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -160,6 +167,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -176,6 +184,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -192,6 +201,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: number;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -208,6 +218,7 @@ export type GameCardDefinition =
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
+    cannotBeCarried?: true;
     cardType: 'artifact';
     grantsBearerLethal?: never;
     grantsBearerPower?: never;
@@ -1222,6 +1233,7 @@ const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
     atEndOfControllerTurnUntapNearbyAllies
     atEndOfEachTurnSiteControllerLosesLife
+    cannotBeCarried
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn
     bearerControllerChoosesExtraRandomOutcome cardType
     grantsBearerLethal grantsBearerPower manaCost nearbyMinionsMustAttackIfAble
@@ -1504,6 +1516,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'artifact') {
+    if (card.cannotBeCarried !== undefined && card.cannotBeCarried !== true) {
+      throw new RangeError(`${path}.cannotBeCarried must be true`);
+    }
     if (card.atEndOfControllerTurnUntapNearbyAllies !== undefined
       && card.atEndOfControllerTurnUntapNearbyAllies !== true) {
       throw new RangeError(`${path}.atEndOfControllerTurnUntapNearbyAllies must be true`);
@@ -2618,6 +2633,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
+            ...(card.cannotBeCarried === true ? { cannotBeCarried: true as const } : {}),
             ...(card.atEndOfControllerTurnUntapNearbyAllies === true
               ? { atEndOfControllerTurnUntapNearbyAllies: true as const }
               : card.atEndOfEachTurnSiteControllerLosesLife !== undefined

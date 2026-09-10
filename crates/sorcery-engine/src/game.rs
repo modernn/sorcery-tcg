@@ -4459,6 +4459,9 @@ impl Game {
                     mana_cost: facts.mana_cost,
                 };
                 descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
+                if facts.cannot_be_carried {
+                    continue;
+                }
                 for bearer in &bearers {
                     let Ok(occupied) = self.unit_target_occupied_cells(bearer) else {
                         continue;
@@ -4489,7 +4492,19 @@ impl Game {
             let region = self.unit_target_region(&unit)?;
             let cells = self.unit_target_occupied_cells(&unit)?.to_vec();
             for cell in &cells {
-                let mut instance_ids = self.loose_artifact_instance_ids(*cell, region);
+                let mut instance_ids = Vec::new();
+                for instance_id in self.loose_artifact_instance_ids(*cell, region) {
+                    let artifact = self
+                        .position
+                        .artifacts
+                        .iter()
+                        .find(|artifact| artifact.card.instance_id == instance_id)
+                        .ok_or(GameError::IllegalAction)?;
+                    if self.artifact_facts(artifact)?.cannot_be_carried {
+                        continue;
+                    }
+                    instance_ids.push(instance_id);
+                }
                 instance_ids.sort_unstable();
                 let count = instance_ids.len();
                 descriptors.extend(

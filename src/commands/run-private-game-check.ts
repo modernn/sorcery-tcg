@@ -4627,6 +4627,7 @@ function gameDefinition(
   doesNotUntapDuringControllersStartPhase = false,
   affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities = false,
   atEndOfControllerTurnUntapNearbyAllies = false,
+  cannotBeCarried = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4664,6 +4665,7 @@ function gameDefinition(
       + Number(atEndOfControllerTurnUntapNearbyAllies) === 1) {
     return {
       cardType: 'artifact',
+      ...(cannotBeCarried ? { cannotBeCarried: true as const } : {}),
       ...(grantsBearerPower === 2
         ? { grantsBearerPower }
         : grantsBearerLethal
