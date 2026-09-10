@@ -1329,14 +1329,22 @@ fn rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site(
     assert_exact_replay(&session);
 }
 
-fn stage_south_on_north_d3(session: &mut Session) -> String {
+fn stage_south_on_north_cell(session: &mut Session, cell: &str) -> String {
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
-    play_site(session, "D3");
+    play_site(session, cell);
     end_and_draw(session);
-    let (enemy, _) = summon_at(session, "south-minion", "D3");
+    let (enemy, _) = summon_at(session, "south-minion", cell);
     end_and_draw(session);
     enemy
+}
+
+fn stage_south_on_north_d3(session: &mut Session) -> String {
+    stage_south_on_north_cell(session, "D3")
+}
+
+fn stage_south_on_north_d4(session: &mut Session) -> String {
+    stage_south_on_north_cell(session, "D4")
 }
 
 #[test]
@@ -1612,5 +1620,116 @@ fn rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square() {
         unit(&state(&session), &giant)["occupiedCells"],
         json!(["B3", "B4", "C3", "C4"])
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0183_oversized_activated_projectile_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "tapToShootProjectileDamage": 1 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("activated projectile actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "shoot-damage-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|descriptor| descriptor["path"][0]["cell"] == "B3"),
+        "an east ray from the B3 anchor reaches D3, not D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-damage-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "projectile-damage-allocated"]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 1);
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "shootsDragProjectile": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("drag projectile actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "shoot-drag-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["fightOnArrival"] == false
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|descriptor| descriptor["path"][0]["cell"] == "B3"),
+        "an east ray from the B3 anchor reaches D3, not D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-drag-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["fightOnArrival"] == false
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(event_types(&receipt), ["projectile-shot", "unit-dragged"]);
+    assert_eq!(
+        receipt.events[1].payload["from"],
+        json!({ "cell": "D4", "region": "surface" })
+    );
+    assert_eq!(
+        receipt.events[1].payload["to"],
+        json!({ "cell": "C4", "region": "surface" }),
+        "the haul returns to the C4 origin, not the B3 anchor"
+    );
+    assert_eq!(unit(&state(&session), &enemy)["location"], "C4");
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
     assert_exact_replay(&session);
 }

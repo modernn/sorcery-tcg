@@ -3742,6 +3742,54 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0183",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 activated projectile originates cardinal rays from every occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "projectile-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0183_oversized_activated_projectile_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0184",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 drag projectile originates from every occupied cell and hauls the hit unit back to that origin, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "shootsDragProjectile"
+      ],
+      "actionHints": [
+        "shoot-drag-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "unit-dragged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_cell"
+      }
     }
   ]
 }

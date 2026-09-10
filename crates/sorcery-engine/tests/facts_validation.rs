@@ -884,3 +884,34 @@ fn oversized_water_site_cast_should_parse() {
     assert!(facts.must_be_cast_to_water_site);
     assert!(facts.summon_to_any_site);
 }
+
+#[test]
+fn oversized_activated_and_drag_projectiles_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-activated-projectile",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "tapToShootProjectileDamage",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized activated-projectile minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.tap_to_shoot_projectile_damage, Some(1));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-drag-projectile",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "shootsDragProjectile",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized drag-projectile minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.shoots_drag_projectile);
+}
