@@ -341,6 +341,51 @@ export class RustSessionClient {
     });
   }
 
+  async runNoveltyFromForcedAction(input: Readonly<{
+    actionId: string;
+    actionKind: string;
+    maxActions: number;
+    predictedEventTypes: readonly string[];
+    predictedStateHash: string;
+  }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    entry: Readonly<{
+      actionId: string;
+      actionKind: string;
+      eventTypes: readonly string[];
+      stateHash: Sha256Hash;
+    }>;
+    result: JsonValue;
+  }>> {
+    const payload = await this.call('runNoveltyFromForcedAction', {
+      actionId: input.actionId,
+      actionKind: input.actionKind,
+      maxActions: input.maxActions,
+      predictedEventTypes: [...input.predictedEventTypes],
+      predictedStateHash: input.predictedStateHash,
+    });
+    if (!isRecord(payload)
+      || !Array.isArray(payload.emittedCheckpoints)
+      || !isRecord(payload.entry)
+      || typeof payload.entry.actionId !== 'string'
+      || typeof payload.entry.actionKind !== 'string'
+      || !Array.isArray(payload.entry.eventTypes)
+      || !payload.entry.eventTypes.every((eventType) => typeof eventType === 'string')
+      || payload.result === undefined) {
+      throw new Error('Rust session runNoveltyFromForcedAction result was invalid');
+    }
+    return Object.freeze({
+      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
+      entry: Object.freeze({
+        actionId: payload.entry.actionId,
+        actionKind: payload.entry.actionKind,
+        eventTypes: Object.freeze(payload.entry.eventTypes.slice() as string[]),
+        stateHash: requireHash(payload.entry.stateHash, 'stateHash'),
+      }),
+      result: payload.result as JsonValue,
+    });
+  }
+
   async step(request: RustActionRequest): Promise<RustStepResult> {
     const result = await this.call('step', request as unknown as JsonValue);
     if (!isRecord(result) || typeof result.accepted !== 'boolean') {

@@ -15,6 +15,9 @@ use crate::game::{
     Game, GameEndReason, GameError, GameOutcome, IssuedAction, Position, SeatObservation,
 };
 use crate::novelty::{NoveltyStep, probe_novelty};
+use crate::novelty_dispatch::{
+    ForcedNoveltyInput, ForcedNoveltyOutput, run_novelty_from_forced_action,
+};
 use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
 use crate::policy::{PolicyError, baseline_policy_snapshot};
 use crate::simulator::SimulatorError;
@@ -194,6 +197,19 @@ impl Session {
         max_actions: usize,
     ) -> Result<NoveltyRolloutOutput, SessionError> {
         run_novelty_rollout(self, max_actions)
+    }
+
+    /// Forces one engine-issued action, checks its probe prediction, then rolls out novelty.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when the action is stale, the prediction does not replay,
+    /// or novelty materialization fails.
+    pub fn run_novelty_from_forced_action(
+        &mut self,
+        input: ForcedNoveltyInput<'_>,
+    ) -> Result<ForcedNoveltyOutput, SessionError> {
+        run_novelty_from_forced_action(self, input)
     }
 
     /// Expands every engine-issued root action, then follows the baseline policy.

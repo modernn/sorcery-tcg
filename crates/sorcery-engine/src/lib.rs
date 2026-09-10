@@ -12,6 +12,7 @@ pub mod facts;
 pub mod game;
 pub mod gauntlet;
 pub mod novelty;
+pub mod novelty_dispatch;
 pub mod novelty_rollout;
 pub mod policy;
 pub mod prng;

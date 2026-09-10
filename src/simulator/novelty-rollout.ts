@@ -7,6 +7,7 @@ import {
 import { deepFreeze, type EngineRejectionCode, type StateHash } from '../engine/contract.ts';
 import {
   type GameLegalAction,
+  type GameManifest,
   type GameSession,
   type GameTerminal,
 } from '../engine/game.ts';
@@ -111,6 +112,23 @@ export type NoveltyRolloutOptions = Readonly<{
   onCheckpoint?: (checkpoint: GameCheckpoint) => void;
 }>;
 
+export type ForcedNoveltyOptions = Readonly<NoveltyRolloutOptions & {
+  actionId: string;
+  actionKind: ActionKind;
+  predictedEventTypes: readonly string[];
+  predictedStateHash: StateHash;
+}>;
+
+export type ForcedNoveltyDispatch = Readonly<{
+  entry: Readonly<{
+    actionId: string;
+    actionKind: ActionKind;
+    eventTypes: readonly string[];
+    stateHash: StateHash;
+  }>;
+  result: NoveltyRolloutResult;
+}>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -128,16 +146,38 @@ function checkpointFailureFrom(result: NoveltyRolloutResult): NoveltyRolloutResu
   }) as NoveltyRolloutResult;
 }
 
+function applyEmittedCheckpoints(
+  result: NoveltyRolloutResult,
+  emitted: readonly JsonValue[],
+  onCheckpoint?: (checkpoint: GameCheckpoint) => void,
+): NoveltyRolloutResult {
+  try {
+    const seen = new Set<string>();
+    for (const raw of emitted) {
+      const checkpoint = parseGameCheckpoint(canonicalJson(raw));
+      if (seen.has(checkpoint.checkpointId)) continue;
+      seen.add(checkpoint.checkpointId);
+      onCheckpoint?.(checkpoint);
+    }
+  } catch {
+    return checkpointFailureFrom(result);
+  }
+  return result;
+}
+
+function boundedMaxActions(maxActions: number | undefined): number {
+  const value = maxActions ?? NOVELTY_ROLLOUT_ACTION_LIMIT;
+  if (!Number.isSafeInteger(value) || value < 0 || value > NOVELTY_ROLLOUT_ACTION_LIMIT) {
+    throw new RangeError(`maxActions must be 0-${NOVELTY_ROLLOUT_ACTION_LIMIT}`);
+  }
+  return value;
+}
+
 export async function runNoveltyRollout(
   root: GameSession,
   options: NoveltyRolloutOptions = {},
 ): Promise<NoveltyRolloutResult> {
-  const maxActions = options.maxActions ?? NOVELTY_ROLLOUT_ACTION_LIMIT;
-  if (!Number.isSafeInteger(maxActions) || maxActions < 0
-    || maxActions > NOVELTY_ROLLOUT_ACTION_LIMIT) {
-    throw new RangeError(`maxActions must be 0-${NOVELTY_ROLLOUT_ACTION_LIMIT}`);
-  }
-
+  const maxActions = boundedMaxActions(options.maxActions);
   const rootCheckpoint = createGameCheckpoint(root) as unknown as JsonValue;
   return withRustSession(root.manifest, async (handle) => {
     await handle.resume(rootCheckpoint);
@@ -145,18 +185,68 @@ export async function runNoveltyRollout(
     if (!isRecord(payload.result)) {
       throw new Error('Rust novelty rollout result was invalid');
     }
-    const result = deepFreeze(payload.result) as NoveltyRolloutResult;
-    try {
-      const seen = new Set<string>();
-      for (const raw of payload.emittedCheckpoints) {
-        const checkpoint = parseGameCheckpoint(canonicalJson(raw));
-        if (seen.has(checkpoint.checkpointId)) continue;
-        seen.add(checkpoint.checkpointId);
-        options.onCheckpoint?.(checkpoint);
-      }
-    } catch {
-      return checkpointFailureFrom(result);
-    }
-    return result;
+    return applyEmittedCheckpoints(
+      deepFreeze(payload.result) as NoveltyRolloutResult,
+      payload.emittedCheckpoints,
+      options.onCheckpoint,
+    );
   });
+}
+
+async function dispatchForcedNovelty(
+  manifest: GameManifest,
+  checkpoint: JsonValue,
+  options: ForcedNoveltyOptions,
+): Promise<ForcedNoveltyDispatch> {
+  const maxActions = boundedMaxActions(options.maxActions);
+  return withRustSession(manifest, async (handle) => {
+    await handle.resume(checkpoint);
+    const payload = await handle.runNoveltyFromForcedAction({
+      actionId: options.actionId,
+      actionKind: options.actionKind,
+      maxActions,
+      predictedEventTypes: options.predictedEventTypes,
+      predictedStateHash: options.predictedStateHash,
+    });
+    if (!isRecord(payload.result)) {
+      throw new Error('Rust forced novelty result was invalid');
+    }
+    return deepFreeze({
+      entry: {
+        actionId: payload.entry.actionId,
+        actionKind: payload.entry.actionKind as ActionKind,
+        eventTypes: payload.entry.eventTypes,
+        stateHash: payload.entry.stateHash,
+      },
+      result: applyEmittedCheckpoints(
+        deepFreeze(payload.result) as NoveltyRolloutResult,
+        payload.emittedCheckpoints,
+        options.onCheckpoint,
+      ),
+    });
+  });
+}
+
+/** Forces one engine-issued action from `root`, then runs novelty from the prediction. */
+export async function runNoveltyFromForcedAction(
+  root: GameSession,
+  options: ForcedNoveltyOptions,
+): Promise<ForcedNoveltyDispatch> {
+  return dispatchForcedNovelty(
+    root.manifest,
+    createGameCheckpoint(root) as unknown as JsonValue,
+    options,
+  );
+}
+
+/** Resumes a captured checkpoint, forces one engine-issued action, then runs novelty. */
+export async function runNoveltyFromForcedCheckpoint(
+  checkpoint: GameCheckpoint,
+  options: ForcedNoveltyOptions,
+): Promise<ForcedNoveltyDispatch> {
+  return dispatchForcedNovelty(
+    checkpoint.manifest,
+    checkpoint as unknown as JsonValue,
+    options,
+  );
 }

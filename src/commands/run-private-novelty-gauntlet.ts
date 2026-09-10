@@ -11,12 +11,12 @@ import {
 import { deepFreeze } from '../engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
   type GameManifest,
 } from '../engine/game.ts';
 import { withRustSession } from '../engine/rust-session-helpers.ts';
 import {
   NOVELTY_ROLLOUT_ACTION_LIMIT,
+  runNoveltyFromForcedCheckpoint,
   runNoveltyRollout,
   type NoveltyFrontierCandidate,
   type NoveltyRolloutResult,
@@ -304,39 +304,25 @@ export async function runPrivateNoveltyGauntlet(
     }
     const checkpoint = checkpoints.get(seed.checkpointId);
     if (!checkpoint) throw new Error('private novelty frontier checkpoint was not captured');
-    const entry = await withRustSession(checkpoint.manifest, async (handle) => {
-      await handle.resume(checkpoint as unknown as JsonValue);
-      const issued = (await handle.legalActions()).filter(({ actionId }) => actionId === seed.actionId);
-      if (issued.length !== 1) throw new Error('private novelty frontier action is stale');
-      if (issued[0]!.descriptor.kind !== seed.actionKind) {
-        throw new Error('private novelty frontier action kind changed');
-      }
-      const stepped = await handle.stepAction(issued[0]!);
-      if (!stepped.accepted) {
-        throw new Error(`private novelty frontier action rejected: ${stepped.reason.code}`);
-      }
-      return stepped;
+    const dispatched = await runNoveltyFromForcedCheckpoint(checkpoint, {
+      actionId: seed.actionId,
+      actionKind: seed.actionKind,
+      maxActions,
+      onCheckpoint: captureCheckpoint,
+      predictedEventTypes: seed.predictedEventTypes,
+      predictedStateHash: seed.predictedStateHash,
     });
-    const entryEventTypes = [...new Set(entry.receipt.events.map(({ type }) => type))].sort();
-    if (hashGameState(entry.session.state) !== seed.predictedStateHash
-      || canonicalJson(entryEventTypes as unknown as JsonValue)
-        !== canonicalJson(seed.predictedEventTypes as unknown as JsonValue)
-      || seed.signals.some((signal) => signal.kind === 'action-kind'
-        ? signal.value !== seed.actionKind
-        : !entryEventTypes.includes(signal.value))) {
+    const entryEventTypes = [...dispatched.entry.eventTypes];
+    if (seed.signals.some((signal) => signal.kind === 'action-kind'
+      ? signal.value !== seed.actionKind
+      : !entryEventTypes.includes(signal.value))) {
       throw new Error('private novelty frontier prediction did not replay exactly');
     }
     exercisedSignals.add(signalKey({ kind: 'action-kind', value: seed.actionKind }));
     for (const value of entryEventTypes) {
       exercisedSignals.add(signalKey({ kind: 'event-type', value }));
     }
-    const result = await runNoveltyRollout(entry.session, {
-      maxActions,
-      onCheckpoint: captureCheckpoint,
-    });
-    if (result.initialStateHash !== seed.predictedStateHash) {
-      throw new Error('private novelty frontier rollout started from the wrong state');
-    }
+    const result = dispatched.result;
     frontierBranches.push({
       actionId: seed.actionId,
       actionKind: seed.actionKind,
