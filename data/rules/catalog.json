@@ -6753,6 +6753,49 @@
         "file": "crates/sorcery-engine/tests/belfry_rules.rs",
         "testName": "rule_catalog_0313_belfry_does_not_untap_on_the_opponents_turn"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0314",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Monument Artifact can be conjured onto a controlled site but cannot be conjured onto a unit and cannot be picked up.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeCarried"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "pick-up-artifacts"
+      ],
+      "eventHints": [
+        "artifact-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/monument_rules.rs",
+        "testName": "rule_catalog_0314_a_monument_cannot_be_cast_onto_a_unit_or_picked_up"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0315",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "An ordinary Artifact sharing the Monument's square can still be picked up. The Monument stays out of every Pick Up combination.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeCarried"
+      ],
+      "actionHints": [
+        "pick-up-artifacts"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/monument_rules.rs",
+        "testName": "rule_catalog_0315_a_carryable_artifact_on_the_same_square_can_still_be_picked_up"
+      }
     }
   ]
 }
