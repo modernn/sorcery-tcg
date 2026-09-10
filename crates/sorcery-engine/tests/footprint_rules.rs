@@ -939,7 +939,7 @@ fn rule_catalog_0171_oversized_genesis_strike_hits_enemies_sharing_any_footprint
                 .to_owned()
         })
         .collect();
-    assert_eq!(struck, [enemy.clone()]);
+    assert_eq!(struck.as_slice(), [enemy.as_str()]);
     assert!(!struck.contains(&avatar_id));
     assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
