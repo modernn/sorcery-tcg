@@ -204,6 +204,12 @@ fn rule_catalog_0314_a_monument_cannot_be_cast_onto_a_unit_or_picked_up() {
             descriptor["kind"] == "cast-artifact" && descriptor["cardId"] == "north-monument"
         })
         .collect();
+    let relic_casts: Vec<_> = legal_descriptors(&session)
+        .into_iter()
+        .filter(|descriptor| {
+            descriptor["kind"] == "cast-artifact" && descriptor["cardId"] == "north-relic"
+        })
+        .collect();
     assert!(
         !casts.is_empty(),
         "the Monument can still be conjured onto a site"
@@ -213,6 +219,12 @@ fn rule_catalog_0314_a_monument_cannot_be_cast_onto_a_unit_or_picked_up() {
             .iter()
             .all(|descriptor| descriptor["cell"] == "C4" && descriptor.get("bearer").is_none()),
         "a Monument is not offered onto a unit: {casts:?}"
+    );
+    assert!(
+        relic_casts
+            .iter()
+            .any(|descriptor| descriptor.get("bearer").is_some()),
+        "an ordinary Artifact is still offered onto a unit: {relic_casts:?}"
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-artifact"

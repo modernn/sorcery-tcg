@@ -71,7 +71,8 @@ Still TypeScript (not a second legality or observation engine):
 ## Gate status on this branch
 
 - `pnpm typecheck` / `pnpm lint` — green.
-- Belfry playthrough (`RULE-04 Belfry untaps nearby allies at the end of your turn`) and the catalog linker — green.
+- Monument playthrough (`RULE-04 a Monument cannot be conjured onto a unit or picked up`), catalog `0314`–`0315`, and the catalog linker — green.
+- Belfry playthrough remains green on this stack.
 - Remaining `pnpm test` engine and ingestion files — green. Full `pnpm verify` still fails authority-collector / some DATA-01 bundle cases (`pwsh` missing, no private authority bundle). Those are environment gaps, not this family.
 - PR #2 stays frozen. Rebuild `session-json` after engine fact changes.
 
