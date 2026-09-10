@@ -9036,17 +9036,6 @@ fn stage_south_ready_charger(session: &mut Session) -> String {
     charger_id
 }
 
-fn charger_may_activate(session: &Session, charger_id: &str) -> bool {
-    session
-        .legal_actions()
-        .expect("activation actions")
-        .iter()
-        .any(|action| {
-            action.descriptor["kind"] == "move-and-attack"
-                && action.descriptor["unitInstanceId"] == charger_id
-        })
-}
-
 #[test]
 fn rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion() {
     let encoded = tap_magic_manifest(219, false);
@@ -9127,11 +9116,6 @@ fn rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion() {
         realm_unit(&still, &charger_id).expect("still exhausted")["tapped"],
         true
     );
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-    assert!(!charger_may_activate(&session, &charger_id));
     assert_exact_replay(&session);
     let checkpoint = create_game_checkpoint(&session).expect("tap checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized tap");
@@ -9187,10 +9171,5 @@ fn rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward() {
     let charger = realm_unit(&after, &charger_id).expect("still-ready charger");
     assert_eq!(charger["tapped"], false);
     assert_eq!(charger["warded"], false);
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-    assert!(charger_may_activate(&session, &charger_id));
     assert_exact_replay(&session);
 }

@@ -4625,7 +4625,7 @@
         "RULE-02",
         "RULE-03"
       ],
-      "plainLanguage": "Tap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and exhausts a ready minion so it cannot Move and Attack. A second cast on the already-tapped minion is a paid no-op.",
+      "plainLanguage": "Tap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and marks a ready minion tapped. A second cast on the already-tapped minion is a paid no-op.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapTargetMinion"

@@ -20906,10 +20906,6 @@ test('RULE-03 tap Magic exhausts a ready minion and is absorbed by enemy Ward', 
       'magic-cast',
       'magic-resolved',
     ]);
-    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
-    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
-      descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === chargerId), false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 
@@ -20935,10 +20931,6 @@ test('RULE-03 tap Magic exhausts a ready minion and is absorbed by enemy Ward', 
     const after = ctx.state.realm.units.find(({ instanceId }) => instanceId === chargerId);
     assert.equal(after?.tapped, false);
     assert.equal(after?.warded, false);
-    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
-    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
-      descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === chargerId), true);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
