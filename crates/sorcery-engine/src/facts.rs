@@ -194,6 +194,7 @@ pub enum MagicEffect {
         target_nearby: bool,
         untap_target_minion_after_damage: bool,
     },
+    DestroyTargetSite,
     DestroyTargetSiteWithDamageGrid([u8; 5]),
     DisableTargetNearbyMinionUntilNextTurn,
     DrawSites(u8),
@@ -1144,9 +1145,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
     let discard_site = true_only(object, "discardSiteAsAdditionalCost", path)?;
     let destroy_site = true_only(object, "destroyTargetSite", path)?;
     let damage_grid = parse_damage_grid(object, path)?;
-    let target_site_fact_count =
-        u8::from(discard_site) + u8::from(destroy_site) + u8::from(damage_grid.is_some());
-    if target_site_fact_count != 0 && target_site_fact_count != 3 {
+    let craterize = discard_site && destroy_site && damage_grid.is_some();
+    if (discard_site || damage_grid.is_some()) && !craterize {
         return Err(FactError::new(
             path,
             "site-destruction grid damage facts must be defined together",
@@ -1189,6 +1189,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 target_nearby,
                 untap_target_minion_after_damage,
             }),
+            (destroy_site && damage_grid.is_none()).then_some(MagicEffect::DestroyTargetSite),
             damage_grid.map(MagicEffect::DestroyTargetSiteWithDamageGrid),
             true_only(object, "disableTargetNearbyMinionUntilNextTurn", path)?
                 .then_some(MagicEffect::DisableTargetNearbyMinionUntilNextTurn),

@@ -7705,3 +7705,213 @@ fn rule_catalog_0203_bounce_ward_absorbs_the_return() {
     );
     assert_exact_replay(&session);
 }
+
+fn destroy_site_manifest(seed: u32, protected: bool) -> String {
+    let mut south_site = site(false);
+    if protected {
+        south_site["cannotBeMovedDestroyedOrModified"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-destroy": magic(("destroyTargetSite", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": south_site,
+    });
+    manifest(seed, &cards, &["north-destroy"; 6], &["south-minion"; 6])
+}
+
+fn stage_south_site_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let south_site_id = state(session)["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    south_site_id
+}
+
+fn destroy_site_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("destroy-site actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-destroy"
+        })
+        .filter_map(|action| {
+            Some((
+                action.descriptor["targetLocation"]["cell"]
+                    .as_str()?
+                    .to_owned(),
+                action.descriptor["targetSiteInstanceId"]
+                    .as_str()?
+                    .to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0207_destroy_target_site_replaces_the_site_with_rubble() {
+    let encoded = destroy_site_manifest(207, false);
+    let mut session = opening_main(&encoded);
+    let north_site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("North site identity")
+        .to_owned();
+    let south_site_id = stage_south_site_at_c1(&mut session);
+    let before = state(&session);
+    assert_eq!(
+        destroy_site_targets(&session),
+        [
+            ("C1".to_owned(), south_site_id.clone()),
+            ("C4".to_owned(), north_site_id.clone()),
+        ]
+    );
+    assert_eq!(before["realm"]["sites"]["C1"]["cardId"], "south-site");
+    assert_eq!(before["realm"]["sites"]["C1"]["rubble"], Value::Null);
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        descriptor["targetLocation"],
+        json!({ "cell": "C1", "region": "surface" })
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-destroyed",
+            "rubble-created",
+            "magic-resolved"
+        ]
+    );
+    let destroyed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-destroyed")
+        .expect("site destruction");
+    assert_eq!(destroyed.payload["cell"], "C1");
+    assert_eq!(destroyed.payload["instanceId"], south_site_id);
+    assert_eq!(destroyed.payload["owner"], "south");
+    assert_eq!(
+        destroyed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let rubble = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "rubble-created")
+        .expect("Rubble creation");
+    assert_eq!(rubble.payload["cell"], "C1");
+    assert_eq!(
+        rubble.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "minion-died"
+                || event.event_type == "card-discarded")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"]["cardId"], "rubble");
+    assert_eq!(after["realm"]["sites"]["C1"]["rubble"], true);
+    assert_eq!(
+        after["realm"]["sites"]["C1"]["instanceId"],
+        rubble.payload["instanceId"]
+    );
+    assert_eq!(after["realm"]["sites"]["C4"]["instanceId"], north_site_id);
+    assert_eq!(after["players"]["south"]["avatar"]["location"], "C1");
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_eq!(
+        destroy_site_targets(&session),
+        [("C4".to_owned(), north_site_id)]
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("destroy-site checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized destroy-site");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed destroy-site");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed destroy-site session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site() {
+    let encoded = destroy_site_manifest(208, true);
+    let mut session = opening_main(&encoded);
+    let south_site_id = stage_south_site_at_c1(&mut session);
+    let before = state(&session);
+    let south_site = before["realm"]["sites"]["C1"].clone();
+    assert_eq!(south_site["instanceId"], south_site_id);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-destruction-prevented", "magic-resolved"]
+    );
+    let prevented = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-destruction-prevented")
+        .expect("protected-site prevention");
+    assert_eq!(prevented.payload["cell"], "C1");
+    assert_eq!(prevented.payload["instanceId"], south_site_id);
+    assert_eq!(prevented.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-destroyed"
+                || event.event_type == "rubble-created")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"], south_site);
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_exact_replay(&session);
+}

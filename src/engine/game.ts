@@ -1449,7 +1449,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     const targetSiteEffectFacts = Number(card.discardSiteAsAdditionalCost === true)
       + Number(card.destroyTargetSite === true)
       + Number(targetSiteDamage !== undefined);
-    if (targetSiteEffectFacts !== 0 && targetSiteEffectFacts !== 3) {
+    const simpleDestroyTargetSite = card.destroyTargetSite === true
+      && card.discardSiteAsAdditionalCost !== true
+      && targetSiteDamage === undefined;
+    if (targetSiteEffectFacts !== 0 && targetSiteEffectFacts !== 3 && !simpleDestroyTargetSite) {
       throw new RangeError(
         `${path} site-destruction grid damage facts must be defined together`,
       );
@@ -1463,6 +1466,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageRandomUnitAtLocation !== undefined)
       + Number(card.damageTargetUnit !== undefined)
       + Number(targetSiteEffectFacts === 3)
+      + Number(simpleDestroyTargetSite)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
@@ -2140,6 +2144,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     destroyTargetSite: true as const,
                     discardSiteAsAdditionalCost: true as const,
                   }
+                : card.destroyTargetSite === true
+                  ? { destroyTargetSite: true as const }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true

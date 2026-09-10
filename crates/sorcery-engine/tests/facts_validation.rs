@@ -203,6 +203,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("damageEachUnitAtLocationWithinTwoSteps", json!(2)),
         ("damageRandomUnitAtLocation", json!(2)),
         ("damageTargetUnit", json!(2)),
+        ("destroyTargetSite", json!(true)),
         ("disableTargetNearbyMinionUntilNextTurn", json!(true)),
         ("fightAllyWithAdjacentEnemy", json!(true)),
         ("gainControlOfTargetNearbyMinion", json!(true)),
@@ -440,6 +441,15 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                     "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
                     json!([1, 2, 3, 4, 5]),
                 ),
+            ),
+            "defined together",
+        ),
+        (
+            "destroy plus discard without grid",
+            with(
+                spell("magic", ("destroyTargetSite", json!(true))),
+                "discardSiteAsAdditionalCost",
+                json!(true),
             ),
             "defined together",
         ),

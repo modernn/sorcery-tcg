@@ -1257,6 +1257,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
+        | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::DrawSites(_)
@@ -4932,6 +4933,37 @@ impl Game {
         Ok(targets)
     }
 
+    fn destroy_target_site_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        if caster_location.region == Region::Void {
+            return Ok(Vec::new());
+        }
+        Ok(Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                let site = self.position.sites[cell.index()].as_ref()?;
+                let water = self.location_exists_in_region(cell, Region::Underwater);
+                if caster_location.region == Region::Underwater && !water
+                    || caster_location.region == Region::Underground && water
+                {
+                    return None;
+                }
+                Some(MagicChoice {
+                    target_location: Some(Location {
+                        cell,
+                        region: caster_location.region,
+                    }),
+                    target_site_instance_id: Some(site.card.instance_id.clone()),
+                    ..MagicChoice::default()
+                })
+            })
+            .collect())
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one closed match keeps every supported Magic choice shape explicit"
@@ -5209,6 +5241,9 @@ impl Game {
                 } else {
                     Vec::new()
                 }
+            }
+            MagicEffect::DestroyTargetSite => {
+                self.destroy_target_site_choices(seat, caster_instance_id)?
             }
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
@@ -11655,6 +11690,61 @@ impl Game {
         Ok((destroyed_cards, rubble))
     }
 
+    fn apply_destroy_target_site(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_site = self.position.sites[cell.index()]
+            .as_ref()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let target_protected = matches!(
+            &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
+            CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+        );
+        let owner = target_site.card.owner;
+        outcomes.push(
+            if target_protected {
+                "site-destruction-prevented"
+            } else {
+                "site-destroyed"
+            },
+            || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            },
+        );
+        if target_protected {
+            return Ok(());
+        }
+        let (destroyed_cards, rubble) =
+            self.destroy_sites_into_rubble(vec![(cell, target_site)], source_instance_id)?;
+        self.settle_region_occupancy(outcomes)?;
+        for card in destroyed_cards {
+            self.position.players[seat_index(card.owner)]
+                .cemetery
+                .push(card);
+        }
+        for (rubble_cell, instance_id) in rubble {
+            outcomes.push("rubble-created", || {
+                json!({
+                    "cell": rubble_cell,
+                    "instanceId": instance_id,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -15469,6 +15559,18 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DestroyTargetSite => {
+                let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_site(
+                    cell,
+                    target_site_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DestroyTargetSiteWithDamageGrid(grid) => {
                 let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
                 let target_site_instance_id = target_site_instance_id
@@ -18351,6 +18453,10 @@ mod tests {
             (
                 MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(3),
                 json!({ "damageEachUnitAtLocationWithinTwoSteps": 3 }),
+            ),
+            (
+                MagicEffect::DestroyTargetSite,
+                json!({ "destroyTargetSite": true }),
             ),
             (
                 MagicEffect::DestroyTargetSiteWithDamageGrid([10, 7, 4, 2, 1]),

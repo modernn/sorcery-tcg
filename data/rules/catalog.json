@@ -4327,6 +4327,56 @@
         "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
         "testName": "rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_defending"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0207",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-site Magic pays its cost, offers every real site including the caster's own, never offers Rubble or a void, replaces the chosen site with Rubble, and moves that site into its owner's cemetery. Occupants remain on the Rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-destroyed",
+        "rubble-created",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0207_destroy_target_site_replaces_the_site_with_rubble"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0208",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-site Magic that would destroy a site that cannot be moved, destroyed, or modified is prevented, leaves the site in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeMovedDestroyedOrModified",
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-destruction-prevented",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site"
+      }
     }
   ]
 }
