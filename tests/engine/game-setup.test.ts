@@ -11342,7 +11342,7 @@ test('RULE-03 site Genesis discards up to two top spells publicly without deck-o
   });
 });
 
-test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike', () => {
+test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strike', async () => {
   const north: GameDeckSpec = {
     atlas: Array(6).fill('vikings-north-site'),
     avatar: 'vikings-north-avatar',
@@ -11440,109 +11440,106 @@ test('RULE-03/04 Vikings area damage uses bearer Lethal without becoming a strik
     },
   }), /tapToDamageEachUnitAtAdjacentLocation must be 2/);
 
-  let session = keep(createGameSession(gameManifest));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'vikings' && descriptor.cell === 'C3');
-  const vikings = session.state.realm.units.find(({ cardId }) => cardId === 'vikings')!;
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId), false);
-  take(({ descriptor }) => descriptor.kind === 'cast-artifact'
-    && descriptor.cardId === 'poisonous-dagger'
-    && descriptor.bearer?.instanceId === vikings.instanceId);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'disabled-vikings' && descriptor.cell === 'C3');
-  const disabled = session.state.realm.units.find(({ cardId }) => cardId === 'disabled-vikings')!;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'vikings-warded-enemy' && descriptor.cell === 'C2');
-  const warded = session.state.realm.units.find(({ cardId }) => cardId === 'vikings-warded-enemy')!;
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'vikings-stealthed-enemy' && descriptor.cell === 'C2');
-  const stealthed = session.state.realm.units.find(({ cardId }) => cardId === 'vikings-stealthed-enemy')!;
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'vikings-submerged-enemy'
-    && descriptor.cell === 'C2' && descriptor.region === 'underwater');
-  const submerged = session.state.realm.units.find(({ cardId }) => cardId === 'vikings-submerged-enemy')!;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cardId === 'vikings-ally' && descriptor.cell === 'C2');
-  const ally = session.state.realm.units.find(({ cardId }) => cardId === 'vikings-ally')!;
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === session.state.players.south.avatar.card.instanceId
-    && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'vikings' && descriptor.cell === 'C3');
+    const vikings = ctx.state.realm.units.find(({ cardId }) => cardId === 'vikings')!;
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'cast-artifact'
+      && descriptor.cardId === 'poisonous-dagger'
+      && descriptor.bearer?.instanceId === vikings.instanceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'disabled-vikings' && descriptor.cell === 'C3');
+    const disabled = ctx.state.realm.units.find(({ cardId }) => cardId === 'disabled-vikings')!;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'vikings-warded-enemy' && descriptor.cell === 'C2');
+    const warded = ctx.state.realm.units.find(({ cardId }) => cardId === 'vikings-warded-enemy')!;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'vikings-stealthed-enemy' && descriptor.cell === 'C2');
+    const stealthed = ctx.state.realm.units.find(({ cardId }) => cardId === 'vikings-stealthed-enemy')!;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'vikings-submerged-enemy'
+      && descriptor.cell === 'C2' && descriptor.region === 'underwater');
+    const submerged = ctx.state.realm.units.find(({ cardId }) => cardId === 'vikings-submerged-enemy')!;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'vikings-ally' && descriptor.cell === 'C2');
+    const ally = ctx.state.realm.units.find(({ cardId }) => cardId === 'vikings-ally')!;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === ctx.state.players.south.avatar.card.instanceId
+      && descriptor.to.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
 
-  const checkpoint = session;
-  const activations = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId);
-  assert.deepEqual(activations.flatMap(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' ? [descriptor.targetLocation.cell] : []), ['C2', 'C4']);
-  assert.equal(activations.every(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' && descriptor.targetLocation.region === 'surface'), true);
-  assert.equal(observeGame(checkpoint.state, 'north').realm.units.find(({ instanceId }) =>
-    instanceId === disabled.instanceId)?.disabled, true);
-  assert.equal(legalGameActions(checkpoint.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === disabled.instanceId), false);
+    const activations = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId);
+    assert.deepEqual(activations.flatMap(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' ? [descriptor.targetLocation.cell] : []), ['C2', 'C4']);
+    assert.equal(activations.every(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' && descriptor.targetLocation.region === 'surface'), true);
+    assert.equal(ctx.observe('north').realm.units.find(({ instanceId }) =>
+      instanceId === disabled.instanceId)?.disabled, true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === disabled.instanceId), false);
 
-  const result = stepGame(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage'
-      && descriptor.sourceInstanceId === vikings.instanceId
-      && descriptor.targetLocation.cell === 'C2'));
-  assert.equal(result.accepted, true);
-  session = result.session;
-  const events = result.receipt.events;
-  assert.equal(events.some(({ type }) => type === 'strike-damage-allocated'), false);
-  assert.deepEqual(events.slice(0, 2).map(({ type }) => type), ['area-damage-activated', 'stealth-lost']);
-  assert.equal(events.slice(2, 6).every(({ type }) => type === 'area-damage-allocated'), true);
-  assert.deepEqual(events.filter(({ type }) => type === 'area-damage-allocated')
-    .map(({ payload }) => (payload as unknown as Readonly<Record<string, unknown>>).targetInstanceId)
-    .sort(), [
-    ally.instanceId,
-    session.state.players.south.avatar.card.instanceId,
-    stealthed.instanceId,
-    warded.instanceId,
-  ].sort());
-  assert.equal(events.filter(({ type }) => type === 'minion-died').length, 2);
-  assert.equal(events.some(({ payload, type }) => type === 'damage-dealt'
-    && (payload as unknown as Readonly<Record<string, unknown>>).instanceId === stealthed.instanceId
-    && (payload as unknown as Readonly<Record<string, unknown>>).amount === 2), true);
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === ally.instanceId), false);
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === stealthed.instanceId), false);
-  assert.equal(session.state.realm.artifacts?.some((artifact) =>
-    'bearer' in artifact && artifact.bearer.instanceId === vikings.instanceId), true);
-  const wardedAfter = session.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId)!;
-  assert.deepEqual({ damage: wardedAfter.damage, warded: wardedAfter.warded }, { damage: 0, warded: false });
-  const submergedAfter = session.state.realm.units.find(({ instanceId }) => instanceId === submerged.instanceId)!;
-  assert.deepEqual({ damage: submergedAfter.damage, region: submergedAfter.region }, {
-    damage: 0,
-    region: 'underwater',
+    const result = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage'
+        && descriptor.sourceInstanceId === vikings.instanceId
+        && descriptor.targetLocation.cell === 'C2'));
+    assert.equal(result.accepted, true);
+    const events = result.receipt.events;
+    assert.equal(events.some(({ type }) => type === 'strike-damage-allocated'), false);
+    assert.deepEqual(events.slice(0, 2).map(({ type }) => type), ['area-damage-activated', 'stealth-lost']);
+    assert.equal(events.slice(2, 6).every(({ type }) => type === 'area-damage-allocated'), true);
+    assert.deepEqual(events.filter(({ type }) => type === 'area-damage-allocated')
+      .map(({ payload }) => (payload as unknown as Readonly<Record<string, unknown>>).targetInstanceId)
+      .sort(), [
+      ally.instanceId,
+      ctx.state.players.south.avatar.card.instanceId,
+      stealthed.instanceId,
+      warded.instanceId,
+    ].sort());
+    assert.equal(events.filter(({ type }) => type === 'minion-died').length, 2);
+    assert.equal(events.some(({ payload, type }) => type === 'damage-dealt'
+      && (payload as unknown as Readonly<Record<string, unknown>>).instanceId === stealthed.instanceId
+      && (payload as unknown as Readonly<Record<string, unknown>>).amount === 2), true);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === ally.instanceId), false);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === stealthed.instanceId), false);
+    assert.equal(ctx.state.realm.artifacts?.some((artifact) =>
+      'bearer' in artifact && artifact.bearer.instanceId === vikings.instanceId), true);
+    const wardedAfter = ctx.state.realm.units.find(({ instanceId }) => instanceId === warded.instanceId)!;
+    assert.deepEqual({ damage: wardedAfter.damage, warded: wardedAfter.warded }, { damage: 0, warded: false });
+    const submergedAfter = ctx.state.realm.units.find(({ instanceId }) => instanceId === submerged.instanceId)!;
+    assert.deepEqual({ damage: submergedAfter.damage, region: submergedAfter.region }, {
+      damage: 0,
+      region: 'underwater',
+    });
+    assert.equal(ctx.state.players.south.avatar.life, 18);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) => instanceId === vikings.instanceId)?.tapped, true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId), false);
+    assert.deepEqual(result.receipt.randomDraws, []);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(session.state.players.south.avatar.life, 18);
-  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === vikings.instanceId)?.tapped, true);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'activate-area-damage' && descriptor.sourceInstanceId === vikings.instanceId), false);
-  assert.deepEqual(result.receipt.randomDraws, []);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-03 a minion mana ability requires readiness, taps, and expires at End Phase', async () => {
