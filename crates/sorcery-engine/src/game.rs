@@ -11239,8 +11239,9 @@ impl Game {
         Ok(())
     }
 
-    /// Replaces every destroyed site with Rubble, drains the units its Water layer supported, and
-    /// hands back the destroyed cards with the Rubble identities they left behind.
+    /// Replaces every destroyed site with Rubble, drains the Water layer it supported into the
+    /// relative underground layer for loose Artifacts and units, and hands back the destroyed
+    /// cards with the Rubble identities they left behind.
     #[expect(
         clippy::type_complexity,
         reason = "the caller settles the destroyed cards and the Rubble receipts on separate schedules"
@@ -11269,6 +11270,14 @@ impl Game {
                     .any(|cell| flooded.contains(cell))
             {
                 unit.region = Region::Underground;
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && flooded.contains(location)
+                && *region == Region::Underwater
+            {
+                *region = Region::Underground;
             }
         }
         let mut rubble = Vec::with_capacity(destroyed.len());
@@ -18457,6 +18466,12 @@ mod tests {
             }
             manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
             manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
+            manifest["cards"]["south-spell-3"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
         });
         let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
         let card_id = |name: &str| {
@@ -18517,12 +18532,28 @@ mod tests {
         base.position.sites[c4.index()] = Some(protected.clone());
         let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let artifact_id = IdentityHash::parse(
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .expect("artifact identity");
         let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
         drowned.region = Region::Underwater;
         let mut survivor =
             test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
         survivor.region = Region::Underwater;
         base.position.units = vec![drowned, survivor];
+        base.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("south-spell-3"),
+                instance_id: artifact_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underwater,
+            },
+        }];
         base.position.active_seat = Seat::North;
         base.position.decision_seat = Seat::North;
         base.position.phase = Phase::Main;
@@ -18689,6 +18720,19 @@ mod tests {
                 .expect("Burrowing survivor")
                 .region,
             Region::Underground
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == artifact_id)
+                .expect("loose Artifact")
+                .placement,
+            ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underground,
+            }
         );
         let south_cemetery = &destroyed.position.players[seat_index(Seat::South)].cemetery;
         assert_eq!(south_cemetery[0].instance_id.as_str(), drowned_id);
