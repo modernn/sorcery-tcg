@@ -557,3 +557,203 @@ fn oversized_ground_movement_should_check_every_new_terrain_cell() {
             })
     );
 }
+
+fn freeze() -> Value {
+    json!({
+        "cardType": "magic",
+        "disableTargetNearbyMinionUntilNextTurn": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn composition_manifest(
+    seed: u32,
+    giant_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+) -> String {
+    let mut giant = minion(&json!({ "occupiesSquareArea": 2 }));
+    giant
+        .as_object_mut()
+        .expect("giant facts")
+        .extend(giant_extra.as_object().expect("extra giant facts").clone());
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-giant": giant,
+        "north-site": site(false),
+        "south-avatar": avatar(),
+        "south-minion": minion(&json!({})),
+        "south-site": site(false),
+    });
+    if north_spells.contains(&"north-freeze") {
+        cards["north-freeze"] = freeze();
+    }
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "footprint-composition-rules" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-footprint-composition-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 9],
+                "avatar": "north-avatar",
+                "spellbook": north_spells,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": south_spells,
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical manifest")
+}
+
+fn composition_session(
+    giant_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+) -> Session {
+    let manifest = (1u32..=512)
+        .map(|seed| composition_manifest(seed, giant_extra, north_spells, south_spells))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate session");
+            let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north Spellbook hand");
+            required_north
+                .iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
+        })
+        .expect("opening hand with the required north spells");
+    Session::new(&manifest).expect("composition session")
+}
+
+fn play_first_domains(session: &mut Session) {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+}
+
+fn establish_north_square(session: &mut Session) {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+}
+
+fn establish_north_square_and_south_d2(session: &mut Session) -> String {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    play_site(session, "C2");
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    play_site(session, "D2");
+    let (enemy, _) = summon_at(session, "south-minion", "D2");
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
+#[test]
+fn rule_catalog_0167_oversized_genesis_still_draws_after_summoning() {
+    let mut session = composition_session(
+        &json!({ "genesisDrawSpells": 1 }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let before = state(&session);
+    let drawn_id = before["players"]["north"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("top Spellbook identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(event_types(&receipt), ["minion-summoned", "spell-drawn"]);
+    assert!(
+        !serde_json::to_string(&receipt.events)
+            .expect("event JSON")
+            .contains(&drawn_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "spellcaster": true }),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-freeze",
+            "north-freeze",
+            "north-freeze",
+            "north-freeze",
+        ],
+        &["south-minion"; 8],
+        &["north-giant", "north-freeze"],
+    );
+    let enemy = establish_north_square_and_south_d2(&mut session);
+    let (giant, summon) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        summon.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let actions = session
+        .legal_actions()
+        .expect("Freeze actions after the oversized summon");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-freeze"
+                && action.descriptor["casterInstanceId"] == avatar_id
+                && action.descriptor["target"]["instanceId"] == enemy
+        }),
+        "D2 is nearby only to a non-anchor footprint cell, not the C4 Avatar"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["casterInstanceId"] == giant
+            && descriptor["target"]["instanceId"] == enemy
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &enemy)["disableEffects"][0]["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_exact_replay(&session);
+}

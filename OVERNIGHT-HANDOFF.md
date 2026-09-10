@@ -10,10 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **166 rust-supported / 0 typescript-supported** out of 166.
+`data/rules/catalog.json`: **168 rust-supported / 0 typescript-supported** out of 168.
 
-Latest catalog proofs: Waterbound composes with Ward, end-turn Stealth, Genesis, and Stealth tokens
-(`RULE-CATALOG-0163`–`0166`).
+Latest catalog proofs: oversized 2×2 composes with location-independent Genesis and printed Spellcaster
+(`RULE-CATALOG-0167`–`0168`). Nearby Magic originates from every occupied footprint cell.
 
 ## TypeScript legality cutover
 

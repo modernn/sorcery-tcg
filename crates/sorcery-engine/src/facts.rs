@@ -1501,14 +1501,20 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             || tap_to_shoot_projectile_damage.is_some()
             || shoots_drag_projectile
             || site_provides_no_threshold
-            || spellcaster
             || gains_power_ranged_and_spellcaster_atop_tower
             || summon_to_any_site
             || must_be_cast_to_outer_column
             || token
             || deathrite_damage_each_unit_here.is_some()
             || discard_spell_to_damage_random_other_unit_here.is_some()
-            || genesis.is_some())
+            || matches!(
+                genesis,
+                Some(
+                    MinionGenesis::DamageEachOtherUnitHereOne
+                        | MinionGenesis::MayDamageTargetAdjacentUnitTwo
+                        | MinionGenesis::StrikeEachEnemyHere
+                )
+            ))
     {
         return Err(FactError::new(
             format!("{path}.occupiesSquareArea"),

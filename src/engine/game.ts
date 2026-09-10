@@ -1779,7 +1779,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.tapToShootProjectileDamage !== undefined
       || card.shootsDragProjectile === true
       || card.siteProvidesNoThreshold === true
-      || card.spellcaster === true
       || card.gainsPowerRangedAndSpellcasterAtopTower === 2
       || card.summonToAnySite === true
       || card.mustBeCastToOuterColumn === true
@@ -1787,13 +1786,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.deathriteDamageEachUnitHere !== undefined
       || card.discardSpellToDamageRandomOtherUnitHere !== undefined
       || card.genesisDamageEachOtherUnitHere === 1
-      || card.genesisDisableSelfUntilDamaged === true
       || card.genesisMayDamageTargetAdjacentUnit === 2
-      || card.genesisStrikeEachEnemyHere === true
-      || card.genesisDrawSpells !== undefined
-      || card.genesisDrawSite === true
-      || card.genesisHealController === 2
-      || card.genesisLoseControllerLife === 2)) {
+      || card.genesisStrikeEachEnemyHere === true)) {
     throw new RangeError(
       `${path}.occupiesSquareArea has an unsupported ability combination`,
     );

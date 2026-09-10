@@ -4802,22 +4802,37 @@ impl Game {
         seat: Seat,
         caster_instance_id: &IdentityHash,
     ) -> Result<Location, GameError> {
+        Ok(self.spellcaster_occupied_cells(seat, caster_instance_id)?.0)
+    }
+
+    fn spellcaster_occupied_cells(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<(Location, &[Cell]), GameError> {
         let player = &self.position.players[seat_index(seat)];
         if player.avatar.card.instance_id == *caster_instance_id {
-            return Ok(Location {
-                cell: player.avatar.location,
-                region: Region::Surface,
-            });
+            return Ok((
+                Location {
+                    cell: player.avatar.location,
+                    region: Region::Surface,
+                },
+                std::slice::from_ref(&player.avatar.location),
+            ));
         }
-        self.position
+        let unit = self
+            .position
             .units
             .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *caster_instance_id)
-            .map(|unit| Location {
+            .ok_or(GameError::IllegalAction)?;
+        Ok((
+            Location {
                 cell: unit.location,
                 region: unit.region,
-            })
-            .ok_or(GameError::IllegalAction)
+            },
+            Self::unit_occupied_cells(unit),
+        ))
     }
 
     fn targeted_magic_choices(
@@ -4827,8 +4842,8 @@ impl Game {
         target_nearby: bool,
         minion_only: bool,
     ) -> Result<Vec<MagicChoice>, GameError> {
-        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
-        let caster_cells = [caster_location.cell];
+        let (caster_location, caster_cells) =
+            self.spellcaster_occupied_cells(seat, caster_instance_id)?;
         let mut targets = Vec::new();
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
@@ -4836,7 +4851,7 @@ impl Game {
                 && caster_location.region == Region::Surface
                 && (!target_nearby
                     || Self::footprints_nearby(
-                        &caster_cells,
+                        caster_cells,
                         std::slice::from_ref(&player.avatar.location),
                     ))
             {
@@ -4858,7 +4873,7 @@ impl Game {
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
                             && (!target_nearby
                                 || Self::footprints_nearby(
-                                    &caster_cells,
+                                    caster_cells,
                                     Self::unit_occupied_cells(unit),
                                 ))
                     })
@@ -5190,8 +5205,8 @@ impl Game {
                 choices
             }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
-                let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
-                let caster_cells = [caster_location.cell];
+                let (caster_location, caster_cells) =
+                    self.spellcaster_occupied_cells(seat, caster_instance_id)?;
                 let mut targets: Vec<_> = self
                     .position
                     .units
@@ -5200,7 +5215,7 @@ impl Game {
                         unit.region == caster_location.region
                             && (unit.controller == seat || !self.minion_has_active_stealth(unit))
                             && Self::footprints_nearby(
-                                &caster_cells,
+                                caster_cells,
                                 Self::unit_occupied_cells(unit),
                             )
                     })

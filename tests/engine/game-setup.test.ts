@@ -9966,7 +9966,11 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
   for (const incompatibleFact of [
     { connectsTopBottom: true as const },
     { siteProvidesNoThreshold: true as const },
-    { spellcaster: true as const },
+    { ranged: true as const },
+    { waterbound: true as const },
+    { genesisDamageEachOtherUnitHere: 1 as const },
+    { genesisStrikeEachEnemyHere: true as const },
+    { genesisMayDamageTargetAdjacentUnit: 2 as const },
   ]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -9978,6 +9982,27 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
         },
       },
     }), /occupiesSquareArea has an unsupported ability combination/);
+  }
+  for (const extra of [
+    { genesisDrawSpells: 1 },
+    { genesisDrawSite: true as const },
+    { genesisHealController: 2 as const },
+    { genesisLoseControllerLife: 2 as const },
+    { genesisDisableSelfUntilDamaged: true as const },
+    { spellcaster: true as const },
+  ]) {
+    const composed = createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [giantCardId]: {
+          ...cards[giantCardId]!,
+          ...extra,
+        },
+      },
+    });
+    assert.equal(composed.cards[giantCardId]?.cardType === 'minion'
+      && composed.cards[giantCardId].occupiesSquareArea, 2);
   }
   const gameManifest = createGameManifest(input);
   assert.equal(gameManifest.cards[giantCardId]?.cardType === 'minion'

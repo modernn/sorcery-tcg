@@ -658,4 +658,32 @@ fn typed_effects_should_retain_only_normalized_values() {
     assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(2)));
     assert_eq!(facts.thresholds, Thresholds::default());
     assert_eq!(facts.provides, None::<Element>);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-draw",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "genesisDrawSpells",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Genesis minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(1)));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-caster",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "spellcaster",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Spellcaster") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.spellcaster);
 }

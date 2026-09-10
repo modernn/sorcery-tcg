@@ -3384,6 +3384,51 @@
         "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
         "testName": "rule_catalog_0166_waterbound_stealth_token_enters_stealthed_on_water"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0167",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized minion's Genesis still draws after occupying a canonical 2x2.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0167_oversized_genesis_still_draws_after_summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0168",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed Spellcaster occupying a 2x2 originates Nearby Magic from every footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell"
+      }
     }
   ]
 }
