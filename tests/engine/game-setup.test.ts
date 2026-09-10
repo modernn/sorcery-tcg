@@ -124,6 +124,7 @@ type SiteFacts = Readonly<{
   genesisMayBottomNextSpell?: true;
   genesisReorderNextSpells?: 3;
   minionsHereGainVoidwalkUntilLeavingVoid?: true;
+  ordinary?: true;
   rangedUnitsHereRangeBonus?: 1;
   sacrificeToDestroyNearbySite?: true;
 }>;
@@ -196,6 +197,7 @@ function cardsFor(
         ...(site.minionsHereGainVoidwalkUntilLeavingVoid === true
           ? { minionsHereGainVoidwalkUntilLeavingVoid: true as const }
           : {}),
+        ...(site.ordinary === true ? { ordinary: true as const } : {}),
         ...(site.rangedUnitsHereRangeBonus === 1
           ? { rangedUnitsHereRangeBonus: 1 as const }
           : {}),
@@ -4351,6 +4353,8 @@ test('RULE-03 Hamlet reduces only Ordinary minion mana payments at that site', a
   });
   assert.throws(() => invalid('hamlet', { ordinaryMinionManaDiscount: 0 }),
     /ordinaryMinionManaDiscount must be 1/);
+  assert.throws(() => invalid('hamlet', { ordinary: false }),
+    /ordinary must be true when defined/);
   assert.throws(() => invalid('ordinary-one', { ordinary: false }), /ordinary must be true/);
 
   const gameManifest = await findOpeningManifest(
@@ -25206,6 +25210,80 @@ test('RULE-04 Flood adds Water affinity and later Drought wins the timestamp', a
     assert.equal(ctx.state.realm.auras?.[0]?.cardId, 'flood-north-aura');
     assert.equal(ctx.state.realm.auras?.[1]?.cardId, 'flood-south-aura');
     assert.equal(ctx.state.realm.immobileAreas == null, true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 Fate floods only non-Ordinary sites and submerges occupants', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const fate = {
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities: true as const,
+    cardType: 'aura' as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'fate-north-aura': fate,
+    'fate-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'fate-north-site': { cardType: 'site', elements: ['earth'] },
+    'fate-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'fate-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'fate-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-atlantean-fate-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('fate-north-site'),
+        avatar: 'fate-north-avatar',
+        spellbook: Array(6).fill('fate-north-aura'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('fate-south-site'),
+        avatar: 'fate-south-avatar',
+        spellbook: Array(6).fill('fate-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+    assert.equal(ctx.observe('north').players.north.affinity.water, 0);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'fate-north-aura'
+        && descriptor.cells.includes('C4'));
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 0);
+    assert.equal(ctx.observe('north').players.north.affinity.water, 1);
+    assert.equal(ctx.state.realm.immobileAreas == null, true);
+    assert.equal(ctx.state.realm.auras?.[0]?.cardId, 'fate-north-aura');
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

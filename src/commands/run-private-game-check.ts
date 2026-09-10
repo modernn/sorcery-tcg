@@ -4625,6 +4625,7 @@ function gameDefinition(
   atEndOfControllerTurnControllerGainsLife: 0 | 2 = 0,
   atEndOfControllerTurnControllerLosesLife: 0 | 2 = 0,
   doesNotUntapDuringControllersStartPhase = false,
+  affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4727,6 +4728,7 @@ function gameDefinition(
         : {}),
       ...(genesisHealNearbyAvatars ? { genesisHealNearbyAvatars } : {}),
       ...(isTower ? { isTower: true as const } : {}),
+      ...(card.rarity === 'ordinary' ? { ordinary: true as const } : {}),
       ...(uniqueOrLegendary ? { uniqueOrLegendary: true as const } : {}),
     };
   }
@@ -4737,7 +4739,8 @@ function gameDefinition(
       + Number(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf)
       + Number(atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
       + Number(affectedSitesAreFlooded)
-      + Number(affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold) === 1) {
+      + Number(affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold)
+      + Number(affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities) === 1) {
     return {
       ...(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
         ? { atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true as const }
@@ -4749,6 +4752,11 @@ function gameDefinition(
             ? { affectedSitesAreFlooded: true as const }
             : affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
               ? { affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true as const }
+            : affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+              ? {
+                affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities:
+                  true as const,
+              }
           : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
       cardType: 'aura',
       manaCost: card.manaCost,

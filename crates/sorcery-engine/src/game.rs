@@ -923,6 +923,29 @@ enum Phase {
     Terminal,
 }
 
+/// Later-timestamp Flood / Drought / Fate overlay on one played site.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SiteWaterOverlay {
+    Drought,
+    Fate,
+    Flooded,
+    None,
+    Printed,
+}
+
+enum FateSubmerge {
+    Artifact {
+        cell: Cell,
+        instance_id: IdentityHash,
+        owner: Seat,
+    },
+    Minion {
+        cell: Cell,
+        instance_id: IdentityHash,
+        seat: Seat,
+    },
+}
+
 impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
@@ -1271,6 +1294,7 @@ const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
     match facts.effect {
         AuraEffect::AffectedSitesAreFlooded
         | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+        | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
         | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
         | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
         | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
@@ -1439,6 +1463,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         genesis_reorder_next_spells: _,
         is_tower: _,
         minions_here_gain_voidwalk_until_leaving_void: _,
+        ordinary: _,
         ordinary_minion_mana_discount: _,
         prevents_units_with_power_at_least_from_entering: _,
         ranged_units_here_range_bonus: _,
@@ -3167,7 +3192,10 @@ impl Game {
             else {
                 return Err(invalid("realm site lacks Site facts"));
             };
-            if source.controller != seat || !source_facts.sacrifice_to_destroy_nearby_site {
+            if source.controller != seat
+                || !source_facts.sacrifice_to_destroy_nearby_site
+                || self.site_abilities_lost(source_cell)
+            {
                 continue;
             }
             let nearby = std::iter::once(source_cell)
@@ -4217,7 +4245,7 @@ impl Game {
                     matches!(
                         &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                         CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
-                    )
+                    ) && !self.site_abilities_lost(*cell)
                 })
         }) {
             2
@@ -4975,6 +5003,7 @@ impl Game {
                 facts.effect,
                 AuraEffect::AffectedSitesAreFlooded
                     | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                     | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
                     | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
             ) {
@@ -5040,7 +5069,7 @@ impl Game {
                         matches!(
                             &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                             CardFacts::Site(site_facts) if site_facts.is_tower
-                        )
+                        ) && !self.site_abilities_lost(*cell)
                     })
             })
     }
@@ -6939,7 +6968,9 @@ impl Game {
         else {
             return 1;
         };
-        usize::from(!facts.airborne_minions_atop_move_freely_away)
+        usize::from(
+            !facts.airborne_minions_atop_move_freely_away || self.site_abilities_lost(current.cell),
+        )
     }
 
     fn avatar_entry_power(&self, seat: Seat) -> u8 {
@@ -6969,9 +7000,10 @@ impl Game {
             else {
                 return true;
             };
-            if facts
-                .prevents_units_with_power_at_least_from_entering
-                .is_some_and(|threshold| profile.power >= threshold)
+            if !self.site_abilities_lost(candidate.cell)
+                && facts
+                    .prevents_units_with_power_at_least_from_entering
+                    .is_some_and(|threshold| profile.power >= threshold)
             {
                 return false;
             }
@@ -6992,6 +7024,7 @@ impl Game {
             return true;
         };
         !facts.blocks_ground_minion_entry_while_minion_atop
+            || self.site_abilities_lost(candidate.cell)
             || !self.position.units.iter().any(|unit| {
                 unit.region == Region::Surface && Self::unit_occupies_cell(unit, candidate.cell)
             })
@@ -7045,7 +7078,7 @@ impl Game {
                 matches!(
                     &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                     CardFacts::Site(facts) if facts.connects_burrowed_allies
-                )
+                ) && !self.site_abilities_lost(cell)
             })
     }
 
@@ -7092,6 +7125,7 @@ impl Game {
                             &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                             CardFacts::Site(facts)
                                 if facts.minions_here_gain_voidwalk_until_leaving_void
+                                    && !self.site_abilities_lost(*cell)
                         )
                     })
             })
@@ -7138,20 +7172,41 @@ impl Game {
                 })
     }
 
-    /// Whether a played site is currently a Water site, after Flooded/Drought overlays.
+    /// Whether a played site is currently a Water site, after Flooded/Drought/Fate overlays.
     ///
     /// Official Flooded gives a site a minimum of one Water affinity. Official Drought says
-    /// affected sites are not Water sites and provide no Water threshold. Later-entered Auras
-    /// win when both cover the same cell.
+    /// affected sites are not Water sites and provide no Water threshold. Official Atlantean Fate
+    /// floods only non-Ordinary sites. Later-entered Auras win when both cover the same cell.
     fn is_water_site(&self, cell: Cell) -> bool {
+        match self.site_water_overlay(cell) {
+            SiteWaterOverlay::Printed => self
+                .position
+                .sites
+                .get(cell.index())
+                .and_then(Option::as_ref)
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(facts) if facts.elements.contains(Element::Water)
+                    )
+                }),
+            SiteWaterOverlay::Flooded | SiteWaterOverlay::Fate => true,
+            SiteWaterOverlay::Drought => false,
+            SiteWaterOverlay::None => false,
+        }
+    }
+
+    /// Later-timestamp terrain overlay on a played site, if any Aura covers the cell.
+    fn site_water_overlay(&self, cell: Cell) -> SiteWaterOverlay {
         let Some(site) = self.position.sites[cell.index()].as_ref() else {
-            return false;
+            return SiteWaterOverlay::None;
         };
         let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
         else {
-            return false;
+            return SiteWaterOverlay::None;
         };
-        let mut water = facts.elements.contains(Element::Water);
+        let ordinary = facts.ordinary;
+        let mut overlay = SiteWaterOverlay::Printed;
         for aura in &self.position.auras {
             if !aura.cells.contains(&cell) {
                 continue;
@@ -7162,17 +7217,51 @@ impl Game {
                 continue;
             };
             match aura_facts.effect {
-                AuraEffect::AffectedSitesAreFlooded => water = true,
+                AuraEffect::AffectedSitesAreFlooded => overlay = SiteWaterOverlay::Flooded,
                 AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold => {
-                    water = false;
+                    overlay = SiteWaterOverlay::Drought;
                 }
-                AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                    if !ordinary =>
+                {
+                    overlay = SiteWaterOverlay::Fate;
+                }
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
                 | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
                 | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
                 | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {}
             }
         }
-        water
+        overlay
+    }
+
+    /// Official Fate is a Lose effect: a covered non-Ordinary site has no printed abilities.
+    fn site_abilities_lost(&self, cell: Cell) -> bool {
+        self.fate_covers_non_ordinary_site(cell)
+    }
+
+    fn fate_covers_cell(&self, cell: Cell) -> bool {
+        self.position.auras.iter().any(|aura| {
+            aura.cells.contains(&cell)
+                && matches!(
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts,
+                    CardFacts::Aura(aura_facts)
+                        if aura_facts.effect
+                            == AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                )
+        })
+    }
+
+    fn fate_covers_non_ordinary_site(&self, cell: Cell) -> bool {
+        let Some(site) = self.position.sites[cell.index()].as_ref() else {
+            return false;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        !facts.ordinary && self.fate_covers_cell(cell)
     }
 
     fn underground_location_exists(&self, cell: Cell) -> bool {
@@ -7410,7 +7499,9 @@ impl Game {
                 else {
                     return None;
                 };
-                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified {
+                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified
+                    || self.site_abilities_lost(cell) && suppressed_sites[cell.index()]
+                {
                     return None;
                 }
                 Some(self.effective_site_elements(cell, facts.elements))
@@ -7442,10 +7533,12 @@ impl Game {
     }
 
     fn effective_site_elements(&self, cell: Cell, printed: ElementSet) -> ElementSet {
-        if self.is_water_site(cell) {
-            printed.with(Element::Water)
-        } else {
-            printed.without(Element::Water)
+        match self.site_water_overlay(cell) {
+            SiteWaterOverlay::Fate => ElementSet::only(Element::Water),
+            SiteWaterOverlay::Flooded => printed.with(Element::Water),
+            SiteWaterOverlay::Drought => printed.without(Element::Water),
+            SiteWaterOverlay::Printed => printed,
+            SiteWaterOverlay::None => ElementSet::empty(),
         }
     }
 
@@ -7475,6 +7568,7 @@ impl Game {
                 match facts.effect {
                     AuraEffect::AffectedSitesAreFlooded
                     | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                     | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
                     | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
                         descriptors.extend(Cell::SQUARE_AREAS.into_iter().map(|cells| {
@@ -7532,7 +7626,8 @@ impl Game {
         else {
             return false;
         };
-        !facts.unique_or_legendary && !facts.cannot_be_moved_destroyed_or_modified
+        self.site_abilities_lost(cell)
+            || (!facts.unique_or_legendary && !facts.cannot_be_moved_destroyed_or_modified)
     }
 
     fn cell_is_nearby_spellcaster(
@@ -7590,6 +7685,7 @@ impl Game {
             if source.controller != seat
                 || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
                 || facts.cannot_be_moved_destroyed_or_modified
+                || self.site_abilities_lost(source_cell)
                 || source.last_flight_turn == Some(self.position.turn_number)
             {
                 continue;
@@ -7633,13 +7729,18 @@ impl Game {
             if minion.must_be_cast_to_water_site && !self.is_water_site(cell) {
                 return None;
             }
-            if site_facts
-                .prevents_units_with_power_at_least_from_entering
-                .is_some_and(|threshold| minion.attack >= threshold)
+            if !self.site_abilities_lost(cell)
+                && site_facts
+                    .prevents_units_with_power_at_least_from_entering
+                    .is_some_and(|threshold| minion.attack >= threshold)
             {
                 return None;
             }
-            let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
+            let discount = u64::from(
+                minion.ordinary
+                    && site_facts.ordinary_minion_mana_discount
+                    && !self.site_abilities_lost(cell),
+            );
             Some(minion.mana_cost.saturating_sub(discount))
         };
         if minion.occupies_square_area_two {
@@ -12008,6 +12109,9 @@ impl Game {
         card_id: CardId,
         facts: &SiteFacts,
     ) -> (Option<u8>, usize) {
+        if self.fate_covers_cell(cell) && !facts.ordinary {
+            return (None, 0);
+        }
         let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
             (facts.genesis_gain_mana_if_only_controlled_copy
                 && !self
@@ -12197,9 +12301,11 @@ impl Game {
         let CardFacts::Site(facts) = self.rules.cards[usize::from(card_id.0)].facts.clone() else {
             return Err(GameError::IllegalAction);
         };
+        let abilities_lost = self.fate_covers_cell(cell) && !facts.ordinary;
         self.position.phase = Phase::Main;
         self.position.decision_seat = seat;
-        let paid_token = matches!(genesis_token_choice, Some(GenesisTokenChoice::PayOneMana));
+        let paid_token =
+            !abilities_lost && matches!(genesis_token_choice, Some(GenesisTokenChoice::PayOneMana));
         let token = if paid_token {
             Some(
                 self.create_token_unit(
@@ -12223,7 +12329,7 @@ impl Game {
             .checked_add(u16::from(genesis_gain_mana.unwrap_or(0)))
             .and_then(|mana| mana.checked_sub(u16::from(paid_token)))
             .ok_or(GameError::IllegalAction)?;
-        if facts.genesis_heal_nearby_avatars {
+        if !abilities_lost && facts.genesis_heal_nearby_avatars {
             for healed_seat in [Seat::North, Seat::South] {
                 let avatar_cell = self.position.players[seat_index(healed_seat)]
                     .avatar
@@ -12238,7 +12344,7 @@ impl Game {
                 }
             }
         }
-        if facts.genesis_immobilize_nearby_until_next_turn {
+        if !abilities_lost && facts.genesis_immobilize_nearby_until_next_turn {
             let cells: BTreeSet<Cell> = std::iter::once(cell)
                 .chain(cell.bordering(false))
                 .chain(cell.diagonals(false))
@@ -12281,7 +12387,7 @@ impl Game {
                 })
             });
         }
-        if facts.genesis_enemies_lose_stealth {
+        if !abilities_lost && facts.genesis_enemies_lose_stealth {
             let enemy = other_seat(seat);
             for unit in self
                 .position
@@ -12311,10 +12417,10 @@ impl Game {
                 outcomes,
             );
         }
-        if facts.genesis_discard_top_spells {
+        if !abilities_lost && facts.genesis_discard_top_spells {
             self.apply_mill_library(seat, DeckZone::Spellbook, 2, &card_instance_id, outcomes);
         }
-        if self.position.terminal.is_none() && defer_token {
+        if !abilities_lost && self.position.terminal.is_none() && defer_token {
             self.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
                 cell,
                 seat,
@@ -12325,8 +12431,8 @@ impl Game {
         self.begin_hidden_spell_genesis(
             seat,
             &card_instance_id,
-            facts.genesis_may_bottom_next_spell,
-            facts.genesis_reorder_next_spells,
+            !abilities_lost && facts.genesis_may_bottom_next_spell,
+            !abilities_lost && facts.genesis_reorder_next_spells,
         );
         if self.position.terminal.is_none()
             && let Some(rubble_cell) = create_rubble_at
@@ -12562,6 +12668,7 @@ impl Game {
                 .any(|cell| cell == target_cell);
         if source.controller != seat
             || !source_facts.sacrifice_to_destroy_nearby_site
+            || self.site_abilities_lost(source_cell)
             || !target_matches
             || !nearby
         {
@@ -12573,7 +12680,7 @@ impl Game {
             else {
                 return Err(GameError::IllegalAction);
             };
-            facts.cannot_be_moved_destroyed_or_modified
+            facts.cannot_be_moved_destroyed_or_modified && !self.site_abilities_lost(target_cell)
         } else {
             false
         };
@@ -12677,6 +12784,7 @@ impl Game {
         if source.controller != seat
             || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
             || facts.cannot_be_moved_destroyed_or_modified
+            || self.site_abilities_lost(source_cell)
             || source.last_flight_turn == Some(self.position.turn_number)
             || !nearby
             || self.surface_location_exists(target_cell)
@@ -12802,7 +12910,7 @@ impl Game {
         let target_protected = matches!(
             &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
             CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
-        );
+        ) && !self.site_abilities_lost(cell);
         let owner = target_site.card.owner;
         outcomes.push(
             if target_protected {
@@ -12859,7 +12967,7 @@ impl Game {
         let target_protected = matches!(
             &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
             CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
-        );
+        ) && !self.site_abilities_lost(cell);
         let owner = target_site.card.owner;
         let card_id = self.rules.cards[usize::from(target_site.card.card_id.0)]
             .id
@@ -14444,11 +14552,144 @@ impl Game {
             effect,
             AuraEffect::AffectedSitesAreFlooded
                 | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
         ) {
+            if matches!(
+                effect,
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+            ) {
+                self.apply_atlantean_fate_genesis(cells, &instance_id, outcomes)?;
+            }
             self.settle_region_occupancy(outcomes)?;
             self.settle_nearby_enemy_stealth(outcomes);
         }
         self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Official Fate Genesis submerges minions and loose Artifacts atop affected non-Ordinary sites.
+    fn apply_atlantean_fate_genesis(
+        &mut self,
+        cells: &[Cell],
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let affected: Vec<Cell> = cells
+            .iter()
+            .copied()
+            .filter(|cell| self.site_abilities_lost(*cell))
+            .collect();
+        let mut minion_ids = BTreeSet::new();
+        let mut artifact_ids = BTreeSet::new();
+        for cell in &affected {
+            for unit in &self.position.units {
+                if unit.region == Region::Surface && Self::unit_occupies_cell(unit, *cell) {
+                    minion_ids.insert(unit.card.instance_id.clone());
+                }
+            }
+            for artifact in &self.position.artifacts {
+                if let ArtifactPlacement::Loose {
+                    location,
+                    region: Region::Surface,
+                } = artifact.placement
+                    && location == *cell
+                {
+                    artifact_ids.insert(artifact.card.instance_id.clone());
+                }
+            }
+        }
+        let mut submerged: Vec<(IdentityHash, FateSubmerge)> = Vec::new();
+        for instance_id in minion_ids {
+            let Some(index) = self
+                .position
+                .units
+                .iter()
+                .position(|unit| unit.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            let occupied = Self::unit_occupied_cells(&self.position.units[index]);
+            if self.position.units[index].region != Region::Surface
+                || !occupied
+                    .iter()
+                    .all(|cell| self.location_exists_in_region(*cell, Region::Underwater))
+            {
+                continue;
+            }
+            self.position.units[index].region = Region::Underwater;
+            let cell = self.position.units[index].location;
+            let seat = self.position.units[index].controller;
+            submerged.push((
+                instance_id.clone(),
+                FateSubmerge::Minion {
+                    cell,
+                    instance_id,
+                    seat,
+                },
+            ));
+        }
+        for instance_id in artifact_ids {
+            let Some(index) = self
+                .position
+                .artifacts
+                .iter()
+                .position(|artifact| artifact.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            let ArtifactPlacement::Loose {
+                location,
+                region: Region::Surface,
+            } = self.position.artifacts[index].placement
+            else {
+                continue;
+            };
+            if !self.location_exists_in_region(location, Region::Underwater) {
+                continue;
+            }
+            let owner = self.position.artifacts[index].card.owner;
+            self.position.artifacts[index].placement = ArtifactPlacement::Loose {
+                location,
+                region: Region::Underwater,
+            };
+            submerged.push((
+                instance_id.clone(),
+                FateSubmerge::Artifact {
+                    cell: location,
+                    instance_id,
+                    owner,
+                },
+            ));
+        }
+        submerged.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (_, outcome) in submerged {
+            match outcome {
+                FateSubmerge::Minion {
+                    cell,
+                    instance_id,
+                    seat,
+                } => outcomes.push("minion-submerged", || {
+                    json!({
+                        "cell": cell,
+                        "instanceId": instance_id,
+                        "seat": seat,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                }),
+                FateSubmerge::Artifact {
+                    cell,
+                    instance_id,
+                    owner,
+                } => outcomes.push("artifact-submerged", || {
+                    json!({
+                        "cell": cell,
+                        "instanceId": instance_id,
+                        "owner": owner,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                }),
+            }
+        }
         Ok(())
     }
 
@@ -15723,6 +15964,7 @@ impl Game {
             AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => true,
             AuraEffect::AffectedSitesAreFlooded
             | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+            | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
             | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
             | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {
                 false
@@ -18067,7 +18309,7 @@ impl Game {
                     matches!(
                         &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                         CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
-                    )
+                    ) && !self.site_abilities_lost(cell)
                 });
                 let targets = self.site_grid_damage_targets(cell, grid);
                 let statuses = targets

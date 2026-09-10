@@ -6664,6 +6664,52 @@
         "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
         "testName": "rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0310",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 Aura can flood only non-Ordinary sites. Those sites become Water sites and provide only Water threshold. Ordinary sites under the same area keep their printed elements and are not flooded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "ordinary"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/atlantean_fate_rules.rs",
+        "testName": "rule_catalog_0310_fate_makes_non_ordinary_sites_water_only_and_spares_ordinary"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0311",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "The same Aura's Genesis submerges minions atop affected non-Ordinary sites. A minion without Submerge dies through region settlement and enters its owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured",
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/atlantean_fate_rules.rs",
+        "testName": "rule_catalog_0311_fate_genesis_submerges_and_kills_a_minion_without_submerge"
+      }
     }
   ]
 }

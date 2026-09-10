@@ -204,6 +204,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             json!(true),
         ),
         (
+            "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+            json!(true),
+        ),
+        (
             "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
             json!(3),
         ),

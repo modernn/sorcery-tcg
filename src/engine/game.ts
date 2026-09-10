@@ -213,6 +213,7 @@ export type GameCardDefinition =
     genesisReorderNextSpells?: 3;
     isTower?: true;
     minionsHereGainVoidwalkUntilLeavingVoid?: true;
+    ordinary?: true;
     ordinaryMinionManaDiscount?: 1;
     preventsUnitsWithPowerAtLeastFromEntering?: number;
     rangedUnitsHereRangeBonus?: 1;
@@ -220,6 +221,7 @@ export type GameCardDefinition =
     uniqueOrLegendary?: true;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded?: never;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
@@ -231,6 +233,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded?: never;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3;
@@ -242,6 +245,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded?: never;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
@@ -253,6 +257,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded?: never;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
@@ -264,6 +269,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded: true;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
@@ -275,8 +281,21 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities?: never;
     affectedSitesAreFlooded?: never;
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true;
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities: true;
+    affectedSitesAreFlooded?: never;
+    affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold?: never;
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
     atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
@@ -1185,6 +1204,7 @@ const SUPPORTED_CARD_FIELDS = {
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
   `.trim().split(/\s+/)),
   aura: new Set(`
+    affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
     affectedSitesAreFlooded
     affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
@@ -1245,7 +1265,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
-    isTower ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
+    isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
     minionsHereGainVoidwalkUntilLeavingVoid
     preventsUnitsWithPowerAtLeastFromEntering uniqueOrLegendary
   `.trim().split(/\s+/)),
@@ -1440,6 +1460,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.sacrificeToDestroyNearbySite !== true) {
       throw new RangeError(`${path}.sacrificeToDestroyNearbySite must be true when defined`);
     }
+    if (card.ordinary !== undefined && card.ordinary !== true) {
+      throw new RangeError(`${path}.ordinary must be true when defined`);
+    }
     if (card.ordinaryMinionManaDiscount !== undefined
       && card.ordinaryMinionManaDiscount !== 1) {
       throw new RangeError(`${path}.ordinaryMinionManaDiscount must be 1`);
@@ -1575,12 +1598,19 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold must be true`,
       );
     }
+    if (card.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities !== undefined
+      && card.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities !== true) {
+      throw new RangeError(
+        `${path}.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities must be true`,
+      );
+    }
     if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
       + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
       + Number(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true)
       + Number(card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
       + Number(card.affectedSitesAreFlooded === true)
       + Number(card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold === true)
+      + Number(card.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities === true)
         !== 1) {
       throw new RangeError(`${path} must define exactly one supported Aura effect`);
     }
@@ -2642,6 +2672,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { genesisReorderNextSpells: 3 as const }
               : {}),
             ...(card.isTower === true ? { isTower: true as const } : {}),
+            ...(card.ordinary === true ? { ordinary: true as const } : {}),
             ...(card.minionsHereGainVoidwalkUntilLeavingVoid === true
               ? { minionsHereGainVoidwalkUntilLeavingVoid: true as const }
               : {}),
@@ -2684,6 +2715,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     : card.affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold === true
                       ? {
                         affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold: true as const,
+                      }
+                    : card.affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                      === true
+                      ? {
+                        affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities:
+                          true as const,
                       }
                     : {
                       immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:

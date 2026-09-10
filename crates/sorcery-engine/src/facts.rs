@@ -67,6 +67,18 @@ impl ElementSet {
         Self(self.0 & !(1 << element.index()))
     }
 
+    /// Returns a set that contains only `element`.
+    #[must_use]
+    pub const fn only(element: Element) -> Self {
+        Self(0).with(element)
+    }
+
+    /// Returns an empty elemental set.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
     /// Iterates present elements in canonical rules order.
     pub fn iter(self) -> impl Iterator<Item = Element> {
         Element::ALL
@@ -151,6 +163,7 @@ pub struct SiteFacts {
     pub genesis_reorder_next_spells: bool,
     pub is_tower: bool,
     pub minions_here_gain_voidwalk_until_leaving_void: bool,
+    pub ordinary: bool,
     pub ordinary_minion_mana_discount: bool,
     pub prevents_units_with_power_at_least_from_entering: Option<u8>,
     pub ranged_units_here_range_bonus: bool,
@@ -187,6 +200,7 @@ pub struct ArtifactFacts {
 pub enum AuraEffect {
     AffectedSitesAreFlooded,
     AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold,
+    AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities,
     AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
     AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
     AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
@@ -719,6 +733,7 @@ const SITE_FIELDS: &[&str] = &[
     "genesisReorderNextSpells",
     "isTower",
     "minionsHereGainVoidwalkUntilLeavingVoid",
+    "ordinary",
     "ordinaryMinionManaDiscount",
     "preventsUnitsWithPowerAtLeastFromEntering",
     "rangedUnitsHereRangeBonus",
@@ -743,6 +758,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
 ];
 
 const AURA_FIELDS: &[&str] = &[
+    "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
     "affectedSitesAreFlooded",
     "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
     "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
@@ -1085,6 +1101,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             "minionsHereGainVoidwalkUntilLeavingVoid",
             path,
         )?,
+        ordinary: true_only(object, "ordinary", path)?,
         ordinary_minion_mana_discount: fixed_integer(
             object,
             "ordinaryMinionManaDiscount",
@@ -1211,6 +1228,14 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
                 path,
             )?
             .then_some(AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold),
+            true_only(
+                object,
+                "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+                path,
+            )?
+            .then_some(
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities,
+            ),
             fixed_integer(
                 object,
                 "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
