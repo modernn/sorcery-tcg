@@ -7962,6 +7962,10 @@ fn return_site_targets(session: &Session) -> Vec<(String, String)> {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps targeting, return events, void banishment, observation, checkpoint, and replay together"
+)]
 fn rule_catalog_0209_return_target_site_returns_owners_site_and_banishes_surface_minions() {
     let encoded = return_site_manifest(209, false);
     let mut session = opening_main(&encoded);
