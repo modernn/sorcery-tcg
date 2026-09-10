@@ -8644,7 +8644,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
     },
     seed: 1,
   }), /genesisDisableSelfUntilDamaged must be true when defined/);
-  for (const incompatible of [{ stealth: true }, { token: true }, { waterbound: true }]) {
+  for (const incompatible of [{ stealth: true }, { token: true }]) {
     assert.throws(() => createGameManifest({
       ...input,
       cards: {
@@ -8658,6 +8658,24 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       seed: 1,
     }), /Genesis/);
   }
+  const waterboundGenesisDisable = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisDisableSelfUntilDamaged: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+    seed: 1,
+  });
+  assert.equal(
+    waterboundGenesisDisable.cards[alliedMinionId]?.cardType === 'minion'
+      && waterboundGenesisDisable.cards[alliedMinionId].genesisDisableSelfUntilDamaged
+      && waterboundGenesisDisable.cards[alliedMinionId].waterbound,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
