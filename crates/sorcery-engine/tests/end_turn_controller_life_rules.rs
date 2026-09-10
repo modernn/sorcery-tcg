@@ -332,7 +332,8 @@ fn rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar
 
 #[test]
 fn rule_catalog_0307_end_turn_controller_life_loss_can_open_deaths_door() {
-    let mut session = Session::new(&loss_manifest(2)).expect("valid Death's Door life-loss session");
+    let mut session =
+        Session::new(&loss_manifest(2)).expect("valid Death's Door life-loss session");
     summon_north_source(&mut session);
     let source_id = unit_id(&session, "north-source");
     let receipt = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn").1;
