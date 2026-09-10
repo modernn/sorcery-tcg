@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
+use std::path::{Component, Path};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -64,13 +65,52 @@ pub struct GameRecord {
     pub turn_count: u64,
 }
 
-/// Building a per-game record failed.
+/// Fixed filenames written by [`write_game_artifacts`].
+pub const GAME_ARTIFACT_FILES: [&str; 5] = [
+    "manifest.json",
+    "transcript.json",
+    "events.jsonl",
+    "coverage.json",
+    "outcome.json",
+];
+
+/// Classified outcome and terminal identities for one finished game.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameOutcomeArtifact {
+    /// Number of accepted actions.
+    pub accepted_action_count: usize,
+    /// Ranked/public result classification.
+    pub classification: BatchClassification,
+    /// Identity of the flattened event list.
+    pub events_hash: IdentityHash,
+    /// Number of fights started.
+    pub fight_count: usize,
+    /// Final authoritative state identity.
+    pub final_state_hash: IdentityHash,
+    /// Canonical manifest identity.
+    pub manifest_id: IdentityHash,
+    /// Whether authoritative replay reproduced the transcript.
+    pub replay_verified: bool,
+    /// Record schema.
+    pub schema_version: u8,
+    /// Exact finished public terminal.
+    pub terminal: FinishedTerminal,
+    /// Identity of the accepted-action transcript.
+    pub transcript_hash: IdentityHash,
+    /// Final turn number.
+    pub turn_count: u64,
+}
+
+/// Building or writing a per-game record failed.
 #[derive(Debug)]
 pub enum GameRecordError {
     /// The compact rollout or authoritative replay failed.
     Simulator(SimulatorError),
     /// The session finished with a disagreeing outcome and reason.
     Invalid(&'static str),
+    /// Writing artifact files failed.
+    Io(std::io::Error),
     /// The session or rollout is still active.
     NonTerminal,
 }
@@ -80,6 +120,7 @@ impl fmt::Display for GameRecordError {
         match self {
             Self::Simulator(error) => error.fmt(formatter),
             Self::Invalid(message) => formatter.write_str(message),
+            Self::Io(error) => error.fmt(formatter),
             Self::NonTerminal => formatter.write_str("game record requires a finished session"),
         }
     }
@@ -89,6 +130,7 @@ impl Error for GameRecordError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Simulator(error) => Some(error),
+            Self::Io(error) => Some(error),
             Self::Invalid(_) | Self::NonTerminal => None,
         }
     }
@@ -116,6 +158,84 @@ impl From<serde_json::Error> for GameRecordError {
     fn from(error: serde_json::Error) -> Self {
         Self::Simulator(SimulatorError::from(SessionError::from(error)))
     }
+}
+
+impl From<std::io::Error> for GameRecordError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl GameRecord {
+    /// Returns the classified outcome artifact derived from this record.
+    #[must_use]
+    pub fn outcome_artifact(&self) -> GameOutcomeArtifact {
+        GameOutcomeArtifact {
+            accepted_action_count: self.accepted_action_count,
+            classification: self.classification,
+            events_hash: self.events_hash.clone(),
+            fight_count: self.fight_count,
+            final_state_hash: self.final_state_hash.clone(),
+            manifest_id: self.manifest_id.clone(),
+            replay_verified: self.replay_verified,
+            schema_version: self.schema_version,
+            terminal: self.terminal,
+            transcript_hash: self.transcript_hash.clone(),
+            turn_count: self.turn_count,
+        }
+    }
+}
+
+/// Writes the six SIM-03 artifact files into `dir`.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] when `dir` escapes (`..`), cannot be created, or
+/// a file cannot be written.
+pub fn write_game_artifacts(dir: &Path, record: &GameRecord) -> Result<(), GameRecordError> {
+    validate_artifacts_dir(dir)?;
+    std::fs::create_dir_all(dir)?;
+    write_canonical_file(&dir.join("manifest.json"), &record.manifest)?;
+    write_canonical_file(
+        &dir.join("transcript.json"),
+        &serde_json::to_value(&record.transcript)?,
+    )?;
+    std::fs::write(dir.join("events.jsonl"), &record.event_jsonl)?;
+    write_canonical_file(
+        &dir.join("coverage.json"),
+        &serde_json::to_value(&record.coverage)?,
+    )?;
+    write_canonical_file(
+        &dir.join("outcome.json"),
+        &serde_json::to_value(record.outcome_artifact())?,
+    )?;
+    Ok(())
+}
+
+/// Rejects empty artifact paths and parent-directory escapes.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError::Invalid`] when the path is empty or contains `..`.
+pub fn validate_artifacts_dir(dir: &Path) -> Result<(), GameRecordError> {
+    if dir.as_os_str().is_empty() {
+        return Err(GameRecordError::Invalid("artifacts directory is empty"));
+    }
+    if dir
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(GameRecordError::Invalid(
+            "artifacts directory must not contain ..",
+        ));
+    }
+    Ok(())
+}
+
+fn write_canonical_file(path: &Path, value: &Value) -> Result<(), GameRecordError> {
+    let output = canonical_json(value)?;
+    std::fs::write(path, format!("{output}\n"))?;
+    Ok(())
 }
 
 /// Builds the SIM-03 record from one finished authoritative session.
@@ -296,7 +416,13 @@ fn descriptor_kind(descriptor: &Value) -> Result<String, GameRecordError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{event_jsonl, game_record_from_session, record_synthetic_demo};
+    use std::fs;
+
+    use super::{
+        GAME_ARTIFACT_FILES, event_jsonl, game_record_from_session, record_synthetic_demo,
+        validate_artifacts_dir, write_game_artifacts,
+    };
+    use crate::canonical::canonical_json;
     use crate::synthetic::synthetic_demo_session;
 
     #[test]
@@ -367,5 +493,53 @@ mod tests {
                 .offered_action_kinds
                 .contains(&"end-turn".to_owned())
         );
+    }
+
+    #[test]
+    fn artifact_directory_rejects_parent_escape_and_writes_fixed_files() {
+        assert!(validate_artifacts_dir("..".as_ref()).is_err());
+        assert!(validate_artifacts_dir("games/../secret".as_ref()).is_err());
+        assert!(validate_artifacts_dir("".as_ref()).is_err());
+
+        let record = record_synthetic_demo(31).expect("seed-31 record");
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-game-artifacts-{}-31", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write_game_artifacts(&dir, &record).expect("write artifacts");
+        let names = fs::read_dir(&dir)
+            .expect("artifact dir")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        for file in GAME_ARTIFACT_FILES {
+            assert!(names.contains(&file.to_owned()), "{file}");
+        }
+        assert_eq!(
+            fs::read_to_string(dir.join("events.jsonl")).expect("events"),
+            record.event_jsonl
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("manifest.json")).expect("manifest"),
+            format!(
+                "{}\n",
+                canonical_json(&record.manifest).expect("canonical manifest")
+            )
+        );
+        let outcome: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("outcome.json")).expect("outcome"))
+                .expect("outcome JSON");
+        assert_eq!(outcome["finalStateHash"], record.final_state_hash.as_str());
+        assert_eq!(outcome["transcriptHash"], record.transcript_hash.as_str());
+        assert_eq!(outcome["eventsHash"], record.events_hash.as_str());
+        assert_eq!(
+            outcome["classification"],
+            "unranked_partial_rules_unverified_authority"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

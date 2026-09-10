@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, Read, Write};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sorcery_engine::batch::{
-    BatchJob, GameBatchResult, MAX_BATCH_BYTES, MAX_BATCH_JOBS, MAX_BATCH_WORKERS,
-    default_batch_workers, run_game_batch,
+    BatchJob, DeterministicGameReport, GameBatchResult, MAX_BATCH_BYTES, MAX_BATCH_JOBS,
+    MAX_BATCH_WORKERS, default_batch_workers, run_game_batch, run_game_batch_to_dir,
 };
 use sorcery_engine::canonical::{
     IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
@@ -15,7 +16,7 @@ use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
     validate_deck,
 };
-use sorcery_engine::game_record::record_synthetic_demo;
+use sorcery_engine::game_record::{record_synthetic_demo, write_game_artifacts};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -26,9 +27,19 @@ const MAX_BATCH_JSON_BYTES: usize = MAX_BATCH_BYTES * 2 + 1024 * 1024;
 type CliResult<T> = Result<T, Box<dyn Error>>;
 
 enum Command {
-    Demo { seed: u32 },
-    Record { seed: u32 },
-    Batch { workers: usize, seeds: Vec<u32> },
+    Demo {
+        seed: u32,
+        artifacts_dir: Option<String>,
+    },
+    Record {
+        seed: u32,
+        artifacts_dir: Option<String>,
+    },
+    Batch {
+        workers: usize,
+        seeds: Vec<u32>,
+        artifacts_dir: Option<String>,
+    },
     BatchJson,
 }
 
@@ -37,6 +48,7 @@ enum Command {
 struct BatchJsonRequest {
     schema_version: u8,
     workers: usize,
+    artifacts_dir: Option<String>,
     jobs: Vec<BatchJsonJob>,
 }
 
@@ -93,18 +105,42 @@ fn main() {
 
 fn run() -> CliResult<()> {
     match parse_args(std::env::args().skip(1))? {
-        Command::Demo { seed } => {
-            let mut results = run_synthetic_batch(&[seed], 1)?;
-            let report = results
-                .pop()
-                .ok_or_else(|| io::Error::other("demo produced no result"))?
-                .report;
-            write_canonical_json(&report)
+        Command::Demo {
+            seed,
+            artifacts_dir,
+        } => {
+            if let Some(dir) = artifacts_dir {
+                let record = record_synthetic_demo(seed)?;
+                write_game_artifacts(Path::new(&dir), &record)?;
+                write_canonical_json(&compact_report(&record))
+            } else {
+                let mut results = run_synthetic_batch(&[seed], 1, None)?;
+                let report = results
+                    .pop()
+                    .ok_or_else(|| io::Error::other("demo produced no result"))?
+                    .report;
+                write_canonical_json(&report)
+            }
         }
-        Command::Record { seed } => write_canonical_json(&record_synthetic_demo(seed)?),
-        Command::Batch { workers, seeds } => {
-            write_canonical_json(&run_synthetic_batch(&seeds, workers)?)
+        Command::Record {
+            seed,
+            artifacts_dir,
+        } => {
+            let record = record_synthetic_demo(seed)?;
+            if let Some(dir) = artifacts_dir {
+                write_game_artifacts(Path::new(&dir), &record)?;
+            }
+            write_canonical_json(&record)
         }
+        Command::Batch {
+            workers,
+            seeds,
+            artifacts_dir,
+        } => write_canonical_json(&run_synthetic_batch(
+            &seeds,
+            workers,
+            artifacts_dir.as_deref(),
+        )?),
         Command::BatchJson => {
             let input = read_batch_json_stdin()?;
             write_canonical_json(&run_batch_json(&input)?)
@@ -117,34 +153,27 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
     match args.next().as_deref() {
         Some("demo") => {
             let seed = args.next().map_or(Ok(1), |value| parse_seed(&value))?;
+            let artifacts_dir = args.next();
             if args.next().is_some() {
-                return Err(io::Error::other("usage: sorcery-engine demo [seed]").into());
+                return Err(io::Error::other("usage: sorcery-engine demo [seed] [dir]").into());
             }
-            Ok(Command::Demo { seed })
+            Ok(Command::Demo {
+                seed,
+                artifacts_dir,
+            })
         }
         Some("record") => {
             let seed = args.next().map_or(Ok(1), |value| parse_seed(&value))?;
+            let artifacts_dir = args.next();
             if args.next().is_some() {
-                return Err(io::Error::other("usage: sorcery-engine record [seed]").into());
+                return Err(io::Error::other("usage: sorcery-engine record [seed] [dir]").into());
             }
-            Ok(Command::Record { seed })
+            Ok(Command::Record {
+                seed,
+                artifacts_dir,
+            })
         }
-        Some("batch") => {
-            let workers = args.next().map_or_else(
-                || Ok(default_batch_workers()),
-                |value| parse_workers(&value),
-            )?;
-            let mut seeds = args
-                .map(|value| parse_seed(&value))
-                .collect::<Result<Vec<_>, _>>()?;
-            if seeds.is_empty() {
-                seeds.push(1);
-            }
-            if seeds.len() > MAX_BATCH_JOBS {
-                return Err(io::Error::other("batch must contain 1-256 seeds").into());
-            }
-            Ok(Command::Batch { workers, seeds })
-        }
+        Some("batch") => parse_batch_args(args),
         Some("batch-json") => {
             if args.next().is_some() {
                 return Err(io::Error::other("usage: sorcery-engine batch-json").into());
@@ -152,7 +181,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] | record [seed] | batch [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | batch-json",
         )
         .into()),
     }
@@ -189,6 +218,8 @@ fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
     if request.jobs.is_empty() || request.jobs.len() > MAX_BATCH_JOBS {
         return Err(io::Error::other("batch-json must contain 1-256 jobs").into());
     }
+    let artifacts_dir = request.artifacts_dir;
+    let workers = request.workers;
     let validated = request
         .jobs
         .into_iter()
@@ -222,7 +253,59 @@ fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
             south_policy: &job.south_policy,
         })
         .collect::<Vec<_>>();
-    Ok(run_game_batch(&jobs, request.workers)?)
+    if let Some(dir) = artifacts_dir {
+        Ok(run_game_batch_to_dir(&jobs, workers, Path::new(&dir))?)
+    } else {
+        Ok(run_game_batch(&jobs, workers)?)
+    }
+}
+
+fn parse_batch_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
+    let mut artifacts_dir = None;
+    let mut rest = Vec::new();
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        if arg == "--out" {
+            let dir = args
+                .next()
+                .ok_or_else(|| io::Error::other("usage: sorcery-engine batch --out dir"))?;
+            artifacts_dir = Some(dir);
+            continue;
+        }
+        rest.push(arg);
+    }
+    let mut rest = rest.into_iter();
+    let workers = rest.next().map_or_else(
+        || Ok(default_batch_workers()),
+        |value| parse_workers(&value),
+    )?;
+    let mut seeds = rest
+        .map(|value| parse_seed(&value))
+        .collect::<Result<Vec<_>, _>>()?;
+    if seeds.is_empty() {
+        seeds.push(1);
+    }
+    if seeds.len() > MAX_BATCH_JOBS {
+        return Err(io::Error::other("batch must contain 1-256 seeds").into());
+    }
+    Ok(Command::Batch {
+        workers,
+        seeds,
+        artifacts_dir,
+    })
+}
+
+fn compact_report(record: &sorcery_engine::game_record::GameRecord) -> DeterministicGameReport {
+    DeterministicGameReport {
+        accepted_action_count: record.accepted_action_count,
+        classification: record.classification,
+        final_state_hash: record.final_state_hash.clone(),
+        fight_count: record.fight_count,
+        replay_verified: record.replay_verified,
+        terminal: record.terminal,
+        transcript_hash: record.transcript_hash.clone(),
+        turn_count: record.turn_count,
+    }
 }
 
 fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHash)> {
@@ -287,7 +370,11 @@ fn parse_workers(value: &str) -> CliResult<usize> {
     Ok(workers)
 }
 
-fn run_synthetic_batch(seeds: &[u32], workers: usize) -> CliResult<Vec<GameBatchResult>> {
+fn run_synthetic_batch(
+    seeds: &[u32],
+    workers: usize,
+    artifacts_dir: Option<&str>,
+) -> CliResult<Vec<GameBatchResult>> {
     let manifests = seeds
         .iter()
         .map(|&seed| synthetic_demo_manifest_json(seed))
@@ -303,7 +390,11 @@ fn run_synthetic_batch(seeds: &[u32], workers: usize) -> CliResult<Vec<GameBatch
             south_policy: &policy,
         })
         .collect::<Vec<_>>();
-    Ok(run_game_batch(&jobs, workers)?)
+    if let Some(dir) = artifacts_dir {
+        Ok(run_game_batch_to_dir(&jobs, workers, Path::new(dir))?)
+    } else {
+        Ok(run_game_batch(&jobs, workers)?)
+    }
 }
 
 fn baseline_policy(manifest_json: &str) -> CliResult<PolicySnapshot> {
@@ -355,21 +446,72 @@ mod tests {
     #[test]
     fn parse_args_should_default_record_seed() {
         let command = parse_args(["record".to_owned()].into_iter()).expect("valid record");
-        let Command::Record { seed } = command else {
+        let Command::Record {
+            seed,
+            artifacts_dir,
+        } = command
+        else {
             panic!("expected record command");
         };
 
-        assert_eq!(seed, 1);
+        assert_eq!((seed, artifacts_dir), (1, None));
+    }
+
+    #[test]
+    fn parse_args_should_take_demo_and_batch_artifact_dirs() {
+        let demo =
+            parse_args(["demo".to_owned(), "31".to_owned(), "games/31".to_owned()].into_iter())
+                .expect("valid demo");
+        let Command::Demo {
+            seed,
+            artifacts_dir,
+        } = demo
+        else {
+            panic!("expected demo command");
+        };
+        assert_eq!((seed, artifacts_dir.as_deref()), (31, Some("games/31")));
+
+        let batch = parse_args(
+            [
+                "batch".to_owned(),
+                "--out".to_owned(),
+                "games".to_owned(),
+                "2".to_owned(),
+                "31".to_owned(),
+            ]
+            .into_iter(),
+        )
+        .expect("valid batch");
+        let Command::Batch {
+            seeds,
+            workers,
+            artifacts_dir,
+        } = batch
+        else {
+            panic!("expected batch command");
+        };
+        assert_eq!(
+            (workers, seeds, artifacts_dir.as_deref()),
+            (2, vec![31], Some("games"))
+        );
     }
 
     #[test]
     fn parse_args_should_apply_batch_defaults() {
         let command = parse_args(["batch".to_owned()].into_iter()).expect("valid defaults");
-        let Command::Batch { seeds, workers } = command else {
+        let Command::Batch {
+            seeds,
+            workers,
+            artifacts_dir,
+        } = command
+        else {
             panic!("expected batch command");
         };
 
-        assert_eq!((seeds, (1..=8).contains(&workers)), (vec![1], true));
+        assert_eq!(
+            (seeds, (1..=8).contains(&workers), artifacts_dir),
+            (vec![1], true, None)
+        );
     }
 
     #[test]

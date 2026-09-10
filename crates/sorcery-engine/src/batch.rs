@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 use std::thread;
 
 use serde::Serialize;
@@ -9,8 +10,9 @@ use serde::Serialize;
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
 use crate::game::{Game, GameEndReason, GameOutcome};
+use crate::game_record::{game_record_from_session, validate_artifacts_dir, write_game_artifacts};
 use crate::policy::PolicySnapshot;
-use crate::session::SessionError;
+use crate::session::{Session, SessionError};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
 
 /// Maximum jobs accepted by one bounded batch.
@@ -246,6 +248,13 @@ pub enum BatchError {
     NonTerminal(usize),
     /// A native worker panicked.
     WorkerPanicked,
+    /// Writing one job's SIM-03 artifacts failed.
+    Artifacts {
+        /// Original job index.
+        job_index: usize,
+        /// Underlying record or filesystem failure.
+        source: crate::game_record::GameRecordError,
+    },
 }
 
 impl fmt::Display for BatchError {
@@ -259,6 +268,12 @@ impl fmt::Display for BatchError {
                 write!(formatter, "batch job {job_index} did not terminate")
             }
             Self::WorkerPanicked => formatter.write_str("native batch worker panicked"),
+            Self::Artifacts { job_index, source } => {
+                write!(
+                    formatter,
+                    "batch job {job_index} artifacts failed: {source}"
+                )
+            }
         }
     }
 }
@@ -267,6 +282,7 @@ impl Error for BatchError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Job { source, .. } => Some(source),
+            Self::Artifacts { source, .. } => Some(source),
             Self::Invalid(_) | Self::NonTerminal(_) | Self::WorkerPanicked => None,
         }
     }
@@ -283,6 +299,38 @@ impl Error for BatchError {
 pub fn run_batch(
     jobs: &[BatchJob<'_>],
     requested_workers: usize,
+) -> Result<Vec<BatchResult>, BatchError> {
+    run_batch_inner(jobs, requested_workers, None)
+}
+
+/// Runs a bounded batch and writes one SIM-03 artifact directory per job.
+///
+/// Compact reports stay in input order. Each job writes into `{dir}/{jobIndex}/`.
+///
+/// # Errors
+///
+/// Returns [`BatchError`] under the same conditions as [`run_batch`], or when
+/// artifact paths or writes fail.
+pub fn run_batch_to_dir(
+    jobs: &[BatchJob<'_>],
+    requested_workers: usize,
+    artifacts_dir: &Path,
+) -> Result<Vec<BatchResult>, BatchError> {
+    validate_artifacts_dir(artifacts_dir).map_err(|source| BatchError::Artifacts {
+        job_index: 0,
+        source,
+    })?;
+    std::fs::create_dir_all(artifacts_dir).map_err(|error| BatchError::Artifacts {
+        job_index: 0,
+        source: error.into(),
+    })?;
+    run_batch_inner(jobs, requested_workers, Some(artifacts_dir))
+}
+
+fn run_batch_inner(
+    jobs: &[BatchJob<'_>],
+    requested_workers: usize,
+    artifacts_dir: Option<&Path>,
 ) -> Result<Vec<BatchResult>, BatchError> {
     if jobs.is_empty() || jobs.len() > MAX_BATCH_JOBS {
         return Err(BatchError::Invalid("batch must contain 1-256 jobs"));
@@ -308,7 +356,9 @@ pub fn run_batch(
                     chunk
                         .iter()
                         .enumerate()
-                        .map(|(offset, job)| run_job(chunk_index * chunk_size + offset, job))
+                        .map(|(offset, job)| {
+                            finish_job(chunk_index * chunk_size + offset, job, artifacts_dir)
+                        })
                         .collect::<Vec<_>>()
                 })
             })
@@ -337,13 +387,44 @@ pub fn run_game_batch(
         .collect())
 }
 
+/// Runs an ordered native batch and writes one SIM-03 artifact directory per job.
+///
+/// # Errors
+///
+/// Returns [`BatchError`] under the same conditions as [`run_batch_to_dir`].
+pub fn run_game_batch_to_dir(
+    jobs: &[BatchJob<'_>],
+    requested_workers: usize,
+    artifacts_dir: &Path,
+) -> Result<Vec<GameBatchResult>, BatchError> {
+    Ok(run_batch_to_dir(jobs, requested_workers, artifacts_dir)?
+        .into_iter()
+        .map(GameBatchResult::from)
+        .collect())
+}
+
 /// Returns the default bounded native worker count for this host.
 #[must_use]
 pub fn default_batch_workers() -> usize {
     thread::available_parallelism().map_or(1, |workers| workers.get().min(MAX_BATCH_WORKERS))
 }
 
-fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchError> {
+fn finish_job(
+    job_index: usize,
+    job: &BatchJob<'_>,
+    artifacts_dir: Option<&Path>,
+) -> Result<BatchResult, BatchError> {
+    let (result, session) = run_job(job_index, job)?;
+    if let Some(dir) = artifacts_dir {
+        let record = game_record_from_session(&session)
+            .map_err(|source| BatchError::Artifacts { job_index, source })?;
+        write_game_artifacts(&dir.join(job_index.to_string()), &record)
+            .map_err(|source| BatchError::Artifacts { job_index, source })?;
+    }
+    Ok(result)
+}
+
+fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<(BatchResult, Session), BatchError> {
     let failed = |source| BatchError::Job { job_index, source };
     let game = Game::from_manifest_json(job.manifest_json)
         .map_err(SimulatorError::from)
@@ -381,23 +462,26 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<BatchResult, BatchErr
         .flat_map(|receipt| &receipt.events)
         .filter(|event| event.event_type == "fight-started")
         .count();
-    Ok(BatchResult {
-        job_index,
-        manifest_id: session.manifest_id().clone(),
-        accepted_action_count: session.transcript().len(),
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
-        final_state_hash: session
-            .state_hash()
-            .map_err(SessionError::from)
-            .map_err(SimulatorError::from)
-            .map_err(failed)?,
-        fight_count,
-        terminal,
-        replay_verified: true,
-        transcript_hash: session
-            .transcript_hash()
-            .map_err(SimulatorError::from)
-            .map_err(failed)?,
-        turn_count: session.turn_number(),
-    })
+    Ok((
+        BatchResult {
+            job_index,
+            manifest_id: session.manifest_id().clone(),
+            accepted_action_count: session.transcript().len(),
+            classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+            final_state_hash: session
+                .state_hash()
+                .map_err(SessionError::from)
+                .map_err(SimulatorError::from)
+                .map_err(failed)?,
+            fight_count,
+            terminal,
+            replay_verified: true,
+            transcript_hash: session
+                .transcript_hash()
+                .map_err(SimulatorError::from)
+                .map_err(failed)?,
+            turn_count: session.turn_number(),
+        },
+        session,
+    ))
 }
