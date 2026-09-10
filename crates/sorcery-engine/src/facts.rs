@@ -220,6 +220,7 @@ pub enum MagicEffect {
     TargetPlayerLosesLife(u8),
     TeleportAllyToTargetSite,
     TeleportNearbyAllyThenDrawCard,
+    UntapTargetMinion,
 }
 
 /// Magic facts.
@@ -725,6 +726,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "teleportAllyToTargetSite",
     "teleportNearbyAllyThenDrawCard",
     "thresholds",
+    "untapTargetMinion",
     "untapTargetMinionAfterDamage",
 ];
 
@@ -1246,6 +1248,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::TeleportAllyToTargetSite),
             true_only(object, "teleportNearbyAllyThenDrawCard", path)?
                 .then_some(MagicEffect::TeleportNearbyAllyThenDrawCard),
+            true_only(object, "untapTargetMinion", path)?.then_some(MagicEffect::UntapTargetMinion),
         ],
         path,
     )?;

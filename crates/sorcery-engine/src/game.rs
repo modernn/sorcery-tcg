@@ -1280,7 +1280,8 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::TargetPlayerGainsLife(_)
         | MagicEffect::TargetPlayerLosesLife(_)
         | MagicEffect::TeleportAllyToTargetSite
-        | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
+        | MagicEffect::TeleportNearbyAllyThenDrawCard
+        | MagicEffect::UntapTargetMinion => None,
     }
 }
 
@@ -5243,7 +5244,8 @@ impl Game {
             )?,
             MagicEffect::SubmergeTargetMinion
             | MagicEffect::KillTargetMinion
-            | MagicEffect::ReturnTargetMinionToOwnerHand => {
+            | MagicEffect::ReturnTargetMinionToOwnerHand
+            | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::BurrowTargetMinionOrArtifact => {
@@ -14875,6 +14877,16 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::UntapTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_untap_minion(instance_id, *target_seat, card_instance_id, outcomes)?;
+            }
             MagicEffect::TargetPlayerGainsLife(amount) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
@@ -15643,22 +15655,12 @@ impl Game {
                     else {
                         return Err(GameError::IllegalAction);
                     };
-                    let unit = self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| unit.card.instance_id == target_instance_id)
-                        .ok_or(GameError::IllegalAction)?;
-                    if unit.tapped {
-                        unit.tapped = false;
-                        outcomes.push("minion-untapped", || {
-                            json!({
-                                "instanceId": target_instance_id,
-                                "seat": target_seat,
-                                "sourceInstanceId": card_instance_id,
-                            })
-                        });
-                    }
+                    self.apply_untap_minion(
+                        &target_instance_id,
+                        *target_seat,
+                        card_instance_id,
+                        outcomes,
+                    )?;
                 }
             }
             MagicEffect::DamageEachAbovegroundMinionOne => {
@@ -17058,6 +17060,32 @@ impl Game {
                 self.position.active_seat,
                 outcomes,
             )?;
+        }
+        Ok(())
+    }
+
+    fn apply_untap_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.tapped {
+            unit.tapped = false;
+            outcomes.push("minion-untapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
         }
         Ok(())
     }
@@ -18778,6 +18806,10 @@ mod tests {
             (
                 MagicEffect::TargetPlayerLosesLife(2),
                 json!({ "targetPlayerLosesLife": 2 }),
+            ),
+            (
+                MagicEffect::UntapTargetMinion,
+                json!({ "untapTargetMinion": true }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);

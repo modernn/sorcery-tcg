@@ -4571,6 +4571,53 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0217",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Untap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and readies a tapped minion without dealing damage or breaking Ward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-untapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0217_untap_target_minion_readies_a_tapped_minion_without_breaking_ward"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0218",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Untap-minion Magic that targets an already-untapped minion is a paid no-op. The minion stays ready, keeps Ward, and no untap event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped"
+      }
     }
   ]
 }

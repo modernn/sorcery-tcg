@@ -205,6 +205,7 @@ export type GameCardDefinition =
     teleportAllyToTargetSite?: true;
     teleportNearbyAllyThenDrawCard?: true;
     thresholds: GameThresholds;
+    untapTargetMinion?: true;
     untapTargetMinionAfterDamage?: true;
   }>
   | Readonly<{
@@ -1020,7 +1021,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
-    teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
+    teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
     airborne atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
@@ -1506,7 +1507,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.targetPlayerGainsLife !== undefined)
       + Number(card.targetPlayerLosesLife !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
-      + Number(card.teleportNearbyAllyThenDrawCard === true);
+      + Number(card.teleportNearbyAllyThenDrawCard === true)
+      + Number(card.untapTargetMinion === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
     }
@@ -1515,6 +1517,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.targetNearby !== undefined && card.damageTargetUnit === undefined) {
       throw new RangeError(`${path}.targetNearby requires damageTargetUnit`);
+    }
+    if (card.untapTargetMinion !== undefined && card.untapTargetMinion !== true) {
+      throw new RangeError(`${path}.untapTargetMinion must be true when defined`);
     }
     if (card.untapTargetMinionAfterDamage !== undefined
       && card.untapTargetMinionAfterDamage !== true) {
@@ -2237,6 +2242,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { targetPlayerGainsLife: card.targetPlayerGainsLife }
                         : card.targetPlayerLosesLife !== undefined
                           ? { targetPlayerLosesLife: card.targetPlayerLosesLife }
+                        : card.untapTargetMinion === true
+                          ? { untapTargetMinion: true as const }
                         : card.teleportNearbyAllyThenDrawCard === true
                           ? { teleportNearbyAllyThenDrawCard: true as const }
                           : { teleportAllyToTargetSite: true as const }),

@@ -231,6 +231,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("targetPlayerLosesLife", json!(2)),
         ("teleportAllyToTargetSite", json!(true)),
         ("teleportNearbyAllyThenDrawCard", json!(true)),
+        ("untapTargetMinion", json!(true)),
     ];
     for (field, value) in magic_effects {
         assert!(

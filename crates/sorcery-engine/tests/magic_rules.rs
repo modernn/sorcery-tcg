@@ -8786,3 +8786,195 @@ fn rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door() {
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
+
+fn untap_magic_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-untap": magic(("untapTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(json!({
+            "charge": true,
+            "ward": true,
+        })),
+        "south-site": site(false),
+    });
+    manifest(
+        seed,
+        &cards,
+        &["north-untap"; 6],
+        &["south-charger"; 6],
+    )
+}
+
+fn untap_minion_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("untap actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-untap"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_charger(session: &mut Session, tap: bool) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-charger"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let charger_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("South Charge identity")
+        .to_owned();
+    if tap {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == charger_id
+                && descriptor["to"]["cell"] == "C1"
+        });
+        if session
+            .legal_actions()
+            .expect("post-activation actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "decline-attack")
+        {
+            accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+        }
+    }
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    charger_id
+}
+
+#[test]
+fn rule_catalog_0217_untap_target_minion_readies_a_tapped_minion_without_breaking_ward() {
+    let encoded = untap_magic_manifest(217);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_charger(&mut session, true);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("tapped charger");
+    assert_eq!(charger["tapped"], true);
+    assert_eq!(charger["warded"], true);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        untap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !untap_minion_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-untap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-untapped", "magic-resolved"]
+    );
+    let untapped = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-untapped")
+        .expect("untap event");
+    assert_eq!(untapped.payload["instanceId"], charger_id);
+    assert_eq!(untapped.payload["seat"], "south");
+    assert_eq!(
+        untapped.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("untapped charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("untap checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized untap");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed untap");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed untap session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped() {
+    let encoded = untap_magic_manifest(218);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_charger(&mut session, false);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        untap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-untap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-untapped"
+                || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+}
