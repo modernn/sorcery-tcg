@@ -1423,6 +1423,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         alternative_summon_payment: _,
         at_start_of_controller_turn_draw_sites: _,
         at_start_of_controller_turn_draw_spells: _,
+        at_start_of_controller_turn_lure_nearby_enemy_minion: _,
         at_start_of_controller_turn_teleport_to_random_site_or_void: _,
         attack: _,
         burrowing: _,
@@ -14141,7 +14142,23 @@ impl Game {
                     });
                 }
             }
-            ActionDescriptor::ResolveStartTurnTrigger { .. } => {
+            ActionDescriptor::ResolveStartTurnTrigger {
+                lure_target_instance_id,
+                source_instance_id,
+                ..
+            } => {
+                if lure_target_instance_id.is_some() {
+                    return None;
+                }
+                let unit = self.start_turn_trigger_unit(seat, source_instance_id)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                if !facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
+                    return None;
+                }
                 let candidates = self
                     .random_site_or_void_locations()
                     .into_iter()
@@ -14399,12 +14416,58 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         for source_instance_id in &pending.remaining_trigger_instance_ids {
-            let descriptor = ActionDescriptor::ResolveStartTurnTrigger {
-                source_instance_id: source_instance_id.clone(),
+            let Some(unit) = self.start_turn_trigger_unit(pending.seat, source_instance_id) else {
+                continue;
             };
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if facts.at_start_of_controller_turn_lure_nearby_enemy_minion {
+                let choices = self.start_turn_lure_choices(unit)?;
+                if choices.is_empty() {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::ResolveStartTurnTrigger {
+                            lure_destination: None,
+                            lure_target_instance_id: None,
+                            source_instance_id: source_instance_id.clone(),
+                        },
+                        format!(
+                            "Resolve start-turn lure for {}…",
+                            &source_instance_id.as_str()
+                                [..15.min(source_instance_id.as_str().len())]
+                        ),
+                    );
+                } else {
+                    for (target_instance_id, destination) in choices {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveStartTurnTrigger {
+                                lure_destination: Some(destination),
+                                lure_target_instance_id: Some(target_instance_id.clone()),
+                                source_instance_id: source_instance_id.clone(),
+                            },
+                            format!(
+                                "Lure minion {}… one step toward {}…",
+                                &target_instance_id.as_str()
+                                    [..15.min(target_instance_id.as_str().len())],
+                                &source_instance_id.as_str()
+                                    [..15.min(source_instance_id.as_str().len())]
+                            ),
+                        );
+                    }
+                }
+                continue;
+            }
             self.push_action(
                 actions,
-                descriptor,
+                ActionDescriptor::ResolveStartTurnTrigger {
+                    lure_destination: None,
+                    lure_target_instance_id: None,
+                    source_instance_id: source_instance_id.clone(),
+                },
                 format!(
                     "Resolve start-turn trigger for {}…",
                     &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
@@ -14528,7 +14591,11 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
-        let ActionDescriptor::ResolveStartTurnTrigger { source_instance_id } = &action.descriptor
+        let ActionDescriptor::ResolveStartTurnTrigger {
+            lure_destination,
+            lure_target_instance_id,
+            source_instance_id,
+        } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
         };
@@ -14544,6 +14611,16 @@ impl Game {
                 .contains(source_instance_id)
         {
             return Err(GameError::IllegalAction);
+        }
+        if lure_destination.is_some() || lure_target_instance_id.is_some() {
+            self.apply_start_turn_lure(
+                action.seat,
+                source_instance_id,
+                lure_target_instance_id.as_ref(),
+                *lure_destination,
+                outcomes,
+            )?;
+            return Ok(());
         }
         let draw = {
             let unit = self
@@ -14563,6 +14640,25 @@ impl Game {
         };
         if let Some((zone, count)) = draw {
             self.apply_genesis_draws(action.seat, source_instance_id, zone, count, outcomes);
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let is_lure = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_lure_nearby_enemy_minion
+        };
+        if is_lure {
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());
@@ -14687,9 +14783,120 @@ impl Game {
             return None;
         };
         (facts.at_start_of_controller_turn_teleport_to_random_site_or_void
+            || facts.at_start_of_controller_turn_lure_nearby_enemy_minion
             || facts.at_start_of_controller_turn_draw_sites.is_some()
             || facts.at_start_of_controller_turn_draw_spells.is_some())
         .then_some(unit)
+    }
+
+    fn start_turn_lure_choices(
+        &self,
+        source: &UnitPosition,
+    ) -> Result<Vec<(IdentityHash, Location)>, GameError> {
+        let source_cells = Self::unit_occupied_cells(source);
+        let enemy_seat = other_seat(source.controller);
+        let mut choices = Vec::new();
+        for enemy in &self.position.units {
+            if enemy.controller != enemy_seat
+                || enemy.region != source.region
+                || self.minion_is_disabled(enemy)
+            {
+                continue;
+            }
+            let enemy_cells = Self::unit_occupied_cells(enemy);
+            if !Self::footprints_nearby(source_cells, enemy_cells) {
+                continue;
+            }
+            let from = Location {
+                cell: enemy.location,
+                region: enemy.region,
+            };
+            let starting_distance = minimum_cardinal_distance(enemy_cells, source_cells);
+            let target = UnitTarget::Minion {
+                instance_id: enemy.card.instance_id.clone(),
+                seat: enemy_seat,
+            };
+            let mut added = false;
+            for destination in self.card_effect_step_destinations(&target, from)? {
+                let destination_cells = match enemy.occupied_cells {
+                    Some(area) => translated_square(area, from.cell, destination.cell)
+                        .ok_or(GameError::IllegalAction)?
+                        .to_vec(),
+                    None => vec![destination.cell],
+                };
+                if minimum_cardinal_distance(&destination_cells, source_cells) >= starting_distance
+                {
+                    continue;
+                }
+                choices.push((enemy.card.instance_id.clone(), destination));
+                added = true;
+            }
+            if !added {
+                choices.push((enemy.card.instance_id.clone(), from));
+            }
+        }
+        Ok(choices)
+    }
+
+    fn apply_start_turn_lure(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        target_instance_id: Option<&IdentityHash>,
+        destination: Option<Location>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .start_turn_trigger_unit(seat, source_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !facts.at_start_of_controller_turn_lure_nearby_enemy_minion {
+            return Err(GameError::IllegalAction);
+        }
+        let (Some(target_instance_id), Some(destination)) = (target_instance_id, destination)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !self
+            .start_turn_lure_choices(&source)?
+            .iter()
+            .any(|(candidate, to)| candidate == target_instance_id && *to == destination)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let enemy = UnitTarget::Minion {
+            instance_id: target_instance_id.clone(),
+            seat: other_seat(seat),
+        };
+        let from = self.unit_target_location(&enemy)?;
+        let to = self.move_unit_target_to(&enemy, destination)?;
+        let path = if to == from {
+            vec![from]
+        } else {
+            vec![from, to]
+        };
+        outcomes.push("unit-lured", || {
+            json!({
+                "allyInstanceId": source_instance_id,
+                "from": from,
+                "path": path,
+                "seat": other_seat(seat),
+                "sourceInstanceId": source_instance_id,
+                "steps": path.len() - 1,
+                "targetInstanceId": target_instance_id,
+                "to": to,
+            })
+        });
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_static_power_deaths(outcomes)?;
+        self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn start_turn_trigger_instance_ids(&self, seat: Seat) -> Vec<IdentityHash> {
@@ -20230,6 +20437,13 @@ mod tests {
         .expect("valid start-turn Atlas draw manifest")
         .ensure_selfplay_supported()
         .expect("start-turn draw sites is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnLureNearbyEnemyMinion",
+            json!(true),
+        )]))
+        .expect("valid start-turn lure manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn lure is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

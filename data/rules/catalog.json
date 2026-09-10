@@ -5463,6 +5463,48 @@
         "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
         "testName": "rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0256",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn lure forces a nearby same-region enemy minion to take one card-effect step toward the source. The ability is mandatory, does not tap, and cannot be intercepted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0256_start_turn_lure_forces_a_nearby_enemy_one_step_closer"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0257",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn lure is a paid no-op when no nearby same-region enemy minion exists. The Start Phase then continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0257_start_turn_lure_no_ops_when_no_enemy_is_nearby"
+      }
     }
   ]
 }

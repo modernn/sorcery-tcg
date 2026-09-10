@@ -33,6 +33,7 @@ function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpe
 
 type SpellFacts = Readonly<{
   airborne?: boolean;
+  atStartOfControllerTurnLureNearbyEnemyMinion?: true;
   attack?: number;
   burrowing?: boolean;
   cannotAttackSites?: boolean;
@@ -1932,6 +1933,42 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /competing start-turn triggers are unsupported/);
+  const startTurnLureManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnLureNearbyEnemyMinion: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnLureManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnLureManifest.cards[firstSpell].atStartOfControllerTurnLureNearbyEnemyMinion,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 1,
+        atStartOfControllerTurnLureNearbyEnemyMinion: true,
+      } as GameCardDefinition,
+    },
+  }), /competing start-turn triggers are unsupported/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnLureNearbyEnemyMinion: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /atStartOfControllerTurnLureNearbyEnemyMinion must be true when defined/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -23753,6 +23790,157 @@ test('RULE-04 Genesis strikes deal double damage only while the struck unit is n
         && descriptor.cell === 'C4');
     assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
       instanceId === targetId)?.damage, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 start-turn lure forces a nearby enemy one step closer and no-ops when none is nearby', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'lure-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'lure-north-site': { cardType: 'site', elements: ['earth'] },
+    'lure-north-source': {
+      atStartOfControllerTurnLureNearbyEnemyMinion: true,
+      attack: 1,
+      cardType: 'minion',
+      defense: 4,
+      manaCost: 0,
+      thresholds,
+    },
+    'lure-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'lure-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'lure-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-start-turn-lure-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('lure-north-site'),
+        avatar: 'lure-north-avatar',
+        spellbook: Array(6).fill('lure-north-source'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('lure-south-site'),
+        avatar: 'lure-south-avatar',
+        spellbook: Array(6).fill('lure-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  const afterSourceSummoned = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'lure-north-source'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  const resolveEmptyStartTurn = async (ctx: SetupCtx, sourceId: string) => {
+    assert.equal(ctx.state.phase === 'start-turn', true);
+    assert.equal((await ctx.legalActions('north')).every(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId
+        && descriptor.lureTargetInstanceId == null), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId
+        && descriptor.lureTargetInstanceId == null);
+  };
+
+  await withSetup(gameManifest, async (ctx) => {
+    await afterSourceSummoned(ctx);
+    const sourceId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'lure-north-source')?.instanceId;
+    assert.ok(sourceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'lure-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await resolveEmptyStartTurn(ctx, sourceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'lure-north-site'
+        && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'lure-south-minion'
+        && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'lure-south-minion')?.instanceId;
+    assert.ok(targetId);
+    assert.equal(ctx.state.phase === 'start-turn', true);
+    assert.equal((await ctx.legalActions('north')).every(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId
+        && descriptor.lureTargetInstanceId === targetId), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId
+        && descriptor.lureTargetInstanceId === targetId
+        && descriptor.lureDestination?.cell === 'C4');
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === targetId)?.location, 'C4');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === targetId)?.tapped, false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(gameManifest, async (ctx) => {
+    await afterSourceSummoned(ctx);
+    const sourceId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'lure-north-source')?.instanceId;
+    assert.ok(sourceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'lure-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'lure-south-minion'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'lure-south-minion')?.instanceId;
+    assert.ok(targetId);
+    await resolveEmptyStartTurn(ctx, sourceId);
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === targetId)?.location, 'C1');
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

@@ -616,8 +616,14 @@ pub enum ActionDescriptor {
         /// Authoritative candidate identity chosen by the controller.
         outcome_instance_id: IdentityHash,
     },
-    /// Resolve one start-turn random teleport trigger for a minion.
+    /// Resolve one start-turn trigger for a minion.
     ResolveStartTurnTrigger {
+        /// One-step destination a nearby enemy must take, when this trigger lures.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lure_destination: Option<Location>,
+        /// Nearby enemy minion forced one step closer, when this trigger lures.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lure_target_instance_id: Option<IdentityHash>,
         /// Authoritative triggering minion identity.
         source_instance_id: IdentityHash,
     },
@@ -1602,15 +1608,26 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ResolveRandomOutcome {
                             outcome_instance_id: right,
                         },
-                    )
-                    | (
+                    ) => left.cmp(right),
+                    (
                         ActionDescriptor::ResolveStartTurnTrigger {
+                            lure_destination: left_destination,
+                            lure_target_instance_id: left_target,
                             source_instance_id: left,
                         },
                         ActionDescriptor::ResolveStartTurnTrigger {
+                            lure_destination: right_destination,
+                            lure_target_instance_id: right_target,
                             source_instance_id: right,
                         },
-                    ) => left.cmp(right),
+                    ) => left
+                        .cmp(right)
+                        .then_with(|| {
+                            compare_optional_identities(left_target.as_ref(), right_target.as_ref())
+                        })
+                        .then_with(|| {
+                            compare_optional_locations(*left_destination, *right_destination)
+                        }),
                     (
                         ActionDescriptor::DeclareAttack { target: left },
                         ActionDescriptor::DeclareAttack { target: right },

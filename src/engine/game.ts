@@ -296,6 +296,7 @@ export type GameCardDefinition =
     manaCost: number;
     atStartOfControllerTurnDrawSites?: number;
     atStartOfControllerTurnDrawSpells?: number;
+    atStartOfControllerTurnLureNearbyEnemyMinion?: true;
     atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
@@ -1013,6 +1014,8 @@ type GameActionDescriptor =
   }>
   | Readonly<{
     kind: 'resolve-start-turn-trigger';
+    lureDestination?: GameLocation;
+    lureTargetInstanceId?: StateHash;
     sourceInstanceId: StateHash;
   }>
   | Readonly<{
@@ -1099,7 +1102,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -1941,6 +1944,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnDrawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
     );
   }
+  if (card.atStartOfControllerTurnLureNearbyEnemyMinion !== undefined
+    && card.atStartOfControllerTurnLureNearbyEnemyMinion !== true) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnLureNearbyEnemyMinion must be true when defined`,
+    );
+  }
   if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== undefined
     && card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== true) {
     throw new RangeError(
@@ -1962,6 +1971,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const startTurnTriggerCount = [
     card.atStartOfControllerTurnDrawSites !== undefined,
     card.atStartOfControllerTurnDrawSpells !== undefined,
+    card.atStartOfControllerTurnLureNearbyEnemyMinion === true,
     card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true,
   ].filter(Boolean).length;
   if (startTurnTriggerCount > 1) {
@@ -2464,6 +2474,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.atStartOfControllerTurnDrawSpells !== undefined
               ? { atStartOfControllerTurnDrawSpells: card.atStartOfControllerTurnDrawSpells }
+              : {}),
+            ...(card.atStartOfControllerTurnLureNearbyEnemyMinion === true
+              ? { atStartOfControllerTurnLureNearbyEnemyMinion: true as const }
               : {}),
             ...(card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
               ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }
