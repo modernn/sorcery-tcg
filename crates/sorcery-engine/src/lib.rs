@@ -18,6 +18,7 @@ pub mod novelty_frontier;
 pub mod novelty_rollout;
 pub mod policy;
 pub mod prng;
+pub mod schedule;
 pub mod selfplay;
 pub mod session;
 pub mod session_json;
