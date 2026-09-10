@@ -3605,6 +3605,52 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0177",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Ranged minion originates cardinal projectiles from every occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0177_oversized_ranged_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0178",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 gains power, Ranged, and Spellcaster when any occupied cell is a Tower.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsPowerRangedAndSpellcasterAtopTower"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower"
+      }
     }
   ]
 }

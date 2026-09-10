@@ -22,6 +22,25 @@ fn site(blocks_ground_entry: bool) -> Value {
     value
 }
 
+fn special_north_site(giant_extra: &Value) -> Option<(&'static str, Value)> {
+    if giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true) {
+        Some((
+            "north-water",
+            json!({ "cardType": "site", "elements": ["water"] }),
+        ))
+    } else if giant_extra
+        .get("gainsPowerRangedAndSpellcasterAtopTower")
+        .is_some()
+    {
+        Some((
+            "north-tower",
+            json!({ "cardType": "site", "elements": ["earth"], "isTower": true }),
+        ))
+    } else {
+        None
+    }
+}
+
 fn minion(extra: &Value) -> Value {
     let mut value = json!({
         "attack": 1,
@@ -617,13 +636,12 @@ fn composition_manifest(
             .extend(south_extra.as_object().expect("extra south facts").clone());
         cards["south-minion"] = south;
     }
-    let wants_water = giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true);
-    if wants_water {
-        cards["north-water"] = json!({ "cardType": "site", "elements": ["water"] });
+    if let Some((card_id, definition)) = special_north_site(giant_extra) {
+        cards[card_id] = definition;
     }
-    let north_atlas = if wants_water {
+    let north_atlas = if let Some((card_id, _)) = special_north_site(giant_extra) {
         let mut atlas = vec!["north-site"; 8];
-        atlas.insert(0, "north-water");
+        atlas.insert(0, card_id);
         atlas
     } else {
         vec!["north-site"; 9]
@@ -677,11 +695,12 @@ fn composition_session(
             let atlas = preview_state["players"]["north"]["hand"]["atlas"]
                 .as_array()
                 .expect("north Atlas hand");
-            let wants_water = giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true);
+            let required_atlas = special_north_site(giant_extra).map(|(card_id, _)| card_id);
             required_north
                 .iter()
                 .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
-                && (!wants_water || atlas.iter().any(|card| card["cardId"] == "north-water"))
+                && required_atlas
+                    .is_none_or(|card_id| atlas.iter().any(|card| card["cardId"] == card_id))
         })
         .expect("opening hand with the required north spells");
     Session::new(&manifest).expect("composition session")
@@ -707,10 +726,10 @@ fn establish_north_square(session: &mut Session) {
     play_site(session, "B3");
 }
 
-fn establish_north_square_water_at_c4(session: &mut Session) {
+fn establish_north_square_named_at_c4(session: &mut Session, first_site: &str) {
     keep(session);
     keep(session);
-    play_named_site(session, "north-water", "C4");
+    play_named_site(session, first_site, "C4");
     end_and_draw(session);
     play_site(session, "C1");
     end_and_draw(session);
@@ -721,6 +740,14 @@ fn establish_north_square_water_at_c4(session: &mut Session) {
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
     play_named_site(session, "north-site", "B3");
+}
+
+fn establish_north_square_water_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-water");
+}
+
+fn establish_north_square_tower_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-tower");
 }
 
 fn offers_summon(session: &Session, card_id: &str) -> bool {
@@ -1194,6 +1221,112 @@ fn rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site(
     assert!(
         !offers_summon(&session, "north-giant"),
         "enabled Rats must suppress every occupied Earth site, not only the B3 anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+fn stage_south_on_north_d3(session: &mut Session) -> String {
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "D3");
+    end_and_draw(session);
+    let (enemy, _) = summon_at(session, "south-minion", "D3");
+    end_and_draw(session);
+    enemy
+}
+
+#[test]
+fn rule_catalog_0177_oversized_ranged_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "ranged": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d3(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let actions = session
+        .legal_actions()
+        .expect("Ranged actions after the oversized summon");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == avatar_id
+        }),
+        "the C4 Avatar is not Ranged"
+    );
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D3"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "D3", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower() {
+    let mut session = composition_session(
+        &json!({ "gainsPowerRangedAndSpellcasterAtopTower": 2 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_tower_at_c4(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-tower");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    let enemy = stage_south_on_north_d3(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "D3", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    assert_eq!(
+        receipt.events[1].payload["amount"],
+        3,
+        "the C4 Tower shares the oversized footprint, so derived power is 1+2"
     );
     assert_exact_replay(&session);
 }

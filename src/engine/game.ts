@@ -1774,10 +1774,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.burrowing === true
       || card.submerge === true
       || card.voidwalk === true
-      || card.ranged === true
       || card.tapToShootProjectileDamage !== undefined
       || card.shootsDragProjectile === true
-      || card.gainsPowerRangedAndSpellcasterAtopTower === 2
       || card.mustBeCastToOuterColumn === true
       || card.token === true)) {
     throw new RangeError(

@@ -576,7 +576,7 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "oversized ability",
             with(
                 with(minion(), "occupiesSquareArea", json!(2)),
-                "ranged",
+                "voidwalk",
                 json!(true),
             ),
             "unsupported ability combination",
@@ -782,4 +782,35 @@ fn oversized_waterbound_and_threshold_suppression_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.site_provides_no_threshold);
+}
+
+#[test]
+fn oversized_ranged_and_tower_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-ranged",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "ranged",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Ranged minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-tower",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "gainsPowerRangedAndSpellcasterAtopTower",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized Tower-conditional minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.gains_power_ranged_and_spellcaster_atop_tower);
 }

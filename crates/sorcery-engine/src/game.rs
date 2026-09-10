@@ -3590,18 +3590,7 @@ impl Game {
         {
             return Ok(Vec::new());
         }
-        let maximum_steps = if self.position.sites[shooter.location.index()]
-            .as_ref()
-            .is_some_and(|site| {
-                matches!(
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                    CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
-                )
-            }) {
-            2
-        } else {
-            1
-        };
+        let maximum_steps = self.ranged_projectile_range(shooter);
         Ok(self
             .projectile_options(shooter, maximum_steps)
             .into_iter()
@@ -3614,15 +3603,45 @@ impl Game {
             .collect())
     }
 
+    /// One or two cardinal steps: a range-bonus site under any occupied cell grants the longer shot.
+    fn ranged_projectile_range(&self, shooter: &UnitPosition) -> usize {
+        if Self::unit_occupied_cells(shooter).iter().any(|cell| {
+            self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
+                    )
+                })
+        }) {
+            2
+        } else {
+            1
+        }
+    }
+
     fn projectile_options(
         &self,
         shooter: &UnitPosition,
         maximum_steps: usize,
     ) -> Vec<ProjectileOption> {
+        Self::unit_occupied_cells(shooter)
+            .iter()
+            .flat_map(|cell| self.projectile_options_from(shooter, *cell, maximum_steps))
+            .collect()
+    }
+
+    fn projectile_options_from(
+        &self,
+        shooter: &UnitPosition,
+        origin_cell: Cell,
+        maximum_steps: usize,
+    ) -> Vec<ProjectileOption> {
         let seat = shooter.controller;
         let shooter_instance_id = &shooter.card.instance_id;
         let origin = Location {
-            cell: shooter.location,
+            cell: origin_cell,
             region: Region::Surface,
         };
         let mut options = Vec::new();
@@ -4395,14 +4414,16 @@ impl Game {
         facts.gains_power_ranged_and_spellcaster_atop_tower
             && unit.region == Region::Surface
             && !self.minion_is_disabled(unit)
-            && self.position.sites[unit.location.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(site_facts) if site_facts.is_tower
-                    )
-                })
+            && Self::unit_occupied_cells(unit).iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(site_facts) if site_facts.is_tower
+                        )
+                    })
+            })
     }
 
     fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {

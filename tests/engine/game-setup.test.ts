@@ -9975,7 +9975,6 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
   }), /occupiesSquareArea must be 2/);
   for (const incompatibleFact of [
     { connectsTopBottom: true as const },
-    { ranged: true as const },
   ]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -10003,6 +10002,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { summonToAnySite: true as const },
     { waterbound: true as const },
     { siteProvidesNoThreshold: true as const },
+    { ranged: true as const },
+    { gainsPowerRangedAndSpellcasterAtopTower: 2 as const },
   ]) {
     const composed = createGameManifest({
       ...input,
@@ -19210,7 +19211,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
     },
     seed: 1,
   }), /gainsPowerRangedAndSpellcasterAtopTower must be 2/);
-  assert.throws(() => createGameManifest({
+  const oversizedTower = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -19220,7 +19221,18 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       } as unknown as GameCardDefinition,
     },
     seed: 1,
-  }), /occupiesSquareArea has an unsupported ability combination/);
+  });
+  const oversizedTowerDefinition = oversizedTower.cards[conditionalId];
+  assert.equal(
+    oversizedTowerDefinition?.cardType === 'minion'
+      && oversizedTowerDefinition.occupiesSquareArea,
+    2,
+  );
+  assert.equal(
+    oversizedTowerDefinition?.cardType === 'minion'
+      && oversizedTowerDefinition.gainsPowerRangedAndSpellcasterAtopTower,
+    2,
+  );
 
   const gameManifest = await findOpeningManifest(
     (seed) => createGameManifest({ ...input, seed }),
