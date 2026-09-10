@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/monument-cannot-be-carried-0005`. Stack this on the Belfry PR (`cursor/belfry-nearby-untap-0005`, https://github.com/modernn/sorcery-tcg/pull/3). Do not add more slices to PR #2 or PR #3.
+Live line: `cursor/land-powered-movement-on-master-0005`. Replays PR #6 onto current `master` (Belfry + Monument already landed via #5). Do not add catalog slices.
 
-Do not start from `master`'s copy of this file. That copy still says to migrate `game-setup.test.ts` and gut `game.ts`; that work is already on the cutover branch. Do not open a second cutover branch.
+PRs #4–#7 merged on the stack. #6 and #7 still need land-on-master follow-ups. Merge this onto `master` first, then land policy-select.
 
 `cursor/phase3-drown-bury-artifacts-36d3` was identical to `master` with PR #1 closed. It is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`).
 
@@ -14,6 +14,7 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 Latest catalog proofs: official Monument carry prohibition (`RULE-CATALOG-0314`–`0315`). A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
 Belfry nearby untap remains `RULE-CATALOG-0312`–`0313`.
+Deterministic `powered-movement` now uses public temporary-power identities on the seat observation. It does not add a new catalog family.
 Atlantean Fate remains `RULE-CATALOG-0310`–`0311`.
 Start Phase doesn't-untap remains `RULE-CATALOG-0308`–`0309`.
 End-of-controller-turn Avatar life remains `RULE-CATALOG-0304`–`0307`.
@@ -78,7 +79,7 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Next exact step
 
-1. Keep new official-rules work on new `cursor/<one-family>-0005` branches. Do not grow PR #2 or PR #3. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Monument cannot-be-carried is bound — do not invent MTG keywords.
+1. Merge this land-on-master PR, then replay PR #7 (`selectPolicyAction`) onto that head. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations still need modeling before Voidwalk or tokens are lifted. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Monument cannot-be-carried is bound — do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 

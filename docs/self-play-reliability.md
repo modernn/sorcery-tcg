@@ -49,7 +49,7 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for all 166 cataloged scenarios. Ranked self-play still waits on private
+- Rust has direct proofs for all 315 cataloged scenarios. Ranked self-play still waits on private
   authority verification.
 - Realm Artifacts are admitted as power Artifacts, Lethal Artifacts, end-turn site-controller
   life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder, including
@@ -72,8 +72,10 @@ ordinary debug suite because running the same workload there takes several minut
   its bearer to finish loose at the endpoint.
 - A tapped area-damage minion blankets one adjacent location in its own region with its current
   power and its carried Lethal. The blanket is not a strike, so it never draws a return strike.
-- The selector neighborhood is intentionally small and `seat-observation-v1` does not expose enough
-  state for strong tactical play; `powered-movement` is therefore inactive.
+- `powered-movement` now prefers the same toward-enemy `MoveAndAttack` that
+  `move-toward-enemy` would pick, but only when that unit currently has a public
+  temporary power source. The selector neighborhood remains small; `seat-observation-v1`
+  still omits most tactical state.
 - Campaign state round-trips through a strict checkpoint with the seed set, lineage, fixed action
   bound, attempt budget, portfolio, audit state, and exact pending-suite commitment. An unattended
   caller must use `reserve_generation` or `reserve_final_audit`, publish that checkpoint atomically,
