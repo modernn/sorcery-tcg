@@ -10559,3 +10559,237 @@ fn rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card() {
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
+
+fn discard_cards_manifest(seed: u32, count: u8, north_spells: &[&str]) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-discard": magic(("targetPlayerDiscardsCards", json!(count)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, north_spells, &["south-minion"; 6])
+}
+
+fn discard_card_ids(session: &Session) -> Vec<(String, String)> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter_map(|action| {
+            if action.descriptor["kind"] != "discard-card" {
+                return None;
+            }
+            Some((
+                action.descriptor["cardInstanceId"]
+                    .as_str()
+                    .expect("discard identity")
+                    .to_owned(),
+                action.descriptor["zone"]
+                    .as_str()
+                    .expect("discard zone")
+                    .to_owned(),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one replayed scenario proves targeting, seat transfer, hidden hands, and forged rejection"
+)]
+fn rule_catalog_0239_target_player_discard_lets_the_targeted_player_choose() {
+    let mut session = opening_main(&discard_cards_manifest(239, 1, &["north-discard"; 6]));
+    let before = state(&session);
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    let south_spells: Vec<_> = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("south Spellbook")
+        .iter()
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    let south_sites: Vec<_> = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("south Atlas")
+        .iter()
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(south_spells.len(), 3);
+    assert_eq!(south_sites.len(), 3);
+    let chosen = south_spells[0].clone();
+    let targets: Vec<_> = session
+        .legal_actions()
+        .expect("cast actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-discard"
+        })
+        .map(|action| action.descriptor["target"]["seat"].clone())
+        .collect();
+    assert!(targets.iter().any(|seat| *seat == "north"));
+    assert!(targets.iter().any(|seat| *seat == "south"));
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    let spell_id = descriptor["cardInstanceId"].clone();
+    assert_eq!(event_types(&cast), ["magic-cast"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "discard-card");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["remaining"], 1);
+    assert_eq!(pending["pendingDiscardCards"]["seat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["sourceInstanceId"], spell_id);
+    let offered = discard_card_ids(&session);
+    assert_eq!(offered.len(), 6);
+    assert!(
+        offered
+            .iter()
+            .any(|(id, zone)| { id == chosen.as_str().expect("chosen") && zone == "spellbook" })
+    );
+    assert!(south_sites.iter().all(|id| {
+        offered
+            .iter()
+            .any(|(offered_id, zone)| offered_id == id.as_str().expect("site") && zone == "atlas")
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("pending discard actions")
+            .iter()
+            .all(|action| action.seat == Seat::South)
+    );
+    let north_view = session
+        .public_view(Seat::North)
+        .expect("North public view during the choice");
+    assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
+    assert_eq!(north_view["players"]["south"]["hand"]["atlas"], 3);
+    let south_json = north_view.to_string();
+    assert!(
+        !south_json.contains(chosen.as_str().expect("chosen identity")),
+        "the caster must not see the opponent's hidden hand identities"
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let checkpoint = session.clone();
+    let forged = session
+        .step(ActionRequest {
+            action_id: identity_hash(&json!({
+                "descriptor": {
+                    "cardInstanceId": chosen,
+                    "kind": "discard-card",
+                    "zone": "spellbook",
+                },
+                "engineVersion": "sorcery-core-v1",
+                "seat": "north",
+                "stateVersion": pending["stateVersion"],
+            }))
+            .expect("forged action id")
+            .to_string(),
+            seat: Seat::North,
+            state_version: pending["stateVersion"].as_u64().expect("state version"),
+        })
+        .expect("forged step");
+    assert!(matches!(
+        forged,
+        StepResult::Rejected(rejection)
+            if rejection.code == RejectionCode::UnknownAction
+                || rejection.code == RejectionCode::WrongSeat
+    ));
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == chosen
+            && descriptor["zone"] == "spellbook"
+    });
+    assert_eq!(event_types(&receipt), ["card-discarded", "magic-resolved"]);
+    assert_eq!(receipt.events[0].payload["cardId"], "south-minion");
+    assert_eq!(receipt.events[0].payload["instanceId"], chosen);
+    assert_eq!(receipt.events[0].payload["owner"], "south");
+    assert_eq!(receipt.events[0].payload["seat"], "south");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[0].payload["zone"], "spellbook");
+    assert_eq!(receipt.events[1].payload["instanceId"], spell_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["decisionSeat"], "north");
+    assert!(after.get("pendingDiscardCards").is_none());
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("south cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == chosen)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("south hand")
+            .len(),
+        2
+    );
+    let mut resumed = checkpoint;
+    accept_where(&mut resumed, |descriptor| {
+        descriptor["kind"] == "discard-card" && descriptor["cardInstanceId"] == chosen
+    });
+    assert_eq!(
+        resumed.replay_value().expect("resumed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0240_target_player_discard_is_a_paid_noop_without_cards() {
+    let mut session = opening_main(&discard_cards_manifest(
+        240,
+        6,
+        &["north-discard", "north-discard", "north-discard"],
+    ));
+    let south_avatar = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    let mut discarded = 0;
+    while state(&session)["phase"] == "discard-card" {
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "discard-card"
+        });
+        assert_eq!(receipt.events[0].event_type, "card-discarded");
+        discarded += 1;
+    }
+    assert_eq!(discarded, 6);
+    let emptied = state(&session);
+    assert_eq!(emptied["phase"], "main");
+    assert_eq!(
+        emptied["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("south Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        emptied["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("south Spellbook")
+            .len(),
+        0
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert_eq!(state(&session)["phase"], "main");
+    assert_eq!(state(&session)["decisionSeat"], "north");
+    assert_exact_replay(&session);
+}

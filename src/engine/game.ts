@@ -193,6 +193,7 @@ export type GameCardDefinition =
     manaCost: number;
     millSites?: number;
     millSpells?: number;
+    targetPlayerDiscardsCards?: number;
     returnMinionFromOwnCemetery?: true;
     returnTargetArtifactFromOwnCemetery?: true;
     returnTargetMagicFromOwnCemetery?: true;
@@ -436,6 +437,14 @@ type PendingStartTurn = Readonly<{
   seat: GameSeat;
 }>;
 
+type PendingDiscardCards = Readonly<{
+  remaining: number;
+  seat: GameSeat;
+  sourceCardId: string;
+  sourceInstanceId: StateHash;
+  sourceOwner: GameSeat;
+}>;
+
 type PendingDeathriteSource = Readonly<{
   controller: GameSeat;
   currentPower: number;
@@ -453,7 +462,7 @@ type PendingDeathriteBatch = Readonly<{
   stage: 'active-order' | 'non-active-order' | 'resolve';
 }>;
 
-type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
 type LeapAttackContinuation = Readonly<{
   ally: GameUnitRef;
@@ -620,6 +629,7 @@ export type GameState = Readonly<{
   pendingChainMagic?: PendingChainMagic | null;
   pendingCombat: PendingCombat | null;
   pendingDeathrites?: PendingDeathrites | null;
+  pendingDiscardCards?: PendingDiscardCards;
   pendingEndTurnAura?: PendingEndTurnAura | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisSpellOrder?: PendingGenesisSpellOrder | null;
@@ -961,6 +971,11 @@ type GameActionDescriptor =
     sourceInstanceId: StateHash;
   }>
   | Readonly<{
+    cardInstanceId: StateHash;
+    kind: 'discard-card';
+    zone: DeckZone;
+  }>
+  | Readonly<{
     kind: 'order-deathrites';
     sourceInstanceId: StateHash;
   }>
@@ -1034,7 +1049,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
     submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
-    tapTargetMinion targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
+    tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
@@ -1561,6 +1576,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
+      + Number(card.targetPlayerDiscardsCards !== undefined)
       + Number(card.targetPlayerGainsLife !== undefined)
       + Number(card.targetPlayerLosesLife !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
@@ -1630,6 +1646,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.millSpells < 1
       || card.millSpells > MAX_DECK_CARDS)) {
       throw new RangeError(`${path}.millSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
+    }
+    if (card.targetPlayerDiscardsCards !== undefined
+      && (!Number.isSafeInteger(card.targetPlayerDiscardsCards)
+        || card.targetPlayerDiscardsCards < 1
+        || card.targetPlayerDiscardsCards > MAX_DECK_CARDS)) {
+      throw new RangeError(
+        `${path}.targetPlayerDiscardsCards must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+      );
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
       throw new RangeError(`${path}.manaCost must be a supported nonnegative safe integer`);
@@ -2321,6 +2345,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           summonTokenToEachControlledSiteBorderingEnemySite:
                             card.summonTokenToEachControlledSiteBorderingEnemySite,
                         }
+                        : card.targetPlayerDiscardsCards !== undefined
+                          ? { targetPlayerDiscardsCards: card.targetPlayerDiscardsCards }
                         : card.targetPlayerGainsLife !== undefined
                           ? { targetPlayerGainsLife: card.targetPlayerGainsLife }
                         : card.targetPlayerLosesLife !== undefined

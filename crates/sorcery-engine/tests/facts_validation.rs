@@ -235,6 +235,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             "summonTokenToEachControlledSiteBorderingEnemySite",
             json!("foot-soldier"),
         ),
+        ("targetPlayerDiscardsCards", json!(1)),
         ("targetPlayerGainsLife", json!(2)),
         ("targetPlayerLosesLife", json!(2)),
         ("tapTargetMinion", json!(true)),

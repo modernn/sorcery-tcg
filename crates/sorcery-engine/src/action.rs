@@ -290,6 +290,13 @@ pub enum ActionDescriptor {
     DrawSite,
     /// Tap a capable Avatar to draw the top Spellbook card during the main phase.
     DrawSpell,
+    /// The targeted player discards one chosen hand card for a pending Magic effect.
+    DiscardCard {
+        /// Exact Atlas or Spellbook card discarded.
+        card_instance_id: IdentityHash,
+        /// Hand the discarded card is taken from.
+        zone: DeckZone,
+    },
     /// Play a site from the player's hand.
     PlaySite {
         /// Stable rules card identity.
@@ -993,6 +1000,7 @@ impl ActionDescriptor {
             | Self::ResolveStartTurnTrigger { .. }
             | Self::ResolveEndTurnAuraRandom { .. }
             | Self::ResolveEndTurnAuraMove { .. }
+            | Self::DiscardCard { .. }
             | Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1612,6 +1620,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::Draw { zone: right },
                     ) => deck_zone_order(*left).cmp(&deck_zone_order(*right)),
                     (
+                        ActionDescriptor::DiscardCard {
+                            card_instance_id: left,
+                            zone: left_zone,
+                        },
+                        ActionDescriptor::DiscardCard {
+                            card_instance_id: right,
+                            zone: right_zone,
+                        },
+                    ) => left
+                        .cmp(right)
+                        .then_with(|| deck_zone_order(*left_zone).cmp(&deck_zone_order(*right_zone))),
+                    (
                         ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
                             target_cell: left_cell,
                             target_rubble_instance_id: left_id,
@@ -2077,6 +2097,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 42,
         ActionDescriptor::ResolveRandomOutcome { .. } => 43,
         ActionDescriptor::ResolveStartTurnTrigger { .. } => 44,
+        ActionDescriptor::DiscardCard { .. } => 45,
         ActionDescriptor::ExtendChainMagic { .. } => 24,
         ActionDescriptor::FlySite { .. } => 25,
         ActionDescriptor::Intercept { .. } => 26,

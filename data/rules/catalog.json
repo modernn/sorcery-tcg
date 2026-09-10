@@ -5090,6 +5090,55 @@
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0238_start_turn_draw_spells_decks_out_on_an_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0239",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player discard Magic offers only both Avatars. After the cast is announced, the targeted player chooses one of their own Atlas or Spellbook hand cards. The choice is a pending Storyline that transfers the decision seat; the caster cannot pick the card, and opponent hand identities stay redacted until the discard is public in the cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "discard-card"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "card-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0239_target_player_discard_lets_the_targeted_player_choose"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0240",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "The same targeted discard is a paid no-op when the chosen player has no hand cards. It never becomes a random discard and never decks out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0240_target_player_discard_is_a_paid_noop_without_cards"
+      }
     }
   ]
 }

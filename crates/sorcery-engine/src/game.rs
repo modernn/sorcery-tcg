@@ -58,6 +58,7 @@ pub struct Position {
     immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
     pending_cemetery_summon: Option<PendingCemeterySummon>,
+    pending_discard_cards: Option<PendingDiscardCards>,
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
@@ -836,6 +837,16 @@ struct PendingGenesisSpellOrder {
     source_instance_id: IdentityHash,
 }
 
+/// The targeted player's remaining Storyline discards after a Magic pays and announces.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingDiscardCards {
+    remaining: u8,
+    seat: Seat,
+    source_card_id: String,
+    source_instance_id: IdentityHash,
+    source_owner: Seat,
+}
+
 /// The free placement a cemetery summon owes after its public random selection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingCemeterySummon {
@@ -883,6 +894,7 @@ enum Phase {
     ChainMagic,
     DeathriteOrder,
     Defend,
+    DiscardCard,
     Draw,
     EndTurnAura,
     Genesis,
@@ -905,6 +917,7 @@ impl Phase {
             Self::ChainMagic => "chain-magic",
             Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
+            Self::DiscardCard => "discard-card",
             Self::Draw => "draw",
             Self::EndTurnAura => "end-turn-aura",
             Self::Genesis => "genesis",
@@ -1321,6 +1334,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
+        | MagicEffect::TargetPlayerDiscardsCards(_)
         | MagicEffect::TargetPlayerGainsLife(_)
         | MagicEffect::TargetPlayerLosesLife(_)
         | MagicEffect::TapTargetMinion
@@ -1570,6 +1584,7 @@ impl Game {
                 immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
                 pending_cemetery_summon: None,
+                pending_discard_cards: None,
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
@@ -2006,6 +2021,7 @@ impl Game {
             Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
             Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
+            Phase::DiscardCard => self.append_discard_card_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::EndTurnAura => self.append_end_turn_aura_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
@@ -2670,6 +2686,50 @@ impl Game {
             }
         }
         Ok(targets)
+    }
+
+    fn append_discard_card_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_discard_cards
+            .as_ref()
+            .ok_or_else(|| invalid("discard-card phase lacks a pending Magic"))?;
+        if pending.seat != self.position.decision_seat {
+            return Err(invalid("discard-card choice belongs to another seat"));
+        }
+        let player = &self.position.players[seat_index(pending.seat)];
+        let mut cards: Vec<_> = player
+            .hand_atlas
+            .iter()
+            .map(|card| (DeckZone::Atlas, card))
+            .chain(
+                player
+                    .hand_spellbook
+                    .iter()
+                    .map(|card| (DeckZone::Spellbook, card)),
+            )
+            .collect();
+        cards.sort_unstable_by(|left, right| left.1.instance_id.cmp(&right.1.instance_id));
+        for (zone, card) in cards {
+            let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
+            let identity = card.instance_id.as_str();
+            self.push_action(
+                actions,
+                ActionDescriptor::DiscardCard {
+                    card_instance_id: card.instance_id.clone(),
+                    zone,
+                },
+                format!(
+                    "Discard {card_id} {} from {}",
+                    &identity[..15.min(identity.len())],
+                    zone.as_str()
+                ),
+            );
+        }
+        Ok(())
     }
 
     fn append_draw_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
@@ -5153,6 +5213,109 @@ impl Game {
         Ok(())
     }
 
+    fn hand_card_count(&self, seat: Seat) -> usize {
+        let player = &self.position.players[seat_index(seat)];
+        player.hand_atlas.len() + player.hand_spellbook.len()
+    }
+
+    fn begin_discard_cards(
+        &mut self,
+        seat: Seat,
+        count: u8,
+        source_card_id: &str,
+        source_instance_id: &IdentityHash,
+        source_owner: Seat,
+    ) -> bool {
+        let remaining = self.hand_card_count(seat).min(usize::from(count));
+        let remaining = u8::try_from(remaining).unwrap_or(count);
+        if remaining == 0 {
+            return false;
+        }
+        self.position.pending_discard_cards = Some(PendingDiscardCards {
+            remaining,
+            seat,
+            source_card_id: source_card_id.to_owned(),
+            source_instance_id: source_instance_id.clone(),
+            source_owner,
+        });
+        self.position.phase = Phase::DiscardCard;
+        self.position.decision_seat = seat;
+        true
+    }
+
+    fn apply_discard_card_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::DiscardCard {
+            card_instance_id,
+            zone,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let pending = self
+            .position
+            .pending_discard_cards
+            .clone()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::DiscardCard
+            || pending.seat != action.seat
+            || pending.remaining == 0
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let player = &self.position.players[seat_index(pending.seat)];
+        let actual_zone = if player
+            .hand_atlas
+            .iter()
+            .any(|card| card.instance_id == *card_instance_id)
+        {
+            DeckZone::Atlas
+        } else if player
+            .hand_spellbook
+            .iter()
+            .any(|card| card.instance_id == *card_instance_id)
+        {
+            DeckZone::Spellbook
+        } else {
+            return Err(GameError::IllegalAction);
+        };
+        if *zone != actual_zone {
+            return Err(GameError::IllegalAction);
+        }
+        self.pay_chosen_hand_discard(
+            pending.seat,
+            card_instance_id,
+            &pending.source_instance_id,
+            outcomes,
+        )?;
+        let remaining = pending.remaining.saturating_sub(1);
+        if remaining == 0 || self.hand_card_count(pending.seat) == 0 {
+            self.position.pending_discard_cards = None;
+            self.position.decision_seat = self.position.active_seat;
+            self.position.phase = if self.position.terminal.is_some() {
+                Phase::Terminal
+            } else {
+                Phase::Main
+            };
+            Self::emit_continuation_magic_resolved(
+                &pending.source_card_id,
+                &pending.source_instance_id,
+                pending.source_owner,
+                outcomes,
+            );
+        } else {
+            self.position.pending_discard_cards = Some(PendingDiscardCards {
+                remaining,
+                ..pending
+            });
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
     fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
         let choices: Vec<_> = self.position.players[seat_index(seat)]
             .cemetery
@@ -5486,7 +5649,8 @@ impl Game {
             MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
                 self.artifact_target_choices(seat, caster_instance_id)?
             }
-            MagicEffect::TargetPlayerGainsLife(_)
+            MagicEffect::TargetPlayerDiscardsCards(_)
+            | MagicEffect::TargetPlayerGainsLife(_)
             | MagicEffect::TargetPlayerLosesLife(_)
             | MagicEffect::MillSites(_)
             | MagicEffect::MillSpells(_) => self.avatar_player_choices(),
@@ -7348,6 +7512,9 @@ impl Game {
             } => {
                 self.apply_defend_action(action.seat, *from, path, *to, unit_instance_id, outcomes)
             }
+            ActionDescriptor::DiscardCard { .. } => {
+                self.apply_discard_card_action(action, outcomes)
+            }
             ActionDescriptor::Draw { zone } => {
                 self.apply_draw_action(action.seat, *zone, false, outcomes)
             }
@@ -7466,6 +7633,7 @@ impl Game {
         outcomes.move_tail_before_completion(settlement_start);
         // Magic that owns its own resolution event resumes through its continuation instead.
         let continuing_cast = self.position.pending_cemetery_summon.is_some()
+            || self.position.pending_discard_cards.is_some()
             || matches!(
                 action.descriptor,
                 ActionDescriptor::CastMagic {
@@ -10848,6 +11016,7 @@ impl Game {
     fn clear_ordered_terminal_continuations(&mut self) {
         self.position.pending_basic_movement = PendingField::Absent;
         self.position.pending_cemetery_summon = None;
+        self.position.pending_discard_cards = None;
         self.position.pending_chain_magic = PendingField::Absent;
         self.position.pending_ranged_step = PendingField::Absent;
         self.position.pending_combat = None;
@@ -15124,6 +15293,11 @@ impl Game {
                 };
                 self.apply_untap_minion(instance_id, *target_seat, card_instance_id, outcomes)?;
             }
+            MagicEffect::TargetPlayerDiscardsCards(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                raising =
+                    self.begin_discard_cards(target_seat, count, card_id, card_instance_id, owner);
+            }
             MagicEffect::TargetPlayerGainsLife(amount) => {
                 let target_seat = self.targeted_avatar_seat(target.as_ref())?;
                 self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
@@ -18086,6 +18260,18 @@ impl Game {
                     }),
                 );
             }
+            if let Some(pending) = &self.position.pending_discard_cards {
+                object.insert(
+                    "pendingDiscardCards".to_owned(),
+                    json!({
+                        "remaining": pending.remaining,
+                        "seat": pending.seat,
+                        "sourceCardId": pending.source_card_id,
+                        "sourceInstanceId": pending.source_instance_id,
+                        "sourceOwner": pending.source_owner,
+                    }),
+                );
+            }
         }
         self.insert_realm_artifacts(&mut value);
         if !self.position.auras.is_empty() {
@@ -19219,6 +19405,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetSiteToOwnerHand,
                 json!({ "returnTargetSiteToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::TargetPlayerDiscardsCards(1),
+                json!({ "targetPlayerDiscardsCards": 1 }),
             ),
             (
                 MagicEffect::TargetPlayerGainsLife(2),

@@ -1481,6 +1481,34 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   });
   assert.equal(milledSpells.cards[firstSpell]?.cardType === 'magic'
     && milledSpells.cards[firstSpell].millSpells, 2);
+  for (const targetPlayerDiscardsCards of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          cardType: 'magic',
+          manaCost: 1,
+          targetPlayerDiscardsCards,
+          thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+        } as unknown as GameCardDefinition,
+      },
+    }), /targetPlayerDiscardsCards must be a safe integer between 1 and 200/);
+  }
+  const discardCards = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 1,
+        targetPlayerDiscardsCards: 2,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(discardCards.cards[firstSpell]?.cardType === 'magic'
+    && discardCards.cards[firstSpell].targetPlayerDiscardsCards, 2);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -22446,6 +22474,150 @@ test('RULE-03 start-turn draw spells draws a hidden spell then decks out on an e
       status: 'finished',
       winner: 'south',
     });
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'discard-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'discard-north-site': { cardType: 'site', elements: ['earth'] },
+    'discard-spell': {
+      cardType: 'magic',
+      manaCost: 0,
+      targetPlayerDiscardsCards: 1,
+      thresholds,
+    },
+    'discard-empty': {
+      cardType: 'magic',
+      manaCost: 0,
+      targetPlayerDiscardsCards: 6,
+      thresholds,
+    },
+    'discard-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'discard-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'discard-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const input = (
+    seed: number,
+    northSpellbook: readonly string[],
+  ) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-target-player-discard-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('discard-north-site'),
+        avatar: 'discard-north-avatar',
+        spellbook: [...northSpellbook],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('discard-south-site'),
+        avatar: 'discard-south-avatar',
+        spellbook: Array(6).fill('discard-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const choiceManifest = createGameManifest(input(239, Array(6).fill('discard-spell')));
+  assert.equal(choiceManifest.cards['discard-spell']?.cardType === 'magic'
+    && choiceManifest.cards['discard-spell'].targetPlayerDiscardsCards, 1);
+
+  await withSetup(choiceManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const southAvatar = ctx.state.players.south.avatar.card.instanceId;
+    const chosen = ctx.state.players.south.hand.spellbook[0]?.instanceId;
+    assert.ok(chosen);
+    const paid = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'discard-spell'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'south'
+        && descriptor.target.instanceId === southAvatar));
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), ['magic-cast']);
+    assert.equal(ctx.state.phase, 'discard-card');
+    assert.equal(ctx.state.decisionSeat, 'south');
+    assert.equal(ctx.state.pendingDiscardCards?.remaining, 1);
+    const offered = (await ctx.legalActions('south')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'discard-card' ? [descriptor.cardInstanceId] : []);
+    assert.equal(offered.includes(chosen), true);
+    assert.equal((await ctx.legalActions('north')).length, 0);
+    assert.equal(
+      canonicalJson(ctx.observe('north')).includes(chosen),
+      false,
+    );
+    const discarded = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'discard-card'
+        && descriptor.cardInstanceId === chosen
+        && descriptor.zone === 'spellbook', 'south'));
+    assert.equal(discarded.accepted, true);
+    if (!discarded.accepted) return;
+    assert.deepEqual(discarded.receipt.events.map(({ type }) => type), [
+      'card-discarded',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.decisionSeat, 'north');
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === chosen), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(240, [
+    'discard-empty',
+    'discard-empty',
+    'discard-empty',
+  ])), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'discard-empty'
+        && descriptor.target?.seat === 'south');
+    while (ctx.state.phase === 'discard-card') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'discard-card');
+    }
+    assert.equal(ctx.state.players.south.hand.atlas.length, 0);
+    assert.equal(ctx.state.players.south.hand.spellbook.length, 0);
+    const paid = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'discard-empty'
+        && descriptor.target?.seat === 'south'));
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.phase, 'main');
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
