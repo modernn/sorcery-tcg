@@ -18,6 +18,7 @@ use crate::novelty::{NoveltyStep, probe_novelty};
 use crate::novelty_dispatch::{
     ForcedNoveltyInput, ForcedNoveltyOutput, run_novelty_from_forced_action,
 };
+use crate::novelty_frontier::{NoveltyFrontierSearchOutput, run_novelty_frontier_search};
 use crate::novelty_rollout::{NoveltyRolloutOutput, run_novelty_rollout};
 use crate::policy::{PolicyError, baseline_policy_snapshot};
 use crate::simulator::SimulatorError;
@@ -210,6 +211,19 @@ impl Session {
         input: ForcedNoveltyInput<'_>,
     ) -> Result<ForcedNoveltyOutput, SessionError> {
         run_novelty_from_forced_action(self, input)
+    }
+
+    /// Runs one-step novelty, then expands unchosen signals as forced branches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] when a bound is invalid or a frontier dispatch fails.
+    pub fn run_novelty_frontier_search(
+        &self,
+        max_actions: usize,
+        max_branches: usize,
+    ) -> Result<NoveltyFrontierSearchOutput, SessionError> {
+        run_novelty_frontier_search(self, max_actions, max_branches)
     }
 
     /// Expands every engine-issued root action, then follows the baseline policy.

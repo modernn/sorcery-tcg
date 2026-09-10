@@ -15,6 +15,7 @@ import { withRustSession } from '../engine/rust-session-helpers.ts';
 
 export const NOVELTY_ROLLOUT_ACTION_LIMIT = 500;
 export const NOVELTY_ROLLOUT_WIDTH_LIMIT = 128;
+export const NOVELTY_FRONTIER_BRANCH_LIMIT = 32;
 
 type ActionKind = GameLegalAction['descriptor']['kind'];
 type FinishedTerminal = Extract<GameTerminal, { status: 'finished' }>;
@@ -127,6 +128,60 @@ export type ForcedNoveltyDispatch = Readonly<{
     stateHash: StateHash;
   }>;
   result: NoveltyRolloutResult;
+}>;
+
+export type NoveltyFrontierBranch = Readonly<{
+  actionId: string;
+  actionKind: ActionKind;
+  branchId: string;
+  checkpointId: StateHash;
+  depth: number;
+  entryActionCount: 1;
+  entryEventTypes: readonly string[];
+  novelSignalsAtDispatch: readonly NoveltyFrontierCandidate['signal'][];
+  parentBranchId: string | null;
+  parentJobId: string;
+  result: NoveltyRolloutResult;
+  signals: readonly NoveltyFrontierCandidate['signal'][];
+}>;
+
+export type NoveltyFrontierPending = Readonly<{
+  actionId: string;
+  actionKind: ActionKind;
+  branchId: string;
+  checkpointId: StateHash;
+  depth: number;
+  parentBranchId: string | null;
+  parentJobId: string;
+  predictedEventTypes: readonly string[];
+  predictedStateHash: StateHash;
+  signals: readonly NoveltyFrontierCandidate['signal'][];
+}>;
+
+export type NoveltyFrontierSearchReport = Readonly<{
+  classification: 'authority-private';
+  frontierBranches: readonly NoveltyFrontierBranch[];
+  frontierPending: readonly NoveltyFrontierPending[];
+  policyVersion: 'signal-guided-bounded-frontier-v2';
+  root: NoveltyRolloutResult;
+  schemaVersion: 2;
+  totals: Readonly<{
+    branchLimit: number;
+    frontierBranches: number;
+    frontierCompleted: number;
+    frontierFailed: number;
+    frontierHorizon: number;
+    frontierLimitReached: boolean;
+    frontierMaxDepth: number;
+    frontierPending: number;
+    frontierPendingSignals: number;
+    frontierPrunedCovered: number;
+    rootStatus: NoveltyRolloutResult['status'];
+  }>;
+}>;
+
+export type NoveltyFrontierSearchOptions = Readonly<NoveltyRolloutOptions & {
+  maxBranches?: number;
 }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -249,4 +304,42 @@ export async function runNoveltyFromForcedCheckpoint(
     checkpoint as unknown as JsonValue,
     options,
   );
+}
+
+function boundedMaxBranches(maxBranches: number | undefined): number {
+  const value = maxBranches ?? NOVELTY_FRONTIER_BRANCH_LIMIT;
+  if (!Number.isSafeInteger(value) || value < 0 || value > NOVELTY_FRONTIER_BRANCH_LIMIT) {
+    throw new RangeError(`maxBranches must be 0-${NOVELTY_FRONTIER_BRANCH_LIMIT}`);
+  }
+  return value;
+}
+
+/** Runs one-step novelty from `root`, then expands unchosen signals as forced branches. */
+export async function runNoveltyFrontierSearch(
+  root: GameSession,
+  options: NoveltyFrontierSearchOptions = {},
+): Promise<NoveltyFrontierSearchReport> {
+  const maxActions = boundedMaxActions(options.maxActions);
+  const maxBranches = boundedMaxBranches(options.maxBranches);
+  const rootCheckpoint = createGameCheckpoint(root) as unknown as JsonValue;
+  return withRustSession(root.manifest, async (handle) => {
+    await handle.resume(rootCheckpoint);
+    const payload = await handle.runNoveltyFrontierSearch({ maxActions, maxBranches });
+    if (!isRecord(payload.result)) {
+      throw new Error('Rust novelty frontier search result was invalid');
+    }
+    const report = deepFreeze(payload.result) as NoveltyFrontierSearchReport;
+    try {
+      const seen = new Set<string>();
+      for (const raw of payload.emittedCheckpoints) {
+        const checkpoint = parseGameCheckpoint(canonicalJson(raw));
+        if (seen.has(checkpoint.checkpointId)) continue;
+        seen.add(checkpoint.checkpointId);
+        options.onCheckpoint?.(checkpoint);
+      }
+    } catch {
+      throw new Error('novelty frontier checkpoint sink failed');
+    }
+    return report;
+  });
 }

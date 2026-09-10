@@ -341,6 +341,28 @@ export class RustSessionClient {
     });
   }
 
+  async runNoveltyFrontierSearch(input: Readonly<{
+    maxActions: number;
+    maxBranches: number;
+  }>): Promise<Readonly<{
+    emittedCheckpoints: readonly JsonValue[];
+    result: JsonValue;
+  }>> {
+    const payload = await this.call('runNoveltyFrontierSearch', {
+      maxActions: input.maxActions,
+      maxBranches: input.maxBranches,
+    });
+    if (!isRecord(payload)
+      || !Array.isArray(payload.emittedCheckpoints)
+      || payload.result === undefined) {
+      throw new Error('Rust session runNoveltyFrontierSearch result was invalid');
+    }
+    return Object.freeze({
+      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
+      result: payload.result as JsonValue,
+    });
+  }
+
   async runNoveltyFromForcedAction(input: Readonly<{
     actionId: string;
     actionKind: string;
