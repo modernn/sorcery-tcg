@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Live line: `cursor/rust-cutover-setup-tests-0005` (PR https://github.com/modernn/sorcery-tcg/pull/2), tip `0090408`.
+Live line: `cursor/rust-cutover-setup-tests-0005` (PR https://github.com/modernn/sorcery-tcg/pull/2).
 
 Do not start from `master`'s copy of this file. That copy still says to migrate `game-setup.test.ts` and gut `game.ts`; that work is already on this branch. Do not open a second cutover branch.
 
@@ -26,7 +26,7 @@ Still TypeScript (not a second legality engine):
 - Manifest validation, observation, authority ingestion, server, and browser UI.
 - `run-private-game-check.ts` still *calls* the sync wrappers; it cannot be executed in this cloud checkout (no `.local/authority/`).
 
-## Gate status at tip `0090408`
+## Gate status on this branch
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
