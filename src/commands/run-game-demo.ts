@@ -106,8 +106,8 @@ export function runGameRecord(seed = 1): RustGameRecord {
   return runRustSyntheticRecord(seed);
 }
 
-export function runGameDemo(seed = 1): DeterministicGameReport {
-  const report = runRustSyntheticDemo(seed);
+export function runGameDemo(seed = 1, artifactsDir?: string): DeterministicGameReport {
+  const report = runRustSyntheticDemo(seed, artifactsDir);
   return Object.freeze({
     acceptedActionCount: report.acceptedActionCount,
     classification: 'unranked_partial_rules',

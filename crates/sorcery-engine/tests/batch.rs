@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 use sorcery_engine::batch::{
-    BatchError, BatchJob, default_batch_workers, run_batch, run_game_batch,
+    BatchError, BatchJob, default_batch_workers, run_batch, run_game_batch, run_game_batch_to_dir,
 };
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::game_record::GAME_ARTIFACT_FILES;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -111,4 +112,51 @@ fn worker_counts_should_produce_identical_ordered_authoritative_results() {
         run_batch(&wrong_binding, 1),
         Err(BatchError::Job { job_index: 0, .. })
     ));
+}
+
+#[test]
+fn batch_to_dir_writes_one_artifact_folder_per_job() {
+    let first_manifest = synthetic_demo_manifest_json(31).expect("seed-31 manifest");
+    let second_manifest = synthetic_demo_manifest_json(23).expect("seed-23 manifest");
+    let policy = policy(&first_manifest);
+    let jobs = [
+        BatchJob {
+            manifest_json: &first_manifest,
+            north_deck_id: policy.deck_id(),
+            north_policy: &policy,
+            south_deck_id: policy.deck_id(),
+            south_policy: &policy,
+        },
+        BatchJob {
+            manifest_json: &second_manifest,
+            north_deck_id: policy.deck_id(),
+            north_policy: &policy,
+            south_deck_id: policy.deck_id(),
+            south_policy: &policy,
+        },
+    ];
+    let dir = std::env::temp_dir().join(format!("sorcery-batch-artifacts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let results = run_game_batch_to_dir(&jobs, 2, &dir).expect("batch artifacts");
+    assert_eq!(results.len(), 2);
+    for (job_index, result) in results.iter().enumerate() {
+        let job_dir = dir.join(job_index.to_string());
+        for file in GAME_ARTIFACT_FILES {
+            assert!(job_dir.join(file).is_file(), "{job_index}/{file}");
+        }
+        let outcome: Value = serde_json::from_str(
+            &std::fs::read_to_string(job_dir.join("outcome.json")).expect("outcome"),
+        )
+        .expect("outcome JSON");
+        assert_eq!(outcome["manifestId"], result.manifest_id.as_str());
+        assert_eq!(
+            outcome["finalStateHash"],
+            result.report.final_state_hash.as_str()
+        );
+        assert_eq!(
+            outcome["transcriptHash"],
+            result.report.transcript_hash.as_str()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }

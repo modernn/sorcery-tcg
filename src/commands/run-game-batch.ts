@@ -71,8 +71,13 @@ function policy(manifest: GameManifest, boundDeckId: ReturnType<typeof identityH
   return { ...body, policyId: identityHash(body as unknown as JsonValue) } as JsonValue;
 }
 
-function rustRequest(manifests: readonly GameManifest[], workers: number): string {
+function rustRequest(
+  manifests: readonly GameManifest[],
+  workers: number,
+  artifactsDir?: string,
+): string {
   return canonicalJson({
+    ...(artifactsDir === undefined ? {} : { artifactsDir }),
     jobs: manifests.map((manifest) => {
       const northDeckId = deckId(manifest.decks.north);
       const southDeckId = deckId(manifest.decks.south);
@@ -145,6 +150,7 @@ async function runRustBatch(request: string): Promise<unknown> {
 export async function runGameBatch(
   manifests: readonly GameManifest[],
   requestedWorkers = Math.min(availableParallelism(), MAX_WORKERS),
+  artifactsDir?: string,
 ): Promise<readonly GameBatchResult[]> {
   if (manifests.length === 0 || manifests.length > MAX_JOBS) {
     throw new RangeError(`game batch must contain 1-${MAX_JOBS} manifests`);
@@ -157,7 +163,7 @@ export async function runGameBatch(
   if (Buffer.byteLength(canonicalJson(manifests as unknown as JsonValue)) > MAX_BATCH_BYTES) {
     throw new RangeError(`game batch exceeds ${MAX_BATCH_BYTES} bytes`);
   }
-  const results = await runRustBatch(rustRequest(manifests, requestedWorkers));
+  const results = await runRustBatch(rustRequest(manifests, requestedWorkers, artifactsDir));
   if (!Array.isArray(results) || results.length !== manifests.length
     || results.some((result, jobIndex) => !isRecord(result)
       || result.jobIndex !== jobIndex

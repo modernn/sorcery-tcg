@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import { identityHash } from '../../src/authority/hash.ts';
@@ -41,6 +43,30 @@ test('SIM-03 seed-31 record writes manifest, transcript, events, coverage, and o
   assert.equal(record.coverage.committedActionKinds.includes('summon-minion'), true);
   assert.equal(record.coverage.committedEventTypes.includes('fight-started'), true);
   assert.equal(record.coverage.offeredActionKinds.includes('end-turn'), true);
+});
+
+test('demo writes SIM-03 artifact files without changing compact stdout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sorcery-demo-artifacts-'));
+  try {
+    const compact = runGameDemo(31);
+    const written = runGameDemo(31, dir);
+    assert.deepEqual(written, compact);
+    assert.deepEqual(readdirSync(dir).sort(), [
+      'coverage.json',
+      'events.jsonl',
+      'manifest.json',
+      'outcome.json',
+      'transcript.json',
+    ]);
+    const outcome = JSON.parse(readFileSync(join(dir, 'outcome.json'), 'utf8')) as {
+      finalStateHash: string;
+      transcriptHash: string;
+    };
+    assert.equal(outcome.finalStateHash, compact.finalStateHash);
+    assert.equal(outcome.transcriptHash, compact.transcriptHash);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('TEST-02 fresh processes emit byte-identical game records', () => {

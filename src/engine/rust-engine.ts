@@ -246,11 +246,16 @@ export function runRustEngineCommand(args: readonly string[]): JsonValue {
 }
 
 /** Runs the authoritative synthetic demo rollout for one seed. */
-export function runRustSyntheticDemo(seed: number): RustDeterministicGameReport {
+export function runRustSyntheticDemo(
+  seed: number,
+  artifactsDir?: string,
+): RustDeterministicGameReport {
   if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
     throw new RangeError('seed must be a safe integer between 0 and 4294967295');
   }
-  return parseRustReport(runRustEngineCommand(['demo', String(seed)]));
+  return parseRustReport(runRustEngineCommand(
+    artifactsDir === undefined ? ['demo', String(seed)] : ['demo', String(seed), artifactsDir],
+  ));
 }
 
 function parseRustRecord(value: unknown): RustGameRecord {
