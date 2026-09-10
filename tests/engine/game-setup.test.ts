@@ -22801,11 +22801,11 @@ test('RULE-04 must-attack-a-unit-if-able is mandatory in range and optional out 
 
   await withSetup(createGameManifest(input(244)), async (ctx) => {
     await reachAfterSummon(ctx, 'C1');
-    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.phase === 'main', true);
     assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
       descriptor.kind === 'end-turn'), true);
     await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
-    assert.equal(ctx.state.phase, 'draw');
+    assert.equal(ctx.state.phase === 'draw', true);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
