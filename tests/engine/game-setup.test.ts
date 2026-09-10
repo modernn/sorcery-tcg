@@ -19174,9 +19174,14 @@ test('RULE-03 draw-site Magic draws hidden Atlas cards and redacts them from the
       'site-drawn',
       'magic-resolved',
     ]);
-    assert.equal(drawn.receipt.events[1]?.payload.seat, 'north');
-    assert.equal(drawn.receipt.events[1]?.payload.sourceInstanceId, sourceInstanceId);
-    assert.equal(drawn.receipt.events[2]?.payload.sourceInstanceId, sourceInstanceId);
+    assert.deepEqual(drawn.receipt.events[1]?.payload, {
+      seat: 'north',
+      sourceInstanceId,
+    });
+    assert.deepEqual(drawn.receipt.events[2]?.payload, {
+      seat: 'north',
+      sourceInstanceId,
+    });
     assert.deepEqual(drawn.receipt.randomDraws, []);
     const hand = ctx.state.players.north.hand.atlas;
     assert.equal(hand.length, 4);
