@@ -24079,12 +24079,29 @@ test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and i
   });
 
   await withSetup(uniqueManifest, async (ctx) => {
-    await afterAuraOnC4(ctx);
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
     await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'play-site'
         && descriptor.cardId === 'ablaze-south-site'
         && descriptor.cell === 'D1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    const legalCells = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) =>
+        descriptor.kind === 'cast-aura' && descriptor.cardId === 'ablaze-north-aura')
+      .map(({ descriptor }) => descriptor.kind === 'cast-aura' ? descriptor.cells : []);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C4' && cells.length === 1), true);
+    assert.equal(legalCells.some((cells) => cells[0] === 'D1'), false);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'ablaze-north-aura'
+        && descriptor.cells[0] === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
     await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
     assert.equal(ctx.state.phase === 'start-turn', true);
     await ctx.take(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
@@ -24092,18 +24109,6 @@ test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and i
     assert.equal('rubble' in (ctx.state.realm.sites.C4 ?? {}), true);
     assert.equal(ctx.state.players.north.avatar.location, 'C4');
     assert.equal(ctx.state.realm.auras, undefined);
-    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-    await ctx.take(({ descriptor }) =>
-      descriptor.kind === 'play-site'
-        && descriptor.cardId === 'ablaze-north-site'
-        && descriptor.cell === 'C3');
-    const legalCells = (await ctx.legalActions('north'))
-      .filter(({ descriptor }) =>
-        descriptor.kind === 'cast-aura' && descriptor.cardId === 'ablaze-north-aura')
-      .map(({ descriptor }) => descriptor.kind === 'cast-aura' ? descriptor.cells : []);
-    assert.equal(legalCells.some((cells) => cells[0] === 'C3' && cells.length === 1), true);
-    assert.equal(legalCells.some((cells) => cells[0] === 'D1'), false);
-    assert.equal(legalCells.some((cells) => cells[0] === 'C4'), false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

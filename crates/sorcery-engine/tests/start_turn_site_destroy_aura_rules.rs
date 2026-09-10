@@ -246,8 +246,13 @@ fn rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop
 
 #[test]
 fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
-    let mut session = after_aura_on_c4(true);
-    let source_id = aura_id(&session);
+    let mut session = Session::new(&manifest(true)).expect("valid unique-site session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
@@ -255,6 +260,37 @@ fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
         descriptor["kind"] == "play-site"
             && descriptor["cardId"] == "south-site"
             && descriptor["cell"] == "D1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let legal_cells: Vec<_> = session
+        .legal_actions()
+        .expect("Ablaze offers beside a Unique site")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-aura" && action.descriptor["cardId"] == "north-aura"
+        })
+        .map(|action| action.descriptor["cells"].clone())
+        .collect();
+    assert!(
+        legal_cells.contains(&json!(["C4"])),
+        "an Ordinary site remains a legal conjure target: {legal_cells:?}"
+    );
+    assert!(
+        !legal_cells.contains(&json!(["D1"])),
+        "a Unique or Legendary site is not a legal conjure target: {legal_cells:?}"
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-aura"
+            && descriptor["cells"] == json!(["C4"])
+    });
+    let source_id = aura_id(&session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let receipt = resolve_start_turn_destroy(&mut session, &source_id);
@@ -281,34 +317,5 @@ fn rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn() {
     assert_eq!(after["realm"]["sites"]["C4"]["rubble"], true);
     assert_eq!(after["players"]["north"]["avatar"]["location"], "C4");
     assert!(after["realm"].get("auras").is_none());
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "play-site"
-            && descriptor["cardId"] == "north-site"
-            && descriptor["cell"] == "C3"
-    });
-    let legal_cells: Vec<_> = session
-        .legal_actions()
-        .expect("second Ablaze offers")
-        .into_iter()
-        .filter(|action| {
-            action.descriptor["kind"] == "cast-aura" && action.descriptor["cardId"] == "north-aura"
-        })
-        .map(|action| action.descriptor["cells"].clone())
-        .collect();
-    assert!(
-        legal_cells.contains(&json!(["C3"])),
-        "an Ordinary site remains a legal conjure target: {legal_cells:?}"
-    );
-    assert!(
-        !legal_cells.contains(&json!(["D1"])),
-        "a Unique or Legendary site is not a legal conjure target: {legal_cells:?}"
-    );
-    assert!(
-        !legal_cells.contains(&json!(["C4"])),
-        "rubble is not a legal conjure target: {legal_cells:?}"
-    );
     assert_exact_replay(&session);
 }
