@@ -1436,6 +1436,13 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
     }
+    if (card.untapTargetMinion !== undefined && card.untapTargetMinion !== true) {
+      throw new RangeError(`${path}.untapTargetMinion must be true when defined`);
+    }
+    if (card.untapTargetMinionAfterDamage !== undefined
+      && card.untapTargetMinionAfterDamage !== true) {
+      throw new RangeError(`${path}.untapTargetMinionAfterDamage must be true when defined`);
+    }
     if (card.damageEachAbovegroundMinion !== undefined
       && card.damageEachAbovegroundMinion !== 1) {
       throw new RangeError(`${path}.damageEachAbovegroundMinion must be 1`);
@@ -1517,13 +1524,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.targetNearby !== undefined && card.damageTargetUnit === undefined) {
       throw new RangeError(`${path}.targetNearby requires damageTargetUnit`);
-    }
-    if (card.untapTargetMinion !== undefined && card.untapTargetMinion !== true) {
-      throw new RangeError(`${path}.untapTargetMinion must be true when defined`);
-    }
-    if (card.untapTargetMinionAfterDamage !== undefined
-      && card.untapTargetMinionAfterDamage !== true) {
-      throw new RangeError(`${path}.untapTargetMinionAfterDamage must be true when defined`);
     }
     if (card.untapTargetMinionAfterDamage === true && card.damageTargetUnit === undefined) {
       throw new RangeError(`${path}.untapTargetMinionAfterDamage requires damageTargetUnit`);
