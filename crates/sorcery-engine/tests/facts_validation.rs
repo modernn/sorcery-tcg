@@ -375,6 +375,10 @@ fn rule_06_should_validate_elements_thresholds_and_token_reference_ids() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table documents every fail-closed Magic auxiliary pairing"
+)]
 fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
     let invalid = [
         (

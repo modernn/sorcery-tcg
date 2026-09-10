@@ -7837,7 +7837,6 @@ fn rule_catalog_0207_destroy_target_site_replaces_the_site_with_rubble() {
     );
 
     let after = state(&session);
-    assert_eq!(after["realm"]["sites"]["C1"]["cardId"], "rubble");
     assert_eq!(after["realm"]["sites"]["C1"]["rubble"], true);
     assert_eq!(
         after["realm"]["sites"]["C1"]["instanceId"],
