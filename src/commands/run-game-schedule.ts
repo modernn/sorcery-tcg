@@ -23,8 +23,7 @@ function parseSchedule(value: unknown): SyntheticScheduleReport {
     || value.schemaVersion !== 1
     || !Array.isArray(value.plannedSeeds)
     || !Array.isArray(value.completedSeeds)
-    || !isRecord(value.gauntlet)
-    || !Number.isSafeInteger(value.gauntlet.gameCount)
+    || !Number.isSafeInteger(value.gameCount)
     || typeof value.scheduleId !== 'string'
     || !/^sha256:[0-9a-f]{64}$/u.test(value.scheduleId)) {
     throw new Error('Rust schedule report did not match the expected contract');
@@ -38,7 +37,7 @@ function parseSchedule(value: unknown): SyntheticScheduleReport {
       }),
     ),
     failurePolicy: 'abort',
-    gameCount: value.gauntlet.gameCount as number,
+    gameCount: value.gameCount as number,
     plannedSeeds: Object.freeze(
       value.plannedSeeds.map((seed) => {
         if (!Number.isSafeInteger(seed)) throw new Error('schedule plannedSeeds was invalid');

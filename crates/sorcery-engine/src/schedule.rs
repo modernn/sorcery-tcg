@@ -68,7 +68,10 @@ pub struct ScheduleReport {
     pub failed_seed: Option<u32>,
     /// Applied failure policy.
     pub failure_policy: FailurePolicy,
-    /// Aggregated finished pairs.
+    /// Number of finished games across completed pairs.
+    pub game_count: usize,
+    /// Aggregated finished pairs. Skipped from canonical JSON because it carries a float mean.
+    #[serde(skip)]
     pub gauntlet: GauntletReport,
     /// Seeds after weighting and caps, including any failed seed.
     pub planned_seeds: Vec<u32>,
@@ -259,6 +262,7 @@ pub fn run_declared_pairs(
             .collect(),
         failed_seed,
         failure_policy,
+        game_count: completed.iter().map(|report| report.game_count).sum(),
         gauntlet: merge_gauntlet_reports(&completed)?,
         planned_seeds,
         schema_version: 1,
