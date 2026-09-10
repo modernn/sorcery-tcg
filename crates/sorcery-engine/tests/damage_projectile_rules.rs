@@ -386,7 +386,7 @@ fn disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire() {
         ["C4", "C3"]
     );
     let before = state(&visible.session);
-    assert_eq!(unit(&before, near_target_id)["stealthed"], true);
+    assert_eq!(unit(&before, near_target_id)["stealthed"], false);
     let mut fired = visible.session;
     fire_south(&mut fired, &visible.shooter_id, near_target_id);
     assert_eq!(unit(&state(&fired), near_target_id)["damage"], 1);

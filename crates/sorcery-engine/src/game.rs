@@ -2335,7 +2335,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         let destination = Location {
             cell: pending.cell,
-            region: Region::Surface,
+            region: pending.region,
         };
         for (_kind, instance_id, start, profile) in self.defender_candidates()? {
             for path in self
@@ -7630,12 +7630,29 @@ impl Game {
         Ok(())
     }
 
-    /// Walks a declared defender one cell at a time, settling derived power after each interior
-    /// step so an aura the defender carries away kills its allies where it left them instead of
-    /// being restored by the rest of the path. Returns the path index actually reached.
+    fn minion_occupies(&self, seat: Seat, instance_id: &IdentityHash, location: Location) -> bool {
+        self.position.units.iter().any(|unit| {
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && unit.location == location.cell
+                && unit.region == location.region
+        })
+    }
+
+    fn minion_covers(&self, seat: Seat, instance_id: &IdentityHash, location: Location) -> bool {
+        self.position.units.iter().any(|unit| {
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && unit.region == location.region
+                && Self::unit_occupies_cell(unit, location.cell)
+        })
+    }
+
+    /// Walks a declared minion one cell at a time, settling region occupancy after every step.
     ///
-    /// The arrival step is deliberately left for the shared post-action settlement, so a defender
-    /// that only strands its allies as it lands still joins the combat before they die.
+    /// Derived power deaths stay on interior steps so an aura the defender carries away kills
+    /// its allies where it left them, while the arrival step still joins combat first. A Waterbound
+    /// that enters the void is banished on that cell, so later path cells are never occupied.
     fn walk_declared_defend_path(
         &mut self,
         seat: Seat,
@@ -7661,6 +7678,18 @@ impl Game {
             }
             self.move_minion_to(unit_instance_id, next)?;
             reached += 1;
+            self.settle_region_occupancy(outcomes)?;
+            if self.position.pending_deathrites.is_some() || self.position.terminal.is_some() {
+                break;
+            }
+            if !self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            {
+                break;
+            }
             self.settle_nearby_enemy_stealth(outcomes);
             if reached + 1 >= path.len() {
                 break;
@@ -7949,25 +7978,19 @@ impl Game {
         unit_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.phase != Phase::Defend
-            || path.is_empty()
-            || path.first() != Some(&from)
-            || path
-                .iter()
-                .any(|location| location.region != Region::Surface)
-        {
+        if self.position.phase != Phase::Defend || path.is_empty() || path.first() != Some(&from) {
             return Err(GameError::IllegalAction);
         }
-        let pending_cell = self
+        let pending = self
             .position
             .pending_combat
             .as_ref()
-            .ok_or(GameError::IllegalAction)?
-            .cell;
+            .ok_or(GameError::IllegalAction)?;
+        let pending_cell = pending.cell;
         if to
             != (Location {
                 cell: pending_cell,
-                region: Region::Surface,
+                region: pending.region,
             })
         {
             return Err(GameError::IllegalAction);
@@ -8024,9 +8047,12 @@ impl Game {
             UnitKind::Minion => {
                 let reached =
                     self.walk_declared_defend_path(seat, path, unit_instance_id, outcomes)?;
-                // An interrupted defender owes the rest of its path, so the combat it was joining
-                // cannot be restored until that movement finishes.
-                if reached + 1 < path.len() {
+                let still_present = self.position.units.iter().any(|unit| {
+                    unit.controller == seat && unit.card.instance_id == *unit_instance_id
+                });
+                // An interrupted living defender owes the rest of its path, so the combat it was
+                // joining cannot be restored until that movement finishes.
+                if reached + 1 < path.len() && still_present {
                     self.position.pending_basic_movement =
                         PendingField::Pending(PendingBasicMovement {
                             path: path.to_vec(),
@@ -8054,6 +8080,22 @@ impl Game {
                             "to": path[path.len() - 1],
                         })
                     });
+                    return Ok(());
+                }
+                if !self.minion_covers(seat, unit_instance_id, to) {
+                    let reported = &path[..=reached];
+                    let reported_to = *reported.last().ok_or(GameError::IllegalAction)?;
+                    outcomes.insert(joined_start, "defender-moved", || {
+                        json!({
+                            "from": from,
+                            "instanceId": unit_instance_id,
+                            "path": reported,
+                            "seat": seat,
+                            "steps": reached,
+                            "to": reported_to,
+                        })
+                    });
+                    self.position.state_version += 1;
                     return Ok(());
                 }
             }
@@ -9547,6 +9589,41 @@ impl Game {
         )
     }
 
+    /// Reveals Stealth on every Disabled minion before region occupancy is judged.
+    ///
+    /// Disabled is a loss of abilities, not a delayed interaction: a Waterbound that leaves
+    /// Water is immediately visible, and the reveal is permanent even if it later returns.
+    fn reveal_disabled_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
+        let mut revealed: Vec<(IdentityHash, Seat)> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| unit.stealthed && self.minion_is_disabled(unit))
+            .map(|unit| (unit.card.instance_id.clone(), unit.controller))
+            .collect();
+        revealed.sort_by(|left, right| left.0.cmp(&right.0));
+        for (instance_id, seat) in revealed {
+            let Some(unit) = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            if !unit.stealthed {
+                continue;
+            }
+            unit.stealthed = false;
+            outcomes.push("stealth-lost", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                })
+            });
+        }
+    }
+
     /// Settles every unit whose own region stopped holding it, killing or banishing it.
     ///
     /// Banished units leave before the deaths resolve, but their outcomes follow the death
@@ -9555,6 +9632,7 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
+        self.reveal_disabled_stealth(outcomes);
         let (deaths, banishments) = self.region_settlement_removals();
         if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
@@ -10406,16 +10484,8 @@ impl Game {
                 outcomes,
             );
         }
-        outcomes.push("move-and-attack-activated", || {
-            json!({
-                "from": from,
-                "path": path,
-                "seat": seat,
-                "steps": path.len() - 1,
-                "to": to,
-                "unitInstanceId": unit_instance_id,
-            })
-        });
+        let activation_start = outcomes.len();
+        let mut reported_path = path.to_vec();
         match attacker_kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
@@ -10423,17 +10493,33 @@ impl Game {
                 avatar.tapped = true;
             }
             UnitKind::Minion => {
-                for location in path.iter().skip(1) {
-                    self.move_minion_to(unit_instance_id, *location)?;
-                    self.settle_nearby_enemy_stealth(outcomes);
-                }
-                self.position
-                    .units
-                    .iter_mut()
-                    .find(|unit| unit.card.instance_id == *unit_instance_id)
-                    .ok_or(GameError::IllegalAction)?
-                    .tapped = true;
+                let reached =
+                    self.walk_declared_defend_path(seat, path, unit_instance_id, outcomes)?;
+                reported_path.truncate(reached + 1);
             }
+        }
+        let reported_to = *reported_path.last().ok_or(GameError::IllegalAction)?;
+        outcomes.insert(activation_start, "move-and-attack-activated", || {
+            json!({
+                "from": from,
+                "path": reported_path,
+                "seat": seat,
+                "steps": reported_path.len() - 1,
+                "to": reported_to,
+                "unitInstanceId": unit_instance_id,
+            })
+        });
+        let arrived = match attacker_kind {
+            UnitKind::Avatar => self.position.players[seat_index(seat)].avatar.location == to.cell,
+            UnitKind::Minion => self.minion_occupies(seat, unit_instance_id, to),
+        };
+        if !arrived || self.position.terminal.is_some() {
+            if self.position.pending_deathrites.is_none() && self.position.terminal.is_none() {
+                self.position.phase = Phase::Main;
+                self.position.decision_seat = self.position.active_seat;
+            }
+            self.position.state_version += 1;
+            return Ok(());
         }
         self.position.pending_combat = Some(PendingCombat {
             allocations: Vec::new(),
