@@ -518,6 +518,7 @@ struct AuraPosition {
     cells: Vec<Cell>,
     controller: Seat,
     turn_counters: u8,
+    visited_cells: BTreeSet<Cell>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -704,6 +705,7 @@ enum EndTurnAuraStage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingEndTurnAura {
     aura_instance_id: IdentityHash,
+    ending_seat: Seat,
     outcome_instance_ids: Option<Vec<IdentityHash>>,
     remaining_aura_instance_ids: Vec<IdentityHash>,
     seat: Seat,
@@ -1256,6 +1258,7 @@ const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
     match facts.effect {
         AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
         | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+        | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
         | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf => None,
     }
 }
@@ -1704,16 +1707,7 @@ impl Game {
                 self.position
                     .auras
                     .iter()
-                    .map(|aura| {
-                        json!({
-                            "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
-                            "cells": aura.cells,
-                            "controller": aura.controller,
-                            "instanceId": aura.card.instance_id,
-                            "owner": aura.card.owner,
-                            "turnCounters": aura.turn_counters,
-                        })
-                    })
+                    .map(|aura| self.aura_public_value(aura))
                     .collect::<Vec<_>>(),
             )
         };
@@ -4886,6 +4880,7 @@ impl Game {
             if matches!(
                 facts.effect,
                 AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+                    | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
             ) {
                 continue;
             }
@@ -7339,6 +7334,25 @@ impl Game {
                             });
                         }
                     }
+                    AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => {
+                        for cell in Cell::ALL {
+                            if self.position.sites[cell.index()].is_none()
+                                || !self.cell_is_nearby_spellcaster(
+                                    seat,
+                                    caster_instance_id,
+                                    cell,
+                                )
+                            {
+                                continue;
+                            }
+                            descriptors.push(ActionDescriptor::CastAura {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                cells: vec![cell],
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -7354,6 +7368,37 @@ impl Game {
             return false;
         };
         !facts.unique_or_legendary && !facts.cannot_be_moved_destroyed_or_modified
+    }
+
+    fn cell_is_nearby_spellcaster(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+        cell: Cell,
+    ) -> bool {
+        let Ok((_, occupied)) = self.spellcaster_occupied_cells(seat, caster_instance_id) else {
+            return false;
+        };
+        occupied.iter().any(|origin| {
+            *origin == cell
+                || origin.bordering(false).any(|candidate| candidate == cell)
+                || origin.diagonals(false).any(|candidate| candidate == cell)
+        })
+    }
+
+    fn aura_public_value(&self, aura: &AuraPosition) -> Value {
+        let mut value = json!({
+            "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
+            "cells": aura.cells,
+            "controller": aura.controller,
+            "instanceId": aura.card.instance_id,
+            "owner": aura.card.owner,
+            "turnCounters": aura.turn_counters,
+        });
+        if !aura.visited_cells.is_empty() {
+            value["visitedCells"] = json!(aura.visited_cells.iter().collect::<Vec<_>>());
+        }
+        value
     }
 
     /// Offers every nearby empty cell a controlled flying site may settle into this turn.
@@ -14004,7 +14049,9 @@ impl Game {
     ///
     /// Two-by-two Auras keep that area immobilized, and ground the Airborne minions standing on a
     /// site inside it, until the controller's third turn ends and dispels it. A start-turn site
-    /// destruction Aura occupies one Ordinary or Exceptional site and does not hold the area.
+    /// destruction Aura occupies one Ordinary or Exceptional site and does not hold the area. An
+    /// end-of-each-turn wandering Aura occupies one nearby site, remembers visited cells, and does
+    /// not hold the area.
     fn apply_cast_aura_action(
         &mut self,
         action: &IssuedAction,
@@ -14041,9 +14088,14 @@ impl Game {
         let CardFacts::Aura(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
-        let is_site_destroy = matches!(
+        let holds_immobilizing_area = matches!(
             facts.effect,
-            AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+            AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+        );
+        let tracks_visited_cells = matches!(
+            facts.effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
         );
         let air = u16::try_from(facts.thresholds.get(Element::Air))
             .map_err(|_| GameError::IllegalAction)?;
@@ -14061,7 +14113,7 @@ impl Game {
         self.record_unit_interaction(caster_kind, seat, caster_instance_id, outcomes)?;
         let instance_id = card.instance_id.clone();
         let owner = card.owner;
-        if !is_site_destroy {
+        if holds_immobilizing_area {
             self.position.immobile_areas.push(ImmobileArea {
                 cells: cells.iter().copied().collect(),
                 expires_at_seat: None,
@@ -14075,6 +14127,11 @@ impl Game {
             cells: cells.clone(),
             controller: seat,
             turn_counters: 0,
+            visited_cells: if tracks_visited_cells {
+                cells.iter().copied().collect()
+            } else {
+                BTreeSet::new()
+            },
         });
         outcomes.push("aura-conjured", || {
             json!({
@@ -14579,33 +14636,54 @@ impl Game {
                 }
             }
             EndTurnAuraStage::Move => {
-                self.push_action(
-                    actions,
-                    ActionDescriptor::ResolveEndTurnAuraMove {
-                        aura_instance_id: aura.card.instance_id.clone(),
-                        cells: None,
-                    },
-                    "Decline end-turn Aura move".to_owned(),
-                );
-                for cells in Self::aura_covered_square(aura)
-                    .into_iter()
-                    .flat_map(Self::aura_one_step_areas)
-                {
+                let CardFacts::Aura(facts) =
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                if matches!(
+                    facts.effect,
+                    AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+                ) {
+                    for cell in self.wildfire_unvisited_adjacent(aura) {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveEndTurnAuraMove {
+                                aura_instance_id: aura.card.instance_id.clone(),
+                                cells: Some(vec![cell]),
+                            },
+                            format!("Move Aura to {cell}"),
+                        );
+                    }
+                } else {
                     self.push_action(
                         actions,
                         ActionDescriptor::ResolveEndTurnAuraMove {
                             aura_instance_id: aura.card.instance_id.clone(),
-                            cells: Some(cells),
+                            cells: None,
                         },
-                        format!(
-                            "Move Aura to {}",
-                            cells
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
+                        "Decline end-turn Aura move".to_owned(),
                     );
+                    for cells in Self::aura_covered_square(aura)
+                        .into_iter()
+                        .flat_map(Self::aura_one_step_areas)
+                    {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveEndTurnAuraMove {
+                                aura_instance_id: aura.card.instance_id.clone(),
+                                cells: Some(cells.to_vec()),
+                            },
+                            format!(
+                                "Move Aura to {}",
+                                cells
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -15151,22 +15229,28 @@ impl Game {
         Ok(())
     }
 
-    fn end_turn_damage_aura_ids(&self, seat: Seat) -> Vec<IdentityHash> {
+    fn end_turn_aura_triggers(&self, aura: &AuraPosition, ending_seat: Seat) -> bool {
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        match facts.effect {
+            AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
+                aura.controller == ending_seat
+            }
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => true,
+            AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+            | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {
+                false
+            }
+        }
+    }
+
+    fn end_turn_damage_aura_ids(&self, ending_seat: Seat) -> Vec<IdentityHash> {
         self.position
             .auras
             .iter()
-            .filter(|aura| {
-                if aura.controller != seat {
-                    return false;
-                }
-                let CardFacts::Aura(facts) =
-                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
-                else {
-                    return false;
-                };
-                facts.effect
-                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
-            })
+            .filter(|aura| self.end_turn_aura_triggers(aura, ending_seat))
             .map(|aura| aura.card.instance_id.clone())
             .collect()
     }
@@ -15228,16 +15312,7 @@ impl Game {
     ) -> Result<(), GameError> {
         let Some(index) = aura_instance_ids.iter().position(|instance_id| {
             self.position.auras.iter().any(|aura| {
-                if aura.card.instance_id != *instance_id || aura.controller != seat {
-                    return false;
-                }
-                let CardFacts::Aura(facts) =
-                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
-                else {
-                    return false;
-                };
-                facts.effect
-                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+                aura.card.instance_id == *instance_id && self.end_turn_aura_triggers(aura, seat)
             })
         }) else {
             return self.finish_end_turn_cleanup(seat, outcomes);
@@ -15251,6 +15326,16 @@ impl Game {
             .find(|aura| aura.card.instance_id == aura_instance_id)
             .ok_or(GameError::IllegalAction)?
             .clone();
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if matches!(
+            facts.effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        ) {
+            return self.begin_wildfire_end_turn(seat, aura, remaining_aura_instance_ids, outcomes);
+        }
         outcomes.push("aura-end-turn-triggered", || {
             json!({
                 "cells": aura.cells,
@@ -15270,6 +15355,7 @@ impl Game {
             });
             self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
                 aura_instance_id,
+                ending_seat: seat,
                 outcome_instance_ids: None,
                 remaining_aura_instance_ids,
                 seat,
@@ -15294,6 +15380,7 @@ impl Game {
             )?;
             self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
                 aura_instance_id,
+                ending_seat: seat,
                 outcome_instance_ids: Some(outcome_instance_ids),
                 remaining_aura_instance_ids,
                 seat,
@@ -15322,6 +15409,7 @@ impl Game {
         }
         self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
             aura_instance_id,
+            ending_seat: seat,
             outcome_instance_ids: None,
             remaining_aura_instance_ids,
             seat,
@@ -15402,6 +15490,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let remaining = pending.remaining_aura_instance_ids.clone();
+        let ending_seat = pending.ending_seat;
         self.resolve_end_turn_aura_damage(&aura, target, outcomes)?;
         if self.position.terminal.is_some() {
             self.position.pending_end_turn_aura = None;
@@ -15411,6 +15500,7 @@ impl Game {
         }
         self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
             aura_instance_id: aura_instance_id.clone(),
+            ending_seat,
             outcome_instance_ids: None,
             remaining_aura_instance_ids: remaining,
             seat: action.seat,
@@ -15444,19 +15534,38 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let legal_move = cells.is_none()
-            || self
-                .position
-                .auras
-                .iter()
-                .find(|aura| aura.card.instance_id == *aura_instance_id)
-                .is_some_and(|aura| {
-                    cells.is_some_and(|destination| {
-                        Self::aura_covered_square(aura).is_some_and(|area| {
-                            Self::aura_one_step_areas(area).contains(&destination)
-                        })
+        let Some(aura) = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == *aura_instance_id)
+            .cloned()
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let is_wildfire = matches!(
+            facts.effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        );
+        let legal_move = if is_wildfire {
+            cells.as_ref().is_some_and(|destination| {
+                matches!(destination.as_slice(), [cell] if self
+                    .wildfire_unvisited_adjacent(&aura)
+                    .contains(cell))
+            })
+        } else {
+            cells.is_none()
+                || cells.as_ref().is_some_and(|destination| {
+                    Self::vec_as_square(destination).is_some_and(|square| {
+                        Self::aura_covered_square(&aura)
+                            .is_some_and(|area| Self::aura_one_step_areas(area).contains(&square))
                     })
-                });
+                })
+        };
         if !legal_move {
             return Err(GameError::IllegalAction);
         }
@@ -15467,7 +15576,12 @@ impl Game {
                 .iter_mut()
                 .find(|aura| aura.card.instance_id == *aura_instance_id)
             {
-                aura.cells = destination.to_vec();
+                if is_wildfire {
+                    if let Some(cell) = destination.first() {
+                        aura.visited_cells.insert(*cell);
+                    }
+                }
+                aura.cells = destination.clone();
             }
             if let Some(area) = self
                 .position
@@ -15496,7 +15610,7 @@ impl Game {
         }
         self.position.state_version += 1;
         self.begin_end_turn_aura(
-            action.seat,
+            pending.ending_seat,
             &pending.remaining_aura_instance_ids,
             outcomes,
             None,
@@ -15504,7 +15618,11 @@ impl Game {
     }
 
     fn aura_covered_square(aura: &AuraPosition) -> Option<SquareArea> {
-        match aura.cells.as_slice() {
+        Self::vec_as_square(&aura.cells)
+    }
+
+    fn vec_as_square(cells: &[Cell]) -> Option<SquareArea> {
+        match cells {
             [a, b, c, d] => Some([*a, *b, *c, *d]),
             _ => None,
         }
@@ -15517,6 +15635,154 @@ impl Game {
                 candidate[0] != cells[0] && candidate[0].manhattan_distance(cells[0]) == 1
             })
             .collect()
+    }
+
+    fn wildfire_unvisited_adjacent(&self, aura: &AuraPosition) -> Vec<Cell> {
+        let Some(current) = aura.cells.first().copied() else {
+            return Vec::new();
+        };
+        current
+            .bordering(false)
+            .filter(|cell| !aura.visited_cells.contains(cell))
+            .collect()
+    }
+
+    fn begin_wildfire_end_turn(
+        &mut self,
+        ending_seat: Seat,
+        aura: AuraPosition,
+        remaining_aura_instance_ids: Vec<IdentityHash>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura_instance_id = aura.card.instance_id.clone();
+        let controller = aura.controller;
+        outcomes.push("aura-end-turn-triggered", || {
+            json!({
+                "cells": aura.cells,
+                "instanceId": aura_instance_id,
+                "seat": controller,
+                "sourceInstanceId": aura_instance_id,
+            })
+        });
+        let Some(cell) = aura.cells.first().copied() else {
+            return Err(GameError::IllegalAction);
+        };
+        let destinations = self.wildfire_unvisited_adjacent(&aura);
+        if !destinations.is_empty() {
+            self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+                aura_instance_id: aura_instance_id.clone(),
+                ending_seat,
+                outcome_instance_ids: None,
+                remaining_aura_instance_ids: remaining_aura_instance_ids.clone(),
+                seat: controller,
+                stage: EndTurnAuraStage::Move,
+            });
+            self.position.decision_seat = controller;
+        }
+        self.damage_each_unit_here_for_wildfire(&aura_instance_id, cell, outcomes)?;
+        if self.position.terminal.is_some() {
+            self.position.pending_end_turn_aura = None;
+            self.position.phase = Phase::Terminal;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        if destinations.is_empty() {
+            self.dispel_aura(&aura_instance_id, outcomes)?;
+            return self.begin_end_turn_aura(
+                ending_seat,
+                &remaining_aura_instance_ids,
+                outcomes,
+                None,
+            );
+        }
+        if self.position.pending_deathrites.is_none() {
+            self.position.phase = Phase::EndTurnAura;
+            self.position.decision_seat = controller;
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn damage_each_unit_here_for_wildfire(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let targets = self.units_at_location(Location {
+            cell,
+            region: Region::Surface,
+        });
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, target_seat) in targets {
+            outcomes.push("aura-end-turn-damage-allocated", || {
+                json!({
+                    "amount": 3,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+            let result = self.apply_simple_damage(
+                kind,
+                target_seat,
+                &target_instance_id,
+                3,
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                defeated_avatars.push(target_seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::EndTurnAura,
+                self.position.decision_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn dispel_aura(
+        &mut self,
+        aura_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let index = self
+            .position
+            .auras
+            .iter()
+            .position(|aura| aura.card.instance_id == *aura_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let aura = self.position.auras.remove(index);
+        let owner = aura.card.owner;
+        let controller = aura.controller;
+        let instance_id = aura.card.instance_id.clone();
+        self.position.players[seat_index(owner)]
+            .cemetery
+            .push(aura.card);
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != instance_id);
+        outcomes.push("aura-dispelled", || {
+            json!({
+                "instanceId": instance_id,
+                "owner": owner,
+                "seat": controller,
+                "sourceInstanceId": instance_id,
+            })
+        });
+        Ok(())
     }
 
     fn apply_cast_artifact_action(
@@ -19120,16 +19386,7 @@ impl Game {
                 .position
                 .auras
                 .iter()
-                .map(|aura| {
-                    json!({
-                        "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
-                        "cells": aura.cells,
-                        "controller": aura.controller,
-                        "instanceId": aura.card.instance_id,
-                        "owner": aura.card.owner,
-                        "turnCounters": aura.turn_counters,
-                    })
-                })
+                .map(|aura| self.aura_public_value(aura))
                 .collect();
         }
         if !self.position.immobile_areas.is_empty() {

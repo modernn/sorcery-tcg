@@ -199,6 +199,14 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             json!(3),
         ),
         (
+            "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
+            json!(3),
+        ),
+        (
+            "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+            json!(true),
+        ),
+        (
             "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
             json!(true),
         ),

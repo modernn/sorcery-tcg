@@ -5601,6 +5601,54 @@
         "file": "crates/sorcery-engine/tests/start_turn_life_loss_rules.rs",
         "testName": "rule_catalog_0261_start_turn_life_loss_can_open_deaths_door"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0262",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A wandering end-of-each-turn Aura conjures atop a single nearby site, deals its printed damage to each unit there, then must move to an adjacent location it has not visited. The move is mandatory and does not hold or immobilize the area.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-end-turn-aura-move"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "aura-end-turn-damage-allocated",
+        "aura-moved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
+        "testName": "rule_catalog_0262_wandering_aura_damages_each_unit_then_must_move"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0263",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same wandering Aura cannot be conjured on a site that is not nearby the spellcaster. It triggers at the end of each player's turn, and it dispels when no unvisited adjacent location remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-end-turn-aura-move"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
+        "testName": "rule_catalog_0263_far_sites_are_illegal_and_each_turn_can_box_the_aura_out"
+      }
     }
   ]
 }

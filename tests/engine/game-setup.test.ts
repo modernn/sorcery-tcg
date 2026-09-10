@@ -24207,6 +24207,106 @@ test('RULE-04 start-turn controller life loss reduces the Avatar and can open De
   await run(2, 0, true);
 });
 
+test('RULE-04 end-of-each-turn wandering Aura damages units here then must move or dispel', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'wildfire-north-aura': {
+      atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'wildfire-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'wildfire-north-site': { cardType: 'site', elements: ['earth'] },
+    'wildfire-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'wildfire-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'wildfire-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-end-turn-wandering-aura-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('wildfire-north-site'),
+        avatar: 'wildfire-north-avatar',
+        spellbook: Array(6).fill('wildfire-north-aura'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('wildfire-south-site'),
+        avatar: 'wildfire-south-avatar',
+        spellbook: Array(6).fill('wildfire-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'wildfire-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw');
+    const legalCells = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) =>
+        descriptor.kind === 'cast-aura' && descriptor.cardId === 'wildfire-north-aura')
+      .map(({ descriptor }) => descriptor.kind === 'cast-aura' ? descriptor.cells : []);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C4' && cells.length === 1), true);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C1'), false);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'wildfire-north-aura'
+        && descriptor.cells[0] === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.phase === 'end-turn-aura', true);
+    assert.equal(
+      (await ctx.legalActions('north')).every(({ descriptor }) =>
+        descriptor.kind === 'resolve-end-turn-aura-move' && descriptor.cells !== undefined),
+      true,
+    );
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'resolve-end-turn-aura-move'
+        && descriptor.cells?.[0] === 'C3');
+    assert.equal(ctx.state.players.north.avatar.life, 17);
+    assert.deepEqual(ctx.state.realm.auras?.[0]?.cells, ['C3']);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.phase === 'end-turn-aura', true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'resolve-end-turn-aura-move'
+        && descriptor.cells?.[0] === 'C2');
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

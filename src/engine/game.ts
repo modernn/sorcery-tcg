@@ -197,6 +197,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true;
@@ -205,6 +206,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
@@ -213,7 +215,17 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent?: never;
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
@@ -390,6 +402,7 @@ type AuraInstance = Readonly<CardInstance & {
   cells: readonly RealmCell[];
   controller: GameSeat;
   turnCounters: number;
+  visitedCells?: readonly RealmCell[];
 }>;
 
 type RubbleInstance = Readonly<{
@@ -761,6 +774,7 @@ export type GameObservation = Readonly<{
       instanceId: StateHash;
       owner: GameSeat;
       turnCounters: number;
+      visitedCells?: readonly RealmCell[];
     }>[];
     immobileAreas?: readonly ImmobileArea[];
     sites: Readonly<Partial<Record<RealmCell,
@@ -1046,7 +1060,7 @@ type GameActionDescriptor =
   }>
   | Readonly<{
     auraInstanceId: StateHash;
-    cells?: TwoByTwoArea;
+    cells?: readonly RealmCell[];
     kind: 'resolve-end-turn-aura-move';
   }>
   | Readonly<{ amount: number; kind: 'activate-mana'; unitInstanceId: StateHash }>
@@ -1089,6 +1103,7 @@ const SUPPORTED_CARD_FIELDS = {
   `.trim().split(/\s+/)),
   aura: new Set(`
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
+    atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent
     atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf cardType
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns manaCost thresholds
   `.trim().split(/\s+/)),
@@ -1448,9 +1463,16 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf must be true`,
       );
     }
+    if (card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent !== undefined
+      && card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent !== 3) {
+      throw new RangeError(
+        `${path}.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent must be 3`,
+      );
+    }
     if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
       + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
       + Number(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true)
+      + Number(card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3)
         !== 1) {
       throw new RangeError(`${path} must define exactly one supported Aura effect`);
     }
@@ -2392,6 +2414,10 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep:
                       3 as const,
                   }
+                  : card.atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3
+                    ? {
+                      atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 3 as const,
+                    }
                   : {
                     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
                       true as const,

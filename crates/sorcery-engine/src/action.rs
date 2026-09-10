@@ -638,9 +638,9 @@ pub enum ActionDescriptor {
     ResolveEndTurnAuraMove {
         /// Authoritative Aura identity.
         aura_instance_id: IdentityHash,
-        /// Exact destination area, omitted to decline the optional move.
+        /// Exact destination cells, omitted to decline an optional Thunderstorm step.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cells: Option<SquareArea>,
+        cells: Option<Vec<Cell>>,
     },
     /// End the acting player's turn.
     EndTurn,

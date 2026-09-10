@@ -173,6 +173,7 @@ pub struct ArtifactFacts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuraEffect {
     AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
+    AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
     AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
     ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns,
 }
@@ -705,6 +706,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
 
 const AURA_FIELDS: &[&str] = &[
     "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
+    "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
     "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
     "cardType",
     "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
@@ -1137,6 +1139,15 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
             )?
             .then_some(
                 AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
+            ),
+            fixed_integer(
+                object,
+                "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
+                3,
+                path,
+            )?
+            .then_some(
+                AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
             ),
             true_only(
                 object,

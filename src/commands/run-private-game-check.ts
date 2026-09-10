@@ -4599,6 +4599,7 @@ function gameDefinition(
   atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf = false,
   uniqueOrLegendary = false,
   atStartOfControllerTurnControllerLosesLife: 0 | 2 = 0,
+  atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent: 0 | 3 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4705,12 +4706,15 @@ function gameDefinition(
     && card.manaCost !== null
     && Number(immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns)
       + Number(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
-      + Number(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf) === 1) {
+      + Number(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf)
+      + Number(atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3) === 1) {
     return {
       ...(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
         ? { atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true as const }
         : atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
           ? { atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep }
+          : atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent === 3
+            ? { atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent }
           : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
       cardType: 'aura',
       manaCost: card.manaCost,
