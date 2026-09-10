@@ -6499,6 +6499,12 @@ impl Game {
             if minion.must_be_cast_to_water_site && !site_facts.elements.contains(Element::Water) {
                 return None;
             }
+            if site_facts
+                .prevents_units_with_power_at_least_from_entering
+                .is_some_and(|threshold| minion.attack >= threshold)
+            {
+                return None;
+            }
             let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
             Some(minion.mana_cost.saturating_sub(discount))
         };
@@ -6613,10 +6619,20 @@ impl Game {
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
     /// site control, mana, thresholds, and the printed casting restrictions.
     fn free_summon_destinations(&self, minion: &MinionFacts) -> Vec<SummonDestination> {
+        let may_enter = |cell: Cell| {
+            self.surface_location_exists(cell)
+                && self.teleport_entry_allowed(
+                    Location {
+                        cell,
+                        region: Region::Surface,
+                    },
+                    minion.attack,
+                )
+        };
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .filter(|cells| cells.iter().all(|cell| self.surface_location_exists(*cell)))
+                .filter(|cells| cells.iter().copied().all(may_enter))
                 .map(|cells| SummonDestination {
                     cell: cells[0],
                     cells: Some(cells),
@@ -6627,7 +6643,7 @@ impl Game {
         } else {
             let mut destinations = Cell::ALL
                 .into_iter()
-                .filter(|cell| self.surface_location_exists(*cell))
+                .filter(|cell| may_enter(*cell))
                 .flat_map(|cell| self.summon_regions(minion, cell, 0, true))
                 .collect::<Vec<_>>();
             destinations.extend(self.void_summon_destinations(minion, 0, true));
@@ -13181,10 +13197,14 @@ impl Game {
                     .find(|candidate| *candidate == outcome_instance_id)
             {
                 let card_id = &self.rules.cards[usize::from(
-                    self.position.players[seat_index(pending.seat)]
-                        .cemetery
-                        .iter()
-                        .find(|card| card.instance_id == *dead)
+                    [Seat::North, Seat::South]
+                        .into_iter()
+                        .find_map(|owner| {
+                            self.position.players[seat_index(owner)]
+                                .cemetery
+                                .iter()
+                                .find(|card| card.instance_id == *dead)
+                        })
                         .expect("dead minion")
                         .card_id
                         .0,
@@ -18760,15 +18780,16 @@ mod tests {
                 });
             }
             for ordinal in 1..=3 {
-                manifest["cards"][format!("south-spell-{ordinal}")]["defense"] = json!(3);
+                manifest["cards"][format!("south-spell-{ordinal}")]["defense"] = json!(40);
                 manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
             }
             manifest["cards"]["south-spell-1"]["ward"] = json!(true);
             manifest["cards"]["south-spell-2"]["stealth"] = json!(true);
+            manifest["cards"]["south-spell-3"]["burrowing"] = json!(true);
             manifest["cards"]["north-spell-50"] = json!({
                 "attack": 1,
                 "cardType": "minion",
-                "defense": 3,
+                "defense": 40,
                 "manaCost": 0,
                 "stealth": true,
                 "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -18867,7 +18888,7 @@ mod tests {
         game.position.decision_seat = Seat::North;
         game.position.phase = Phase::Main;
 
-        let fatality_targets: Vec<_> = game
+        let fatality_targets: BTreeSet<_> = game
             .legal_actions()
             .expect("Fatality actions")
             .into_iter()
@@ -19895,6 +19916,51 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn disabled_scent_hound_should_not_strip_nearby_enemy_stealth() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
+            manifest["cards"]["south-spell-1"]["stealth"] = json!(true);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid disabled Hound manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let mut hound = test_minion(
+            card_id("north-spell-1"),
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            Seat::North,
+            Cell::parse("C3").expect("C3"),
+            None,
+        );
+        hound.disabled_until_damaged = true;
+        hound.tapped = false;
+        let mut target = test_minion(
+            card_id("south-spell-1"),
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            Seat::South,
+            Cell::parse("C2").expect("C2"),
+            None,
+        );
+        target.stealthed = true;
+        target.tapped = false;
+        game.position.units = vec![hound, target];
+        let mut outcomes = Vec::new();
+        game.settle_nearby_enemy_stealth(&mut OutcomeLog::Record(&mut outcomes));
+        assert!(outcomes.is_empty());
+        assert!(game.position.units[1].stealthed);
+        assert!(game.minion_is_disabled(&game.position.units[0]));
     }
 
     /// One crater board: a Water target at C2, both Avatars inside the grid, and one South minion

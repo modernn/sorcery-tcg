@@ -20553,13 +20553,21 @@ test('RULE-04 start-turn random teleports resolve in controller-chosen order thr
     assert.equal(ctx.state.cards[blockedSiteCardId]?.cardType === 'site'
       && ctx.state.cards[blockedSiteCardId].preventsUnitsWithPowerAtLeastFromEntering, 3);
 
+    await withFork(ctx, async (first) => {
+      const committed = await first.step(firstTrigger);
+      assert.equal(committed.accepted, true);
+      if (!committed.accepted) return;
+      await withFork(ctx, async (second) => {
+        const repeated = await second.step(firstTrigger);
+        assert.equal(repeated.accepted, true);
+        if (!repeated.accepted) return;
+        assert.deepEqual(repeated.receipt, committed.receipt);
+      });
+    });
+
     const committed = await ctx.step(firstTrigger);
     assert.equal(committed.accepted, true);
     if (!committed.accepted) return;
-    const repeated = await ctx.step(firstTrigger);
-    assert.equal(repeated.accepted, true);
-    if (!repeated.accepted) return;
-    assert.deepEqual(repeated.receipt, committed.receipt);
     assert.equal(committed.receipt.events.length, 0);
     assert.equal(committed.receipt.randomDraws.length, 2);
     assert.equal(committed.receipt.randomDraws.every(({ purpose }) =>
@@ -20616,6 +20624,8 @@ test('RULE-04 start-turn random teleports resolve in controller-chosen order thr
     const committedAfterForge = await ctx.step(secondTrigger);
     assert.equal(committedAfterForge.accepted, true);
     if (!committedAfterForge.accepted) return;
+    assert.equal(secondCommittedReceipt.accepted, true);
+    if (!secondCommittedReceipt.accepted) return;
     assert.deepEqual(committedAfterForge.receipt, secondCommittedReceipt.receipt);
     const moved = await ctx.step(movedChoice);
     assert.equal(moved.accepted, true);
@@ -20819,14 +20829,16 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
       kind: 'cast-magic',
     });
 
-    await withFork(ctx, async (repeat) => {
-      const committed = await repeat.step(raiseCast);
+    await withFork(ctx, async (first) => {
+      const committed = await first.step(raiseCast);
       assert.equal(committed.accepted, true);
       if (!committed.accepted) return;
-      const repeated = await repeat.step(raiseCast);
-      assert.equal(repeated.accepted, true);
-      if (!repeated.accepted) return;
-      assert.deepEqual(repeated.receipt, committed.receipt);
+      await withFork(ctx, async (second) => {
+        const repeated = await second.step(raiseCast);
+        assert.equal(repeated.accepted, true);
+        if (!repeated.accepted) return;
+        assert.deepEqual(repeated.receipt, committed.receipt);
+      });
     });
 
     const committed = await ctx.step(raiseCast);
