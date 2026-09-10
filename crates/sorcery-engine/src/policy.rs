@@ -276,7 +276,7 @@ impl PolicySnapshot {
             if let Some(action) = select_feature(
                 feature,
                 self.selector.atlas_reserve,
-                observation,
+                &observation,
                 legal_actions,
             ) {
                 return Ok(action);
@@ -340,12 +340,12 @@ impl PolicySnapshot {
     }
 }
 
-fn select_feature(
+fn select_feature<'a>(
     feature: PolicyFeature,
     atlas_reserve: u8,
-    observation: SeatObservation,
-    actions: &[IssuedAction],
-) -> Option<&IssuedAction> {
+    observation: &SeatObservation,
+    actions: &'a [IssuedAction],
+) -> Option<&'a IssuedAction> {
     match feature {
         PolicyFeature::KeepMulligan => actions.iter().find(|action| {
             matches!(
@@ -374,7 +374,7 @@ fn select_feature(
                 matches!(action.descriptor(), ActionDescriptor::Draw { zone: candidate } if *candidate == zone)
             })
         }
-        PolicyFeature::PoweredMovement => None,
+        PolicyFeature::PoweredMovement => select_powered_movement(observation, actions),
         PolicyFeature::BeneficialTactic => beneficial_tactic_index(
             observation.seat(),
             actions.iter().map(IssuedAction::descriptor),
@@ -421,10 +421,31 @@ fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u
     }
 }
 
-fn select_movement(
-    observation: SeatObservation,
-    actions: &[IssuedAction],
-) -> Option<&IssuedAction> {
+fn select_powered_movement<'a>(
+    observation: &SeatObservation,
+    actions: &'a [IssuedAction],
+) -> Option<&'a IssuedAction> {
+    let movement = select_movement(observation, actions)?;
+    let ActionDescriptor::MoveAndAttack {
+        unit_instance_id, ..
+    } = movement.descriptor()
+    else {
+        return None;
+    };
+    if observation
+        .powered_unit_instance_ids()
+        .contains(unit_instance_id)
+    {
+        Some(movement)
+    } else {
+        None
+    }
+}
+
+fn select_movement<'a>(
+    observation: &SeatObservation,
+    actions: &'a [IssuedAction],
+) -> Option<&'a IssuedAction> {
     let enemy = observation.enemy_avatar();
     actions
         .iter()
@@ -661,11 +682,41 @@ pub fn parse_policy_snapshot(text: &str) -> Result<PolicySnapshot, PolicyError> 
 #[cfg(test)]
 mod tests {
     use crate::action::{ActionDescriptor, GenesisTokenChoice, ProjectileDirection, UnitTarget};
-    use crate::board::Cell;
+    use crate::board::{Cell, Location, Region};
     use crate::canonical::IdentityHash;
     use crate::contract::Seat;
+    use crate::game::{IssuedAction, SeatObservation};
 
-    use super::beneficial_tactic_index;
+    use super::{PolicyFeature, beneficial_tactic_index, select_feature};
+
+    fn move_toward(unit: IdentityHash, from: &str, to: &str) -> IssuedAction {
+        let from_cell = Cell::parse(from).expect("from cell");
+        let to_cell = Cell::parse(to).expect("to cell");
+        IssuedAction::for_test(
+            ActionDescriptor::MoveAndAttack {
+                from: Location {
+                    cell: from_cell,
+                    region: Region::Surface,
+                },
+                path: vec![
+                    Location {
+                        cell: from_cell,
+                        region: Region::Surface,
+                    },
+                    Location {
+                        cell: to_cell,
+                        region: Region::Surface,
+                    },
+                ],
+                to: Location {
+                    cell: to_cell,
+                    region: Region::Surface,
+                },
+                unit_instance_id: unit,
+            },
+            Seat::North,
+        )
+    }
 
     fn identity(hex: char) -> IdentityHash {
         IdentityHash::parse(&format!("sha256:{}", hex.to_string().repeat(64)))
@@ -781,5 +832,44 @@ mod tests {
             beneficial_tactic_index(Seat::North, actions[..4].iter()),
             None
         );
+    }
+
+    #[test]
+    fn powered_movement_selects_only_when_the_best_toward_enemy_unit_has_temporary_power() {
+        let powered = identity('c');
+        let ordinary = identity('d');
+        let enemy = Location {
+            cell: Cell::parse("C1").expect("C1"),
+            region: Region::Surface,
+        };
+        let observation = SeatObservation::for_test(Seat::North, enemy, vec![powered.clone()]);
+        let mixed = [
+            move_toward(ordinary, "C4", "C3"),
+            move_toward(powered.clone(), "B4", "B3"),
+            IssuedAction::for_test(ActionDescriptor::EndTurn, Seat::North),
+        ];
+        assert!(
+            select_feature(PolicyFeature::PoweredMovement, 0, &observation, &mixed).is_none(),
+            "the closer unpowered unit keeps PoweredMovement inactive"
+        );
+
+        let only_powered = [
+            move_toward(powered.clone(), "C4", "C3"),
+            IssuedAction::for_test(ActionDescriptor::EndTurn, Seat::North),
+        ];
+        let selected = select_feature(
+            PolicyFeature::PoweredMovement,
+            0,
+            &observation,
+            &only_powered,
+        )
+        .expect("temporarily powered toward-enemy move");
+        let ActionDescriptor::MoveAndAttack {
+            unit_instance_id, ..
+        } = selected.descriptor()
+        else {
+            panic!("PoweredMovement must select MoveAndAttack");
+        };
+        assert_eq!(*unit_instance_id, powered);
     }
 }
