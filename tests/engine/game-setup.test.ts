@@ -25,7 +25,7 @@ import {
   type GameReceipt,
   type GameSession,
 } from '../../src/engine/game.ts';
-import { SetupCtx, withFork, withPreview, withSetup } from './rust-setup-session.ts';
+import { SetupCtx, findOpeningManifest, withFork, withPreview, withSetup } from './rust-setup-session.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -2422,7 +2422,7 @@ test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card in
   });
 });
 
-test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon', () => {
+test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon', async () => {
   const decks = {
     north: deck('wendigo-north', 6, 8),
     south: deck('wendigo-south', 6, 8),
@@ -2477,158 +2477,154 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
     seed: 1,
   }), /sacrificeMinionAtSummoningLocationForManaDiscount must be 2/);
 
-  let gameManifest: GameManifest | undefined;
-  for (let seed = 1; seed <= 4_096; seed += 1) {
-    const candidate = createGameManifest({ ...input, seed });
-    const opening = createGameSession(candidate).state.players;
-    if ([wendigoId, localMinionId, submergedMinionId].every((cardId) =>
-      opening.north.hand.spellbook.some((card) => card.cardId === cardId))
-      && opening.north.spellbook[0]?.cardId === secondLocalMinionId
-      && opening.south.hand.spellbook.some((card) => card.cardId === enemyMinionId)) {
-      gameManifest = candidate;
-      break;
-    }
-  }
-  assert.ok(gameManifest);
+  const gameManifest = await findOpeningManifest(
+    (seed) => createGameManifest({ ...input, seed }),
+    (session) => {
+      const opening = session.state.players;
+      return [wendigoId, localMinionId, submergedMinionId].every((cardId) =>
+        opening.north.hand.spellbook.some((card) => card.cardId === cardId))
+        && opening.north.spellbook[0]?.cardId === secondLocalMinionId
+        && opening.south.hand.spellbook.some((card) => card.cardId === enemyMinionId);
+    },
+  );
   assert.equal(
     gameManifest.cards[wendigoId]?.cardType === 'minion'
       && gameManifest.cards[wendigoId].sacrificeMinionAtSummoningLocationForManaDiscount,
     2,
   );
 
-  const readyToSummon = (manifest: GameManifest): GameSession => {
-    let ready = keep(keep(createGameSession(manifest)));
-    const take = (predicate: Parameters<typeof action>[1]): void => {
-      ready = accept(ready, action(ready, predicate));
-    };
-    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  const readyToSummon = async (ctx: SetupCtx): Promise<void> => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardId === localMinionId
       && descriptor.cell === 'C4'
       && descriptor.region === undefined);
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardId === submergedMinionId
       && descriptor.cell === 'C4'
       && descriptor.region === 'underwater');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardId === enemyMinionId
       && descriptor.cell === 'C4');
-    take(({ descriptor }) => descriptor.kind === 'end-turn');
-    take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-    take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardId === secondLocalMinionId
       && descriptor.cell === 'C4'
       && descriptor.region === undefined);
-    return ready;
   };
 
-  let session = readyToSummon(gameManifest);
-  assert.equal(session.state.players.north.mana, 4);
+  await withSetup(gameManifest, async (ctx) => {
+    await readyToSummon(ctx);
+    assert.equal(ctx.state.players.north.mana, 4);
 
-  const local = session.state.realm.units.find(({ cardId }) => cardId === localMinionId);
-  const secondLocal = session.state.realm.units.find(({ cardId }) => cardId === secondLocalMinionId);
-  const submerged = session.state.realm.units.find(({ cardId }) => cardId === submergedMinionId);
-  const enemy = session.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
-  assert.ok(local && secondLocal && submerged && enemy);
-  const wendigoActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardId === wendigoId);
-  assert.equal(wendigoActions.some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.manaCost === 6
-      && descriptor.sacrificedMinionInstanceIds === undefined), false);
-  const discounted = wendigoActions.filter(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C4'
-      && descriptor.region === undefined
-      && descriptor.manaCost === 4);
-  assert.deepEqual(discounted.map(({ descriptor }) => descriptor.kind === 'summon-minion'
-    ? descriptor.sacrificedMinionInstanceIds
-    : undefined), [local.instanceId, secondLocal.instanceId]
-    .sort()
-    .map((instanceId) => [instanceId]));
-  const doubleDiscounted = wendigoActions.filter(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cell === 'C4'
-      && descriptor.region === undefined
-      && descriptor.manaCost === 2);
-  assert.equal(doubleDiscounted.length, 1);
-  assert.deepEqual(
-    doubleDiscounted[0]?.descriptor.kind === 'summon-minion'
-      ? doubleDiscounted[0].descriptor.sacrificedMinionInstanceIds
-      : undefined,
-    [local.instanceId, secondLocal.instanceId].sort(),
-  );
-  const cast = discounted.find(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.sacrificedMinionInstanceIds?.length === 1
-    && descriptor.sacrificedMinionInstanceIds[0] === local.instanceId);
-  assert.ok(cast);
-  assert.deepEqual(
-    cast.descriptor.kind === 'summon-minion'
-      ? cast.descriptor.sacrificedMinionInstanceIds
-      : undefined,
-    [local.instanceId],
-  );
-  assert.equal(wendigoActions.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && (descriptor.sacrificedMinionInstanceIds ?? []).some((instanceId) =>
-      instanceId === submerged.instanceId || instanceId === enemy.instanceId)), false);
+    const local = ctx.state.realm.units.find(({ cardId }) => cardId === localMinionId);
+    const secondLocal = ctx.state.realm.units.find(({ cardId }) => cardId === secondLocalMinionId);
+    const submerged = ctx.state.realm.units.find(({ cardId }) => cardId === submergedMinionId);
+    const enemy = ctx.state.realm.units.find(({ cardId }) => cardId === enemyMinionId);
+    assert.ok(local && secondLocal && submerged && enemy);
+    const wendigoActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cardId === wendigoId);
+    assert.equal(wendigoActions.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.manaCost === 6
+        && descriptor.sacrificedMinionInstanceIds === undefined), false);
+    const discounted = wendigoActions.filter(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined
+        && descriptor.manaCost === 4);
+    assert.deepEqual(discounted.map(({ descriptor }) => descriptor.kind === 'summon-minion'
+      ? descriptor.sacrificedMinionInstanceIds
+      : undefined), [local.instanceId, secondLocal.instanceId]
+      .sort()
+      .map((instanceId) => [instanceId]));
+    const doubleDiscounted = wendigoActions.filter(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined
+        && descriptor.manaCost === 2);
+    assert.equal(doubleDiscounted.length, 1);
+    assert.deepEqual(
+      doubleDiscounted[0]?.descriptor.kind === 'summon-minion'
+        ? doubleDiscounted[0].descriptor.sacrificedMinionInstanceIds
+        : undefined,
+      [local.instanceId, secondLocal.instanceId].sort(),
+    );
+    const cast = discounted.find(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.sacrificedMinionInstanceIds?.length === 1
+      && descriptor.sacrificedMinionInstanceIds[0] === local.instanceId);
+    assert.ok(cast);
+    assert.deepEqual(
+      cast.descriptor.kind === 'summon-minion'
+        ? cast.descriptor.sacrificedMinionInstanceIds
+        : undefined,
+      [local.instanceId],
+    );
+    assert.equal(wendigoActions.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && (descriptor.sacrificedMinionInstanceIds ?? []).some((instanceId) =>
+        instanceId === submerged.instanceId || instanceId === enemy.instanceId)), false);
 
-  const checkpoint = session;
-  const checkpointHash = hashGameState(checkpoint.state);
-  const forged = stepGame(checkpoint, {
-    actionId: `${cast.actionId}:forged`,
-    seat: 'north',
-    stateVersion: checkpoint.state.stateVersion,
+    const checkpointHash = ctx.stateHash();
+    const checkpointVersion = ctx.state.stateVersion;
+    const transcriptLength = ctx.session.transcript.length;
+    const forged = await ctx.stepRequest({
+      actionId: `${cast.actionId}:forged`,
+      seat: 'north',
+      stateVersion: ctx.state.stateVersion,
+    });
+    assert.equal(forged.accepted, false);
+    assert.equal(forged.reason?.code, 'unknown_action');
+    assert.equal(ctx.stateHash(), checkpointHash);
+    assert.equal(forged.session.transcript.length, transcriptLength);
+
+    const result = await ctx.step(cast);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) throw new Error('expected Gnarled Wendigo summon to be accepted');
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+      'minion-sacrificed',
+      'minion-died',
+      'minion-summoned',
+    ]);
+    const sacrificed = result.receipt.events[0];
+    assert.ok(sacrificed && typeof sacrificed.payload === 'object' && !Array.isArray(sacrificed.payload));
+    assert.deepEqual(sacrificed.payload, {
+      cardId: local.cardId,
+      instanceId: local.instanceId,
+      owner: local.owner,
+      seat: local.controller,
+      sourceInstanceId: cast.descriptor.kind === 'summon-minion'
+        ? cast.descriptor.cardInstanceId
+        : '',
+    });
+    const summoned = result.receipt.events[2];
+    assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
+    assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 4);
+    assert.equal(ctx.state.players.north.mana, 0);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === local.instanceId), true);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) =>
+      instanceId === local.instanceId), false);
+    const wendigo = ctx.state.realm.units.find(({ cardId }) => cardId === wendigoId);
+    assert.ok(wendigo);
+    const wendigoDefinition = gameManifest.cards[wendigo.cardId];
+    assert.ok(wendigoDefinition?.cardType === 'minion');
+    assert.deepEqual({
+      attack: wendigoDefinition.attack,
+      defense: wendigoDefinition.defense,
+      location: wendigo.location,
+      region: wendigo.region,
+    }, { attack: 5, defense: 5, location: 'C4', region: 'surface' });
+    assert.deepEqual(result.receipt.randomDraws, []);
+    assert.equal(ctx.state.stateVersion, checkpointVersion + 1);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(forged.accepted, false);
-  assert.equal(forged.reason?.code, 'unknown_action');
-  assert.equal(hashGameState(forged.session.state), checkpointHash);
-  assert.equal(forged.session.transcript.length, checkpoint.transcript.length);
-
-  const result = stepGame(checkpoint, cast);
-  assert.equal(result.accepted, true);
-  if (!result.accepted) throw new Error('expected Gnarled Wendigo summon to be accepted');
-  session = result.session;
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
-    'minion-sacrificed',
-    'minion-died',
-    'minion-summoned',
-  ]);
-  const sacrificed = result.receipt.events[0];
-  assert.ok(sacrificed && typeof sacrificed.payload === 'object' && !Array.isArray(sacrificed.payload));
-  assert.deepEqual(sacrificed.payload, {
-    cardId: local.cardId,
-    instanceId: local.instanceId,
-    owner: local.owner,
-    seat: local.controller,
-    sourceInstanceId: cast.descriptor.kind === 'summon-minion'
-      ? cast.descriptor.cardInstanceId
-      : '',
-  });
-  const summoned = result.receipt.events[2];
-  assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
-  assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 4);
-  assert.equal(session.state.players.north.mana, 0);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === local.instanceId), true);
-  assert.equal(session.state.realm.units.some(({ instanceId }) =>
-    instanceId === local.instanceId), false);
-  const wendigo = session.state.realm.units.find(({ cardId }) => cardId === wendigoId);
-  assert.ok(wendigo);
-  const wendigoDefinition = gameManifest.cards[wendigo.cardId];
-  assert.ok(wendigoDefinition?.cardType === 'minion');
-  assert.deepEqual({
-    attack: wendigoDefinition.attack,
-    defense: wendigoDefinition.defense,
-    location: wendigo.location,
-    region: wendigo.region,
-  }, { attack: 5, defense: 5, location: 'C4', region: 'surface' });
-  assert.deepEqual(result.receipt.randomDraws, []);
-  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
-  assert.equal(verifyGameReplay(session), true);
 
   const deathriteManifest = createGameManifest({
     ...input,
@@ -2645,159 +2641,161 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
     },
     seed: gameManifest.seed,
   });
-  let interruptedSession = readyToSummon(deathriteManifest);
-  const orderedLocals = interruptedSession.state.realm.units
-    .filter(({ cardId }) => cardId === localMinionId || cardId === secondLocalMinionId)
-    .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
-  assert.equal(orderedLocals.length, 2);
-  const orderedPayment = action(interruptedSession, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardId === wendigoId
-      && descriptor.cell === 'C4'
-      && descriptor.region === undefined
-      && descriptor.manaCost === 2
-      && descriptor.sacrificedMinionInstanceIds?.length === 2);
-  const atlasBefore = interruptedSession.state.players.north.atlas.length;
-  const atlasHandBefore = interruptedSession.state.players.north.hand.atlas.length;
-  const interrupted = stepGame(interruptedSession, orderedPayment);
-  assert.equal(interrupted.accepted, true);
-  if (!interrupted.accepted) throw new Error('expected ordered Gnarled payment to be accepted');
-  interruptedSession = interrupted.session;
-  assert.deepEqual(interrupted.receipt.events.map(({ type }) => type), [
-    'minion-sacrificed',
-    'minion-sacrificed',
-  ]);
-  assert.equal(interruptedSession.state.phase, 'deathrite-order');
-  assert.equal(interruptedSession.state.decisionSeat, 'north');
-  assert.deepEqual(interruptedSession.state.terminal, { status: 'active' });
-  assert.equal(interruptedSession.state.players.north.mana, 2);
-  assert.equal(interruptedSession.state.players.north.hand.spellbook.some(({ cardId }) =>
-    cardId === wendigoId), false);
-  assert.equal(interruptedSession.state.realm.units.some(({ cardId }) =>
-    cardId === wendigoId), false);
-  assert.equal(orderedLocals.every(({ instanceId }) => !interruptedSession.state.realm.units
-    .some((unit) => unit.instanceId === instanceId)), true);
-  assert.equal(orderedLocals.every(({ instanceId }) => !interruptedSession.state.players.north.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
-  const orderActions = legalGameActions(interruptedSession.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites');
-  assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
-  orderedLocals.map(({ instanceId }) => instanceId));
-  assert.deepEqual(legalGameActions(interruptedSession.state, 'south'), []);
+  await withSetup(deathriteManifest, async (ctx) => {
+    await readyToSummon(ctx);
+    const orderedLocals = ctx.state.realm.units
+      .filter(({ cardId }) => cardId === localMinionId || cardId === secondLocalMinionId)
+      .sort((left, right) => left.instanceId.localeCompare(right.instanceId));
+    assert.equal(orderedLocals.length, 2);
+    const orderedPayment = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === wendigoId
+        && descriptor.cell === 'C4'
+        && descriptor.region === undefined
+        && descriptor.manaCost === 2
+        && descriptor.sacrificedMinionInstanceIds?.length === 2);
+    const atlasBefore = ctx.state.players.north.atlas.length;
+    const atlasHandBefore = ctx.state.players.north.hand.atlas.length;
+    const interrupted = await ctx.step(orderedPayment);
+    assert.equal(interrupted.accepted, true);
+    if (!interrupted.accepted) throw new Error('expected ordered Gnarled payment to be accepted');
+    assert.deepEqual(interrupted.receipt.events.map(({ type }) => type), [
+      'minion-sacrificed',
+      'minion-sacrificed',
+    ]);
+    assert.equal(ctx.state.phase, 'deathrite-order');
+    assert.equal(ctx.state.decisionSeat, 'north');
+    assert.deepEqual(ctx.state.terminal, { status: 'active' });
+    assert.equal(ctx.state.players.north.mana, 2);
+    assert.equal(ctx.state.players.north.hand.spellbook.some(({ cardId }) =>
+      cardId === wendigoId), false);
+    assert.equal(ctx.state.realm.units.some(({ cardId }) =>
+      cardId === wendigoId), false);
+    assert.equal(orderedLocals.every(({ instanceId }) => !ctx.state.realm.units
+      .some((unit) => unit.instanceId === instanceId)), true);
+    assert.equal(orderedLocals.every(({ instanceId }) => !ctx.state.players.north.cemetery
+      .some((card) => card.instanceId === instanceId)), true);
+    const orderActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites');
+    assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+    orderedLocals.map(({ instanceId }) => instanceId));
+    assert.deepEqual(await ctx.legalActions('south'), []);
 
-  const restored = resumeGameCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
-    createGameCheckpoint(interruptedSession),
-  )));
-  assert.equal(
-    canonicalJson(restored as unknown as JsonValue),
-    canonicalJson(interruptedSession as unknown as JsonValue),
-  );
-  assert.deepEqual(
-    legalGameActions(restored.state, 'north').map(({ actionId }) => actionId),
-    orderActions.map(({ actionId }) => actionId),
-  );
+    const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
+      ctx.checkpoint(),
+    )));
+    assert.equal(
+      canonicalJson(restored as unknown as JsonValue),
+      canonicalJson(ctx.session as unknown as JsonValue),
+    );
+    await withFork(ctx, async (restoredFork) => {
+      assert.deepEqual(
+        (await restoredFork.legalActions('north')).map(({ actionId }) => actionId),
+        orderActions.map(({ actionId }) => actionId),
+      );
+    });
 
-  const branches = orderActions.map((orderAction) => {
-    assert.equal(orderAction.descriptor.kind, 'order-deathrites');
-    if (orderAction.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
-    const chosenInstanceId = orderAction.descriptor.sourceInstanceId;
-    const otherInstanceId = orderedLocals.find(({ instanceId }) =>
-      instanceId !== chosenInstanceId)?.instanceId;
-    assert.ok(otherInstanceId);
-    const ordered = stepGame(restored, orderAction);
-    assert.equal(ordered.accepted, true);
-    if (!ordered.accepted) throw new Error('expected Deathrite order to resolve paid summon');
-    assert.deepEqual(ordered.receipt.events.map(({ type }) => type), [
+    const branchHashes: string[] = [];
+    for (const orderAction of orderActions) {
+      assert.equal(orderAction.descriptor.kind, 'order-deathrites');
+      if (orderAction.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+      const chosenInstanceId = orderAction.descriptor.sourceInstanceId;
+      const otherInstanceId = orderedLocals.find(({ instanceId }) =>
+        instanceId !== chosenInstanceId)?.instanceId;
+      assert.ok(otherInstanceId);
+      await withFork(ctx, async (fork) => {
+        const ordered = await fork.step(orderAction);
+        assert.equal(ordered.accepted, true);
+        if (!ordered.accepted) throw new Error('expected Deathrite order to resolve paid summon');
+        assert.deepEqual(ordered.receipt.events.map(({ type }) => type), [
+          'deathrite-order-committed',
+          'site-drawn',
+          'site-drawn',
+          'minion-died',
+          'minion-died',
+          'minion-summoned',
+        ]);
+        assert.deepEqual(ordered.receipt.events.filter(({ type }) => type === 'site-drawn')
+          .map(({ payload }) => payload !== null && typeof payload === 'object'
+            && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined), [
+          chosenInstanceId,
+          otherInstanceId,
+        ]);
+        assert.equal(fork.state.phase, 'main');
+        assert.equal(fork.state.decisionSeat, 'north');
+        assert.deepEqual(fork.state.terminal, { status: 'active' });
+        assert.equal(fork.state.pendingDeathrites, undefined);
+        assert.equal(fork.state.players.north.mana, 2);
+        assert.equal(fork.state.players.north.atlas.length, atlasBefore - 2);
+        assert.equal(fork.state.players.north.hand.atlas.length, atlasHandBefore + 2);
+        assert.equal(orderedLocals.every(({ instanceId }) => fork.state.players.north.cemetery
+          .some((card) => card.instanceId === instanceId)), true);
+        assert.equal(fork.state.players.north.hand.spellbook.some(({ cardId }) =>
+          cardId === wendigoId), false);
+        assert.equal(fork.state.players.north.cemetery.some(({ cardId }) =>
+          cardId === wendigoId), false);
+        const summonedWendigos = fork.state.realm.units.filter(({ cardId }) => cardId === wendigoId);
+        assert.equal(summonedWendigos.length, 1);
+        assert.deepEqual(summonedWendigos.map(({ location, region }) => ({ location, region })), [{
+          location: 'C4',
+          region: 'surface',
+        }]);
+        assert.equal(await fork.verifyReplay(), true);
+        branchHashes.push(fork.stateHash());
+      });
+    }
+    assert.equal(new Set(branchHashes).size, 1);
+  });
+
+  await withSetup(deathriteManifest, async (ctx) => {
+    await readyToSummon(ctx);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    assert.equal(ctx.state.players.north.atlas.length, 1);
+    const terminalLocals = ctx.state.realm.units.filter(({ cardId }) =>
+      cardId === localMinionId || cardId === secondLocalMinionId);
+    assert.equal(terminalLocals.length, 2);
+    const terminalManaBefore = ctx.state.players.north.mana;
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === wendigoId
+        && descriptor.cell === 'C4'
+        && descriptor.manaCost === 2
+        && descriptor.sacrificedMinionInstanceIds?.length === 2);
+    assert.equal(ctx.state.phase, 'deathrite-order');
+    const terminalResult = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'order-deathrites'));
+    assert.equal(terminalResult.accepted, true);
+    if (!terminalResult.accepted) throw new Error('expected terminal Deathrite order to resolve');
+    assert.deepEqual(terminalResult.receipt.events.map(({ type }) => type), [
       'deathrite-order-committed',
       'site-drawn',
-      'site-drawn',
       'minion-died',
       'minion-died',
-      'minion-summoned',
+      'game-ended',
     ]);
-    assert.deepEqual(ordered.receipt.events.filter(({ type }) => type === 'site-drawn')
-      .map(({ payload }) => payload !== null && typeof payload === 'object'
-        && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined), [
-      chosenInstanceId,
-      otherInstanceId,
-    ]);
-    const resolved = ordered.session;
-    assert.equal(resolved.state.phase, 'main');
-    assert.equal(resolved.state.decisionSeat, 'north');
-    assert.deepEqual(resolved.state.terminal, { status: 'active' });
-    assert.equal(resolved.state.pendingDeathrites, undefined);
-    assert.equal(resolved.state.players.north.mana, 2);
-    assert.equal(resolved.state.players.north.atlas.length, atlasBefore - 2);
-    assert.equal(resolved.state.players.north.hand.atlas.length, atlasHandBefore + 2);
-    assert.equal(orderedLocals.every(({ instanceId }) => resolved.state.players.north.cemetery
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
+    assert.equal(ctx.state.phase, 'terminal');
+    assert.equal(ctx.state.pendingDeathrites, undefined);
+    assert.equal(ctx.state.players.north.mana, terminalManaBefore - 2);
+    assert.equal(ctx.state.realm.units.some(({ cardId }) =>
+      cardId === wendigoId), false);
+    assert.equal(terminalResult.receipt.events.some(({ type }) => type === 'minion-summoned'), false);
+    assert.equal(terminalLocals.every(({ instanceId }) => ctx.state.players.north.cemetery
       .some((card) => card.instanceId === instanceId)), true);
-    assert.equal(resolved.state.players.north.hand.spellbook.some(({ cardId }) =>
-      cardId === wendigoId), false);
-    assert.equal(resolved.state.players.north.cemetery.some(({ cardId }) =>
-      cardId === wendigoId), false);
-    const summonedWendigos = resolved.state.realm.units.filter(({ cardId }) => cardId === wendigoId);
-    assert.equal(summonedWendigos.length, 1);
-    assert.deepEqual(summonedWendigos.map(({ location, region }) => ({ location, region })), [{
-      location: 'C4',
-      region: 'surface',
-    }]);
-    assert.equal(verifyGameReplay(resolved), true);
-    return resolved;
   });
-  assert.equal(new Set(branches.map(({ state }) => hashGameState(state))).size, 1);
-
-  let terminalSession = readyToSummon(deathriteManifest);
-  const takeTerminal = (predicate: Parameters<typeof action>[1]): void => {
-    terminalSession = accept(terminalSession, action(terminalSession, predicate));
-  };
-  takeTerminal(({ descriptor }) => descriptor.kind === 'end-turn');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'end-turn');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'end-turn');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'end-turn');
-  takeTerminal(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  assert.equal(terminalSession.state.players.north.atlas.length, 1);
-  const terminalLocals = terminalSession.state.realm.units.filter(({ cardId }) =>
-    cardId === localMinionId || cardId === secondLocalMinionId);
-  assert.equal(terminalLocals.length, 2);
-  const terminalManaBefore = terminalSession.state.players.north.mana;
-  const terminalPayment = action(terminalSession, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardId === wendigoId
-      && descriptor.cell === 'C4'
-      && descriptor.manaCost === 2
-      && descriptor.sacrificedMinionInstanceIds?.length === 2);
-  terminalSession = accept(terminalSession, terminalPayment);
-  assert.equal(terminalSession.state.phase, 'deathrite-order');
-  const terminalOrder = action(terminalSession, ({ descriptor }) =>
-    descriptor.kind === 'order-deathrites');
-  const terminalResult = stepGame(terminalSession, terminalOrder);
-  assert.equal(terminalResult.accepted, true);
-  if (!terminalResult.accepted) throw new Error('expected terminal Deathrite order to resolve');
-  assert.deepEqual(terminalResult.receipt.events.map(({ type }) => type), [
-    'deathrite-order-committed',
-    'site-drawn',
-    'minion-died',
-    'minion-died',
-    'game-ended',
-  ]);
-  assert.deepEqual(terminalResult.session.state.terminal, {
-    loser: 'north',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'south',
-  });
-  assert.equal(terminalResult.session.state.phase, 'terminal');
-  assert.equal(terminalResult.session.state.pendingDeathrites, undefined);
-  assert.equal(terminalResult.session.state.players.north.mana, terminalManaBefore - 2);
-  assert.equal(terminalResult.session.state.realm.units.some(({ cardId }) =>
-    cardId === wendigoId), false);
-  assert.equal(terminalResult.receipt.events.some(({ type }) => type === 'minion-summoned'), false);
-  assert.equal(terminalLocals.every(({ instanceId }) => terminalResult.session.state.players.north.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
 });
 
 test('RULE-03 Hamlet reduces only Ordinary minion mana payments at that site', () => {

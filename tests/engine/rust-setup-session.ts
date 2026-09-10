@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import type { JsonValue } from '../../src/authority/canonical-json.ts';
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import {
   createGameCheckpoint,
   resumeGameCheckpointAsync,
@@ -20,7 +20,9 @@ import {
   hashGameState,
   observeGame,
 } from '../../src/engine/game.ts';
+import { RustSessionClient } from '../../src/engine/rust-engine.ts';
 import {
+  parseExportedSession,
   RustGameSessionHandle,
 } from '../../src/engine/rust-session-helpers.ts';
 
@@ -173,4 +175,26 @@ export async function withFork(
   } finally {
     await forked.close();
   }
+}
+
+/** Finds the first seed whose opening session matches a predicate. */
+export async function findOpeningManifest(
+  build: (seed: number) => GameManifest,
+  matches: (session: GameSession) => boolean,
+  range: Readonly<{ from?: number; to?: number }> = {},
+): Promise<GameManifest> {
+  const from = range.from ?? 1;
+  const to = range.to ?? 4_096;
+  const client = await RustSessionClient.start();
+  try {
+    for (let seed = from; seed <= to; seed += 1) {
+      const candidate = build(seed);
+      await client.newSession(canonicalJson(candidate as unknown as JsonValue));
+      const session = parseExportedSession(await client.exportSession(), candidate);
+      if (matches(session)) return candidate;
+    }
+  } finally {
+    await client.close();
+  }
+  throw new Error(`no opening seed in ${from}..${to} matched`);
 }
