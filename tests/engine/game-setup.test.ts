@@ -25288,6 +25288,166 @@ test('RULE-04 Fate floods only non-Ordinary sites and submerges occupants', asyn
   });
 });
 
+test('RULE-04 Belfry untaps nearby allies at the end of your turn', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-belfry-v1',
+    },
+    cards: {
+      'belfry-north-artifact': {
+        atEndOfControllerTurnUntapNearbyAllies: true,
+        cardType: 'artifact',
+        manaCost: 0,
+        thresholds,
+      },
+      'belfry-north-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'belfry-north-site': { cardType: 'site', elements: ['earth'] },
+      'belfry-south-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'belfry-south-site': { cardType: 'site', elements: ['earth'] },
+    },
+    decks: {
+      north: {
+        atlas: Array(6).fill('belfry-north-site'),
+        avatar: 'belfry-north-avatar',
+        spellbook: Array(6).fill('belfry-north-artifact'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('belfry-south-site'),
+        avatar: 'belfry-south-avatar',
+        spellbook: Array(6).fill('belfry-north-artifact'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  const belfry = gameManifest.cards['belfry-north-artifact'];
+  assert.equal(
+    belfry?.cardType === 'artifact' && belfry.atEndOfControllerTurnUntapNearbyAllies,
+    true,
+  );
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.north.avatar.tapped, true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === 'belfry-north-artifact'
+        && descriptor.cell === 'C4');
+    const ended = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
+    assert.equal(ended.accepted, true);
+    if (!ended.accepted) {
+      return;
+    }
+    assert.deepEqual(ended.receipt.events.map(({ type }) => type), [
+      'avatar-untapped',
+      'turn-ended',
+      'turn-started',
+    ]);
+    assert.equal(ctx.state.players.north.avatar.tapped, false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 a Monument cannot be conjured onto a unit or picked up', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-monument-uncarried-v1',
+    },
+    cards: {
+      'monument-north-artifact': {
+        atEndOfControllerTurnUntapNearbyAllies: true,
+        cannotBeCarried: true,
+        cardType: 'artifact',
+        manaCost: 0,
+        thresholds,
+      },
+      'monument-north-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'monument-north-site': { cardType: 'site', elements: ['earth'] },
+      'monument-south-avatar': {
+        attack: 1,
+        cardType: 'avatar',
+        defense: 1,
+        drawSpell: false,
+        life: 20,
+      },
+      'monument-south-site': { cardType: 'site', elements: ['earth'] },
+    },
+    decks: {
+      north: {
+        atlas: Array(6).fill('monument-north-site'),
+        avatar: 'monument-north-avatar',
+        spellbook: Array(6).fill('monument-north-artifact'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('monument-south-site'),
+        avatar: 'monument-south-avatar',
+        spellbook: Array(6).fill('monument-north-artifact'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  const monument = gameManifest.cards['monument-north-artifact'];
+  assert.equal(
+    monument?.cardType === 'artifact' && monument.cannotBeCarried,
+    true,
+  );
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const casts = (await ctx.legalActions()).filter(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact' && descriptor.cardId === 'monument-north-artifact');
+    assert.equal(casts.length > 0, true);
+    assert.equal(
+      casts.every(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+        && descriptor.cell === 'C4'
+        && descriptor.bearer == null),
+      true,
+    );
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === 'monument-north-artifact'
+        && descriptor.cell === 'C4');
+    const monumentId = ctx.state.realm.artifacts?.[0]?.instanceId;
+    assert.equal(typeof monumentId, 'string');
+    assert.equal(
+      (await ctx.legalActions()).some(({ descriptor }) =>
+        descriptor.kind === 'pick-up-artifacts'
+        && monumentId !== undefined
+        && descriptor.artifactInstanceIds.includes(monumentId)),
+      false,
+    );
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-04 Magic can destroy or return a Flood Aura', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const cardsFor = (effect: 'destroyTargetAura' | 'returnTargetAuraToOwnerHand'): Record<string, GameCardDefinition> => ({

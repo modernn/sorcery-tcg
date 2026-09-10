@@ -155,6 +155,7 @@ fn parse_should_use_utf16_length_and_ecmascript_whitespace_for_card_ids() {
 #[expect(clippy::too_many_lines)]
 fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
     let artifact_effects = [
+        ("atEndOfControllerTurnUntapNearbyAllies", json!(true)),
         ("atEndOfEachTurnSiteControllerLosesLife", json!(2)),
         (
             "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
@@ -196,6 +197,25 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
     };
     assert_eq!(facts.effect, ArtifactEffect::NearbyMinionsMustAttackIfAble);
     assert!(facts.nearby_strikes_against_units_deal_double_damage);
+
+    let monument = with(
+        spell(
+            "artifact",
+            ("atEndOfControllerTurnUntapNearbyAllies", json!(true)),
+        ),
+        "cannotBeCarried",
+        json!(true),
+    );
+    let CardFacts::Artifact(monument_facts) =
+        parse_card_definition("monument", &monument).expect("Monument")
+    else {
+        panic!("expected Artifact facts");
+    };
+    assert_eq!(
+        monument_facts.effect,
+        ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+    );
+    assert!(monument_facts.cannot_be_carried);
 
     let aura_effects = [
         ("affectedSitesAreFlooded", json!(true)),

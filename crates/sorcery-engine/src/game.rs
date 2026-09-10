@@ -1313,7 +1313,8 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 /// The Artifact effects the realm cannot yet honor, named by their authoring field.
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
-        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+        | ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
         | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
@@ -1330,7 +1331,8 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
 const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
-        ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+            | ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
             | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
@@ -4457,6 +4459,9 @@ impl Game {
                     mana_cost: facts.mana_cost,
                 };
                 descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
+                if facts.cannot_be_carried {
+                    continue;
+                }
                 for bearer in &bearers {
                     let Ok(occupied) = self.unit_target_occupied_cells(bearer) else {
                         continue;
@@ -4487,7 +4492,19 @@ impl Game {
             let region = self.unit_target_region(&unit)?;
             let cells = self.unit_target_occupied_cells(&unit)?.to_vec();
             for cell in &cells {
-                let mut instance_ids = self.loose_artifact_instance_ids(*cell, region);
+                let mut instance_ids = Vec::new();
+                for instance_id in self.loose_artifact_instance_ids(*cell, region) {
+                    let artifact = self
+                        .position
+                        .artifacts
+                        .iter()
+                        .find(|artifact| artifact.card.instance_id == instance_id)
+                        .ok_or(GameError::IllegalAction)?;
+                    if self.artifact_facts(artifact)?.cannot_be_carried {
+                        continue;
+                    }
+                    instance_ids.push(instance_id);
+                }
                 instance_ids.sort_unstable();
                 let count = instance_ids.len();
                 descriptors.extend(
@@ -19784,6 +19801,88 @@ impl Game {
         Ok(())
     }
 
+    fn apply_untap_avatar(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let avatar = &mut self.position.players[seat_index(seat)].avatar;
+        if !avatar.tapped {
+            return;
+        }
+        avatar.tapped = false;
+        let instance_id = avatar.card.instance_id.clone();
+        outcomes.push("avatar-untapped", || {
+            json!({
+                "instanceId": instance_id,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+    }
+
+    /// Official Monument text: at the end of your turn, untap all nearby allies.
+    ///
+    /// Nearby is the Artifact's square plus the eight surrounding squares in the same region.
+    /// Allies are units the Monument's conjurer controls, including that player's Avatar.
+    fn resolve_end_of_controller_turn_untap_nearby_allies(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let mut sources = Vec::new();
+        for artifact in &self.position.artifacts {
+            if artifact.card.owner != seat {
+                continue;
+            }
+            if self.artifact_facts(artifact)?.effect
+                == ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies
+            {
+                sources.push(artifact.card.instance_id.clone());
+            }
+        }
+        sources.sort_unstable();
+        for source_id in sources {
+            let Some(artifact) = self
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == source_id)
+            else {
+                continue;
+            };
+            let location = self.artifact_location(artifact)?;
+            let source_cells = [location.cell];
+            let region = location.region;
+            let mut allies = Vec::new();
+            let avatar = &self.position.players[seat_index(seat)].avatar;
+            if avatar.tapped
+                && region == Region::Surface
+                && Self::footprints_nearby(&source_cells, std::slice::from_ref(&avatar.location))
+            {
+                allies.push((true, avatar.card.instance_id.clone()));
+            }
+            for unit in &self.position.units {
+                if unit.controller != seat || !unit.tapped || unit.region != region {
+                    continue;
+                }
+                if Self::footprints_nearby(&source_cells, Self::unit_occupied_cells(unit)) {
+                    allies.push((false, unit.card.instance_id.clone()));
+                }
+            }
+            allies.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+            for (is_avatar, instance_id) in allies {
+                if is_avatar {
+                    self.apply_untap_avatar(seat, &source_id, outcomes);
+                } else {
+                    self.apply_untap_minion(&instance_id, seat, &source_id, outcomes)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn apply_avatar_life_loss(
         &mut self,
         seat: Seat,
@@ -20363,6 +20462,7 @@ impl Game {
                 })
             });
         }
+        self.resolve_end_of_controller_turn_untap_nearby_allies(seat, outcomes)?;
         let stay_tapped: BTreeSet<_> = self
             .position
             .units
