@@ -317,6 +317,7 @@ export type GameCardDefinition =
     returnTargetArtifactFromOwnCemetery?: true;
     returnTargetMagicFromOwnCemetery?: true;
     returnTargetArtifactToOwnerHand?: true;
+    returnTargetAuraToOwnerHand?: true;
     returnTargetMinionToOwnerHand?: true;
     returnTargetSiteFromOwnCemetery?: true;
     returnTargetSiteToOwnerHand?: true;
@@ -324,6 +325,7 @@ export type GameCardDefinition =
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyTargetArtifact?: true;
+    destroyTargetAura?: true;
     destroyTargetSite?: true;
     grantStealthToTargetMinion?: true;
     grantWardToTargetMinion?: true;
@@ -977,6 +979,7 @@ type GameActionDescriptor =
     target?: GameUnitRef;
     targets?: readonly GameUnitRef[];
     targetArtifactInstanceId?: StateHash;
+    targetAuraInstanceId?: StateHash;
     targetLocation?: GameLocation;
     targetSiteInstanceId?: StateHash;
     temptedDestination?: GameLocation;
@@ -1177,11 +1180,12 @@ const SUPPORTED_CARD_FIELDS = {
     damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
-    destroyTargetArtifact destroyTargetSite
+    destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetMagicFromOwnCemetery returnTargetArtifactToOwnerHand
+    returnTargetAuraToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
     submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
@@ -1607,6 +1611,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnTargetArtifactToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetArtifactToOwnerHand must be true when defined`);
     }
+    if (card.returnTargetAuraToOwnerHand !== undefined
+      && card.returnTargetAuraToOwnerHand !== true) {
+      throw new RangeError(`${path}.returnTargetAuraToOwnerHand must be true when defined`);
+    }
     if (card.returnTargetSiteFromOwnCemetery !== undefined
       && card.returnTargetSiteFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnTargetSiteFromOwnCemetery must be true when defined`);
@@ -1700,6 +1708,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
       throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
     }
+    if (card.destroyTargetAura !== undefined && card.destroyTargetAura !== true) {
+      throw new RangeError(`${path}.destroyTargetAura must be true when defined`);
+    }
     if (card.destroyTargetSite !== undefined && card.destroyTargetSite !== true) {
       throw new RangeError(`${path}.destroyTargetSite must be true when defined`);
     }
@@ -1736,6 +1747,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(targetSiteEffectFacts === 3)
       + Number(simpleDestroyTargetSite)
       + Number(card.destroyTargetArtifact === true)
+      + Number(card.destroyTargetAura === true)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
@@ -1756,6 +1768,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.returnTargetArtifactFromOwnCemetery === true)
       + Number(card.returnTargetMagicFromOwnCemetery === true)
       + Number(card.returnTargetArtifactToOwnerHand === true)
+      + Number(card.returnTargetAuraToOwnerHand === true)
       + Number(card.returnTargetMinionToOwnerHand === true)
       + Number(card.returnTargetSiteFromOwnCemetery === true)
       + Number(card.returnTargetSiteToOwnerHand === true)
@@ -2541,6 +2554,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { destroyTargetSite: true as const }
                 : card.destroyTargetArtifact === true
                   ? { destroyTargetArtifact: true as const }
+                : card.destroyTargetAura === true
+                  ? { destroyTargetAura: true as const }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
@@ -2587,6 +2602,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                       ? { returnTargetMinionToOwnerHand: true as const }
                     : card.returnTargetArtifactToOwnerHand === true
                       ? { returnTargetArtifactToOwnerHand: true as const }
+                    : card.returnTargetAuraToOwnerHand === true
+                      ? { returnTargetAuraToOwnerHand: true as const }
                     : card.returnTargetSiteToOwnerHand === true
                       ? { returnTargetSiteToOwnerHand: true as const }
                     : card.returnTargetSiteFromOwnCemetery === true

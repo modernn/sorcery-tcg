@@ -430,6 +430,9 @@ pub enum ActionDescriptor {
         /// Exact engine-issued Artifact target for Bury.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_artifact_instance_id: Option<IdentityHash>,
+        /// Exact engine-issued Aura target.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_aura_instance_id: Option<IdentityHash>,
         /// Exact engine-issued realm location targeted by the Magic.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_location: Option<Location>,
@@ -694,6 +697,7 @@ impl ActionDescriptor {
                 draw_zone,
                 target,
                 target_artifact_instance_id,
+                target_aura_instance_id,
                 target_location,
                 tempted_destination,
                 tempted_enemy,
@@ -767,6 +771,8 @@ impl ActionDescriptor {
                         "Cast {card_id} on artifact {}…",
                         short_identity(instance_id)
                     )
+                } else if let Some(instance_id) = target_aura_instance_id {
+                    format!("Cast {card_id} on aura {}…", short_identity(instance_id))
                 } else if let Some(target) = target {
                     format!(
                         "Cast {card_id} on {} {}…",
@@ -1227,6 +1233,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     draw_zone: left_draw_zone,
                     target: left_target,
                     target_artifact_instance_id: left_artifact,
+                    target_aura_instance_id: left_aura,
                     target_location: left_location,
                     target_site_instance_id: left_site,
                     tempted_destination: left_tempted_destination,
@@ -1246,6 +1253,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     draw_zone: right_draw_zone,
                     target: right_target,
                     target_artifact_instance_id: right_artifact,
+                    target_aura_instance_id: right_aura,
                     target_location: right_location,
                     target_site_instance_id: right_site,
                     tempted_destination: right_tempted_destination,
@@ -1279,6 +1287,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| {
                     compare_optional_identities(left_artifact.as_ref(), right_artifact.as_ref())
                 })
+                .then_with(|| compare_optional_identities(left_aura.as_ref(), right_aura.as_ref()))
                 .then_with(|| compare_optional_locations(*left_location, *right_location))
                 .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref()))
                 .then_with(|| {

@@ -5782,6 +5782,50 @@
         "file": "crates/sorcery-engine/tests/start_turn_life_gain_rules.rs",
         "testName": "rule_catalog_0269_start_turn_life_gain_cannot_leave_deaths_door"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0270",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can destroy a realm Aura. The Aura moves to its owner's cemetery, matching immobile areas lift, Flood or Drought water overlays leave the covered sites, and the event is aura-destroyed rather than a duration dispel.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0270_destroy_target_aura_sends_flood_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0271",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can return a realm Aura to its owner's Spellbook hand. The Aura leaves the realm, Flood water leaves the covered sites, and the opponent sees only the updated hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0271_return_target_aura_returns_flood_to_its_owners_hand"
+      }
     }
   ]
 }

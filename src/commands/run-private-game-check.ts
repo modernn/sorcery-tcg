@@ -4604,6 +4604,8 @@ function gameDefinition(
   affectedSitesAreFlooded = false,
   affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold = false,
   atStartOfControllerTurnControllerGainsLife: 0 | 2 = 0,
+  destroyTargetAura = false,
+  returnTargetAuraToOwnerHand = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4758,7 +4760,9 @@ function gameDefinition(
     + Number(gainControlOfTargetNearbyMinion)
     + Number(killTargetWoundedMinion)
     + Number(leapAttackAlly)
-    + Number(Boolean(summonTokenToEachControlledSiteBorderingEnemySite));
+    + Number(Boolean(summonTokenToEachControlledSiteBorderingEnemySite))
+    + Number(destroyTargetAura)
+    + Number(returnTargetAuraToOwnerHand);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -4776,6 +4780,8 @@ function gameDefinition(
       ...(grantPowerToAllyThisTurn !== 0 ? { grantPowerToAllyThisTurn } : {}),
       ...(leapAttackAlly ? { leapAttackAlly: true } : {}),
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
+      ...(destroyTargetAura ? { destroyTargetAura: true as const } : {}),
+      ...(returnTargetAuraToOwnerHand ? { returnTargetAuraToOwnerHand: true as const } : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),

@@ -569,6 +569,7 @@ struct MagicChoice {
     draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
     target_artifact_instance_id: Option<IdentityHash>,
+    target_aura_instance_id: Option<IdentityHash>,
     target_location: Option<Location>,
     target_site_instance_id: Option<IdentityHash>,
     tempted_destination: Option<Location>,
@@ -1321,6 +1322,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyTargetArtifact
+        | MagicEffect::DestroyTargetAura
         | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
@@ -1340,6 +1342,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::MillSites(_)
         | MagicEffect::MillSpells(_)
         | MagicEffect::ReturnTargetArtifactToOwnerHand
+        | MagicEffect::ReturnTargetAuraToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
@@ -3225,6 +3228,7 @@ impl Game {
                         draw_zone: choice.draw_zone,
                         target: choice.target,
                         target_artifact_instance_id: choice.target_artifact_instance_id,
+                        target_aura_instance_id: choice.target_aura_instance_id,
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
                         tempted_destination: choice.tempted_destination,
@@ -5550,6 +5554,26 @@ impl Game {
             .collect())
     }
 
+    fn aura_target_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        if caster_location.region != Region::Surface {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .position
+            .auras
+            .iter()
+            .map(|aura| MagicChoice {
+                target_aura_instance_id: Some(aura.card.instance_id.clone()),
+                ..MagicChoice::default()
+            })
+            .collect())
+    }
+
     fn with_chosen_hand_discard(
         &self,
         seat: Seat,
@@ -6061,6 +6085,9 @@ impl Game {
             }
             MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
                 self.artifact_target_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::DestroyTargetAura | MagicEffect::ReturnTargetAuraToOwnerHand => {
+                self.aura_target_choices(seat, caster_instance_id)?
             }
             MagicEffect::TargetPlayerDiscardsCards(_)
             | MagicEffect::TargetPlayerGainsLife(_)
@@ -12831,6 +12858,96 @@ impl Game {
         Ok(())
     }
 
+    fn take_targeted_aura(
+        &mut self,
+        instance_id: &IdentityHash,
+    ) -> Result<AuraPosition, GameError> {
+        let index = self
+            .position
+            .auras
+            .iter()
+            .position(|aura| aura.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        Ok(self.position.auras.remove(index))
+    }
+
+    fn apply_destroy_target_aura(
+        &mut self,
+        target_aura_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let owner = aura.card.owner;
+        let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
+            .id
+            .clone();
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != *target_aura_instance_id);
+        if aura.card.source == CardSource::Token {
+            outcomes.push("aura-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(aura.card);
+            outcomes.push("aura-destroyed", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_return_target_aura_to_owner_hand(
+        &mut self,
+        target_aura_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let owner = aura.card.owner;
+        let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
+            .id
+            .clone();
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != *target_aura_instance_id);
+        if aura.card.source == CardSource::Token {
+            outcomes.push("aura-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .hand_spellbook
+                .push(aura.card);
+            outcomes.push("aura-returned-to-hand", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                    "seat": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -16230,6 +16347,7 @@ impl Game {
             draw_zone,
             target,
             target_artifact_instance_id,
+            target_aura_instance_id,
             target_location,
             target_site_instance_id,
             tempted_destination,
@@ -16277,6 +16395,7 @@ impl Game {
                     draw_zone: *draw_zone,
                     target: target.clone(),
                     target_artifact_instance_id: target_artifact_instance_id.clone(),
+                    target_aura_instance_id: target_aura_instance_id.clone(),
                     target_location: *target_location,
                     target_site_instance_id: target_site_instance_id.clone(),
                     tempted_destination: *tempted_destination,
@@ -16474,6 +16593,9 @@ impl Game {
             }
             if let Some(target_artifact_instance_id) = target_artifact_instance_id {
                 payload["targetArtifactInstanceId"] = json!(target_artifact_instance_id);
+            }
+            if let Some(target_aura_instance_id) = target_aura_instance_id {
+                payload["targetAuraInstanceId"] = json!(target_aura_instance_id);
             }
             if let Some(target_location) = target_location {
                 payload["targetLocation"] = json!(target_location);
@@ -17538,6 +17660,26 @@ impl Game {
                     .ok_or(GameError::IllegalAction)?;
                 self.apply_return_target_artifact_to_owner_hand(
                     target_artifact_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::DestroyTargetAura => {
+                let target_aura_instance_id = target_aura_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_aura(
+                    target_aura_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::ReturnTargetAuraToOwnerHand => {
+                let target_aura_instance_id = target_aura_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_aura_to_owner_hand(
+                    target_aura_instance_id,
                     card_instance_id,
                     outcomes,
                 )?;
@@ -20605,6 +20747,10 @@ mod tests {
                 json!({ "destroyTargetArtifact": true }),
             ),
             (
+                MagicEffect::DestroyTargetAura,
+                json!({ "destroyTargetAura": true }),
+            ),
+            (
                 MagicEffect::DestroyTargetSite,
                 json!({ "destroyTargetSite": true }),
             ),
@@ -20635,6 +20781,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetArtifactToOwnerHand,
                 json!({ "returnTargetArtifactToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetAuraToOwnerHand,
+                json!({ "returnTargetAuraToOwnerHand": true }),
             ),
             (
                 MagicEffect::ReturnTargetArtifactFromOwnCemetery,

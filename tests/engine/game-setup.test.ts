@@ -24500,6 +24500,136 @@ test('RULE-04 Flood adds Water affinity and later Drought wins the timestamp', a
   });
 });
 
+test('RULE-04 Magic can destroy or return a Flood Aura', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cardsFor = (effect: 'destroyTargetAura' | 'returnTargetAuraToOwnerHand'): Record<string, GameCardDefinition> => ({
+    'aura-magic-north-aura': {
+      affectedSitesAreFlooded: true,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'aura-magic-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'aura-magic-north-site': { cardType: 'site', elements: ['earth'] },
+    'aura-magic-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'aura-magic-south-magic': {
+      cardType: 'magic',
+      manaCost: 0,
+      thresholds,
+      ...(effect === 'destroyTargetAura'
+        ? { destroyTargetAura: true as const }
+        : { returnTargetAuraToOwnerHand: true as const }),
+    },
+    'aura-magic-south-site': { cardType: 'site', elements: ['earth'] },
+  });
+  const play = async (effect: 'destroyTargetAura' | 'returnTargetAuraToOwnerHand') => {
+    const gameManifest = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-aura-magic-v1',
+      },
+      cards: cardsFor(effect),
+      decks: {
+        north: {
+          atlas: Array(6).fill('aura-magic-north-site'),
+          avatar: 'aura-magic-north-avatar',
+          spellbook: Array(6).fill('aura-magic-north-aura'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('aura-magic-south-site'),
+          avatar: 'aura-magic-south-avatar',
+          spellbook: Array(6).fill('aura-magic-south-magic'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    });
+    await withSetup(gameManifest, async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+      assert.equal(ctx.observe('north').players.north.affinity.water, 0);
+      assert.equal(
+        (await ctx.legalActions('south')).some(({ descriptor }) =>
+          descriptor.kind === 'cast-magic' && descriptor.cardId === 'aura-magic-south-magic'),
+        false,
+      );
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-aura'
+          && descriptor.cardId === 'aura-magic-north-aura'
+          && descriptor.cells.includes('C4'));
+      const auraId = ctx.state.realm.auras?.[0]?.instanceId;
+      assert.equal(typeof auraId, 'string');
+      assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+      assert.equal(ctx.observe('north').players.north.affinity.water, 1);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardId === 'aura-magic-south-site'
+          && descriptor.cell === 'C1');
+      const northHandBefore = ctx.state.players.north.hand.spellbook.length;
+      const cast = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'cast-magic'
+          && descriptor.cardId === 'aura-magic-south-magic'
+          && descriptor.targetAuraInstanceId === auraId));
+      assert.equal(cast.accepted, true);
+      if (!cast.accepted) {
+        return;
+      }
+      if (effect === 'destroyTargetAura') {
+        assert.deepEqual(cast.receipt.events.map(({ type }) => type), [
+          'magic-cast',
+          'aura-destroyed',
+          'magic-resolved',
+        ]);
+        assert.equal(
+          ctx.state.players.north.cemetery.some((card) => card.instanceId === auraId),
+          true,
+        );
+      } else {
+        assert.deepEqual(cast.receipt.events.map(({ type }) => type), [
+          'magic-cast',
+          'aura-returned-to-hand',
+          'magic-resolved',
+        ]);
+        assert.equal(
+          ctx.state.players.north.hand.spellbook.some((card) => card.instanceId === auraId),
+          true,
+        );
+        assert.equal(ctx.state.players.north.hand.spellbook.length, northHandBefore + 1);
+        assert.equal(ctx.observe('south').players.north.hand.spellbook, northHandBefore + 1);
+      }
+      assert.equal(cast.receipt.events.some(({ type }) => type === 'aura-dispelled'), false);
+      assert.equal(ctx.state.realm.auras == null, true);
+      assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+      assert.equal(ctx.observe('north').players.north.affinity.water, 0);
+      assert.equal(
+        (await ctx.legalActions('south')).some(({ descriptor }) =>
+          descriptor.kind === 'cast-magic' && descriptor.cardId === 'aura-magic-south-magic'),
+        false,
+      );
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await play('destroyTargetAura');
+  await play('returnTargetAuraToOwnerHand');
+});
+
 test('RULE-04 start-turn controller life gain heals and cannot leave Death\'s Door', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const cardsFor = (life: number): Record<string, GameCardDefinition> => ({
