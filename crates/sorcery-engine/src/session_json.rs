@@ -243,14 +243,11 @@ impl SessionJsonService {
         else {
             return error_response(id, "runNoveltyFromForcedAction requires predictedStateHash");
         };
-        let predicted_event_types = match string_list(params, "predictedEventTypes") {
-            Ok(value) => value,
-            Err(_) => {
-                return error_response(
-                    id,
-                    "runNoveltyFromForcedAction predictedEventTypes must be an array of strings",
-                );
-            }
+        let Ok(predicted_event_types) = string_list(params, "predictedEventTypes") else {
+            return error_response(
+                id,
+                "runNoveltyFromForcedAction predictedEventTypes must be an array of strings",
+            );
         };
         let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
             return error_response(id, "runNoveltyFromForcedAction requires maxActions");
@@ -731,10 +728,10 @@ mod tests {
                 "committedEventTypes": [],
             }),
         ));
-        let probed = novelty.result.expect("probe");
-        let probes = probed["probes"].as_array().expect("probes");
+        let scored = novelty.result.expect("probe");
+        let probes = scored["probes"].as_array().expect("probes");
         let selected_index =
-            usize::try_from(probed["selectedIndex"].as_u64().expect("selectedIndex"))
+            usize::try_from(scored["selectedIndex"].as_u64().expect("selectedIndex"))
                 .expect("selectedIndex fits");
         let probe = probes[selected_index].clone();
         let forced = service.handle(&rpc(
