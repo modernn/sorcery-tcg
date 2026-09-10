@@ -8799,12 +8799,7 @@ fn untap_magic_manifest(seed: u32) -> String {
         })),
         "south-site": site(false),
     });
-    manifest(
-        seed,
-        &cards,
-        &["north-untap"; 6],
-        &["south-charger"; 6],
-    )
+    manifest(seed, &cards, &["north-untap"; 6], &["south-charger"; 6])
 }
 
 fn untap_minion_targets(session: &Session) -> Vec<(String, String)> {
