@@ -236,6 +236,7 @@ export type GameCardDefinition =
     discardSpellToDamageRandomOtherUnitHere?: number;
     discardRandomCardInsteadOfMana?: true;
     diesAtEndOfControllerTurn?: true;
+    enemiesMustAttackThisIfAble?: true;
     genesisDamageEachOtherUnitHere?: 1;
     genesisDisableSelfUntilDamaged?: true;
     genesisStrikeEachEnemyHere?: true;
@@ -1059,7 +1060,7 @@ const SUPPORTED_CARD_FIELDS = {
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
-    discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn genesisDamageEachOtherUnitHere
+    discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
@@ -1979,6 +1980,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.mustAttackAUnitIfAble !== undefined && card.mustAttackAUnitIfAble !== true) {
     throw new RangeError(`${path}.mustAttackAUnitIfAble must be true when defined`);
   }
+  if (card.enemiesMustAttackThisIfAble !== undefined && card.enemiesMustAttackThisIfAble !== true) {
+    throw new RangeError(`${path}.enemiesMustAttackThisIfAble must be true when defined`);
+  }
   if (card.mustBeCastToWaterSite !== undefined && typeof card.mustBeCastToWaterSite !== 'boolean') {
     throw new RangeError(`${path}.mustBeCastToWaterSite must be boolean`);
   }
@@ -2406,6 +2410,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.mustAttackAUnitIfAble === true ? { mustAttackAUnitIfAble: true as const } : {}),
+            ...(card.enemiesMustAttackThisIfAble === true
+              ? { enemiesMustAttackThisIfAble: true as const }
+              : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
             ...(card.connectsTopBottom === true ? { connectsTopBottom: true } : {}),

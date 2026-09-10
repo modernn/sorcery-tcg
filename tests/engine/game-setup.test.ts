@@ -1957,6 +1957,31 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && mustAttackManifest.cards[firstSpell].mustAttackAUnitIfAble,
     true,
   );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        enemiesMustAttackThisIfAble: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /enemiesMustAttackThisIfAble must be true when defined/);
+  const forcedSourceManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        enemiesMustAttackThisIfAble: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    forcedSourceManifest.cards[firstSpell]?.cardType === 'minion'
+      && forcedSourceManifest.cards[firstSpell].enemiesMustAttackThisIfAble,
+    true,
+  );
   for (const discardSpellToDamageRandomOtherUnitHere of [0, 1.5, 101]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -22800,6 +22825,143 @@ test('RULE-04 must-attack-a-unit-if-able is mandatory in range and optional out 
   });
 
   await withSetup(createGameManifest(input(244)), async (ctx) => {
+    await reachAfterSummon(ctx, 'C1');
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'end-turn'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 an enemies-must-attack-this source forces only in-range enemy minions', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'forced-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'forced-north-site': { cardType: 'site', elements: ['earth'] },
+    'forced-north-source': {
+      attack: 1,
+      cardType: 'minion',
+      charge: true,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'forced-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'forced-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      enemiesMustAttackThisIfAble: true,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'forced-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const input = (seed: number) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-enemies-must-attack-this-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('forced-north-site'),
+        avatar: 'forced-north-avatar',
+        spellbook: Array(6).fill('forced-north-source'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('forced-south-site'),
+        avatar: 'forced-south-avatar',
+        spellbook: Array(6).fill('forced-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const reachAfterSummon = async (ctx: SetupCtx, southCell: string) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'forced-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'forced-south-minion'
+        && descriptor.cell === southCell);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'forced-north-source'
+        && descriptor.cell === 'C4');
+  };
+
+  const inRangeManifest = createGameManifest(input(245));
+  assert.equal(inRangeManifest.cards['forced-south-minion']?.cardType === 'minion'
+    && inRangeManifest.cards['forced-south-minion'].enemiesMustAttackThisIfAble, true);
+
+  await withSetup(inRangeManifest, async (ctx) => {
+    await reachAfterSummon(ctx, 'C4');
+    assert.equal(ctx.state.phase === 'main', true);
+    const sourceId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'forced-north-source')?.instanceId;
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'forced-south-minion')?.instanceId;
+    assert.ok(sourceId);
+    assert.ok(targetId);
+    const legal = await ctx.legalActions('north');
+    assert.equal(legal.length > 0, true);
+    assert.equal(legal.every(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === sourceId
+        && descriptor.to?.cell === 'C4'), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === sourceId
+        && descriptor.to?.cell === 'C4');
+    while (ctx.state.phase === 'movement') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'continue-basic-movement');
+    }
+    assert.equal(ctx.state.phase === 'attack', true);
+    const attacks = await ctx.legalActions('north');
+    assert.equal(attacks.some(({ descriptor }) => descriptor.kind === 'decline-attack'), false);
+    assert.equal(attacks.filter(({ descriptor }) => descriptor.kind === 'declare-attack').length, 1);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target?.kind === 'minion'
+        && descriptor.target.instanceId === targetId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates === true);
+    if (ctx.state.phase === 'intercept') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    }
+    assert.equal(ctx.state.phase === 'main', true);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === sourceId), true);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === targetId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(246)), async (ctx) => {
     await reachAfterSummon(ctx, 'C1');
     assert.equal(ctx.state.phase === 'main', true);
     assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>

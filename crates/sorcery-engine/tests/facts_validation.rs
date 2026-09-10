@@ -714,6 +714,11 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be true",
         ),
         (
+            "forced-attack source flag",
+            with(minion(), "enemiesMustAttackThisIfAble", json!(false)),
+            "must be true",
+        ),
+        (
             "competing start-turn triggers",
             with(
                 with(
@@ -806,6 +811,14 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.must_attack_a_unit_if_able);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "forced-attack-source",
+        &with(minion(), "enemiesMustAttackThisIfAble", json!(true)),
+    )
+    .expect("valid forced-attack source minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.enemies_must_attack_this_if_able);
     assert_eq!(facts.thresholds, Thresholds::default());
     assert_eq!(facts.provides, None::<Element>);
 

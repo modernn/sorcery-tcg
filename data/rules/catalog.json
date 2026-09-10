@@ -5226,6 +5226,47 @@
         "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
         "testName": "rule_catalog_0244_must_attack_does_not_constrain_when_no_unit_is_in_range"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0245",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that enemies must attack if able forces every opposing minion that can reach it. Those minions may take only Move and Attack paths that can strike it, then must Declare Attack on it. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0245_enemies_must_attack_this_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0246",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same forced-attack source does not constrain an opposing minion that cannot reach it. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0246_enemies_must_attack_this_does_not_constrain_out_of_range"
+      }
     }
   ]
 }
