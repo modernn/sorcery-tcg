@@ -66,7 +66,7 @@ fn baseline_policy_should_reproduce_the_complete_seed_31_action_sequence() {
         let observation = game.observe(game.position().decision_seat());
         let actions = game.legal_actions().expect("legal actions");
         let selected = policy
-            .select_action(observation, &actions)
+            .select_action(&observation, &actions)
             .expect("selected action");
         assert_eq!(
             selected
@@ -157,7 +157,7 @@ fn policy_binding_and_empty_action_sets_should_fail_closed() {
     let manifest = seed_31_manifest(&fixture);
     let game = Game::from_manifest_json(&manifest).expect("valid game");
     let error = policy
-        .select_action(game.observe(Seat::North), &[])
+        .select_action(&game.observe(Seat::North), &[])
         .expect_err("empty legal actions must fail");
     assert!(error.to_string().contains("at least one legal action"));
     assert!(matches!(

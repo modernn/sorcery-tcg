@@ -81,10 +81,13 @@ pub struct Position {
 }
 
 /// Public information required by a deterministic policy for one acting seat.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeatObservation {
     atlas_remaining: usize,
     enemy_avatar: Location,
+    /// Observer-controlled Avatar and minion identities that currently have a
+    /// temporary power source. Identities are public realm objects.
+    powered_unit_instance_ids: Vec<IdentityHash>,
     seat: Seat,
     spellbook_remaining: usize,
 }
@@ -92,26 +95,49 @@ pub struct SeatObservation {
 impl SeatObservation {
     /// Returns the observing seat.
     #[must_use]
-    pub const fn seat(self) -> Seat {
+    pub const fn seat(&self) -> Seat {
         self.seat
     }
 
     /// Returns the observing player's remaining Atlas count.
     #[must_use]
-    pub const fn atlas_remaining(self) -> usize {
+    pub const fn atlas_remaining(&self) -> usize {
         self.atlas_remaining
     }
 
     /// Returns the observing player's remaining Spellbook count.
     #[must_use]
-    pub const fn spellbook_remaining(self) -> usize {
+    pub const fn spellbook_remaining(&self) -> usize {
         self.spellbook_remaining
     }
 
     /// Returns the opposing Avatar's public surface location.
     #[must_use]
-    pub const fn enemy_avatar(self) -> Location {
+    pub const fn enemy_avatar(&self) -> Location {
         self.enemy_avatar
+    }
+
+    /// Returns observer-controlled units that currently have temporary power.
+    #[must_use]
+    pub fn powered_unit_instance_ids(&self) -> &[IdentityHash] {
+        &self.powered_unit_instance_ids
+    }
+}
+
+#[cfg(test)]
+impl SeatObservation {
+    pub(crate) fn for_test(
+        seat: Seat,
+        enemy_avatar: Location,
+        powered_unit_instance_ids: Vec<IdentityHash>,
+    ) -> Self {
+        Self {
+            atlas_remaining: 0,
+            enemy_avatar,
+            powered_unit_instance_ids,
+            seat,
+            spellbook_remaining: 0,
+        }
     }
 }
 
@@ -1716,12 +1742,23 @@ impl Game {
     pub fn observe(&self, seat: Seat) -> SeatObservation {
         let player = &self.position.players[seat_index(seat)];
         let enemy = &self.position.players[seat_index(other_seat(seat))];
+        let mut powered_unit_instance_ids = Vec::new();
+        if !player.avatar.temporary_power_sources.is_empty() {
+            powered_unit_instance_ids.push(player.avatar.card.instance_id.clone());
+        }
+        for unit in &self.position.units {
+            if unit.controller == seat && !unit.temporary_power_sources.is_empty() {
+                powered_unit_instance_ids.push(unit.card.instance_id.clone());
+            }
+        }
+        powered_unit_instance_ids.sort();
         SeatObservation {
             atlas_remaining: player.atlas.len(),
             enemy_avatar: Location {
                 cell: enemy.avatar.location,
                 region: Region::Surface,
             },
+            powered_unit_instance_ids,
             seat,
             spellbook_remaining: player.spellbook.len(),
         }
@@ -21356,6 +21393,16 @@ impl IssuedAction {
         self.state_version
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_test(descriptor: ActionDescriptor, seat: Seat) -> Self {
+        Self {
+            descriptor,
+            label: String::new(),
+            seat,
+            state_version: 0,
+        }
+    }
+
     /// Materializes the typed action at the external JSON boundary.
     ///
     /// # Errors
@@ -23235,6 +23282,51 @@ mod tests {
                     seat: Seat::North,
                 }) if *instance_id == unit_id
             ))
+        );
+    }
+
+    #[test]
+    fn observe_lists_sorted_friendly_units_that_currently_have_temporary_power() {
+        let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let source =
+            identity_hash(&json!({ "fixture": "observe-powered" })).expect("power source identity");
+        let north = seat_index(Seat::North);
+        let avatar_id = game.position.players[north].avatar.card.instance_id.clone();
+        game.position.players[north]
+            .avatar
+            .temporary_power_sources
+            .push(source.clone());
+        let card_id = game.position.players[north]
+            .hand_spellbook
+            .iter()
+            .find_map(|card| {
+                matches!(
+                    game.rules.cards[usize::from(card.card_id.0)].facts,
+                    CardFacts::Minion(_)
+                )
+                .then_some(card.card_id)
+            })
+            .expect("North minion card");
+        let mut unit = test_minion(
+            card_id,
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Seat::North,
+            Cell::parse("C4").expect("C4"),
+            None,
+        );
+        unit.temporary_power_sources.push(source);
+        let unit_id = unit.card.instance_id.clone();
+        game.position.units.push(unit);
+
+        let observation = game.observe(Seat::North);
+        let mut expected = vec![avatar_id, unit_id];
+        expected.sort();
+        assert_eq!(observation.powered_unit_instance_ids(), expected);
+        assert!(
+            game.observe(Seat::South)
+                .powered_unit_instance_ids()
+                .is_empty()
         );
     }
 

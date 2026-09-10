@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Live line: `cursor/monument-cannot-be-carried-0005`. Stack this on the Belfry PR (`cursor/belfry-nearby-untap-0005`, https://github.com/modernn/sorcery-tcg/pull/3). Do not add more slices to PR #2 or PR #3.
+Live line: `cursor/powered-movement-observation-0005`. Stack this on the Monument PR (`cursor/monument-cannot-be-carried-0005`, https://github.com/modernn/sorcery-tcg/pull/4). Do not add more slices to PR #4 or PR #5.
 
 Do not start from `master`'s copy of this file. That copy still says to migrate `game-setup.test.ts` and gut `game.ts`; that work is already on the cutover branch. Do not open a second cutover branch.
 
@@ -14,6 +14,7 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 Latest catalog proofs: official Monument carry prohibition (`RULE-CATALOG-0314`–`0315`). A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
 Belfry nearby untap remains `RULE-CATALOG-0312`–`0313`.
+Deterministic `powered-movement` now uses public temporary-power identities on the seat observation. It does not add a new catalog family.
 Atlantean Fate remains `RULE-CATALOG-0310`–`0311`.
 Start Phase doesn't-untap remains `RULE-CATALOG-0308`–`0309`.
 End-of-controller-turn Avatar life remains `RULE-CATALOG-0304`–`0307`.
