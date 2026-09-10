@@ -6279,6 +6279,90 @@
         "file": "crates/sorcery-engine/tests/end_turn_here_damage_rules.rs",
         "testName": "rule_catalog_0291_end_turn_here_damage_destroys_a_wounded_visitor"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0292",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can mill the top Spellbook card into that player's cemetery. The discarded identity is public, the hand is unchanged, and the Start Phase then proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0292_start_turn_mill_spells_puts_the_top_spell_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0293",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Spellbook mill is a no-op when the library is empty. The game stays active, no card is discarded, and the Start Phase still proceeds to Draw. Required start-turn draws still deck out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0293_start_turn_mill_spells_is_a_no_op_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0294",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can mill the top Atlas card into that player's cemetery. The discarded site identity is public and the Start Phase then proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0294_start_turn_mill_sites_puts_the_top_site_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0295",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Atlas mill is a no-op when the Atlas is empty. The game stays active and the Start Phase still proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0295_start_turn_mill_sites_is_a_no_op_on_an_empty_atlas"
+      }
     }
   ]
 }

@@ -336,6 +336,8 @@ pub struct MinionFacts {
     pub at_start_of_controller_turn_damage_each_other_unit_here: Option<u8>,
     pub at_start_of_controller_turn_draw_sites: Option<u8>,
     pub at_start_of_controller_turn_draw_spells: Option<u8>,
+    pub at_start_of_controller_turn_mill_sites: Option<u8>,
+    pub at_start_of_controller_turn_mill_spells: Option<u8>,
     pub at_start_of_controller_turn_lure_nearby_enemy_minion: bool,
     pub at_start_of_controller_turn_teleport_to_random_site_or_void: bool,
     pub attack: u8,
@@ -817,6 +819,8 @@ const MINION_FIELDS: &[&str] = &[
     "atStartOfControllerTurnDrawSites",
     "atStartOfControllerTurnDrawSpells",
     "atStartOfControllerTurnLureNearbyEnemyMinion",
+    "atStartOfControllerTurnMillSites",
+    "atStartOfControllerTurnMillSpells",
     "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
     "attack",
     "burrowing",
@@ -1672,6 +1676,22 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         path,
     )?
     .map(compact_u8);
+    let at_start_of_controller_turn_mill_sites = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnMillSites",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_mill_spells = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnMillSpells",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_lure_nearby_enemy_minion =
         true_only(object, "atStartOfControllerTurnLureNearbyEnemyMinion", path)?;
     let at_start_of_controller_turn_teleport_to_random_site_or_void = true_only(
@@ -1760,6 +1780,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
             + usize::from(at_start_of_controller_turn_draw_sites.is_some())
             + usize::from(at_start_of_controller_turn_draw_spells.is_some())
+            + usize::from(at_start_of_controller_turn_mill_sites.is_some())
+            + usize::from(at_start_of_controller_turn_mill_spells.is_some())
             + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
             + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
     if start_turn_trigger_count > 1 {
@@ -1810,6 +1832,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         at_start_of_controller_turn_damage_each_other_unit_here,
         at_start_of_controller_turn_draw_sites,
         at_start_of_controller_turn_draw_spells,
+        at_start_of_controller_turn_mill_sites,
+        at_start_of_controller_turn_mill_spells,
         at_start_of_controller_turn_lure_nearby_enemy_minion,
         at_start_of_controller_turn_teleport_to_random_site_or_void,
         attack: compact_u8(required_nonnegative_integer(

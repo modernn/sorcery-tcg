@@ -771,6 +771,16 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be between",
         ),
         (
+            "start-turn mill range",
+            with(minion(), "atStartOfControllerTurnMillSpells", json!(0)),
+            "must be between",
+        ),
+        (
+            "start-turn Atlas mill range",
+            with(minion(), "atStartOfControllerTurnMillSites", json!(0)),
+            "must be between",
+        ),
+        (
             "must-attack flag",
             with(minion(), "mustAttackAUnitIfAble", json!(false)),
             "must be true",
@@ -798,6 +808,15 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             with(
                 with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
                 "atStartOfControllerTurnDrawSites",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn mill",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnMillSpells",
                 json!(1),
             ),
             "competing start-turn",
@@ -950,6 +969,22 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert_eq!(facts.at_start_of_controller_turn_draw_sites, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-mill",
+        &with(minion(), "atStartOfControllerTurnMillSpells", json!(2)),
+    )
+    .expect("valid start-turn mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_mill_spells, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-atlas-mill",
+        &with(minion(), "atStartOfControllerTurnMillSites", json!(2)),
+    )
+    .expect("valid start-turn Atlas mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_mill_sites, Some(2));
     let CardFacts::Minion(facts) = parse_card_definition(
         "start-turn-lure",
         &with(

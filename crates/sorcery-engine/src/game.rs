@@ -1457,6 +1457,8 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         at_start_of_controller_turn_damage_each_other_unit_here: _,
         at_start_of_controller_turn_draw_sites: _,
         at_start_of_controller_turn_draw_spells: _,
+        at_start_of_controller_turn_mill_sites: _,
+        at_start_of_controller_turn_mill_spells: _,
         at_start_of_controller_turn_lure_nearby_enemy_minion: _,
         at_start_of_controller_turn_teleport_to_random_site_or_void: _,
         attack: _,
@@ -15102,6 +15104,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        let mill = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts
+                .at_start_of_controller_turn_mill_sites
+                .map(|count| (DeckZone::Atlas, count))
+                .or(facts
+                    .at_start_of_controller_turn_mill_spells
+                    .map(|count| (DeckZone::Spellbook, count)))
+        };
+        if let Some((zone, count)) = mill {
+            self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let is_lure = {
             let unit = self
                 .start_turn_trigger_unit(action.seat, source_instance_id)
@@ -15442,7 +15466,9 @@ impl Game {
             || facts.at_start_of_controller_turn_teleport_to_random_site_or_void
             || facts.at_start_of_controller_turn_lure_nearby_enemy_minion
             || facts.at_start_of_controller_turn_draw_sites.is_some()
-            || facts.at_start_of_controller_turn_draw_spells.is_some())
+            || facts.at_start_of_controller_turn_draw_spells.is_some()
+            || facts.at_start_of_controller_turn_mill_sites.is_some()
+            || facts.at_start_of_controller_turn_mill_spells.is_some())
         .then_some(unit)
     }
 
@@ -21773,6 +21799,20 @@ mod tests {
         .expect("valid start-turn lure manifest")
         .ensure_selfplay_supported()
         .expect("start-turn lure is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnMillSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill spells is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnMillSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill sites is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

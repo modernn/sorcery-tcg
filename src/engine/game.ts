@@ -387,6 +387,8 @@ export type GameCardDefinition =
     atStartOfControllerTurnDamageEachOtherUnitHere?: number;
     atStartOfControllerTurnDrawSites?: number;
     atStartOfControllerTurnDrawSpells?: number;
+    atStartOfControllerTurnMillSites?: number;
+    atStartOfControllerTurnMillSpells?: number;
     atStartOfControllerTurnLureNearbyEnemyMinion?: true;
     atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
@@ -1209,7 +1211,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -2140,6 +2142,22 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnDrawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
     );
   }
+  if (card.atStartOfControllerTurnMillSites !== undefined
+    && (!Number.isSafeInteger(card.atStartOfControllerTurnMillSites)
+      || card.atStartOfControllerTurnMillSites < 1
+      || card.atStartOfControllerTurnMillSites > MAX_DECK_CARDS)) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnMillSites must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+    );
+  }
+  if (card.atStartOfControllerTurnMillSpells !== undefined
+    && (!Number.isSafeInteger(card.atStartOfControllerTurnMillSpells)
+      || card.atStartOfControllerTurnMillSpells < 1
+      || card.atStartOfControllerTurnMillSpells > MAX_DECK_CARDS)) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnMillSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+    );
+  }
   if (card.atStartOfControllerTurnControllerGainsLife !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnControllerGainsLife)
       || card.atStartOfControllerTurnControllerGainsLife < 1
@@ -2211,6 +2229,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined,
     card.atStartOfControllerTurnDrawSites !== undefined,
     card.atStartOfControllerTurnDrawSpells !== undefined,
+    card.atStartOfControllerTurnMillSites !== undefined,
+    card.atStartOfControllerTurnMillSpells !== undefined,
     card.atStartOfControllerTurnLureNearbyEnemyMinion === true,
     card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true,
   ].filter(Boolean).length;
@@ -2784,6 +2804,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.atStartOfControllerTurnDrawSpells !== undefined
               ? { atStartOfControllerTurnDrawSpells: card.atStartOfControllerTurnDrawSpells }
+              : {}),
+            ...(card.atStartOfControllerTurnMillSites !== undefined
+              ? { atStartOfControllerTurnMillSites: card.atStartOfControllerTurnMillSites }
+              : {}),
+            ...(card.atStartOfControllerTurnMillSpells !== undefined
+              ? { atStartOfControllerTurnMillSpells: card.atStartOfControllerTurnMillSpells }
               : {}),
             ...(card.atStartOfControllerTurnLureNearbyEnemyMinion === true
               ? { atStartOfControllerTurnLureNearbyEnemyMinion: true as const }

@@ -2082,6 +2082,30 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     }), /atStartOfControllerTurnDrawSites must be a safe integer between 1 and 200/);
   }
+  for (const atStartOfControllerTurnMillSpells of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atStartOfControllerTurnMillSpells,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atStartOfControllerTurnMillSpells must be a safe integer between 1 and 200/);
+  }
+  for (const atStartOfControllerTurnMillSites of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atStartOfControllerTurnMillSites,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atStartOfControllerTurnMillSites must be a safe integer between 1 and 200/);
+  }
   const startTurnDrawManifest = createGameManifest({
     ...input,
     cards: {
@@ -2112,6 +2136,47 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && startTurnAtlasDrawManifest.cards[firstSpell].atStartOfControllerTurnDrawSites,
     2,
   );
+  const startTurnMillManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnMillSpells: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnMillManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnMillManifest.cards[firstSpell].atStartOfControllerTurnMillSpells,
+    2,
+  );
+  const startTurnAtlasMillManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnMillSites: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnAtlasMillManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnAtlasMillManifest.cards[firstSpell].atStartOfControllerTurnMillSites,
+    2,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 1,
+        atStartOfControllerTurnMillSpells: 1,
+      } as GameCardDefinition,
+    },
+  }), /competing start-turn triggers are unsupported/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -26337,6 +26402,120 @@ test('RULE-04 end-turn here-area damage hits other units here and can destroy a 
   };
   await run(2, true);
   await run(1, false);
+});
+
+test('RULE-03 start-turn mill puts a public library card in the cemetery or no-ops an empty library', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards = {
+    'mill-north-avatar': avatar,
+    'mill-north-miller': {
+      atStartOfControllerTurnMillSpells: 1,
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'mill-north-site': site,
+    'mill-south-avatar': avatar,
+    'mill-south-dummy': {
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'mill-south-site': site,
+  } satisfies Record<string, GameCardDefinition>;
+  const run = async (spellbookCount: number, expectMilled: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-start-turn-mill-v1',
+      },
+      cards,
+      decks: {
+        north: {
+          atlas: Array(6).fill('mill-north-site'),
+          avatar: 'mill-north-avatar',
+          spellbook: Array(spellbookCount).fill('mill-north-miller'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('mill-south-site'),
+          avatar: 'mill-south-avatar',
+          spellbook: Array(6).fill('mill-south-dummy'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 292,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'mill-north-miller'
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardId === 'mill-south-site'
+          && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      assert.equal(ctx.state.phase === 'start-turn', true);
+      const sourceId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'mill-north-miller')?.instanceId;
+      assert.equal(typeof sourceId, 'string');
+      if (typeof sourceId !== 'string') {
+        return;
+      }
+      const libraryBefore = ctx.state.players.north.spellbook.length;
+      const cemeteryBefore = ctx.state.players.north.cemetery.length;
+      const milledId = ctx.state.players.north.spellbook[0]?.instanceId;
+      const resolved = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'resolve-start-turn-trigger'
+          && descriptor.sourceInstanceId === sourceId));
+      assert.equal(resolved.accepted, true);
+      if (!resolved.accepted) {
+        return;
+      }
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.terminal.status === 'active', true);
+      if (expectMilled) {
+        assert.equal(typeof milledId, 'string');
+        assert.equal(
+          resolved.receipt.events.some(({ type }) => type === 'spell-discarded'),
+          true,
+        );
+        assert.equal(ctx.state.players.north.spellbook.length, libraryBefore - 1);
+        assert.equal(ctx.state.players.north.cemetery.length, cemeteryBefore + 1);
+        assert.equal(
+          ctx.state.players.north.cemetery.some((card) => card.instanceId === milledId),
+          true,
+        );
+      } else {
+        assert.equal(libraryBefore, 0);
+        assert.equal(
+          resolved.receipt.events.some(({ type }) => type === 'spell-discarded'),
+          false,
+        );
+        assert.equal(ctx.state.players.north.cemetery.length, cemeteryBefore);
+      }
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(6, true);
+  await run(3, false);
 });
 
 test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {
