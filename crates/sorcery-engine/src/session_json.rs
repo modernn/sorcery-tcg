@@ -476,9 +476,8 @@ mod tests {
                 .is_none()
         );
         let selected = service.handle(&rpc(2, "selectPolicyAction", json!({})));
-        let action = selected.result.expect("selected action")["action"]
-            .as_object()
-            .expect("action object");
+        let result = selected.result.expect("selected action");
+        let action = result["action"].as_object().expect("action object");
         assert_eq!(action["descriptor"]["kind"], "mulligan");
         assert_eq!(action["descriptor"]["atlasOrder"], json!([]));
         assert_eq!(action["descriptor"]["spellbookOrder"], json!([]));
