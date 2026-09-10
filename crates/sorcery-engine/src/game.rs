@@ -12289,8 +12289,7 @@ impl Game {
 
         let (current_power, lethal) =
             self.combatant_attack_and_lethal(UnitKind::Minion, seat, source_instance_id)?;
-        let selected = self.draw_random_other_unit_here(
-            source_location,
+        let selected = self.draw_random_other_unit_sharing_footprint(
             source_instance_id,
             "discard_spell_random_other_unit_here",
             random_draws,
@@ -12332,6 +12331,37 @@ impl Game {
         }
         self.position.state_version += 1;
         Ok(())
+    }
+
+    /// Draws one hidden random unit sharing the source's whole footprint, excluding it.
+    ///
+    /// Discard-funded random-here uses every occupied cell so a 2x2 can hit an Avatar that shares
+    /// only a non-anchor square. Sparkmage keeps the single-cell nearby-location draw below.
+    fn draw_random_other_unit_sharing_footprint(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        purpose: &str,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let candidates = self.units_sharing_footprint(&source, false);
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let index = draw_index(
+            &mut self.position.prng,
+            candidates.len(),
+            purpose,
+            "unit_index_candidate",
+            random_draws,
+        )?;
+        Ok(Some(candidates[index].clone()))
     }
 
     /// Draws one hidden random unit sharing a location with an activated source, excluding it.

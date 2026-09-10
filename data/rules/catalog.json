@@ -3517,6 +3517,50 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_footprint_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0173",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Discard-funded random-here from a 2x2 damages a hidden other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "discardSpellToDamageRandomOtherUnitHere"
+      ],
+      "actionHints": [
+        "activate-discard-random-damage"
+      ],
+      "eventHints": [
+        "discard-random-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0173_oversized_discard_here_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0174",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 with summonToAnySite may occupy any canonical square whose every cell has surface terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "summonToAnySite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_square"
+      }
     }
   ]
 }

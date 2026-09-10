@@ -1502,10 +1502,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             || shoots_drag_projectile
             || site_provides_no_threshold
             || gains_power_ranged_and_spellcaster_atop_tower
-            || summon_to_any_site
             || must_be_cast_to_outer_column
-            || token
-            || discard_spell_to_damage_random_other_unit_here.is_some())
+            || token)
     {
         return Err(FactError::new(
             format!("{path}.occupiesSquareArea"),

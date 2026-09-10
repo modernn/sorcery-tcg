@@ -717,4 +717,32 @@ fn typed_effects_should_retain_only_normalized_values() {
         facts.genesis,
         Some(MinionGenesis::DamageEachOtherUnitHereOne)
     );
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-discard-here",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "discardSpellToDamageRandomOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized discard-here minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.discard_spell_to_damage_random_other_unit_here, Some(1));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-any-site",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "summonToAnySite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized summon-to-any-site minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.summon_to_any_site);
 }

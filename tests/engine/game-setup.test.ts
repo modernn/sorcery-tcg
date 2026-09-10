@@ -1116,7 +1116,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         .discardSpellToDamageRandomOtherUnitHere,
     3,
   );
-  assert.throws(() => createGameManifest({
+  const oversizedDiscard = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -1126,7 +1126,17 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         occupiesSquareArea: 2,
       } as unknown as GameCardDefinition,
     },
-  }), /occupiesSquareArea has an unsupported ability combination/);
+  });
+  assert.equal(
+    oversizedDiscard.cards[firstSpell]?.cardType === 'minion'
+      && oversizedDiscard.cards[firstSpell].occupiesSquareArea,
+    2,
+  );
+  assert.equal(
+    oversizedDiscard.cards[firstSpell]?.cardType === 'minion'
+      && oversizedDiscard.cards[firstSpell].discardSpellToDamageRandomOtherUnitHere,
+    3,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -9968,7 +9978,6 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { siteProvidesNoThreshold: true as const },
     { ranged: true as const },
     { waterbound: true as const },
-    { discardSpellToDamageRandomOtherUnitHere: 3 as const },
   ]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -9992,6 +10001,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { genesisDamageEachOtherUnitHere: 1 as const },
     { genesisStrikeEachEnemyHere: true as const },
     { genesisMayDamageTargetAdjacentUnit: 2 as const },
+    { discardSpellToDamageRandomOtherUnitHere: 3 as const },
+    { summonToAnySite: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,
@@ -15906,7 +15917,7 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       firstSeat: 'north',
       seed,
     }), /deathriteDamageEachUnitHere must be a safe integer between 1 and/);
-    assert.throws(() => createGameManifest({
+    const oversizedScarabs = createGameManifest({
       authority,
       cards: {
         ...cards,
@@ -15918,7 +15929,17 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       decks,
       firstSeat: 'north',
       seed,
-    }), /occupiesSquareArea has an unsupported ability combination/);
+    });
+    assert.equal(
+      oversizedScarabs.cards[scarabCardIds[0]!]?.cardType === 'minion'
+        && oversizedScarabs.cards[scarabCardIds[0]!].occupiesSquareArea,
+      2,
+    );
+    assert.equal(
+      oversizedScarabs.cards[scarabCardIds[0]!]?.cardType === 'minion'
+        && oversizedScarabs.cards[scarabCardIds[0]!].summonToAnySite,
+      true,
+    );
     const threeDamageManifest = createGameManifest({
       authority,
       cards: {

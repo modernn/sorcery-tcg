@@ -1780,10 +1780,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.shootsDragProjectile === true
       || card.siteProvidesNoThreshold === true
       || card.gainsPowerRangedAndSpellcasterAtopTower === 2
-      || card.summonToAnySite === true
       || card.mustBeCastToOuterColumn === true
-      || card.token === true
-      || card.discardSpellToDamageRandomOtherUnitHere !== undefined)) {
+      || card.token === true)) {
     throw new RangeError(
       `${path}.occupiesSquareArea has an unsupported ability combination`,
     );

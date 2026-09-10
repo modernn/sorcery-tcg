@@ -976,3 +976,110 @@ fn rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_foot
     assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
     assert_exact_replay(&session);
 }
+
+fn discard_here_candidate_count(receipt: &Receipt) -> usize {
+    let draws: Vec<_> = receipt
+        .random_draws
+        .iter()
+        .filter(|draw| draw["purpose"] == "discard_spell_random_other_unit_here")
+        .collect();
+    assert_eq!(draws.len(), 1, "one hidden random draw per activation");
+    assert_eq!(draws[0]["domain"]["kind"], "unit_index_candidate");
+    usize::try_from(
+        draws[0]["domain"]["exclusiveMaximum"]
+            .as_u64()
+            .expect("candidate count"),
+    )
+    .expect("candidate count fits")
+}
+
+#[test]
+fn rule_catalog_0173_oversized_discard_here_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "discardSpellToDamageRandomOtherUnitHere": 1,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    assert_eq!(
+        unit(&before, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-discard-random-damage"
+            && descriptor["sourceInstanceId"] == giant
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "discard-random-damage-activated",
+            "discard-random-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost",
+        ]
+    );
+    assert_eq!(
+        discard_here_candidate_count(&receipt),
+        1,
+        "the C4 Avatar is the sole other unit on the oversized footprint"
+    );
+    assert_eq!(
+        receipt.events[1].payload["sourceLocation"]["cell"],
+        "B3",
+        "the activation still records the canonical anchor"
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], avatar_id);
+    assert_eq!(receipt.events[1].payload["targetKind"], "avatar");
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["life"],
+        19,
+        "the C4 Avatar shares the oversized footprint, not the B3 anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_square() {
+    let mut session = composition_session(
+        &json!({}),
+        &json!({
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &[],
+    );
+    establish_north_square(&mut session);
+    end_and_draw(&mut session);
+    let (giant, receipt) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let realm = &state(&session)["realm"];
+    for cell in ["B3", "B4", "C3", "C4"] {
+        assert_eq!(
+            realm["sites"][cell]["controller"],
+            "north",
+            "{cell} is a North site, so South needs summonToAnySite"
+        );
+    }
+    assert_exact_replay(&session);
+}
