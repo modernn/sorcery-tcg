@@ -6685,7 +6685,7 @@ test('RULE-03 Teleport forcefully moves a chosen ally to a target site surface',
   });
 });
 
-test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-deck draw', () => {
+test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-deck draw', async () => {
   const decks = { north: deck('blink-north', 5, 8), south: deck('blink-south', 5, 6) };
   const baseCards = cardsFor(decks, {
     attack: 1,
@@ -6703,187 +6703,164 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     firstSeat: 'north' as const,
     seed: 266,
   };
-  const preview = createGameSession(createGameManifest({ ...input, cards: baseCards }));
-  const [sourceCard, beneficiaryCard, rainCard] = preview.state.players.north.hand.spellbook;
-  const blinkCard = preview.state.players.north.spellbook[0];
-  assert.ok(sourceCard);
-  assert.ok(beneficiaryCard);
-  assert.ok(rainCard);
-  assert.ok(blinkCard);
-  const cards: Record<string, GameCardDefinition> = { ...baseCards };
-  cards[sourceCard.cardId] = {
-    ...baseCards[sourceCard.cardId]!,
-    defense: 2,
-    otherNearbyAlliesPowerBonus: 1,
-  } as GameCardDefinition;
-  cards[beneficiaryCard.cardId] = {
-    ...baseCards[beneficiaryCard.cardId]!,
-    waterbound: true,
-  } as GameCardDefinition;
-  cards[rainCard.cardId] = {
-    cardType: 'magic',
-    damageEachAbovegroundMinion: 1,
-    manaCost: 0,
-    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-  };
-  cards[blinkCard.cardId] = {
-    cardType: 'magic',
-    manaCost: 0,
-    teleportNearbyAllyThenDrawCard: true,
-    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-  };
-  const gameManifest = createGameManifest({ ...input, cards });
-  const blinkDefinition = gameManifest.cards[blinkCard.cardId];
-  assert.equal(blinkDefinition?.cardType === 'magic'
-    ? blinkDefinition.teleportNearbyAllyThenDrawCard
-    : undefined, true);
+  await withPreview(createGameManifest({ ...input, cards: baseCards }), async (preview) => {
+    const [sourceCard, beneficiaryCard, rainCard] = preview.state.players.north.hand.spellbook;
+    const blinkCard = preview.state.players.north.spellbook[0];
+    assert.ok(sourceCard);
+    assert.ok(beneficiaryCard);
+    assert.ok(rainCard);
+    assert.ok(blinkCard);
+    const cards: Record<string, GameCardDefinition> = { ...baseCards };
+    cards[sourceCard.cardId] = {
+      ...baseCards[sourceCard.cardId]!,
+      defense: 2,
+      otherNearbyAlliesPowerBonus: 1,
+    } as GameCardDefinition;
+    cards[beneficiaryCard.cardId] = {
+      ...baseCards[beneficiaryCard.cardId]!,
+      waterbound: true,
+    } as GameCardDefinition;
+    cards[rainCard.cardId] = {
+      cardType: 'magic',
+      damageEachAbovegroundMinion: 1,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+    cards[blinkCard.cardId] = {
+      cardType: 'magic',
+      manaCost: 0,
+      teleportNearbyAllyThenDrawCard: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+    const gameManifest = createGameManifest({ ...input, cards });
+    const blinkDefinition = gameManifest.cards[blinkCard.cardId];
+    assert.equal(blinkDefinition?.cardType === 'magic'
+      ? blinkDefinition.teleportNearbyAllyThenDrawCard
+      : undefined, true);
 
-  let session = keep(keep(createGameSession(gameManifest)));
-  const sourceInstanceId = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === sourceCard.cardId)?.instanceId;
-  const beneficiaryInstanceId = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === beneficiaryCard.cardId)?.instanceId;
-  const rainInstanceId = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === rainCard.cardId)?.instanceId;
-  assert.ok(sourceInstanceId);
-  assert.ok(beneficiaryInstanceId);
-  assert.ok(rainInstanceId);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === sourceInstanceId
-      && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'B4'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === beneficiaryInstanceId
-      && descriptor.cell === 'B4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'D4'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rainInstanceId));
+    await withSetup(gameManifest, async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      const sourceInstanceId = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === sourceCard.cardId)?.instanceId;
+      const beneficiaryInstanceId = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === beneficiaryCard.cardId)?.instanceId;
+      const rainInstanceId = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === rainCard.cardId)?.instanceId;
+      assert.ok(sourceInstanceId);
+      assert.ok(beneficiaryInstanceId);
+      assert.ok(rainInstanceId);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardInstanceId === sourceInstanceId
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardInstanceId === beneficiaryInstanceId
+          && descriptor.cell === 'B4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'D4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rainInstanceId);
 
-  const beneficiary = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === beneficiaryInstanceId);
-  assert.ok(beneficiary);
-  assert.equal(observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
-    instanceId === beneficiaryInstanceId)?.disabled, true);
-  assert.equal(beneficiary.damage, 1);
-  const blinkInstanceId = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === blinkCard.cardId)?.instanceId;
-  assert.ok(blinkInstanceId);
-  const casts = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === blinkInstanceId);
-  assert.equal(casts.some(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.ally?.instanceId === beneficiaryInstanceId), true);
-  assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.ally?.seat === 'north'
-    && descriptor.target === undefined), true);
-  assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.drawZone ? [descriptor.drawZone] : []))].sort(), [
-    'atlas',
-    'spellbook',
-  ]);
-  assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.ally?.instanceId === sourceInstanceId
-      && descriptor.targetLocation
-      ? [descriptor.targetLocation.cell]
-      : []))].sort(), ['B4', 'C4', 'D4']);
+      const beneficiary = ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === beneficiaryInstanceId);
+      assert.ok(beneficiary);
+      assert.equal(ctx.observe('north').realm.units.find(({ instanceId }) =>
+        instanceId === beneficiaryInstanceId)?.disabled, true);
+      assert.equal(beneficiary.damage, 1);
+      const blinkInstanceId = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === blinkCard.cardId)?.instanceId;
+      assert.ok(blinkInstanceId);
+      const casts = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+        descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === blinkInstanceId);
+      assert.equal(casts.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.ally?.instanceId === beneficiaryInstanceId), true);
+      assert.equal(casts.every(({ descriptor }) => descriptor.kind === 'cast-magic'
+        && descriptor.ally?.seat === 'north'
+        && descriptor.target === undefined), true);
+      assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) =>
+        descriptor.kind === 'cast-magic' && descriptor.drawZone ? [descriptor.drawZone] : []))].sort(), [
+        'atlas',
+        'spellbook',
+      ]);
+      assert.deepEqual([...new Set(casts.flatMap(({ descriptor }) =>
+        descriptor.kind === 'cast-magic'
+          && descriptor.ally?.instanceId === sourceInstanceId
+          && descriptor.targetLocation
+          ? [descriptor.targetLocation.cell]
+          : []))].sort(), ['B4', 'C4', 'D4']);
 
-  const beforeBlink = session;
-  const drawnSpell = beforeBlink.state.players.north.spellbook[0];
-  const drawnSite = beforeBlink.state.players.north.atlas[0];
-  assert.ok(drawnSpell);
-  assert.ok(drawnSite);
-  const beforeHandCount = beforeBlink.state.players.north.hand.spellbook.length;
-  const spellResult = accept(beforeBlink, casts.find(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.ally?.instanceId === sourceInstanceId
-      && descriptor.drawZone === 'spellbook'
-      && descriptor.targetLocation?.cell === 'D4')!);
-  assert.deepEqual(spellResult.transcript.at(-1)?.events.map(({ type }) => type), [
-    'magic-cast',
-    'unit-teleported',
-    'minion-died',
-    'spell-drawn',
-    'magic-resolved',
-  ]);
-  assert.equal(spellResult.state.realm.units.find(({ instanceId }) =>
-    instanceId === sourceInstanceId)?.location, 'D4');
-  assert.equal(spellResult.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === beneficiaryInstanceId), true);
-  assert.equal(spellResult.state.players.north.hand.spellbook.length, beforeHandCount);
-  assert.equal(spellResult.state.players.north.hand.spellbook.some(({ instanceId }) =>
-    instanceId === drawnSpell.instanceId), true);
-  assert.equal(typeof observeGame(spellResult.state, 'south').players.north.hand.spellbook, 'number');
-  assert.equal(verifyGameReplay(spellResult), true);
+      const drawnSpell = ctx.state.players.north.spellbook[0];
+      const drawnSite = ctx.state.players.north.atlas[0];
+      assert.ok(drawnSpell);
+      assert.ok(drawnSite);
+      const beforeHandCount = ctx.state.players.north.hand.spellbook.length;
+      await withFork(ctx, async (spellFork) => {
+        await spellFork.accept(casts.find(({ descriptor }) =>
+          descriptor.kind === 'cast-magic'
+            && descriptor.ally?.instanceId === sourceInstanceId
+            && descriptor.drawZone === 'spellbook'
+            && descriptor.targetLocation?.cell === 'D4')!);
+        assert.deepEqual(spellFork.session.transcript.at(-1)?.events.map(({ type }) => type), [
+          'magic-cast',
+          'unit-teleported',
+          'minion-died',
+          'spell-drawn',
+          'magic-resolved',
+        ]);
+        assert.equal(spellFork.state.realm.units.find(({ instanceId }) =>
+          instanceId === sourceInstanceId)?.location, 'D4');
+        assert.equal(spellFork.state.players.north.cemetery.some(({ instanceId }) =>
+          instanceId === beneficiaryInstanceId), true);
+        assert.equal(spellFork.state.players.north.hand.spellbook.length, beforeHandCount);
+        assert.equal(spellFork.state.players.north.hand.spellbook.some(({ instanceId }) =>
+          instanceId === drawnSpell.instanceId), true);
+        assert.equal(typeof spellFork.observe('south').players.north.hand.spellbook, 'number');
+        assert.equal(await spellFork.verifyReplay(), true);
+      });
 
-  const siteResult = accept(beforeBlink, casts.find(({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.ally?.instanceId === sourceInstanceId
-      && descriptor.drawZone === 'atlas'
-      && descriptor.targetLocation?.cell === 'D4')!);
-  assert.deepEqual(siteResult.transcript.at(-1)?.events.map(({ type }) => type), [
-    'magic-cast',
-    'unit-teleported',
-    'minion-died',
-    'site-drawn',
-    'magic-resolved',
-  ]);
-  assert.equal(siteResult.state.players.north.hand.atlas.some(({ instanceId }) =>
-    instanceId === drawnSite.instanceId), true);
-  assert.equal(typeof observeGame(siteResult.state, 'south').players.north.hand.atlas, 'number');
-  assert.equal(verifyGameReplay(siteResult), true);
-
-  const emptyAtlas: GameSession = {
-    ...beforeBlink,
-    state: {
-      ...beforeBlink.state,
-      players: {
-        ...beforeBlink.state.players,
-        north: { ...beforeBlink.state.players.north, atlas: [] },
-      },
-    },
-  };
-  const atlasLoss = accept(emptyAtlas, action(emptyAtlas, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === blinkInstanceId
-      && descriptor.ally?.instanceId === sourceInstanceId
-      && descriptor.drawZone === 'atlas'
-      && descriptor.targetLocation?.cell === 'D4'));
-  assert.deepEqual(atlasLoss.state.terminal, {
-    loser: 'north',
-    reason: 'deck_empty',
-    status: 'finished',
-    winner: 'south',
+      await withFork(ctx, async (siteFork) => {
+        await siteFork.accept(casts.find(({ descriptor }) =>
+          descriptor.kind === 'cast-magic'
+            && descriptor.ally?.instanceId === sourceInstanceId
+            && descriptor.drawZone === 'atlas'
+            && descriptor.targetLocation?.cell === 'D4')!);
+        assert.deepEqual(siteFork.session.transcript.at(-1)?.events.map(({ type }) => type), [
+          'magic-cast',
+          'unit-teleported',
+          'minion-died',
+          'site-drawn',
+          'magic-resolved',
+        ]);
+        assert.equal(siteFork.state.players.north.hand.atlas.some(({ instanceId }) =>
+          instanceId === drawnSite.instanceId), true);
+        assert.equal(typeof siteFork.observe('south').players.north.hand.atlas, 'number');
+        assert.equal(await siteFork.verifyReplay(), true);
+      });
+    });
   });
-  const spellWithEmptyAtlas = accept(emptyAtlas, action(emptyAtlas, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic'
-      && descriptor.cardInstanceId === blinkInstanceId
-      && descriptor.ally?.instanceId === sourceInstanceId
-      && descriptor.drawZone === 'spellbook'
-      && descriptor.targetLocation?.cell === 'D4'));
-  assert.deepEqual(spellWithEmptyAtlas.state.terminal, { status: 'active' });
 });
 
-test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or resolves with none', () => {
+test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or resolves with none', async () => {
   const decks = {
     north: deck('rescue-north', 4, 6),
     south: deck('rescue-south', 4, 6),
@@ -6900,9 +6877,8 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     };
   }
-  let gameManifest: GameManifest | undefined;
-  for (let seed = 155; seed < 175; seed += 1) {
-    const candidate = createGameManifest({
+  const gameManifest = await findOpeningManifest(
+    (seed) => createGameManifest({
       authority: {
         contentHash: SYNTHETIC_AUTHORITY_HASH,
         mode: 'synthetic',
@@ -6912,19 +6888,17 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
       decks,
       firstSeat: 'north',
       seed,
-    });
-    const preview = createGameSession(candidate).state.players.north;
-    const topTypes = preview.spellbook.slice(0, 2).map(({ cardId }) =>
-      candidate.cards[cardId]?.cardType);
-    if (topTypes.includes('minion')
-      && topTypes.includes('magic')
-      && preview.hand.spellbook.some(({ cardId }) => candidate.cards[cardId]?.cardType === 'magic')) {
-      gameManifest = candidate;
-      break;
-    }
-  }
-  assert.ok(gameManifest);
-  const checkpoint = keep(keep(createGameSession(gameManifest)));
+    }),
+    (session) => {
+      const preview = session.state.players.north;
+      const topTypes = preview.spellbook.slice(0, 2).map(({ cardId }) =>
+        session.manifest.cards[cardId]?.cardType);
+      return topTypes.includes('minion')
+        && topTypes.includes('magic')
+        && preview.hand.spellbook.some(({ cardId }) => session.manifest.cards[cardId]?.cardType === 'magic');
+    },
+    { from: 155, to: 174 },
+  );
 
   const noChoiceCards = { ...cards };
   for (const cardId of [...decks.north.atlas, ...decks.south.atlas]) {
@@ -6937,98 +6911,104 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
     firstSeat: 'north',
     seed: gameManifest.seed,
   });
-  let noChoiceSetup = keep(keep(createGameSession(noChoiceManifest)));
-  noChoiceSetup = accept(noChoiceSetup, action(noChoiceSetup, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  const noChoiceCard = noChoiceSetup.state.players.north.hand.spellbook.find(({ cardId }) =>
-    noChoiceManifest.cards[cardId]?.cardType === 'magic');
-  assert.ok(noChoiceCard);
-  const noChoiceActions = legalGameActions(noChoiceSetup.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === noChoiceCard.instanceId);
-  assert.equal(noChoiceActions.length, 1);
-  assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
-    && noChoiceActions[0].descriptor.cemeteryMinionInstanceId, undefined);
-  assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
-    && noChoiceActions[0].descriptor.target, undefined);
-  const noChoice = accept(noChoiceSetup, noChoiceActions[0]!);
-  assert.deepEqual(noChoice.transcript.at(-1)?.events.map(({ type }) => type), [
-    'magic-cast',
-    'magic-resolved',
-  ]);
-  assert.equal(noChoice.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === noChoiceCard.instanceId), true);
-  assert.equal(verifyGameReplay(noChoice), true);
-
-  let session = accept(checkpoint, action(checkpoint, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  const ownMinion = session.state.players.north.cemetery.find(({ cardId }) =>
-    gameManifest.cards[cardId]?.cardType === 'minion');
-  const ownMagic = session.state.players.north.cemetery.find(({ cardId }) =>
-    gameManifest.cards[cardId]?.cardType === 'magic');
-  assert.ok(ownMinion);
-  assert.ok(ownMagic);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  const opposingMinion = session.state.players.south.cemetery.find(({ cardId }) =>
-    gameManifest.cards[cardId]?.cardType === 'minion');
-  assert.ok(opposingMinion);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-
-  const rescueCard = session.state.players.north.hand.spellbook.find(({ cardId }) =>
-    gameManifest.cards[cardId]?.cardType === 'magic');
-  assert.ok(rescueCard);
-  const choices = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rescueCard.instanceId);
-  assert.deepEqual(choices.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.cemeteryMinionInstanceId
-    ? [descriptor.cemeteryMinionInstanceId]
-    : []), [ownMinion.instanceId]);
-  assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.cemeteryMinionInstanceId === ownMagic.instanceId), false);
-  assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
-    && descriptor.cemeteryMinionInstanceId === opposingMinion.instanceId), false);
-
-  const before = session.state;
-  const result = stepGame(session, choices[0]!);
-  assert.equal(result.accepted, true);
-  if (!result.accepted) return;
-  session = result.session;
-  assert.equal(session.state.stateVersion, before.stateVersion + 1);
-  assert.equal(session.state.players.north.hand.spellbook.length, before.players.north.hand.spellbook.length);
-  assert.equal(session.state.players.north.hand.spellbook.some(({ instanceId }) =>
-    instanceId === ownMinion.instanceId), true);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === ownMinion.instanceId), false);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === rescueCard.instanceId), true);
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
-    'magic-cast',
-    'minion-returned-to-hand',
-    'magic-resolved',
-  ]);
-  assert.deepEqual(result.receipt.events[1]?.payload, {
-    cardId: ownMinion.cardId,
-    instanceId: ownMinion.instanceId,
-    owner: 'north',
-    seat: 'north',
-    sourceInstanceId: rescueCard.instanceId,
+  await withSetup(noChoiceManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const noChoiceCard = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      noChoiceManifest.cards[cardId]?.cardType === 'magic');
+    assert.ok(noChoiceCard);
+    const noChoiceActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === noChoiceCard.instanceId);
+    assert.equal(noChoiceActions.length, 1);
+    assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
+      && noChoiceActions[0].descriptor.cemeteryMinionInstanceId, undefined);
+    assert.equal(noChoiceActions[0]?.descriptor.kind === 'cast-magic'
+      && noChoiceActions[0].descriptor.target, undefined);
+    await ctx.accept(noChoiceActions[0]!);
+    assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === noChoiceCard.instanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(
-    `\"cemeteryMinionInstanceId\":\"${ownMinion.instanceId}\"`), true);
-  const northView = observeGame(session.state, 'north');
-  const southView = observeGame(session.state, 'south');
-  assert.equal(Array.isArray(northView.players.north.hand.spellbook)
-    && northView.players.north.hand.spellbook.some(({ instanceId }) =>
+
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const ownMinion = ctx.state.players.north.cemetery.find(({ cardId }) =>
+      gameManifest.cards[cardId]?.cardType === 'minion');
+    const ownMagic = ctx.state.players.north.cemetery.find(({ cardId }) =>
+      gameManifest.cards[cardId]?.cardType === 'magic');
+    assert.ok(ownMinion);
+    assert.ok(ownMagic);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    const opposingMinion = ctx.state.players.south.cemetery.find(({ cardId }) =>
+      gameManifest.cards[cardId]?.cardType === 'minion');
+    assert.ok(opposingMinion);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+
+    const rescueCard = ctx.state.players.north.hand.spellbook.find(({ cardId }) =>
+      gameManifest.cards[cardId]?.cardType === 'magic');
+    assert.ok(rescueCard);
+    const choices = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardInstanceId === rescueCard.instanceId);
+    assert.deepEqual(choices.flatMap(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cemeteryMinionInstanceId
+      ? [descriptor.cemeteryMinionInstanceId]
+      : []), [ownMinion.instanceId]);
+    assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cemeteryMinionInstanceId === ownMagic.instanceId), false);
+    assert.equal(choices.some(({ descriptor }) => descriptor.kind === 'cast-magic'
+      && descriptor.cemeteryMinionInstanceId === opposingMinion.instanceId), false);
+
+    const before = ctx.state;
+    const result = await ctx.step(choices[0]!);
+    assert.equal(result.accepted, true);
+    if (!result.accepted) return;
+    assert.equal(ctx.state.stateVersion, before.stateVersion + 1);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, before.players.north.hand.spellbook.length);
+    assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) =>
       instanceId === ownMinion.instanceId), true);
-  assert.equal(southView.players.north.hand.spellbook, session.state.players.north.hand.spellbook.length);
-  assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.instanceId));
-  assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.cardId));
-  assert.equal(verifyGameReplay(session), true);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === ownMinion.instanceId), false);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === rescueCard.instanceId), true);
+    assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-returned-to-hand',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(result.receipt.events[1]?.payload, {
+      cardId: ownMinion.cardId,
+      instanceId: ownMinion.instanceId,
+      owner: 'north',
+      seat: 'north',
+      sourceInstanceId: rescueCard.instanceId,
+    });
+    assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(
+      `\"cemeteryMinionInstanceId\":\"${ownMinion.instanceId}\"`), true);
+    const northView = ctx.observe('north');
+    const southView = ctx.observe('south');
+    assert.equal(Array.isArray(northView.players.north.hand.spellbook)
+      && northView.players.north.hand.spellbook.some(({ instanceId }) =>
+        instanceId === ownMinion.instanceId), true);
+    assert.equal(southView.players.north.hand.spellbook, ctx.state.players.north.hand.spellbook.length);
+    assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.instanceId));
+    assert.doesNotMatch(canonicalJson(southView), new RegExp(ownMinion.cardId));
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03/04 Bury forcefully burrows minions if able and immediately resolves survival', () => {
