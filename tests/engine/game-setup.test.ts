@@ -22847,10 +22847,10 @@ test('RULE-04 an enemies-must-attack-this source forces only in-range enemy mini
     },
     'forced-north-site': { cardType: 'site', elements: ['earth'] },
     'forced-north-source': {
-      attack: 1,
+      attack: 2,
       cardType: 'minion',
       charge: true,
-      defense: 1,
+      defense: 2,
       manaCost: 0,
       thresholds,
     },
