@@ -6,14 +6,13 @@ import test from 'node:test';
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import {
   parseGameCheckpoint,
-  resumeGameCheckpoint,
+  resumeGameCheckpointAsync,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
 import {
   hashGameState,
-  legalGameActions,
-  stepGame,
 } from '../../src/engine/game.ts';
+import { withRustSession } from '../../src/engine/rust-session-helpers.ts';
 import {
   runPrivateNoveltyGauntlet,
 } from '../../src/commands/run-private-novelty-gauntlet.ts';
@@ -183,9 +182,9 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         `${result.checkpointId.slice('sha256:'.length)}.json`,
       );
       assert.equal(
-        hashGameState(resumeGameCheckpoint(parseGameCheckpoint(
+        hashGameState((await resumeGameCheckpointAsync(parseGameCheckpoint(
           await readFile(checkpointPath, 'utf8'),
-        )).state),
+        ))).state),
         result.finalStateHash,
       );
     }
@@ -218,13 +217,16 @@ test('private novelty gauntlet runs both actual lessons and seat swaps without l
         checkpointDirectory,
         `${candidate.checkpointId.slice('sha256:'.length)}.json`,
       );
-      const resumed = resumeGameCheckpoint(parseGameCheckpoint(
+      const checkpoint = parseGameCheckpoint(
         await readFile(checkpointPath, 'utf8'),
-      ));
-      const issued = legalGameActions(resumed.state, resumed.state.decisionSeat)
-        .filter(({ actionId }) => actionId === candidate.actionId);
-      assert.equal(issued.length, 1);
-      const applied = stepGame(resumed, issued[0]!);
+      );
+      const applied = await withRustSession(checkpoint.manifest, async (handle) => {
+        await handle.resume(checkpoint as unknown as JsonValue);
+        const issued = (await handle.legalActions()).filter(({ actionId }) =>
+          actionId === candidate.actionId);
+        assert.equal(issued.length, 1);
+        return handle.stepAction(issued[0]!);
+      });
       assert.equal(applied.accepted, true);
       if (!applied.accepted) continue;
       assert.equal(hashGameState(applied.session.state), candidate.predictedStateHash);

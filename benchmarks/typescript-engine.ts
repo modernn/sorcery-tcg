@@ -9,11 +9,9 @@ import {
   selectDeterministicGameAction,
 } from '../src/commands/run-game-demo.ts';
 import {
-  createGameSession,
-  stepGame,
-  verifyGameReplay,
   type GameSession,
 } from '../src/engine/game.ts';
+import { withRustSession } from '../src/engine/rust-session-helpers.ts';
 import { runCounterfactualRollouts } from '../src/simulator/counterfactual.ts';
 
 const SEEDS = [0, 31, 0xffff_ffff] as const;
@@ -79,24 +77,40 @@ function totals(samples: readonly Sample[]): Readonly<{
   return { durationMs, operations, perSecond: operations * 1_000 / durationMs };
 }
 
-function runGame(seed: number, transitionLatencies?: number[]): GameSession {
-  let session = createGameSession(createSyntheticDemoManifest(seed));
-  while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
-    const action = selectDeterministicGameAction(session);
-    const started = performance.now();
-    const result = stepGame(session, action);
-    const durationMs = performance.now() - started;
-    if (!result.accepted) throw new Error(`issued action was rejected: ${result.reason.code}`);
-    transitionLatencies?.push(durationMs);
-    session = result.session;
-  }
-  if (session.state.terminal.status !== 'finished') throw new Error(`seed ${seed} exceeded ${MAX_ACTIONS} actions`);
-  return session;
+async function runGame(
+  seed: number,
+  transitionLatencies?: number[],
+  verifyReplay = false,
+): Promise<GameSession> {
+  return withRustSession(createSyntheticDemoManifest(seed), async (handle) => {
+    while (handle.snapshot.state.terminal.status === 'active'
+      && handle.snapshot.transcript.length < MAX_ACTIONS) {
+      const action = selectDeterministicGameAction(
+        handle.snapshot,
+        await handle.legalActions(),
+      );
+      const started = performance.now();
+      const result = await handle.stepAction(action);
+      const durationMs = performance.now() - started;
+      if (!result.accepted) throw new Error(`issued action was rejected: ${result.reason.code}`);
+      transitionLatencies?.push(durationMs);
+    }
+    const session = handle.snapshot;
+    if (session.state.terminal.status !== 'finished') {
+      throw new Error(`seed ${seed} exceeded ${MAX_ACTIONS} actions`);
+    }
+    if (verifyReplay && !(await handle.verifyReplay())) {
+      throw new Error('authoritative replay failed');
+    }
+    return session;
+  });
 }
 
-function transitionSample(seed: number, gamesPerSample: number): Sample {
+async function transitionSample(seed: number, gamesPerSample: number): Promise<Sample> {
   const latencies: number[] = [];
-  for (let game = 0; game < gamesPerSample; game += 1) runGame((seed + game) >>> 0, latencies);
+  for (let game = 0; game < gamesPerSample; game += 1) {
+    await runGame((seed + game) >>> 0, latencies);
+  }
   recordMemory();
   return {
     durationMs: latencies.reduce((sum, duration) => sum + duration, 0),
@@ -105,12 +119,11 @@ function transitionSample(seed: number, gamesPerSample: number): Sample {
   };
 }
 
-function replaySample(seed: number, gamesPerSample: number): Sample {
+async function replaySample(seed: number, gamesPerSample: number): Promise<Sample> {
   const latenciesMs: number[] = [];
   for (let game = 0; game < gamesPerSample; game += 1) {
     const started = performance.now();
-    const session = runGame((seed + game) >>> 0);
-    if (!verifyGameReplay(session)) throw new Error('authoritative replay failed');
+    await runGame((seed + game) >>> 0, undefined, true);
     latenciesMs.push(performance.now() - started);
   }
   recordMemory();
@@ -122,7 +135,7 @@ function replaySample(seed: number, gamesPerSample: number): Sample {
 }
 
 async function searchSample(seed: number, horizon: number): Promise<Sample> {
-  const root = createGameSession(createSyntheticDemoManifest(seed));
+  const root = await withRustSession(createSyntheticDemoManifest(seed), async (handle) => handle.snapshot);
   const started = performance.now();
   const report = await runCounterfactualRollouts(root, horizon);
   const durationMs = performance.now() - started;
@@ -140,8 +153,12 @@ export async function benchmarkTypeScriptEngine(): Promise<JsonValue> {
   const searchHorizon = positiveInteger('BENCHMARK_SEARCH_HORIZON', 2);
   if (searchHorizon > 32) throw new RangeError('BENCHMARK_SEARCH_HORIZON must be at most 32');
 
-  runGame(SEEDS[0]);
-  await runCounterfactualRollouts(createGameSession(createSyntheticDemoManifest(SEEDS[0])), 1);
+  await runGame(SEEDS[0]);
+  const warmupRoot = await withRustSession(
+    createSyntheticDemoManifest(SEEDS[0]),
+    async (handle) => handle.snapshot,
+  );
+  await runCounterfactualRollouts(warmupRoot, 1);
   recordMemory();
 
   const transitions: Sample[] = [];
@@ -149,8 +166,8 @@ export async function benchmarkTypeScriptEngine(): Promise<JsonValue> {
   const searches: Sample[] = [];
   for (let sample = 0; sample < sampleCount; sample += 1) {
     const seed = SEEDS[sample % SEEDS.length]!;
-    transitions.push(transitionSample(seed, gamesPerSample));
-    replays.push(replaySample(seed, gamesPerSample));
+    transitions.push(await transitionSample(seed, gamesPerSample));
+    replays.push(await replaySample(seed, gamesPerSample));
     searches.push(await searchSample(seed, searchHorizon));
   }
 

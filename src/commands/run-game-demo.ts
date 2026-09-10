@@ -5,11 +5,7 @@ import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import {
   createGameManifest,
-  createGameSession,
   hashGameState,
-  legalGameActions,
-  stepGame,
-  verifyGameReplay,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -18,6 +14,7 @@ import {
   type GameTerminal,
 } from '../engine/game.ts';
 import { runRustSyntheticDemo, type Sha256Hash } from '../engine/rust-engine.ts';
+import { withRustSession } from '../engine/rust-session-helpers.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -68,9 +65,9 @@ export function createSyntheticDemoManifest(seed = 1): GameManifest {
 
 export function selectDeterministicGameAction(
   session: GameSession,
-  issuedActions?: readonly GameLegalAction[],
+  issuedActions: readonly GameLegalAction[],
 ): GameLegalAction {
-  const actions = issuedActions ?? legalGameActions(session.state, session.state.decisionSeat);
+  const actions = issuedActions;
   const seat = session.state.decisionSeat;
   const player = session.state.players[seat];
   const enemySeat = seat === 'north' ? 'south' : 'north';
@@ -173,24 +170,31 @@ export type DeterministicGameReport = Readonly<{
   turnCount: number;
 }>;
 
-export function runDeterministicGame(manifest: GameManifest): DeterministicGameReport {
-  let session = createGameSession(manifest);
-  while (session.state.terminal.status === 'active' && session.transcript.length < MAX_ACTIONS) {
-    const result = stepGame(session, selectDeterministicGameAction(session));
-    if (!result.accepted) throw new Error(`deterministic demo action rejected: ${result.reason.code}`);
-    session = result.session;
-  }
-  if (session.state.terminal.status !== 'finished') throw new Error('deterministic demo exceeded action limit');
-  return Object.freeze({
-    acceptedActionCount: session.transcript.length,
-    classification: 'unranked_partial_rules',
-    finalStateHash: hashGameState(session.state),
-    fightCount: session.transcript.flatMap(({ events }) => events)
-      .filter(({ type }) => type === 'fight-started').length,
-    replayVerified: verifyGameReplay(session),
-    terminal: session.state.terminal,
-    transcriptHash: identityHash(session.transcript as unknown as JsonValue),
-    turnCount: session.state.turnNumber,
+export async function runDeterministicGame(manifest: GameManifest): Promise<DeterministicGameReport> {
+  return withRustSession(manifest, async (handle) => {
+    while (handle.snapshot.state.terminal.status === 'active'
+      && handle.snapshot.transcript.length < MAX_ACTIONS) {
+      const issued = await handle.legalActions();
+      const result = await handle.stepAction(
+        selectDeterministicGameAction(handle.snapshot, issued),
+      );
+      if (!result.accepted) throw new Error(`deterministic demo action rejected: ${result.reason.code}`);
+    }
+    const session = handle.snapshot;
+    if (session.state.terminal.status !== 'finished') {
+      throw new Error('deterministic demo exceeded action limit');
+    }
+    return Object.freeze({
+      acceptedActionCount: session.transcript.length,
+      classification: 'unranked_partial_rules',
+      finalStateHash: hashGameState(session.state),
+      fightCount: session.transcript.flatMap(({ events }) => events)
+        .filter(({ type }) => type === 'fight-started').length,
+      replayVerified: await handle.verifyReplay(),
+      terminal: session.state.terminal,
+      transcriptHash: identityHash(session.transcript as unknown as JsonValue),
+      turnCount: session.state.turnNumber,
+    });
   });
 }
 

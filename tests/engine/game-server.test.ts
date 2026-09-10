@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
 import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
-import { createGameManifest, createGameSession } from '../../src/engine/game.ts';
+import { createGameManifest } from '../../src/engine/game.ts';
+import { withRustSession } from '../../src/engine/rust-session-helpers.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
 
 type JsonObject = Record<string, unknown>;
@@ -152,7 +153,10 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
 
 test('browser API keeps cast artifacts and auras visible without exposing the opponent hand', async () => {
   const base = createSyntheticDemoManifest(53);
-  const openingSpells = createGameSession(base).state.players.north.hand.spellbook;
+  const openingSpells = await withRustSession(
+    base,
+    async (handle) => handle.snapshot.state.players.north.hand.spellbook,
+  );
   const artifactCardId = openingSpells[0]?.cardId;
   const auraCardId = openingSpells[1]?.cardId;
   assert.ok(artifactCardId && auraCardId);
