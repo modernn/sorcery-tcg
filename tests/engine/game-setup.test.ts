@@ -17975,6 +17975,10 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
         descriptor.kind === 'decline-attack')) {
         await underground.take(({ descriptor }) => descriptor.kind === 'decline-attack');
       }
+      await underground.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await underground.take(({ descriptor }) => descriptor.kind === 'draw');
+      await underground.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await underground.take(({ descriptor }) => descriptor.kind === 'draw');
       assert.equal((await underground.legalActions('north')).some(({ descriptor }) =>
         descriptor.kind === 'activate-artifact-damage'
           && descriptor.artifactInstanceId === ballistaInstanceId

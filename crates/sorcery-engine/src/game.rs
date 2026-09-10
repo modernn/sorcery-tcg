@@ -4238,6 +4238,30 @@ impl Game {
             .collect()
     }
 
+    /// Keeps carried Artifact bearer seats aligned with a minion's new controller.
+    fn retarget_carried_minion_artifacts(
+        &mut self,
+        instance_id: &IdentityHash,
+        from_seat: Seat,
+        to_seat: Seat,
+    ) {
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Carried {
+                bearer:
+                    UnitTarget::Minion {
+                        instance_id: bearer_id,
+                        seat,
+                    },
+                ..
+            } = &mut artifact.placement
+                && *bearer_id == *instance_id
+                && *seat == from_seat
+            {
+                *seat = to_seat;
+            }
+        }
+    }
+
     /// Every unit the seat controls, Avatar first, mirroring the authoritative unit reference order.
     fn seat_unit_targets(&self, seat: Seat) -> Vec<UnitTarget> {
         std::iter::once(UnitTarget::Avatar {
@@ -14943,6 +14967,8 @@ impl Game {
                             || json!({ "instanceId": instance_id, "seat": target_seat }),
                         );
                     } else {
+                        let from_seat = *target_seat;
+                        let transferred_id = instance_id.clone();
                         unit.controller = seat;
                         outcomes.push("minion-control-changed", || {
                             json!({
@@ -14952,6 +14978,7 @@ impl Game {
                                 "sourceInstanceId": card_instance_id,
                             })
                         });
+                        self.retarget_carried_minion_artifacts(&transferred_id, from_seat, seat);
                         self.settle_static_power_deaths(outcomes)?;
                     }
                 }
