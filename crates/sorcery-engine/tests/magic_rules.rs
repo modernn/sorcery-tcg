@@ -7203,3 +7203,183 @@ fn rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library() {
         assert_exact_replay(&session);
     }
 }
+
+fn kill_target_minion_manifest(ward: bool) -> String {
+    let mut south_minion = minion(json!({ "defense": 3 }));
+    if ward {
+        south_minion["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-kill": magic(("killTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": south_minion,
+        "south-site": site(false),
+    });
+    manifest(198, &cards, &["north-kill"; 6], &["south-minion"; 6])
+}
+
+fn kill_target_minion_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("kill-minion actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-kill"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_minion_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned enemy identity")
+        .to_owned()
+}
+
+#[test]
+fn rule_catalog_0198_kill_target_minion_destroys_a_healthy_minion_and_excludes_avatars() {
+    let manifest = kill_target_minion_manifest(false);
+    let mut session = opening_main(&manifest);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let targets = kill_target_minion_targets(&session);
+    assert_eq!(targets, [enemy_id.as_str()]);
+    assert!(!targets.contains(&north_avatar));
+    assert!(!targets.contains(&south_avatar));
+    assert_eq!(
+        realm_unit(&before, &enemy_id).expect("healthy enemy")["damage"],
+        0
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-kill"
+    });
+    assert_eq!(descriptor["target"]["instanceId"], enemy_id.as_str());
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    let killed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("unconditional kill event");
+    assert_eq!(killed.payload["cardId"], "south-minion");
+    assert_eq!(killed.payload["owner"], "south");
+    assert_eq!(killed.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt")
+    );
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("kill-minion checkpoint");
+    let serialized =
+        serialize_game_checkpoint(&checkpoint).expect("serialized kill-minion checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed kill-minion checkpoint");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed kill-minion session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0199_kill_target_minion_ward_absorbs_the_kill() {
+    let manifest = kill_target_minion_manifest(true);
+    let mut session = opening_main(&manifest);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    assert_eq!(kill_target_minion_targets(&session), [enemy_id.as_str()]);
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_id).expect("warded enemy")["warded"],
+        true
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-kill"
+            && descriptor["target"]["instanceId"] == enemy_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorption");
+    assert_eq!(broken.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
+    assert_eq!(survivor["warded"], false);
+    assert_eq!(survivor["damage"], 0);
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_exact_replay(&session);
+}

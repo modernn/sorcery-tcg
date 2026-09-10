@@ -184,6 +184,7 @@ export type GameCardDefinition =
     grantChargeToAllyThisTurn?: true;
     grantPowerToAllyThisTurn?: 2;
     healController?: number;
+    killTargetMinion?: true;
     killTargetWoundedMinion?: true;
     leapAttackAlly?: true;
     lureEnemyMinionOneStepCloser?: true;
@@ -1006,7 +1007,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
     destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
-    grantPowerToAllyThisTurn healController killTargetWoundedMinion leapAttackAlly drawSpells
+    grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSpells
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby teleportAllyToTargetSite
@@ -1401,6 +1402,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
     }
+    if (card.killTargetMinion !== undefined
+      && card.killTargetMinion !== true) {
+      throw new RangeError(`${path}.killTargetMinion must be true when defined`);
+    }
     if (card.killTargetWoundedMinion !== undefined
       && card.killTargetWoundedMinion !== true) {
       throw new RangeError(`${path}.killTargetWoundedMinion must be true when defined`);
@@ -1458,6 +1463,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.healController !== undefined)
       + Number(card.drawSpells !== undefined)
+      + Number(card.killTargetMinion === true)
       + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
@@ -2141,6 +2147,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantChargeToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
                     ? { grantPowerToAllyThisTurn: 2 as const }
+                  : card.killTargetMinion === true
+                    ? { killTargetMinion: true as const }
                   : card.killTargetWoundedMinion === true
                     ? { killTargetWoundedMinion: true as const }
                   : card.leapAttackAlly === true

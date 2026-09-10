@@ -853,6 +853,32 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        killTargetMinion: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /killTargetMinion must be true/);
+  const killMinion = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        killTargetMinion: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(killMinion.cards[firstSpell]?.cardType === 'magic'
+    && killMinion.cards[firstSpell].killTargetMinion, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         damageTargetUnit: 1,
         manaCost: 1,
         targetNearby: 'yes',
@@ -18842,6 +18868,156 @@ test('RULE-03 Fatality kills only a wounded minion in the caster region', async 
         ? [descriptor.target]
         : []);
     assert.equal(targetRefs.some(({ kind }) => kind === 'avatar'), false);
+    assert.deepEqual(targetRefs.map(({ instanceId }) => instanceId), [targetInstanceId]);
+
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === targetInstanceId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const killed = await ctx.step(cast);
+    assert.equal(killed.accepted, true);
+    if (!killed.accepted) return;
+    assert.deepEqual(killed.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-killed',
+      'minion-died',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(killed.receipt.events[1]?.payload, {
+      cardId: targetCardId,
+      instanceId: targetInstanceId,
+      owner: 'south',
+      seat: 'south',
+      sourceInstanceId,
+    });
+    assert.equal(killed.receipt.events.some(({ type }) => type === 'damage-dealt'), false);
+    assert.deepEqual(killed.receipt.randomDraws, []);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) =>
+      instanceId === targetInstanceId), false);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === targetInstanceId), true);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === sourceInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 kill-minion Magic destroys a healthy minion and never offers an Avatar', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('kill-north-site'),
+    avatar: 'kill-north-avatar',
+    spellbook: Array(4).fill('kill-minion'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('kill-south-site'),
+    avatar: 'kill-south-avatar',
+    spellbook: Array(4).fill('kill-target'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    'kill-minion': {
+      cardType: 'magic',
+      killTargetMinion: true,
+      manaCost: 1,
+      thresholds,
+    },
+    'kill-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'kill-north-site': { cardType: 'site', elements: ['earth'] },
+    'kill-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'kill-south-site': { cardType: 'site', elements: ['earth'] },
+    'kill-target': {
+      attack: 0,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-kill-minion-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 198,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['kill-minion'], cards['kill-minion']);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'kill-minion': {
+        cardType: 'magic',
+        killTargetMinion: false,
+        manaCost: 1,
+        thresholds,
+      } as unknown as GameCardDefinition,
+    },
+  }), /killTargetMinion must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'kill-minion': {
+        cardType: 'magic',
+        killTargetMinion: true,
+        killTargetWoundedMinion: true,
+        manaCost: 1,
+        thresholds,
+      },
+    },
+  }), /exactly one supported Magic effect/);
+
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'kill-target' && descriptor.cell === 'C1');
+    const target = ctx.state.realm.units.find(({ cardId }) => cardId === 'kill-target');
+    assert.ok(target);
+    assert.equal(target.damage, 0);
+    const targetInstanceId = target.instanceId;
+    const targetCardId = target.cardId;
+    const northAvatarId = ctx.state.players.north.avatar.card.instanceId;
+    const southAvatarId = ctx.state.players.south.avatar.card.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'kill-minion');
+    assert.ok(spell);
+    const spellInstanceId = spell.instanceId;
+
+    const targetRefs = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spellInstanceId
+        && descriptor.target
+        ? [descriptor.target]
+        : []);
+    assert.equal(targetRefs.some(({ kind }) => kind === 'avatar'), false);
+    assert.equal(targetRefs.some(({ instanceId }) =>
+      instanceId === northAvatarId || instanceId === southAvatarId), false);
     assert.deepEqual(targetRefs.map(({ instanceId }) => instanceId), [targetInstanceId]);
 
     const cast = await ctx.action(({ descriptor }) =>

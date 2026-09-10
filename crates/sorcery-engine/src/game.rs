@@ -1266,6 +1266,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GainControlOfTargetNearbyMinion
+        | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::SubmergeTargetMinion
@@ -5161,6 +5162,9 @@ impl Game {
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, true, true)?
+            }
+            MagicEffect::KillTargetMinion => {
+                self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::KillTargetWoundedMinion => self
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
@@ -15096,7 +15100,7 @@ impl Game {
                     }
                 }
             }
-            MagicEffect::KillTargetWoundedMinion => {
+            MagicEffect::KillTargetMinion | MagicEffect::KillTargetWoundedMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
                     seat: target_seat,
@@ -18287,6 +18291,10 @@ mod tests {
                 json!({ "leapAttackAlly": true }),
             ),
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
+            (
+                MagicEffect::KillTargetMinion,
+                json!({ "killTargetMinion": true }),
+            ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {

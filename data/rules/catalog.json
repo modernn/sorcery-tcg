@@ -4106,6 +4106,56 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0198",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Unconditional kill-minion Magic pays its cost, offers every same-region minion including healthy copies, never offers an Avatar, and destroys the chosen minion through the shared kill and Deathrite pipeline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0198_kill_target_minion_destroys_a_healthy_minion_and_excludes_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0199",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Unconditional kill-minion Magic that would destroy a Warded minion breaks Ward instead, leaves the minion in play with no damage, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0199_kill_target_minion_ward_absorbs_the_kill"
+      }
     }
   ]
 }
