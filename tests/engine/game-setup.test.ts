@@ -22495,12 +22495,6 @@ test('RULE-03 target-player discard lets the targeted player choose then no-ops 
       targetPlayerDiscardsCards: 1,
       thresholds,
     },
-    'discard-empty': {
-      cardType: 'magic',
-      manaCost: 0,
-      targetPlayerDiscardsCards: 6,
-      thresholds,
-    },
     'discard-south-avatar': {
       attack: 1,
       cardType: 'avatar',
@@ -22520,13 +22514,20 @@ test('RULE-03 target-player discard lets the targeted player choose then no-ops 
   const input = (
     seed: number,
     northSpellbook: readonly string[],
+    count = 1,
   ) => ({
     authority: {
       contentHash: SYNTHETIC_AUTHORITY_HASH,
       mode: 'synthetic' as const,
       revisionId: 'synthetic-target-player-discard-v1',
     },
-    cards,
+    cards: {
+      ...cards,
+      'discard-spell': {
+        ...cards['discard-spell']!,
+        targetPlayerDiscardsCards: count,
+      },
+    },
     decks: {
       north: {
         atlas: Array(6).fill('discard-north-site'),
@@ -22591,16 +22592,16 @@ test('RULE-03 target-player discard lets the targeted player choose then no-ops 
   });
 
   await withSetup(createGameManifest(input(240, [
-    'discard-empty',
-    'discard-empty',
-    'discard-empty',
-  ])), async (ctx) => {
+    'discard-spell',
+    'discard-spell',
+    'discard-spell',
+  ], 6)), async (ctx) => {
     await ctx.keep();
     await ctx.keep();
     await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
     await ctx.take(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
-        && descriptor.cardId === 'discard-empty'
+        && descriptor.cardId === 'discard-spell'
         && descriptor.target?.seat === 'south');
     while (ctx.state.phase === 'discard-card') {
       await ctx.take(({ descriptor }) => descriptor.kind === 'discard-card');
@@ -22609,7 +22610,7 @@ test('RULE-03 target-player discard lets the targeted player choose then no-ops 
     assert.equal(ctx.state.players.south.hand.spellbook.length, 0);
     const paid = await ctx.step(await ctx.action(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
-        && descriptor.cardId === 'discard-empty'
+        && descriptor.cardId === 'discard-spell'
         && descriptor.target?.seat === 'south'));
     assert.equal(paid.accepted, true);
     if (!paid.accepted) return;
