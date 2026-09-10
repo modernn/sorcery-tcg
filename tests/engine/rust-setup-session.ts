@@ -144,24 +144,24 @@ export class SetupCtx {
 }
 
 /** Runs one callback against a dedicated Rust-backed setup session. */
-export async function withSetup(
+export async function withSetup<T>(
   manifest: GameManifest,
-  run: (ctx: SetupCtx) => Promise<void>,
-): Promise<void> {
+  run: (ctx: SetupCtx) => Promise<T>,
+): Promise<T> {
   const ctx = await SetupCtx.open(manifest);
   try {
-    await run(ctx);
+    return await run(ctx);
   } finally {
     await ctx.close();
   }
 }
 
 /** Opens one independent preview session for dry-run assertions. */
-export async function withPreview(
+export async function withPreview<T>(
   manifest: GameManifest,
-  run: (ctx: SetupCtx) => Promise<void>,
-): Promise<void> {
-  await withSetup(manifest, run);
+  run: (ctx: SetupCtx) => Promise<T>,
+): Promise<T> {
+  return withSetup(manifest, run);
 }
 
 /** Runs one callback against a fork of the current live history. */
