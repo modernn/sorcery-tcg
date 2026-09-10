@@ -260,6 +260,7 @@ export type GameCardDefinition =
     movementBonus?: 1 | 2;
     movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
+    mustAttackAUnitIfAble?: true;
     mustBeCastBurrowed?: boolean;
     mustBeCastSubmerged?: boolean;
     mustBeCastToWaterSite?: boolean;
@@ -1064,7 +1065,7 @@ const SUPPORTED_CARD_FIELDS = {
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount lethal
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
-    movesOnlyForward movesOnlySideways
+    movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
     nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
@@ -1975,6 +1976,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.mustBeCastBurrowed && card.mustBeCastSubmerged) {
     throw new RangeError(`${path} cannot require both burrowed and submerged casting`);
   }
+  if (card.mustAttackAUnitIfAble !== undefined && card.mustAttackAUnitIfAble !== true) {
+    throw new RangeError(`${path}.mustAttackAUnitIfAble must be true when defined`);
+  }
   if (card.mustBeCastToWaterSite !== undefined && typeof card.mustBeCastToWaterSite !== 'boolean') {
     throw new RangeError(`${path}.mustBeCastToWaterSite must be boolean`);
   }
@@ -2401,6 +2405,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             cardType: 'minion' as const,
             ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
             ...(card.charge === true ? { charge: true } : {}),
+            ...(card.mustAttackAUnitIfAble === true ? { mustAttackAUnitIfAble: true as const } : {}),
             ...(card.cannotDefend === true ? { cannotDefend: true } : {}),
             ...(card.cannotDefendOrIntercept === true ? { cannotDefendOrIntercept: true } : {}),
             ...(card.connectsTopBottom === true ? { connectsTopBottom: true } : {}),

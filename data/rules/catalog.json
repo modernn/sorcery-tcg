@@ -5185,6 +5185,47 @@
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0242_start_turn_draw_sites_decks_out_on_an_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0243",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that must attack a unit if able treats that attack as a mandatory main-phase action. While a legal unit attack is in its range of motion, the engine offers only those Move and Attack paths and then requires a unit Declare Attack. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0243_must_attack_a_unit_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0244",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same mandatory-attack fact does not constrain the main phase when no enemy unit is in range of motion. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0244_must_attack_does_not_constrain_when_no_unit_is_in_range"
+      }
     }
   ]
 }

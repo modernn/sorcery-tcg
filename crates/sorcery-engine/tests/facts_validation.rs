@@ -709,6 +709,11 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be between",
         ),
         (
+            "must-attack flag",
+            with(minion(), "mustAttackAUnitIfAble", json!(false)),
+            "must be true",
+        ),
+        (
             "competing start-turn triggers",
             with(
                 with(
@@ -793,6 +798,14 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert_eq!(facts.at_start_of_controller_turn_draw_sites, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "must-attack",
+        &with(minion(), "mustAttackAUnitIfAble", json!(true)),
+    )
+    .expect("valid must-attack minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.must_attack_a_unit_if_able);
     assert_eq!(facts.thresholds, Thresholds::default());
     assert_eq!(facts.provides, None::<Element>);
 

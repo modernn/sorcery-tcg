@@ -1447,6 +1447,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         mortal: _,
         movement_bonus: _,
         movement_restriction: _,
+        must_attack_a_unit_if_able: _,
         must_be_cast_to_outer_column: _,
         must_be_cast_to_water_site: _,
         nearby_enemies_permanently_lose_stealth: _,
@@ -2327,18 +2328,52 @@ impl Game {
     }
 
     fn append_attack_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
-        for target in self.attack_targets()? {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let must_attack_a_unit = matches!(pending.attacker_kind, UnitKind::Minion)
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == pending.attacker_instance_id)
+                .and_then(|unit| {
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        return None;
+                    };
+                    Some(facts.must_attack_a_unit_if_able)
+                })
+                .unwrap_or(false);
+        let targets = self.attack_targets()?;
+        let unit_targets = targets
+            .iter()
+            .any(|target| !matches!(target, CombatTarget::Site { .. }));
+        let offered = if must_attack_a_unit && unit_targets {
+            targets
+                .into_iter()
+                .filter(|target| !matches!(target, CombatTarget::Site { .. }))
+                .collect()
+        } else {
+            targets
+        };
+        for target in offered {
             let descriptor = ActionDescriptor::DeclareAttack { target };
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("declare-attack action requires a label"))?;
             self.push_action(actions, descriptor, label);
         }
-        let descriptor = ActionDescriptor::DeclineAttack;
-        let label = descriptor
-            .state_independent_label()
-            .ok_or_else(|| invalid("decline-attack action requires a label"))?;
-        self.push_action(actions, descriptor, label);
+        if !(must_attack_a_unit && unit_targets) {
+            let descriptor = ActionDescriptor::DeclineAttack;
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("decline-attack action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
         Ok(())
     }
 
@@ -3444,7 +3479,101 @@ impl Game {
             }
         }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned());
+        self.retain_mandatory_unit_attacks(actions);
         Ok(())
+    }
+
+    fn retain_mandatory_unit_attacks(&self, actions: &mut Vec<IssuedAction>) {
+        let seat = self.position.decision_seat;
+        let mandatory: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                if !self.minion_can_move_and_attack(unit, seat) {
+                    return false;
+                }
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return false;
+                };
+                facts.must_attack_a_unit_if_able
+                    && actions.iter().any(|action| {
+                        matches!(
+                            &action.descriptor,
+                            ActionDescriptor::MoveAndAttack {
+                                unit_instance_id,
+                                to,
+                                ..
+                            } if unit_instance_id == &unit.card.instance_id
+                                && self.minion_would_have_unit_attack_target(unit, *to)
+                        )
+                    })
+            })
+            .map(|unit| unit.card.instance_id.clone())
+            .collect();
+        if mandatory.is_empty() {
+            return;
+        }
+        actions.retain(|action| {
+            let ActionDescriptor::MoveAndAttack {
+                unit_instance_id,
+                to,
+                ..
+            } = &action.descriptor
+            else {
+                return false;
+            };
+            mandatory
+                .iter()
+                .any(|instance_id| instance_id == unit_instance_id)
+                && self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == *unit_instance_id)
+                    .is_some_and(|unit| self.minion_would_have_unit_attack_target(unit, *to))
+        });
+    }
+
+    fn minion_would_have_unit_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        let attacker_airborne = self.minion_is_airborne(unit, facts);
+        let attacker_cells =
+            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let opposing_seat = other_seat(unit.controller);
+        let opposing_player = &self.position.players[seat_index(opposing_seat)];
+        if destination.region == Region::Surface
+            && attacker_cells.contains(&opposing_player.avatar.location)
+        {
+            return true;
+        }
+        self.position.units.iter().any(|enemy| {
+            if enemy.controller != opposing_seat
+                || enemy.region != destination.region
+                || enemy.card.instance_id == unit.card.instance_id
+                || !Self::unit_occupied_cells(enemy)
+                    .iter()
+                    .any(|cell| attacker_cells.contains(cell))
+                || self.minion_has_active_stealth(enemy)
+            {
+                return false;
+            }
+            let CardFacts::Minion(enemy_facts) =
+                &self.rules.cards[usize::from(enemy.card.card_id.0)].facts
+            else {
+                return false;
+            };
+            !self.minion_is_airborne(enemy, enemy_facts) || attacker_airborne
+        })
     }
 
     fn mana_activation_amount(&self, seat: Seat, instance_id: &IdentityHash) -> Option<u8> {
@@ -19811,6 +19940,10 @@ mod tests {
         .expect("valid start-turn Atlas draw manifest")
         .ensure_selfplay_supported()
         .expect("start-turn draw sites is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
+            .expect("valid must-attack manifest")
+            .ensure_selfplay_supported()
+            .expect("must attack a unit if able is self-play safe");
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

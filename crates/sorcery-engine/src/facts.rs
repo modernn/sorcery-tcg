@@ -329,6 +329,7 @@ pub struct MinionFacts {
     pub mortal: bool,
     pub movement_bonus: Option<u8>,
     pub movement_restriction: Option<BasicMovementRestriction>,
+    pub must_attack_a_unit_if_able: bool,
     pub must_be_cast_to_outer_column: bool,
     pub must_be_cast_to_water_site: bool,
     pub nearby_enemies_permanently_lose_stealth: bool,
@@ -794,6 +795,7 @@ const MINION_FIELDS: &[&str] = &[
     "movementBonus",
     "movesOnlyForward",
     "movesOnlySideways",
+    "mustAttackAUnitIfAble",
     "mustBeCastBurrowed",
     "mustBeCastSubmerged",
     "mustBeCastToOuterColumn",
@@ -1519,6 +1521,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let submerge = optional_bool(object, "submerge", path)?;
     let required_cast_region = parse_required_cast_region(object, path, burrowing, submerge)?;
     let summon_to_any_site = optional_bool(object, "summonToAnySite", path)?;
+    let must_attack_a_unit_if_able = true_only(object, "mustAttackAUnitIfAble", path)?;
     let must_be_cast_to_outer_column = optional_bool(object, "mustBeCastToOuterColumn", path)?;
     let must_be_cast_to_water_site = optional_bool(object, "mustBeCastToWaterSite", path)?;
     let tap_to_shoot_projectile_damage = optional_bounded_integer(
@@ -1668,6 +1671,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         movement_bonus: optional_bounded_integer(object, "movementBonus", 1, 2, path)?
             .map(compact_u8),
         movement_restriction,
+        must_attack_a_unit_if_able,
         must_be_cast_to_outer_column,
         must_be_cast_to_water_site,
         nearby_enemies_permanently_lose_stealth: true_only(
