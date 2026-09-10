@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/rust-novelty-frontier-0005`. Stack this on current `master` (`e20ef88`). Do not grow already-merged landings.
+Live line: `cursor/simplify-search-wrappers-0005`. Stack this on current `master` (`f8b127d`). Do not grow already-merged landings.
 
-Novelty probe, rollout, forced-action dispatch, and counterfactual search are on master. This branch moves the signal-guided bounded frontier FIFO into Rust (`runNoveltyFrontierSearch`). The private novelty gauntlet still orchestrates four lesson jobs and writes authority-private reports in TypeScript.
+Search RPCs are on master. This branch only deduplicates TS/Rust wrappers, session-json param helpers, and the seed-31 test fixture. It does not change report contracts.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

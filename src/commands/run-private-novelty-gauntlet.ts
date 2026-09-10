@@ -13,12 +13,14 @@ import {
   createGameManifest,
   type GameManifest,
 } from '../engine/game.ts';
-import { withRustSession } from '../engine/rust-session-helpers.ts';
 import {
+  NOVELTY_FRONTIER_BRANCH_LIMIT,
   NOVELTY_ROLLOUT_ACTION_LIMIT,
   runNoveltyFromForcedCheckpoint,
-  runNoveltyRollout,
+  runOpeningNoveltyRollout,
+  type NoveltyFrontierBranch,
   type NoveltyFrontierCandidate,
+  type NoveltyFrontierPending,
   type NoveltyRolloutResult,
 } from '../simulator/novelty-rollout.ts';
 import {
@@ -36,7 +38,6 @@ const DEFAULT_SCENARIO = resolve(
 );
 const LESSON_IDS = ['air-vs-earth-lesson', 'earth-vs-air-lesson'] as const;
 const CHECKPOINT_ID_PATTERN = /^sha256:([0-9a-f]{64})$/u;
-const FRONTIER_BRANCH_LIMIT = 32;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
 
 type LessonId = typeof LESSON_IDS[number];
@@ -44,32 +45,8 @@ type Orientation = 'original' | 'swapped';
 
 export type PrivateNoveltyGauntletReport = Readonly<{
   classification: 'authority-private';
-  frontierBranches: readonly Readonly<{
-    actionId: string;
-    actionKind: NoveltyFrontierCandidate['actionKind'];
-    branchId: string;
-    checkpointId: string;
-    depth: number;
-    entryActionCount: 1;
-    entryEventTypes: readonly string[];
-    novelSignalsAtDispatch: readonly NoveltyFrontierCandidate['signal'][];
-    parentBranchId: string | null;
-    parentJobId: string;
-    result: NoveltyRolloutResult;
-    signals: readonly NoveltyFrontierCandidate['signal'][];
-  }>[];
-  frontierPending: readonly Readonly<{
-    actionId: string;
-    actionKind: NoveltyFrontierCandidate['actionKind'];
-    branchId: string;
-    checkpointId: string;
-    depth: number;
-    parentBranchId: string | null;
-    parentJobId: string;
-    predictedEventTypes: readonly string[];
-    predictedStateHash: StateHash;
-    signals: readonly NoveltyFrontierCandidate['signal'][];
-  }>[];
+  frontierBranches: readonly NoveltyFrontierBranch[];
+  frontierPending: readonly NoveltyFrontierPending[];
   jobs: readonly Readonly<{
     jobId: string;
     lessonId: LessonId;
@@ -79,7 +56,7 @@ export type PrivateNoveltyGauntletReport = Readonly<{
   policyVersion: 'signal-guided-bounded-frontier-v2';
   schemaVersion: 2;
   totals: Readonly<{
-    branchLimit: 32;
+    branchLimit: typeof NOVELTY_FRONTIER_BRANCH_LIMIT;
     completed: number;
     failed: number;
     frontierBranches: number;
@@ -101,7 +78,7 @@ type FrontierSeed = Readonly<{
   actionId: string;
   actionKind: NoveltyFrontierCandidate['actionKind'];
   branchId: string;
-  checkpointId: string;
+  checkpointId: StateHash;
   depth: number;
   parentBranchId: string | null;
   parentJobId: string;
@@ -222,13 +199,10 @@ export async function runPrivateNoveltyGauntlet(
         jobId: `${preset.id}:${orientation}`,
         lessonId: preset.id as LessonId,
         orientation,
-        result: await withRustSession(
-          manifest,
-          async (handle) => runNoveltyRollout(handle.snapshot, {
-            maxActions,
-            onCheckpoint: captureCheckpoint,
-          }),
-        ),
+        result: await runOpeningNoveltyRollout(manifest, {
+          maxActions,
+          onCheckpoint: captureCheckpoint,
+        }),
       });
     }
   }
@@ -293,7 +267,7 @@ export async function runPrivateNoveltyGauntlet(
   let frontierPrunedCovered = 0;
   let stopAfterFailure = false;
   while (cursor < queue.length
-    && frontierBranches.length < FRONTIER_BRANCH_LIMIT
+    && frontierBranches.length < NOVELTY_FRONTIER_BRANCH_LIMIT
     && !stopAfterFailure) {
     const seed = queue[cursor++]!;
     const novelSignalsAtDispatch = seed.signals
@@ -395,14 +369,14 @@ export async function runPrivateNoveltyGauntlet(
     policyVersion: 'signal-guided-bounded-frontier-v2' as const,
     schemaVersion: 2 as const,
     totals: {
-      branchLimit: FRONTIER_BRANCH_LIMIT,
+      branchLimit: NOVELTY_FRONTIER_BRANCH_LIMIT,
       completed: jobs.filter(({ result }) => result.status === 'completed').length,
       failed: jobs.filter(({ result }) => result.status === 'failed').length,
       frontierBranches: frontierBranches.length,
       frontierCompleted: frontierBranches.filter(({ result }) => result.status === 'completed').length,
       frontierFailed: frontierBranches.filter(({ result }) => result.status === 'failed').length,
       frontierHorizon: frontierBranches.filter(({ result }) => result.status === 'horizon').length,
-      frontierLimitReached: frontierBranches.length === FRONTIER_BRANCH_LIMIT
+      frontierLimitReached: frontierBranches.length === NOVELTY_FRONTIER_BRANCH_LIMIT
         && frontierPending.length > 0,
       frontierMaxDepth: frontierBranches.reduce((maximum, { depth }) =>
         Math.max(maximum, depth), 0),

@@ -11,6 +11,7 @@ import type {
 } from './game.ts';
 import {
   RustSessionClient,
+  type RustEmittedResult,
   type RustNoveltyStep,
   type Sha256Hash,
 } from './rust-engine.ts';
@@ -99,10 +100,7 @@ export class RustGameSessionHandle {
   }
 
   /** Runs the coverage-guided one-step novelty rollout from this snapshot. */
-  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
-    emittedCheckpoints: readonly JsonValue[];
-    result: JsonValue;
-  }>> {
+  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<RustEmittedResult> {
     return this.client.runNoveltyRollout(input);
   }
 
@@ -110,10 +108,7 @@ export class RustGameSessionHandle {
   async runNoveltyFrontierSearch(input: Readonly<{
     maxActions: number;
     maxBranches: number;
-  }>): Promise<Readonly<{
-    emittedCheckpoints: readonly JsonValue[];
-    result: JsonValue;
-  }>> {
+  }>): Promise<RustEmittedResult> {
     return this.client.runNoveltyFrontierSearch(input);
   }
 
@@ -134,9 +129,7 @@ export class RustGameSessionHandle {
     }>;
     result: JsonValue;
   }>> {
-    const payload = await this.client.runNoveltyFromForcedAction(input);
-    await this.loadSnapshot();
-    return payload;
+    return this.client.runNoveltyFromForcedAction(input);
   }
 
   /** Applies one bound action request. */
@@ -241,6 +234,18 @@ export async function withRustSession<T>(
   }
 }
 
+/** Resumes a checkpoint on a dedicated process, then runs one callback. */
+export async function withResumedRustSession<T>(
+  manifest: GameManifest,
+  checkpoint: JsonValue,
+  run: (handle: RustGameSessionHandle) => Promise<T>,
+): Promise<T> {
+  return withRustSession(manifest, async (handle) => {
+    await handle.resume(checkpoint);
+    return run(handle);
+  });
+}
+
 /** Applies one action from a saved checkpoint without mutating the caller's live session. */
 export async function transitionFromCheckpoint(
   manifest: GameManifest,
@@ -248,8 +253,7 @@ export async function transitionFromCheckpoint(
   action: GameLegalAction,
   summary: JsonValue,
 ): Promise<JsonValue> {
-  return withRustSession(manifest, async (handle) => {
-    await handle.resume(checkpoint);
+  return withResumedRustSession(manifest, checkpoint, async (handle) => {
     const result = await handle.stepAction(action);
     if (!result.accepted) {
       throw new Error(`issued action was rejected: ${result.reason.code}`);

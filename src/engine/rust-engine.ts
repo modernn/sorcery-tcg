@@ -116,6 +116,23 @@ function parseNoveltyProbe(value: unknown): RustNoveltyProbe {
   });
 }
 
+export type RustEmittedResult = Readonly<{
+  emittedCheckpoints: readonly JsonValue[];
+  result: JsonValue;
+}>;
+
+function parseEmittedResult(payload: unknown, method: string): RustEmittedResult {
+  if (!isRecord(payload)
+    || !Array.isArray(payload.emittedCheckpoints)
+    || payload.result === undefined) {
+    throw new Error(`Rust session ${method} result was invalid`);
+  }
+  return Object.freeze({
+    emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
+    result: payload.result as JsonValue,
+  });
+}
+
 function parseNoveltyStep(value: unknown): RustNoveltyStep {
   if (!isRecord(value)
     || !Array.isArray(value.probes)
@@ -325,42 +342,24 @@ export class RustSessionClient {
     return payload.result as JsonValue;
   }
 
-  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<Readonly<{
-    emittedCheckpoints: readonly JsonValue[];
-    result: JsonValue;
-  }>> {
-    const payload = await this.call('runNoveltyRollout', { maxActions: input.maxActions });
-    if (!isRecord(payload)
-      || !Array.isArray(payload.emittedCheckpoints)
-      || payload.result === undefined) {
-      throw new Error('Rust session runNoveltyRollout result was invalid');
-    }
-    return Object.freeze({
-      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
-      result: payload.result as JsonValue,
-    });
+  async runNoveltyRollout(input: Readonly<{ maxActions: number }>): Promise<RustEmittedResult> {
+    return parseEmittedResult(
+      await this.call('runNoveltyRollout', { maxActions: input.maxActions }),
+      'runNoveltyRollout',
+    );
   }
 
   async runNoveltyFrontierSearch(input: Readonly<{
     maxActions: number;
     maxBranches: number;
-  }>): Promise<Readonly<{
-    emittedCheckpoints: readonly JsonValue[];
-    result: JsonValue;
-  }>> {
-    const payload = await this.call('runNoveltyFrontierSearch', {
-      maxActions: input.maxActions,
-      maxBranches: input.maxBranches,
-    });
-    if (!isRecord(payload)
-      || !Array.isArray(payload.emittedCheckpoints)
-      || payload.result === undefined) {
-      throw new Error('Rust session runNoveltyFrontierSearch result was invalid');
-    }
-    return Object.freeze({
-      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
-      result: payload.result as JsonValue,
-    });
+  }>): Promise<RustEmittedResult> {
+    return parseEmittedResult(
+      await this.call('runNoveltyFrontierSearch', {
+        maxActions: input.maxActions,
+        maxBranches: input.maxBranches,
+      }),
+      'runNoveltyFrontierSearch',
+    );
   }
 
   async runNoveltyFromForcedAction(input: Readonly<{
@@ -386,25 +385,23 @@ export class RustSessionClient {
       predictedEventTypes: [...input.predictedEventTypes],
       predictedStateHash: input.predictedStateHash,
     });
+    const emitted = parseEmittedResult(payload, 'runNoveltyFromForcedAction');
     if (!isRecord(payload)
-      || !Array.isArray(payload.emittedCheckpoints)
       || !isRecord(payload.entry)
       || typeof payload.entry.actionId !== 'string'
       || typeof payload.entry.actionKind !== 'string'
       || !Array.isArray(payload.entry.eventTypes)
-      || !payload.entry.eventTypes.every((eventType) => typeof eventType === 'string')
-      || payload.result === undefined) {
+      || !payload.entry.eventTypes.every((eventType) => typeof eventType === 'string')) {
       throw new Error('Rust session runNoveltyFromForcedAction result was invalid');
     }
     return Object.freeze({
-      emittedCheckpoints: Object.freeze(payload.emittedCheckpoints.slice() as JsonValue[]),
+      ...emitted,
       entry: Object.freeze({
         actionId: payload.entry.actionId,
         actionKind: payload.entry.actionKind,
         eventTypes: Object.freeze(payload.entry.eventTypes.slice() as string[]),
         stateHash: requireHash(payload.entry.stateHash, 'stateHash'),
       }),
-      result: payload.result as JsonValue,
     });
   }
 

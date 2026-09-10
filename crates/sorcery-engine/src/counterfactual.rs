@@ -187,12 +187,11 @@ fn preferred_terminal(left: &Value, right: &Value) -> bool {
 mod tests {
     use super::{COUNTERFACTUAL_CONTINUATION_LIMIT, run_counterfactual};
     use crate::session::Session;
-    use crate::synthetic::synthetic_demo_manifest_json;
+    use crate::synthetic::synthetic_demo_session;
 
     #[test]
     fn opening_counterfactual_is_too_wide_or_complete() {
-        let session =
-            Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session");
+        let session = synthetic_demo_session(31);
         let report = run_counterfactual(&session, 0).expect("counterfactual");
         assert!(report.result()["status"] == "complete" || report.result()["status"] == "too-wide");
         assert_eq!(report.result()["rootStateHash"], json_hash(&session));
@@ -200,8 +199,7 @@ mod tests {
 
     #[test]
     fn rejects_an_oversize_continuation() {
-        let session =
-            Session::new(&synthetic_demo_manifest_json(31).expect("manifest")).expect("session");
+        let session = synthetic_demo_session(31);
         let error = run_counterfactual(&session, COUNTERFACTUAL_CONTINUATION_LIMIT + 1)
             .expect_err("oversize");
         assert!(error.to_string().contains("maxContinuationDecisions"));

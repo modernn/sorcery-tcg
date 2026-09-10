@@ -9,14 +9,7 @@ import { withSetup } from './rust-setup-session.ts';
 
 test('counterfactual rollouts cover every root choice reproducibly without scoring horizons', async () => {
   await withSetup(createSyntheticDemoManifest(31), async (ctx) => {
-    await ctx.keep();
-    await ctx.keep();
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'summon-minion'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'end-turn'));
+    await ctx.seed31AfterNorthOpening();
     const session = ctx.session;
     const beforeHash = hashGameState(session.state);
     const beforeActions = await ctx.legalActions('south');

@@ -13,14 +13,7 @@ import { withSetup } from './rust-setup-session.ts';
 
 test('forced frontier action replays the probe prediction then starts novelty', async () => {
   await withSetup(createSyntheticDemoManifest(31), async (ctx) => {
-    await ctx.keep();
-    await ctx.keep();
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'summon-minion'));
-    await ctx.accept(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'end-turn'));
+    await ctx.seed31AfterNorthOpening();
     const root = ctx.session;
     const checkpoints = new Map<string, GameCheckpoint>();
     const parent = await runNoveltyRollout(root, {
