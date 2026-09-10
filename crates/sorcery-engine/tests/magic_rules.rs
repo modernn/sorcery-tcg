@@ -8243,7 +8243,10 @@ fn rule_catalog_0211_destroy_target_artifact_moves_a_loose_artifact_to_its_owner
     let encoded = artifact_magic_manifest(211, "destroyTargetArtifact");
     let mut session = opening_main(&encoded);
     let artifact_id = stage_south_artifact(&mut session, false);
-    assert_eq!(artifact_magic_targets(&session), [artifact_id.clone()]);
+    assert_eq!(
+        artifact_magic_targets(&session).as_slice(),
+        std::slice::from_ref(&artifact_id)
+    );
     assert!(realm_has_artifact(&state(&session), &artifact_id));
 
     let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
@@ -8316,7 +8319,10 @@ fn rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_ow
         .as_array()
         .expect("South Spellbook hand")
         .len();
-    assert_eq!(artifact_magic_targets(&session), [artifact_id.clone()]);
+    assert_eq!(
+        artifact_magic_targets(&session).as_slice(),
+        std::slice::from_ref(&artifact_id)
+    );
     assert!(realm_has_artifact(&before, &artifact_id));
 
     let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
