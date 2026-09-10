@@ -69,6 +69,11 @@ export class SetupCtx {
     return result.session;
   }
 
+  /** Finds and applies one matching legal action. */
+  async take(predicate: (candidate: GameLegalAction) => boolean): Promise<GameSession> {
+    return this.accept(await this.action(predicate));
+  }
+
   /** Applies one bound action request and requires acceptance. */
   async acceptRequest(request: GameActionRequest): Promise<GameSession> {
     const result = await this.handle.step(request);

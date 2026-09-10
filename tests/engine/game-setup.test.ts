@@ -25,7 +25,7 @@ import {
   type GameReceipt,
   type GameSession,
 } from '../../src/engine/game.ts';
-import { SetupCtx, withPreview, withSetup } from './rust-setup-session.ts';
+import { SetupCtx, withFork, withPreview, withSetup } from './rust-setup-session.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
@@ -1785,270 +1785,278 @@ test('RULE-02 forged spatial actions cannot mutate the game', async () => {
   });
 });
 
-test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relative subsurface', () => {
+test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relative subsurface', async () => {
   const base = manifest(244);
-  const preview = createGameSession(base);
-  const northSites = preview.state.players.north.hand.atlas;
-  const southSites = preview.state.players.south.hand.atlas;
-  const southMinions = preview.state.players.south.hand.spellbook;
-  const sourceCardId = northSites[1]?.cardId;
-  const protectedCardId = northSites[0]?.cardId;
-  const targetCardId = southSites[1]?.cardId;
-  const replacementCardId = southSites[2]?.cardId;
-  const drownedCardId = southMinions[0]?.cardId;
-  const secondDrownedCardId = preview.state.players.south.spellbook[0]?.cardId;
-  const survivorCardId = southMinions[1]?.cardId;
-  const artifactCardId = southMinions[2]?.cardId;
-  assert.ok(sourceCardId);
-  assert.ok(protectedCardId);
-  assert.ok(targetCardId);
-  assert.ok(replacementCardId);
-  assert.ok(drownedCardId);
-  assert.ok(secondDrownedCardId);
-  assert.ok(survivorCardId);
-  assert.ok(artifactCardId);
-  const cards: Record<string, GameCardDefinition> = { ...base.cards };
-  cards[sourceCardId] = {
-    ...cards[sourceCardId]!,
-    sacrificeToDestroyNearbySite: true,
-  } as GameCardDefinition;
-  cards[protectedCardId] = {
-    ...cards[protectedCardId]!,
-    cannotBeMovedDestroyedOrModified: true,
-  } as GameCardDefinition;
-  cards[targetCardId] = { cardType: 'site', elements: ['water'] };
-  cards[replacementCardId] = { cardType: 'site', elements: ['water'] };
-  for (const cardId of [drownedCardId, secondDrownedCardId]) {
-    cards[cardId] = {
+  await withPreview(base, async (preview) => {
+    const northSites = preview.state.players.north.hand.atlas;
+    const southSites = preview.state.players.south.hand.atlas;
+    const southMinions = preview.state.players.south.hand.spellbook;
+    const sourceCardId = northSites[1]?.cardId;
+    const protectedCardId = northSites[0]?.cardId;
+    const targetCardId = southSites[1]?.cardId;
+    const replacementCardId = southSites[2]?.cardId;
+    const drownedCardId = southMinions[0]?.cardId;
+    const secondDrownedCardId = preview.state.players.south.spellbook[0]?.cardId;
+    const survivorCardId = southMinions[1]?.cardId;
+    const artifactCardId = southMinions[2]?.cardId;
+    assert.ok(sourceCardId);
+    assert.ok(protectedCardId);
+    assert.ok(targetCardId);
+    assert.ok(replacementCardId);
+    assert.ok(drownedCardId);
+    assert.ok(secondDrownedCardId);
+    assert.ok(survivorCardId);
+    assert.ok(artifactCardId);
+    const cards: Record<string, GameCardDefinition> = { ...base.cards };
+    cards[sourceCardId] = {
+      ...cards[sourceCardId]!,
+      sacrificeToDestroyNearbySite: true,
+    } as GameCardDefinition;
+    cards[protectedCardId] = {
+      ...cards[protectedCardId]!,
+      cannotBeMovedDestroyedOrModified: true,
+    } as GameCardDefinition;
+    cards[targetCardId] = { cardType: 'site', elements: ['water'] };
+    cards[replacementCardId] = { cardType: 'site', elements: ['water'] };
+    for (const cardId of [drownedCardId, secondDrownedCardId]) {
+      cards[cardId] = {
+        attack: 1,
+        cardType: 'minion',
+        deathriteDrawSite: true,
+        defense: 1,
+        manaCost: 0,
+        submerge: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      };
+    }
+    cards[survivorCardId] = {
       attack: 1,
+      burrowing: true,
       cardType: 'minion',
-      deathriteDrawSite: true,
       defense: 1,
       manaCost: 0,
       submerge: true,
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     };
-  }
-  cards[survivorCardId] = {
-    attack: 1,
-    burrowing: true,
-    cardType: 'minion',
-    defense: 1,
-    manaCost: 0,
-    submerge: true,
-    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-  };
-  cards[artifactCardId] = {
-    cardType: 'artifact',
-    grantsBearerPower: 2,
-    manaCost: 0,
-    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
-  };
-  assert.throws(() => createGameManifest({
-    ...base,
-    cards: {
-      ...cards,
-      [sourceCardId]: {
-        ...cards[sourceCardId]!,
-        sacrificeToDestroyNearbySite: false,
-      } as unknown as GameCardDefinition,
-    },
-  }), /sacrificeToDestroyNearbySite/);
-  assert.throws(() => createGameManifest({
-    ...base,
-    cards: {
-      ...cards,
-      [protectedCardId]: {
-        ...cards[protectedCardId]!,
-        cannotBeMovedDestroyedOrModified: false,
-      } as unknown as GameCardDefinition,
-    },
-  }), /cannotBeMovedDestroyedOrModified must be true when defined/);
-  const gameManifest = createGameManifest({
-    authority: base.authority,
-    cards,
-    decks: base.decks,
-    firstSeat: base.firstSeat,
-    seed: base.seed,
-  });
-  let session = keep(keep(createGameSession(gameManifest)));
-  const sourceCard = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
-  const protectedCard = session.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId === protectedCardId);
-  const targetCard = session.state.players.south.hand.atlas.find(({ cardId }) => cardId === targetCardId);
-  const replacementCard = session.state.players.south.hand.atlas.find(({ cardId }) =>
-    cardId === replacementCardId);
-  const drownedCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === drownedCardId);
-  const survivorCard = session.state.players.south.hand.spellbook.find(({ cardId }) => cardId === survivorCardId);
-  const artifactCard = session.state.players.south.hand.spellbook.find(({ cardId }) =>
-    cardId === artifactCardId);
-  assert.ok(sourceCard);
-  assert.ok(protectedCard);
-  assert.ok(targetCard);
-  assert.ok(replacementCard);
-  assert.ok(drownedCard);
-  assert.ok(survivorCard);
-  assert.ok(artifactCard);
+    cards[artifactCardId] = {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    };
+    assert.throws(() => createGameManifest({
+      ...base,
+      cards: {
+        ...cards,
+        [sourceCardId]: {
+          ...cards[sourceCardId]!,
+          sacrificeToDestroyNearbySite: false,
+        } as unknown as GameCardDefinition,
+      },
+    }), /sacrificeToDestroyNearbySite/);
+    assert.throws(() => createGameManifest({
+      ...base,
+      cards: {
+        ...cards,
+        [protectedCardId]: {
+          ...cards[protectedCardId]!,
+          cannotBeMovedDestroyedOrModified: false,
+        } as unknown as GameCardDefinition,
+      },
+    }), /cannotBeMovedDestroyedOrModified must be true when defined/);
+    const gameManifest = createGameManifest({
+      authority: base.authority,
+      cards,
+      decks: base.decks,
+      firstSeat: base.firstSeat,
+      seed: base.seed,
+    });
+    await withSetup(gameManifest, async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      const sourceCard = ctx.state.players.north.hand.atlas.find(({ cardId }) => cardId === sourceCardId);
+      const protectedCard = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+        cardId === protectedCardId);
+      const targetCard = ctx.state.players.south.hand.atlas.find(({ cardId }) => cardId === targetCardId);
+      const replacementCard = ctx.state.players.south.hand.atlas.find(({ cardId }) =>
+        cardId === replacementCardId);
+      const drownedCard = ctx.state.players.south.hand.spellbook.find(({ cardId }) =>
+        cardId === drownedCardId);
+      const survivorCard = ctx.state.players.south.hand.spellbook.find(({ cardId }) =>
+        cardId === survivorCardId);
+      const artifactCard = ctx.state.players.south.hand.spellbook.find(({ cardId }) =>
+        cardId === artifactCardId);
+      assert.ok(sourceCard);
+      assert.ok(protectedCard);
+      assert.ok(targetCard);
+      assert.ok(replacementCard);
+      assert.ok(drownedCard);
+      assert.ok(survivorCard);
+      assert.ok(artifactCard);
 
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === protectedCard.instanceId
-      && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId !== targetCard.instanceId
-      && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === sourceCard.instanceId
-      && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === targetCard.instanceId
-      && descriptor.cell === 'C2'));
-  const secondDrownedCard = session.state.players.south.hand.spellbook.find(({ cardId }) =>
-    cardId === secondDrownedCardId);
-  assert.ok(secondDrownedCard);
-  for (const card of [drownedCard, secondDrownedCard]) {
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'summon-minion'
-        && descriptor.cardInstanceId === card.instanceId
-        && descriptor.cell === 'C2'
-        && descriptor.region === 'underwater'));
-  }
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === survivorCard.instanceId
-      && descriptor.cell === 'C2'
-      && descriptor.region === 'underwater'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-artifact'
-      && descriptor.cardInstanceId === artifactCard.instanceId
-      && descriptor.bearer?.instanceId === survivorCard.instanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'drop-artifacts'
-      && descriptor.unit.instanceId === survivorCard.instanceId
-      && descriptor.artifactInstanceIds[0] === artifactCard.instanceId));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === protectedCard.instanceId
+          && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId !== targetCard.instanceId
+          && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === sourceCard.instanceId
+          && descriptor.cell === 'C3');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === targetCard.instanceId
+          && descriptor.cell === 'C2');
+      const secondDrownedCard = ctx.state.players.south.hand.spellbook.find(({ cardId }) =>
+        cardId === secondDrownedCardId);
+      assert.ok(secondDrownedCard);
+      for (const card of [drownedCard, secondDrownedCard]) {
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'summon-minion'
+            && descriptor.cardInstanceId === card.instanceId
+            && descriptor.cell === 'C2'
+            && descriptor.region === 'underwater');
+      }
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardInstanceId === survivorCard.instanceId
+          && descriptor.cell === 'C2'
+          && descriptor.region === 'underwater');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'cast-artifact'
+          && descriptor.cardInstanceId === artifactCard.instanceId
+          && descriptor.bearer?.instanceId === survivorCard.instanceId);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'drop-artifacts'
+          && descriptor.unit.instanceId === survivorCard.instanceId
+          && descriptor.artifactInstanceIds[0] === artifactCard.instanceId);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'atlas');
 
-  const checkpoint = session;
-  const actions = legalGameActions(checkpoint.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'activate-site-destruction'
-      && descriptor.sourceSiteInstanceId === sourceCard.instanceId);
-  assert.deepEqual(actions.flatMap(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
-    ? [descriptor.targetCell]
-    : []), ['C2', 'C3', 'C4']);
-  const protectedActivation = actions.find(({ descriptor }) =>
-    descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C4');
-  assert.ok(protectedActivation);
-  const protectedResult = stepGame(checkpoint, protectedActivation);
-  assert.equal(protectedResult.accepted, true);
-  if (!protectedResult.accepted) return;
-  assert.deepEqual(protectedResult.receipt.events.map(({ type }) => type), [
-    'site-sacrificed',
-    'site-destruction-prevented',
-    'rubble-created',
-  ]);
-  assert.deepEqual(protectedResult.session.state.realm.sites.C4, checkpoint.state.realm.sites.C4);
-  assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === sourceCard.instanceId), true);
-  assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === protectedCard.instanceId), false);
-  assert.equal(verifyGameReplay(protectedResult.session), true);
-  const activation = actions.find(({ descriptor }) =>
-    descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C2');
-  assert.ok(activation);
-  const result = stepGame(checkpoint, activation);
-  assert.equal(result.accepted, true);
-  if (!result.accepted) return;
-  session = result.session;
-  assert.equal(session.state.stateVersion, checkpoint.state.stateVersion + 1);
-  const stale = stepGame(session, activation);
-  assert.equal(stale.accepted, false);
-  assert.equal(stale.reason.code, 'stale_version');
-  assert.deepEqual(result.receipt.events.map(({ type }) => type), [
-    'site-sacrificed',
-    'site-destroyed',
-    'rubble-created',
-    'rubble-created',
-  ]);
-  const drownedInstanceIds = [drownedCard.instanceId, secondDrownedCard.instanceId].sort();
-  assert.equal(session.state.phase, 'deathrite-order');
-  assert.equal(session.state.decisionSeat, 'south');
-  assert.equal(drownedInstanceIds.every((instanceId) => !session.state.realm.units
-    .some((unit) => unit.instanceId === instanceId)), true);
-  assert.equal(drownedInstanceIds.every((instanceId) => !session.state.players.south.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
-  const orderActions = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites');
-  assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), drownedInstanceIds);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === sourceCard.instanceId), true);
-  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
-    instanceId === targetCard.instanceId), true);
-  session = accept(session, orderActions[0]!);
-  assert.equal(drownedInstanceIds.every((instanceId) => session.state.players.south.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
-  const survivor = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === survivorCard.instanceId);
-  assert.equal(survivor?.region, 'underground');
-  const buriedArtifact = session.state.realm.artifacts?.find(({ instanceId }) =>
-    instanceId === artifactCard.instanceId);
-  assert.deepEqual(buriedArtifact, {
-    cardId: artifactCard.cardId,
-    instanceId: artifactCard.instanceId,
-    location: 'C2',
-    owner: 'south',
-    region: 'underground',
-    source: artifactCard.source,
-  });
-  assert.deepEqual(observeGame(session.state, 'north').realm.sites.C2, {
-    cardId: 'rubble',
-    controller: null,
-    elements: [],
-    instanceId: session.state.realm.sites.C2?.instanceId,
-    rubble: true,
-  });
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 1);
-  assert.equal(observeGame(session.state, 'north').players.south.affinity.water, 0);
+      const checkpointSiteC4 = ctx.state.realm.sites.C4;
+      const checkpointVersion = ctx.state.stateVersion;
+      const actions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+        descriptor.kind === 'activate-site-destruction'
+          && descriptor.sourceSiteInstanceId === sourceCard.instanceId);
+      assert.deepEqual(actions.flatMap(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
+        ? [descriptor.targetCell]
+        : []), ['C2', 'C3', 'C4']);
+      const protectedActivation = actions.find(({ descriptor }) =>
+        descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C4');
+      assert.ok(protectedActivation);
+      await withFork(ctx, async (protectedFork) => {
+        const protectedResult = await protectedFork.step(protectedActivation);
+        assert.equal(protectedResult.accepted, true);
+        if (!protectedResult.accepted) return;
+        assert.deepEqual(protectedResult.receipt.events.map(({ type }) => type), [
+          'site-sacrificed',
+          'site-destruction-prevented',
+          'rubble-created',
+        ]);
+        assert.deepEqual(protectedResult.session.state.realm.sites.C4, checkpointSiteC4);
+        assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
+          instanceId === sourceCard.instanceId), true);
+        assert.equal(protectedResult.session.state.players.north.cemetery.some(({ instanceId }) =>
+          instanceId === protectedCard.instanceId), false);
+        assert.equal(await protectedFork.verifyReplay(), true);
+      });
+      const activation = actions.find(({ descriptor }) =>
+        descriptor.kind === 'activate-site-destruction' && descriptor.targetCell === 'C2');
+      assert.ok(activation);
+      const result = await ctx.step(activation);
+      assert.equal(result.accepted, true);
+      if (!result.accepted) return;
+      assert.equal(ctx.state.stateVersion, checkpointVersion + 1);
+      const stale = await ctx.step(activation);
+      assert.equal(stale.accepted, false);
+      assert.equal(stale.reason.code, 'stale_version');
+      assert.deepEqual(result.receipt.events.map(({ type }) => type), [
+        'site-sacrificed',
+        'site-destroyed',
+        'rubble-created',
+        'rubble-created',
+      ]);
+      const drownedInstanceIds = [drownedCard.instanceId, secondDrownedCard.instanceId].sort();
+      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.decisionSeat, 'south');
+      assert.equal(drownedInstanceIds.every((instanceId) => !ctx.state.realm.units
+        .some((unit) => unit.instanceId === instanceId)), true);
+      assert.equal(drownedInstanceIds.every((instanceId) => !ctx.state.players.south.cemetery
+        .some((card) => card.instanceId === instanceId)), true);
+      const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
+        descriptor.kind === 'order-deathrites');
+      assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
+        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+      drownedInstanceIds);
+      assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === sourceCard.instanceId), true);
+      assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+        instanceId === targetCard.instanceId), true);
+      await ctx.accept(orderActions[0]!);
+      assert.equal(drownedInstanceIds.every((instanceId) => ctx.state.players.south.cemetery
+        .some((card) => card.instanceId === instanceId)), true);
+      const survivor = ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === survivorCard.instanceId);
+      assert.equal(survivor?.region, 'underground');
+      const buriedArtifact = ctx.state.realm.artifacts?.find(({ instanceId }) =>
+        instanceId === artifactCard.instanceId);
+      assert.deepEqual(buriedArtifact, {
+        cardId: artifactCard.cardId,
+        instanceId: artifactCard.instanceId,
+        location: 'C2',
+        owner: 'south',
+        region: 'underground',
+        source: artifactCard.source,
+      });
+      assert.deepEqual(ctx.observe('north').realm.sites.C2, {
+        cardId: 'rubble',
+        controller: null,
+        elements: [],
+        instanceId: ctx.state.realm.sites.C2?.instanceId,
+        rubble: true,
+      });
+      assert.equal(ctx.observe('north').players.north.affinity.earth, 1);
+      assert.equal(ctx.observe('north').players.south.affinity.water, 0);
 
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  assert.deepEqual(session.transcript.at(-1)?.events.map(({ type }) => type), [
-    'rubble-replaced',
-    'site-played',
-  ]);
-  assert.equal(session.state.realm.sites.C3?.controller, 'north');
-  assert.equal('rubble' in session.state.realm.sites.C3!, false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const replacement = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site'
-      && descriptor.cardInstanceId === replacementCard.instanceId
-      && descriptor.cell === 'C2'));
-  assert.equal(replacement.accepted, true);
-  if (!replacement.accepted) return;
-  session = replacement.session;
-  assert.deepEqual(replacement.receipt.events.map(({ type }) => type), [
-    'rubble-replaced',
-    'site-played',
-  ]);
-  assert.deepEqual(session.state.realm.artifacts?.find(({ instanceId }) =>
-    instanceId === artifactCard.instanceId), { ...buriedArtifact, region: 'underwater' });
-  assert.equal(verifyGameReplay(session), true);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+      assert.deepEqual(ctx.session.transcript.at(-1)?.events.map(({ type }) => type), [
+        'rubble-replaced',
+        'site-played',
+      ]);
+      assert.equal(ctx.state.realm.sites.C3?.controller, 'north');
+      assert.equal('rubble' in ctx.state.realm.sites.C3!, false);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      const replacement = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'play-site'
+          && descriptor.cardInstanceId === replacementCard.instanceId
+          && descriptor.cell === 'C2'));
+      assert.equal(replacement.accepted, true);
+      if (!replacement.accepted) return;
+      assert.deepEqual(replacement.receipt.events.map(({ type }) => type), [
+        'rubble-replaced',
+        'site-played',
+      ]);
+      assert.deepEqual(ctx.state.realm.artifacts?.find(({ instanceId }) =>
+        instanceId === artifactCard.instanceId), { ...buriedArtifact, region: 'underwater' });
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  });
 });
 
 test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled site', async () => {
@@ -2101,7 +2109,7 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
   });
 });
 
-test('RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery', () => {
+test('RULE-03/04 token Magic summons deterministically and tokens banish instead of entering a cemetery', async () => {
   const decks = {
     north: deck('token-north', 6, 6),
     south: deck('token-south', 6, 6),
@@ -2162,111 +2170,108 @@ test('RULE-03/04 token Magic summons deterministically and tokens banish instead
     },
   }), /unsupported spell/);
 
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  const emptyCast = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'cast-magic' && descriptor.target === undefined));
-  assert.equal(emptyCast.accepted, true);
-  if (!emptyCast.accepted) return;
-  session = emptyCast.session;
-  assert.deepEqual(emptyCast.receipt.events.map(({ type }) => type), ['magic-cast', 'magic-resolved']);
-  assert.equal(session.state.realm.units.some(({ source }) => source === 'token'), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'B2');
-  const attacker = session.state.realm.units.find(({ controller, location }) =>
-    controller === 'south' && location === 'B2');
-  assert.ok(attacker);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const emptyCast = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.target === undefined));
+    assert.equal(emptyCast.accepted, true);
+    if (!emptyCast.accepted) return;
+    assert.deepEqual(emptyCast.receipt.events.map(({ type }) => type), ['magic-cast', 'magic-resolved']);
+    assert.equal(ctx.state.realm.units.some(({ source }) => source === 'token'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'B2');
+    const attacker = ctx.state.realm.units.find(({ controller, location }) =>
+      controller === 'south' && location === 'B2');
+    assert.ok(attacker);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
 
-  const tokenCast = action(session, ({ descriptor }) => descriptor.kind === 'cast-magic');
-  assert.equal(tokenCast.descriptor.kind === 'cast-magic' && tokenCast.descriptor.target, undefined);
-  const sourceInstanceId = tokenCast.descriptor.kind === 'cast-magic'
-    ? tokenCast.descriptor.cardInstanceId
-    : '';
-  const summoned = stepGame(session, tokenCast);
-  assert.equal(summoned.accepted, true);
-  if (!summoned.accepted) return;
-  session = summoned.session;
-  const summonEvents = summoned.receipt.events.filter(({ payload, type }) =>
-    type === 'minion-summoned'
-      && (payload as { sourceInstanceId?: string }).sourceInstanceId === sourceInstanceId);
-  assert.deepEqual(summonEvents.map(({ payload }) =>
-    (payload as { cell: string }).cell), ['B3', 'C3']);
-  const tokens = session.state.realm.units
-    .filter(({ source }) => source === 'token')
-    .sort((left, right) => left.location.localeCompare(right.location));
-  assert.deepEqual(tokens.map(({ controller, damage, location, owner, region, source,
-    summoningSickness, tapped }) => ({
-    controller, damage, location, owner, region, source, summoningSickness, tapped,
-  })), [
-    {
-      controller: 'north', damage: 0, location: 'B3', owner: 'north', region: 'surface',
-      source: 'token', summoningSickness: true, tapped: false,
-    },
-    {
-      controller: 'north', damage: 0, location: 'C3', owner: 'north', region: 'surface',
-      source: 'token', summoningSickness: true, tapped: false,
-    },
-  ]);
-  assert.equal(new Set(tokens.map(({ instanceId }) => instanceId)).size, 2);
-  assert.deepEqual(observeGame(session.state, 'south').realm.units
-    .filter(({ token }) => token)
-    .map(({ attack, defense, instanceId }) => ({ attack, defense, instanceId })),
-  tokens.map(({ instanceId }) => ({ attack: 1, defense: 1, instanceId })));
-  assert.deepEqual(summonEvents.map(({ payload }) =>
-    (payload as { instanceId: string }).instanceId), tokens.map(({ instanceId }) => instanceId));
-  assert.deepEqual(summoned.receipt.randomDraws, []);
-  const killed = tokens[0]!;
-  const survivor = tokens[1]!;
+    const tokenCast = await ctx.action(({ descriptor }) => descriptor.kind === 'cast-magic');
+    assert.equal(tokenCast.descriptor.kind === 'cast-magic' && tokenCast.descriptor.target, undefined);
+    const sourceInstanceId = tokenCast.descriptor.kind === 'cast-magic'
+      ? tokenCast.descriptor.cardInstanceId
+      : '';
+    const summoned = await ctx.step(tokenCast);
+    assert.equal(summoned.accepted, true);
+    if (!summoned.accepted) return;
+    const summonEvents = summoned.receipt.events.filter(({ payload, type }) =>
+      type === 'minion-summoned'
+        && (payload as { sourceInstanceId?: string }).sourceInstanceId === sourceInstanceId);
+    assert.deepEqual(summonEvents.map(({ payload }) =>
+      (payload as { cell: string }).cell), ['B3', 'C3']);
+    const tokens = ctx.state.realm.units
+      .filter(({ source }) => source === 'token')
+      .sort((left, right) => left.location.localeCompare(right.location));
+    assert.deepEqual(tokens.map(({ controller, damage, location, owner, region, source,
+      summoningSickness, tapped }) => ({
+      controller, damage, location, owner, region, source, summoningSickness, tapped,
+    })), [
+      {
+        controller: 'north', damage: 0, location: 'B3', owner: 'north', region: 'surface',
+        source: 'token', summoningSickness: true, tapped: false,
+      },
+      {
+        controller: 'north', damage: 0, location: 'C3', owner: 'north', region: 'surface',
+        source: 'token', summoningSickness: true, tapped: false,
+      },
+    ]);
+    assert.equal(new Set(tokens.map(({ instanceId }) => instanceId)).size, 2);
+    assert.deepEqual(ctx.observe('south').realm.units
+      .filter(({ token }) => token)
+      .map(({ attack, defense, instanceId }) => ({ attack, defense, instanceId })),
+    tokens.map(({ instanceId }) => ({ attack: 1, defense: 1, instanceId })));
+    assert.deepEqual(summonEvents.map(({ payload }) =>
+      (payload as { instanceId: string }).instanceId), tokens.map(({ instanceId }) => instanceId));
+    assert.deepEqual(summoned.receipt.randomDraws, []);
+    const killed = tokens[0]!;
+    const survivor = tokens[1]!;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === attacker.instanceId
-    && descriptor.to.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'declare-attack'
-    && descriptor.target.kind === 'minion'
-    && descriptor.target.instanceId === killed.instanceId);
-  const fight = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(fight.accepted, true);
-  if (!fight.accepted) return;
-  session = fight.session;
-  const tokenExitEvents = fight.receipt.events.filter(({ payload, type }) =>
-    (type === 'minion-died' || type === 'minion-banished')
-      && (payload as { instanceId?: string }).instanceId === killed.instanceId);
-  assert.deepEqual(tokenExitEvents.map(({ type }) => type), ['minion-died', 'minion-banished']);
-  const diedIndex = fight.receipt.events.indexOf(tokenExitEvents[0]!);
-  assert.equal(fight.receipt.events[diedIndex + 1], tokenExitEvents[1]);
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === killed.instanceId), false);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === killed.instanceId), false);
-  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) =>
-    instanceId === killed.instanceId), false);
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === survivor.instanceId)?.instanceId, survivor.instanceId);
-  assert.equal(verifyGameReplay(session), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === attacker.instanceId
+      && descriptor.to.cell === 'B3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'declare-attack'
+      && descriptor.target.kind === 'minion'
+      && descriptor.target.instanceId === killed.instanceId);
+    const fight = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+    assert.equal(fight.accepted, true);
+    if (!fight.accepted) return;
+    const tokenExitEvents = fight.receipt.events.filter(({ payload, type }) =>
+      (type === 'minion-died' || type === 'minion-banished')
+        && (payload as { instanceId?: string }).instanceId === killed.instanceId);
+    assert.deepEqual(tokenExitEvents.map(({ type }) => type), ['minion-died', 'minion-banished']);
+    const diedIndex = fight.receipt.events.indexOf(tokenExitEvents[0]!);
+    assert.equal(fight.receipt.events[diedIndex + 1], tokenExitEvents[1]);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === killed.instanceId), false);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === killed.instanceId), false);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === killed.instanceId), false);
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === survivor.instanceId)?.instanceId, survivor.instanceId);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana', () => {
+test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card instead of paying mana', async () => {
   const decks = {
     north: deck('aramos-north', 6, 8),
     south: deck('aramos-south', 6, 8),
@@ -2314,99 +2319,107 @@ test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card in
     },
   }), /discardRandomCardInsteadOfMana must be true/);
 
-  let session = keep(keep(createGameSession(gameManifest)));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  assert.equal(session.state.players.north.mana, 1);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'atlas'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  assert.equal(session.state.players.north.mana, 2);
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(ctx.state.players.north.mana, 1);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    assert.equal(ctx.state.players.north.mana, 2);
 
-  const alternateActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.paymentMode === 'random-card-discard');
-  assert.ok(alternateActions.length > 0);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.paymentMode === undefined), false);
-  assert.ok(alternateActions.every(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.manaCost === 0));
-  const cast = alternateActions.find(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C3');
-  assert.ok(cast);
-  const castInstanceId = cast.descriptor.kind === 'summon-minion'
-    ? cast.descriptor.cardInstanceId
-    : '';
-  const eligible = [
-    ...session.state.players.north.hand.atlas.map((candidate) => ({ ...candidate, zone: 'atlas' as const })),
-    ...session.state.players.north.hand.spellbook
-      .filter(({ instanceId }) => instanceId !== castInstanceId)
-      .map((candidate) => ({ ...candidate, zone: 'spellbook' as const })),
-  ];
-  assert.ok(eligible.length > 0);
-  assert.deepEqual(new Set(eligible.map(({ zone }) => zone)), new Set(['atlas', 'spellbook']));
-  const handBefore = session.state.players.north.hand;
-  const southBefore = canonicalJson(observeGame(session.state, 'south'));
-  assert.ok(eligible.every(({ cardId, instanceId }) =>
-    !southBefore.includes(cardId) && !southBefore.includes(instanceId)));
-  const checkpoint = session;
-  const first = stepGame(checkpoint, cast);
-  const second = stepGame(checkpoint, cast);
-  assert.equal(first.accepted, true);
-  assert.equal(second.accepted, true);
-  assert.deepEqual(second.receipt.randomDraws, first.receipt.randomDraws);
-  assert.deepEqual(second.receipt.events, first.receipt.events);
-  assert.equal(hashGameState(second.session.state), hashGameState(first.session.state));
-  session = first.session;
+    const alternateActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.paymentMode === 'random-card-discard');
+    assert.ok(alternateActions.length > 0);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.paymentMode === undefined), false);
+    assert.ok(alternateActions.every(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.manaCost === 0));
+    const cast = alternateActions.find(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.cell === 'C3');
+    assert.ok(cast);
+    const castInstanceId = cast.descriptor.kind === 'summon-minion'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const eligible = [
+      ...ctx.state.players.north.hand.atlas.map((candidate) => ({ ...candidate, zone: 'atlas' as const })),
+      ...ctx.state.players.north.hand.spellbook
+        .filter(({ instanceId }) => instanceId !== castInstanceId)
+        .map((candidate) => ({ ...candidate, zone: 'spellbook' as const })),
+    ];
+    assert.ok(eligible.length > 0);
+    assert.deepEqual(new Set(eligible.map(({ zone }) => zone)), new Set(['atlas', 'spellbook']));
+    const handBefore = ctx.state.players.north.hand;
+    const southBefore = canonicalJson(ctx.observe('south'));
+    assert.ok(eligible.every(({ cardId, instanceId }) =>
+      !southBefore.includes(cardId) && !southBefore.includes(instanceId)));
+    await withFork(ctx, async (firstFork) => {
+      const first = await firstFork.step(cast);
+      await withFork(ctx, async (secondFork) => {
+        const second = await secondFork.step(cast);
+        assert.equal(first.accepted, true);
+        assert.equal(second.accepted, true);
+        if (!first.accepted || !second.accepted) return;
+        assert.deepEqual(second.receipt.randomDraws, first.receipt.randomDraws);
+        assert.deepEqual(second.receipt.events, first.receipt.events);
+        assert.equal(secondFork.stateHash(), firstFork.stateHash());
+      });
+      assert.equal(first.accepted, true);
+      if (!first.accepted) return;
 
-  const discard = first.receipt.events.find(({ type }) => type === 'card-discarded');
-  assert.ok(discard);
-  assert.equal(typeof discard.payload, 'object');
-  assert.ok(discard.payload && !Array.isArray(discard.payload));
-  const discardPayload = discard.payload as Readonly<Record<string, unknown>>;
-  const discardedInstanceId = discardPayload.instanceId;
-  const discardedCardId = discardPayload.cardId;
-  const discardedZone = discardPayload.zone;
-  assert.equal(discardPayload.sourceInstanceId, castInstanceId);
-  assert.ok(eligible.some(({ cardId, instanceId, zone }) =>
-    cardId === discardedCardId && instanceId === discardedInstanceId && zone === discardedZone));
-  assert.deepEqual(first.receipt.events.map(({ type }) => type), [
-    'card-discarded',
-    'minion-summoned',
-  ]);
-  const summoned = first.receipt.events[1];
-  assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
-  assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 0);
-  assert.equal(session.state.players.north.mana, 2);
-  assert.equal(session.state.players.north.hand.atlas.length,
-    handBefore.atlas.length - (discardedZone === 'atlas' ? 1 : 0));
-  assert.equal(session.state.players.north.hand.spellbook.length,
-    handBefore.spellbook.length - 1 - (discardedZone === 'spellbook' ? 1 : 0));
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === discardedInstanceId), true);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) =>
-    instanceId === castInstanceId), false);
-  assert.ok(first.receipt.randomDraws.length > 0);
-  assert.ok(first.receipt.randomDraws.every(({ domain, purpose }) => {
-    if (typeof domain !== 'object' || domain === null || Array.isArray(domain)) return false;
-    const drawDomain = domain as Readonly<Record<string, unknown>>;
-    return purpose === 'summon_random_card_discard_cost'
-      && drawDomain.kind === 'card_index_candidate'
-      && drawDomain.exclusiveMaximum === eligible.length;
-  }));
-  const southAfter = canonicalJson(observeGame(session.state, 'south'));
-  assert.ok(southAfter.includes(String(discardedCardId)));
-  assert.ok(southAfter.includes(String(discardedInstanceId)));
-  assert.equal(verifyGameReplay(session), true);
+      const discard = first.receipt.events.find(({ type }) => type === 'card-discarded');
+      assert.ok(discard);
+      assert.equal(typeof discard.payload, 'object');
+      assert.ok(discard.payload && !Array.isArray(discard.payload));
+      const discardPayload = discard.payload as Readonly<Record<string, unknown>>;
+      const discardedInstanceId = discardPayload.instanceId;
+      const discardedCardId = discardPayload.cardId;
+      const discardedZone = discardPayload.zone;
+      assert.equal(discardPayload.sourceInstanceId, castInstanceId);
+      assert.ok(eligible.some(({ cardId, instanceId, zone }) =>
+        cardId === discardedCardId && instanceId === discardedInstanceId && zone === discardedZone));
+      assert.deepEqual(first.receipt.events.map(({ type }) => type), [
+        'card-discarded',
+        'minion-summoned',
+      ]);
+      const summoned = first.receipt.events[1];
+      assert.ok(summoned && typeof summoned.payload === 'object' && !Array.isArray(summoned.payload));
+      assert.equal((summoned.payload as Readonly<Record<string, unknown>>).manaPaid, 0);
+      assert.equal(firstFork.state.players.north.mana, 2);
+      assert.equal(firstFork.state.players.north.hand.atlas.length,
+        handBefore.atlas.length - (discardedZone === 'atlas' ? 1 : 0));
+      assert.equal(firstFork.state.players.north.hand.spellbook.length,
+        handBefore.spellbook.length - 1 - (discardedZone === 'spellbook' ? 1 : 0));
+      assert.equal(firstFork.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === discardedInstanceId), true);
+      assert.equal(firstFork.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === castInstanceId), false);
+      assert.ok(first.receipt.randomDraws.length > 0);
+      assert.ok(first.receipt.randomDraws.every(({ domain, purpose }) => {
+        if (typeof domain !== 'object' || domain === null || Array.isArray(domain)) return false;
+        const drawDomain = domain as Readonly<Record<string, unknown>>;
+        return purpose === 'summon_random_card_discard_cost'
+          && drawDomain.kind === 'card_index_candidate'
+          && drawDomain.exclusiveMaximum === eligible.length;
+      }));
+      const southAfter = canonicalJson(firstFork.observe('south'));
+      assert.ok(southAfter.includes(String(discardedCardId)));
+      assert.ok(southAfter.includes(String(discardedInstanceId)));
+      assert.equal(await firstFork.verifyReplay(), true);
+    });
+  });
 });
 
 test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discounted summon', () => {
