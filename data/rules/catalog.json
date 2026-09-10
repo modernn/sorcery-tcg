@@ -3956,6 +3956,53 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0191_oversized_scent_hounds_strip_stealth_near_any_footprint_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0192",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that gains Stealth only with no nearby enemies treats an enemy nearby any occupied footprint cell as nearby.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsStealthAtEndOfTurnIfNoEnemiesNearby"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0192_oversized_conditional_stealth_sees_enemies_near_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0193",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that gains Stealth only with no nearby enemies still gains it when the only enemy Avatar is far from every occupied cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsStealthAtEndOfTurnIfNoEnemiesNearby"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "stealth-gained",
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar"
+      }
     }
   ]
 }

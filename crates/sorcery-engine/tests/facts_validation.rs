@@ -9,7 +9,7 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 mod facts;
 
 use facts::{
-    CardFacts, Element, MagicEffect, MinionGenesis, RequiredCastRegion, Thresholds,
+    CardFacts, Element, EndTurnStealth, MagicEffect, MinionGenesis, RequiredCastRegion, Thresholds,
     parse_card_definition,
 };
 
@@ -1043,4 +1043,24 @@ fn oversized_nearby_aura_and_stealth_loss_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.nearby_enemies_permanently_lose_stealth);
+}
+
+#[test]
+fn oversized_conditional_end_turn_stealth_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-conditional-stealth",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "gainsStealthAtEndOfTurnIfNoEnemiesNearby",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized conditional end-turn Stealth minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.end_turn_stealth,
+        Some(EndTurnStealth::IfNoEnemiesNearby)
+    );
 }

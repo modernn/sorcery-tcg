@@ -2043,3 +2043,75 @@ fn rule_catalog_0191_oversized_scent_hounds_strip_stealth_near_any_footprint_cel
     );
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0192_oversized_conditional_stealth_sees_enemies_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "gainsStealthAtEndOfTurnIfNoEnemiesNearby": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let enemy = stage_south_on_north_d4(&mut session);
+    assert_eq!(unit(&state(&session), &enemy)["location"], "D4");
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "stealth-gained"),
+        "C4 is nearby to D4, so the B3-anchored 2x2 must not gain conditional Stealth"
+    );
+    assert_eq!(unit(&state(&session), &giant)["stealthed"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar() {
+    let mut session = composition_session(
+        &json!({ "gainsStealthAtEndOfTurnIfNoEnemiesNearby": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        state(&session)["players"]["south"]["avatar"]["location"],
+        "C1",
+        "the far South Avatar is not nearby the B3 square"
+    );
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&ended)[0..2],
+        ["stealth-gained", "turn-ended"],
+        "no nearby enemy means the 2x2 still gains conditional Stealth"
+    );
+    assert_eq!(
+        ended.events[0].payload,
+        json!({ "instanceId": giant, "seat": "north" })
+    );
+    assert_eq!(unit(&state(&session), &giant)["stealthed"], true);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert_exact_replay(&session);
+}

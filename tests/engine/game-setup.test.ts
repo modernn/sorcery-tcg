@@ -10016,6 +10016,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { tapToDamageEachUnitAtAdjacentLocation: 2 as const },
     { otherNearbyAlliesPowerBonus: 1 as const },
     { nearbyEnemiesPermanentlyLoseStealth: true as const },
+    { gainsStealthAtEndOfTurnIfNoEnemiesNearby: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,
