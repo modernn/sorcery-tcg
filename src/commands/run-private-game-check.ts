@@ -4622,6 +4622,8 @@ function gameDefinition(
   healTargetMinion: 0 | 1 = 0,
   deathriteMillSpells = false,
   deathriteMillSites = false,
+  atEndOfControllerTurnControllerGainsLife: 0 | 2 = 0,
+  atEndOfControllerTurnControllerLosesLife: 0 | 2 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4871,6 +4873,12 @@ function gameDefinition(
         : {}),
       ...(atEndOfControllerTurnDamageEachOtherUnitHere
         ? { atEndOfControllerTurnDamageEachOtherUnitHere }
+        : {}),
+      ...(atEndOfControllerTurnControllerGainsLife
+        ? { atEndOfControllerTurnControllerGainsLife }
+        : {}),
+      ...(atEndOfControllerTurnControllerLosesLife
+        ? { atEndOfControllerTurnControllerLosesLife }
         : {}),
       ...(atStartOfControllerTurnMillSpells
         ? { atStartOfControllerTurnMillSpells }

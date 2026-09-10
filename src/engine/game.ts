@@ -384,6 +384,8 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    atEndOfControllerTurnControllerGainsLife?: number;
+    atEndOfControllerTurnControllerLosesLife?: number;
     atEndOfControllerTurnDamageEachOtherUnitHere?: number;
     atStartOfControllerTurnControllerGainsLife?: number;
     atStartOfControllerTurnControllerGainsMana?: number;
@@ -1215,7 +1217,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atEndOfControllerTurnControllerGainsLife atEndOfControllerTurnControllerLosesLife atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal deathriteMillSites deathriteMillSpells
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -2209,7 +2211,29 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atEndOfControllerTurnDamageEachOtherUnitHere must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
     );
   }
-  if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined
+  if (card.atEndOfControllerTurnControllerGainsLife !== undefined
+    && (!Number.isSafeInteger(card.atEndOfControllerTurnControllerGainsLife)
+      || card.atEndOfControllerTurnControllerGainsLife < 1
+      || card.atEndOfControllerTurnControllerGainsLife > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.atEndOfControllerTurnControllerGainsLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
+  if (card.atEndOfControllerTurnControllerLosesLife !== undefined
+    && (!Number.isSafeInteger(card.atEndOfControllerTurnControllerLosesLife)
+      || card.atEndOfControllerTurnControllerLosesLife < 1
+      || card.atEndOfControllerTurnControllerLosesLife > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.atEndOfControllerTurnControllerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
+  const endTurnPulseCount = Number(card.atEndOfControllerTurnDamageEachOtherUnitHere !== undefined)
+    + Number(card.atEndOfControllerTurnControllerGainsLife !== undefined)
+    + Number(card.atEndOfControllerTurnControllerLosesLife !== undefined);
+  if (endTurnPulseCount > 1) {
+    throw new RangeError(`${path} competing end-turn pulses are unsupported`);
+  }
+  if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined)
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDamageEachOtherUnitHere)
       || card.atStartOfControllerTurnDamageEachOtherUnitHere < 1
       || card.atStartOfControllerTurnDamageEachOtherUnitHere > MAX_COMBAT_STAT)) {
@@ -2812,6 +2836,18 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? {
                 atEndOfControllerTurnDamageEachOtherUnitHere:
                   card.atEndOfControllerTurnDamageEachOtherUnitHere,
+              }
+              : {}),
+            ...(card.atEndOfControllerTurnControllerGainsLife !== undefined
+              ? {
+                atEndOfControllerTurnControllerGainsLife:
+                  card.atEndOfControllerTurnControllerGainsLife,
+              }
+              : {}),
+            ...(card.atEndOfControllerTurnControllerLosesLife !== undefined
+              ? {
+                atEndOfControllerTurnControllerLosesLife:
+                  card.atEndOfControllerTurnControllerLosesLife,
               }
               : {}),
             ...(card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined

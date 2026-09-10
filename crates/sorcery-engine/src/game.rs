@@ -1451,6 +1451,8 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_end_of_controller_turn_controller_gains_life: _,
+        at_end_of_controller_turn_controller_loses_life: _,
         at_end_of_controller_turn_damage_each_other_unit_here: _,
         at_start_of_controller_turn_controller_gains_life: _,
         at_start_of_controller_turn_controller_gains_mana: _,
@@ -19647,6 +19649,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         self.resolve_end_of_each_turn_site_controller_life_loss(seat, outcomes)?;
+        self.resolve_end_of_controller_turn_controller_life(seat, outcomes)?;
         let pulses: Vec<_> = self
             .position
             .units
@@ -19680,6 +19683,43 @@ impl Game {
             .collect();
         self.continue_end_turn_effects(seat, &pulses, &triggered, outcomes, random_draws)?;
         self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn resolve_end_of_controller_turn_controller_life(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                if let Some(amount) = facts.at_end_of_controller_turn_controller_gains_life {
+                    Some((unit.card.instance_id.clone(), amount, true))
+                } else {
+                    facts
+                        .at_end_of_controller_turn_controller_loses_life
+                        .map(|amount| (unit.card.instance_id.clone(), amount, false))
+                }
+            })
+            .collect();
+        for (instance_id, amount, gain) in sources {
+            if gain {
+                self.heal_avatar(seat, u16::from(amount), &instance_id, outcomes)?;
+            } else {
+                self.apply_avatar_life_loss(seat, u16::from(amount), &instance_id, outcomes);
+            }
+        }
         Ok(())
     }
 
@@ -21916,6 +21956,20 @@ mod tests {
             .expect("valid Deathrite site-mill manifest")
             .ensure_selfplay_supported()
             .expect("Deathrite site mill is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atEndOfControllerTurnControllerGainsLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-gain manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life gain is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-loss manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life loss is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

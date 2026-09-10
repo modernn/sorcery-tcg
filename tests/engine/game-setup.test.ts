@@ -2332,6 +2332,82 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && endTurnHereDamageManifest.cards[firstSpell].atEndOfControllerTurnDamageEachOtherUnitHere,
     1,
   );
+  for (const atEndOfControllerTurnControllerGainsLife of [0, 1.5, 101]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atEndOfControllerTurnControllerGainsLife,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atEndOfControllerTurnControllerGainsLife must be a safe integer between 1 and 100/);
+  }
+  for (const atEndOfControllerTurnControllerLosesLife of [0, 1.5, 101]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atEndOfControllerTurnControllerLosesLife,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atEndOfControllerTurnControllerLosesLife must be a safe integer between 1 and 100/);
+  }
+  const endTurnLifeGainManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atEndOfControllerTurnControllerGainsLife: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    endTurnLifeGainManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeGainManifest.cards[firstSpell].atEndOfControllerTurnControllerGainsLife,
+    2,
+  );
+  const endTurnLifeLossManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atEndOfControllerTurnControllerLosesLife: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    endTurnLifeLossManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeLossManifest.cards[firstSpell].atEndOfControllerTurnControllerLosesLife,
+    2,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atEndOfControllerTurnControllerGainsLife: 2,
+        atEndOfControllerTurnControllerLosesLife: 2,
+      } as GameCardDefinition,
+    },
+  }), /competing end-turn pulses are unsupported/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atEndOfControllerTurnControllerGainsLife: 2,
+        atEndOfControllerTurnDamageEachOtherUnitHere: 1,
+      } as GameCardDefinition,
+    },
+  }), /competing end-turn pulses are unsupported/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -27035,6 +27111,224 @@ test('RULE-03 Deathrite mill puts a public library card in the cemetery or no-op
   };
   await run(6, true);
   await run(3, false);
+});
+
+test('RULE-04 end-turn controller life gain heals and cannot leave Death\'s Door', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cardsFor = (life: number): Record<string, GameCardDefinition> => ({
+    'ender-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life,
+    },
+    'ender-north-site': { cardType: 'site', elements: ['earth'] },
+    'ender-north-source': {
+      atEndOfControllerTurnControllerGainsLife: 2,
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'ender-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ender-south-drain': {
+      cardType: 'magic',
+      manaCost: 0,
+      targetPlayerLosesLife: 2,
+      thresholds,
+    },
+    'ender-south-site': { cardType: 'site', elements: ['earth'] },
+  });
+  const afterSouthDrainsNorth = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ender-north-source'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ender-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'ender-south-drain'
+        && descriptor.target?.kind === 'avatar'
+        && descriptor.target.seat === 'north');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+  const run = async (life: number, afterDrain: number, expectLife: number, deathsDoor: boolean) => {
+    const gameManifest = createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-end-turn-controller-life-gain-v1',
+      },
+      cards: cardsFor(life),
+      decks: {
+        north: {
+          atlas: Array(6).fill('ender-north-site'),
+          avatar: 'ender-north-avatar',
+          spellbook: Array(6).fill('ender-north-source'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('ender-south-site'),
+          avatar: 'ender-south-avatar',
+          spellbook: Array(6).fill('ender-south-drain'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    });
+    await withSetup(gameManifest, async (ctx) => {
+      await afterSouthDrainsNorth(ctx);
+      assert.equal(ctx.state.phase === 'draw', true);
+      assert.equal(ctx.state.players.north.avatar.life, afterDrain);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+      const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'end-turn'));
+      assert.equal(ended.accepted, true);
+      if (!ended.accepted) {
+        return;
+      }
+      assert.equal(ctx.state.players.north.avatar.life, expectLife);
+      assert.equal(ctx.state.players.north.avatar.deathDoorTurn == null, !deathsDoor);
+      if (deathsDoor) {
+        assert.equal(
+          ended.receipt.events.some(({ type }) => type === 'avatar-healed'),
+          false,
+        );
+        assert.equal(ctx.state.turnNumber, 4);
+        assert.equal(ctx.state.players.north.avatar.deathDoorTurn, 2);
+      } else {
+        assert.equal(ended.receipt.events.some(({ payload, type }) =>
+          type === 'avatar-healed'
+          && typeof payload === 'object'
+          && payload !== null
+          && 'amount' in payload
+          && payload.amount === 2
+          && 'life' in payload
+          && payload.life === 20
+          && 'seat' in payload
+          && payload.seat === 'north'), true);
+      }
+      assert.equal(ctx.state.terminal.status, 'active');
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(20, 18, 20, false);
+  await run(2, 0, 0, true);
+});
+
+test('RULE-04 end-turn controller life loss reduces the Avatar and can open Death\'s Door', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cardsFor = (life: number): Record<string, GameCardDefinition> => ({
+    'loser-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life,
+    },
+    'loser-north-site': { cardType: 'site', elements: ['earth'] },
+    'loser-north-source': {
+      atEndOfControllerTurnControllerLosesLife: 2,
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'loser-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'loser-south-dummy': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'loser-south-site': { cardType: 'site', elements: ['earth'] },
+  });
+  const run = async (life: number, expectLife: number, deathsDoor: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-end-turn-controller-life-loss-v1',
+      },
+      cards: cardsFor(life),
+      decks: {
+        north: {
+          atlas: Array(6).fill('loser-north-site'),
+          avatar: 'loser-north-avatar',
+          spellbook: Array(6).fill('loser-north-source'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('loser-south-site'),
+          avatar: 'loser-south-avatar',
+          spellbook: Array(6).fill('loser-south-dummy'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 1,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'loser-north-source'
+          && descriptor.cell === 'C4');
+      const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'end-turn'));
+      assert.equal(ended.accepted, true);
+      if (!ended.accepted) {
+        return;
+      }
+      assert.equal(ctx.state.players.north.avatar.life, expectLife);
+      assert.equal(ended.receipt.events.some(({ payload, type }) =>
+        type === 'avatar-life-lost'
+        && typeof payload === 'object'
+        && payload !== null
+        && 'amount' in payload
+        && payload.amount === 2
+        && 'life' in payload
+        && payload.life === expectLife
+        && 'seat' in payload
+        && payload.seat === 'north'), true);
+      if (deathsDoor) {
+        assert.equal(
+          ended.receipt.events.some(({ type }) => type === 'avatar-reached-deaths-door'),
+          true,
+        );
+        assert.equal(ctx.state.players.north.avatar.deathDoorTurn, 1);
+        assert.equal(ctx.state.turnNumber, 2);
+      } else {
+        assert.equal(ctx.state.players.north.avatar.deathDoorTurn == null, true);
+      }
+      assert.equal(ctx.state.terminal.status, 'active');
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(20, 18, false);
+  await run(2, 0, true);
 });
 
 test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {

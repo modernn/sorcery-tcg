@@ -913,6 +913,50 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be between",
         ),
         (
+            "end-turn controller life gain range",
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "end-turn controller life loss range",
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerLosesLife",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "competing end-turn life pulses",
+            with(
+                with(
+                    minion(),
+                    "atEndOfControllerTurnControllerGainsLife",
+                    json!(2),
+                ),
+                "atEndOfControllerTurnControllerLosesLife",
+                json!(2),
+            ),
+            "competing end-turn",
+        ),
+        (
+            "competing end-turn here damage and life gain",
+            with(
+                with(
+                    minion(),
+                    "atEndOfControllerTurnDamageEachOtherUnitHere",
+                    json!(1),
+                ),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "competing end-turn",
+        ),
+        (
             "start-turn lure flag",
             with(
                 minion(),
@@ -1126,6 +1170,56 @@ fn typed_effects_should_retain_only_normalized_values() {
         facts.at_end_of_controller_turn_damage_each_other_unit_here,
         Some(1)
     );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-gain",
+        &with(
+            minion(),
+            "atEndOfControllerTurnControllerGainsLife",
+            json!(2),
+        ),
+    )
+    .expect("valid end-turn life-gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-loss",
+        &with(
+            minion(),
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(2),
+        ),
+    )
+    .expect("valid end-turn life-loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_loses_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-gain-with-ignited",
+        &with(
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "diesAtEndOfControllerTurn",
+            json!(true),
+        ),
+    )
+    .expect("Ignited may coexist with an end-turn life pulse") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    assert!(facts.dies_at_end_of_controller_turn);
     let CardFacts::Minion(facts) = parse_card_definition(
         "must-attack",
         &with(minion(), "mustAttackAUnitIfAble", json!(true)),
