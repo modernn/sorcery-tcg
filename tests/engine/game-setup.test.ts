@@ -11864,7 +11864,7 @@ test('RULE-04 an active minion prevents damage from a unit at its current-power 
   }
 });
 
-test('RULE-04 Ranged damage retains its attacking unit source classification', () => {
+test('RULE-04 Ranged damage retains its attacking unit source classification', async () => {
   const gameManifest = manifest(174, {
     northSpell: {
       attack: 4,
@@ -11882,50 +11882,49 @@ test('RULE-04 Ranged damage retains its attacking unit source classification', (
     },
     site: { rangedUnitsHereRangeBonus: 1 },
   });
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
-  const shooter = session.state.realm.units.find(({ controller }) => controller === 'north');
-  assert.ok(shooter);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
-  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
-  assert.ok(target);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === shooter.instanceId && descriptor.to.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const shot = stepGame(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'shoot-projectile'
-      && descriptor.shooterInstanceId === shooter.instanceId
-      && descriptor.hit?.instanceId === target.instanceId));
-  assert.equal(shot.accepted, true);
-  if (!shot.accepted) return;
-  session = shot.session;
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId)?.damage, 0);
-  assert.deepEqual(shot.receipt.events.map(({ type }) => type), [
-    'projectile-shot',
-    'strike-damage-allocated',
-    'damage-dealt',
-  ]);
-  assert.equal(shot.receipt.randomDraws.length, 0);
-  assert.equal(verifyGameReplay(session), true);
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+    const shooter = ctx.state.realm.units.find(({ controller }) => controller === 'north');
+    assert.ok(shooter);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+    const target = ctx.state.realm.units.find(({ controller }) => controller === 'south');
+    assert.ok(target);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === shooter.instanceId && descriptor.to.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const shot = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.shooterInstanceId === shooter.instanceId
+        && descriptor.hit?.instanceId === target.instanceId));
+    assert.equal(shot.accepted, true);
+    if (!shot.accepted) return;
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.damage, 0);
+    assert.deepEqual(shot.receipt.events.map(({ type }) => type), [
+      'projectile-shot',
+      'strike-damage-allocated',
+      'damage-dealt',
+    ]);
+    assert.equal(shot.receipt.randomDraws.length, 0);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the first visible unit', () => {
+test('RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the first visible unit', async () => {
   const gameManifest = manifest(314, {
     northSpell: {
       airborne: true,
@@ -11943,107 +11942,106 @@ test('RULE-04 a ready minion may tap to shoot a fixed-damage projectile to the f
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
   });
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    session = accept(session, action(session, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
-  const shooter = session.state.realm.units.find(({ controller }) => controller === 'north');
-  assert.ok(shooter);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'shoot-damage-projectile'
-      && descriptor.shooterInstanceId === shooter.instanceId), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
-  const target = session.state.realm.units.find(({ controller }) => controller === 'south');
-  assert.ok(target);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+    const shooter = ctx.state.realm.units.find(({ controller }) => controller === 'north');
+    assert.ok(shooter);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'shoot-damage-projectile'
+        && descriptor.shooterInstanceId === shooter.instanceId), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+    const target = ctx.state.realm.units.find(({ controller }) => controller === 'south');
+    assert.ok(target);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const shot = legalGameActions(session.state, 'north').find(({ descriptor }) =>
-    descriptor.kind === 'shoot-damage-projectile'
-      && descriptor.shooterInstanceId === shooter.instanceId
-      && descriptor.direction === 'south'
-      && descriptor.hit?.instanceId === target.instanceId);
-  assert.ok(shot);
-  assert.deepEqual(
-    shot.descriptor.kind === 'shoot-damage-projectile'
-      ? shot.descriptor.path.map(({ cell }) => cell)
-      : [],
-    ['C4', 'C3', 'C2', 'C1'],
-  );
-  const fired = stepGame(session, shot);
-  assert.equal(fired.accepted, true);
-  if (!fired.accepted) return;
-  session = fired.session;
-  assert.deepEqual(fired.receipt.events.map(({ type }) => type), [
-    'projectile-shot',
-    'projectile-damage-allocated',
-    'damage-dealt',
-  ]);
-  assert.equal(canonicalJson(fired.receipt.events[1]!.payload), canonicalJson({
-    amount: 4,
-    sourceInstanceId: shooter.instanceId,
-    targetInstanceId: target.instanceId,
-  }));
-  const firedShooter = session.state.realm.units.find(({ instanceId }) =>
-    instanceId === shooter.instanceId);
-  assert.deepEqual(firedShooter && {
-    damage: firedShooter.damage,
-    location: firedShooter.location,
-    summoningSickness: firedShooter.summoningSickness,
-    tapped: firedShooter.tapped,
-    warded: firedShooter.warded,
-  }, {
-    damage: 0,
-    location: 'C4',
-    summoningSickness: false,
-    tapped: true,
-    warded: true,
+    const shot = (await ctx.legalActions('north')).find(({ descriptor }) =>
+      descriptor.kind === 'shoot-damage-projectile'
+        && descriptor.shooterInstanceId === shooter.instanceId
+        && descriptor.direction === 'south'
+        && descriptor.hit?.instanceId === target.instanceId);
+    assert.ok(shot);
+    assert.deepEqual(
+      shot.descriptor.kind === 'shoot-damage-projectile'
+        ? shot.descriptor.path.map(({ cell }) => cell)
+        : [],
+      ['C4', 'C3', 'C2', 'C1'],
+    );
+    const fired = await ctx.step(shot);
+    assert.equal(fired.accepted, true);
+    if (!fired.accepted) return;
+    assert.deepEqual(fired.receipt.events.map(({ type }) => type), [
+      'projectile-shot',
+      'projectile-damage-allocated',
+      'damage-dealt',
+    ]);
+    assert.equal(canonicalJson(fired.receipt.events[1]!.payload), canonicalJson({
+      amount: 4,
+      sourceInstanceId: shooter.instanceId,
+      targetInstanceId: target.instanceId,
+    }));
+    const firedShooter = ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === shooter.instanceId);
+    assert.deepEqual(firedShooter && {
+      damage: firedShooter.damage,
+      location: firedShooter.location,
+      summoningSickness: firedShooter.summoningSickness,
+      tapped: firedShooter.tapped,
+      warded: firedShooter.warded,
+    }, {
+      damage: 0,
+      location: 'C4',
+      summoningSickness: false,
+      tapped: true,
+      warded: true,
+    });
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+      instanceId === target.instanceId)?.damage, 4);
+    assert.equal(fired.receipt.events.some(({ type }) => type === 'strike-damage-allocated'), false);
+    assert.equal(fired.receipt.randomDraws.length, 0);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === target.instanceId)?.damage, 4);
-  assert.equal(fired.receipt.events.some(({ type }) => type === 'strike-damage-allocated'), false);
-  assert.equal(fired.receipt.randomDraws.length, 0);
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 a restricted attacker can target units but not sites', () => {
-  const setup = northAttacksAtC2(114, {
+test('RULE-04 a restricted attacker can target units but not sites', async () => {
+  await withNorthAttacksAtC2(114, {
     attack: 4,
     cannotAttackSites: true,
     charge: true,
     defense: 4,
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, undefined, 0, async ({ ctx, targetInstanceId }) => {
+    const actions = await ctx.legalActions('north');
+    const targets = actions.flatMap(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' ? [descriptor.target] : []);
+    assert.equal(targets.some(({ instanceId, kind }) =>
+      kind === 'minion' && instanceId === targetInstanceId), true);
+    assert.equal(targets.some(({ kind }) => kind === 'site'), false);
+    assert.equal(actions.some(({ descriptor }) => descriptor.kind === 'decline-attack'), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  let { session } = setup;
-  const actions = legalGameActions(session.state, 'north');
-  const targets = actions.flatMap(({ descriptor }) =>
-    descriptor.kind === 'declare-attack' ? [descriptor.target] : []);
-  assert.equal(targets.some(({ instanceId, kind }) =>
-    kind === 'minion' && instanceId === setup.targetInstanceId), true);
-  assert.equal(targets.some(({ kind }) => kind === 'site'), false);
-  assert.equal(actions.some(({ descriptor }) => descriptor.kind === 'decline-attack'), true);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 attacking-only first strike resolves deaths before normal strikes and is inactive while defending', () => {
+test('RULE-04 attacking-only first strike resolves deaths before normal strikes and is inactive while defending', async () => {
   const vanilla = {
     attack: 3,
     defense: 3,
@@ -12051,18 +12049,23 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
   const firstStrike = { ...vanilla, strikesFirstWhileAttacking: true };
-  const attacking = northAttacksAtC2(117, firstStrike, undefined, false, vanilla);
-  let session = accept(attacking.session, action(attacking.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === attacking.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.damage, 0);
-  assert.equal(session.state.players.south.cemetery
-    .some(({ instanceId }) => instanceId === attacking.targetInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(117, firstStrike, undefined, false, vanilla, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.damage, 0);
+    assert.equal(ctx.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   const deathrite = {
     attack: 2,
@@ -12071,124 +12074,130 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
     manaCost: 0,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
-  const ordering = northAttacksAtC2(
+  await withNorthAttacksAtC2(
     280,
     { ...firstStrike, attack: 6, defense: 10 },
     { attack: 2, defense: 1, drawSpell: false, life: 20 },
     false,
     deathrite,
     1,
+    async ({ attackerInstanceId, ctx, targetInstanceId }) => {
+      const defenderIds = ctx.state.realm.units
+        .filter(({ controller, location }) => controller === 'south' && location === 'C1')
+        .map(({ instanceId }) => instanceId)
+        .sort();
+      assert.equal(defenderIds.length, 2);
+      const deathriteIds = [targetInstanceId, defenderIds[0]!].sort();
+      const survivingDefenderId = defenderIds[1]!;
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'declare-attack'
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === targetInstanceId);
+      for (const unitInstanceId of defenderIds) {
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'defend'
+            && descriptor.unitInstanceId === unitInstanceId);
+      }
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+      assert.equal(ctx.state.phase, 'allocate');
+      while (ctx.state.phase === 'allocate') {
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'allocate-strike'
+            && descriptor.amount === (deathriteIds.includes(descriptor.targetInstanceId) ? 3 : 0));
+      }
+
+      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.decisionSeat, 'south');
+      assert.equal(deathriteIds.every((instanceId) => !ctx.state.players.south.cemetery
+        .some((card) => card.instanceId === instanceId)), true);
+      assert.equal(ctx.session.transcript.at(-1)?.events.some(({ type }) => type === 'minion-died'), false);
+      assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === attackerInstanceId)?.damage, 0);
+      assert.equal(ctx.session.transcript.at(-1)?.events.some(({ payload, type }) =>
+        type === 'damage-dealt'
+          && payload !== null
+          && typeof payload === 'object'
+          && 'instanceId' in payload
+          && payload.instanceId === attackerInstanceId), false);
+      const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
+        descriptor.kind === 'order-deathrites');
+      assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
+        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), deathriteIds);
+      const ordered = await ctx.step(orderActions[0]!);
+      assert.equal(ordered.accepted, true);
+      if (!ordered.accepted) return;
+
+      const orderedAllocations = ordered.receipt.events.filter(({ type }) =>
+        type === 'deathrite-damage-allocated');
+      const orderedSources = orderedAllocations
+        .map(({ payload }) => payload !== null && typeof payload === 'object'
+          && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined)
+        .filter((source, index, sources) => source !== undefined && sources.indexOf(source) === index);
+      assert.deepEqual(orderedSources, [
+        orderActions[0]!.descriptor.kind === 'order-deathrites'
+          ? orderActions[0]!.descriptor.sourceInstanceId
+          : '',
+        deathriteIds.find((instanceId) => instanceId !== orderedSources[0])!,
+      ]);
+      const attackerDamage = ordered.receipt.events.filter(({ payload, type }) =>
+        type === 'damage-dealt'
+          && payload !== null
+          && typeof payload === 'object'
+          && 'instanceId' in payload
+          && payload.instanceId === attackerInstanceId);
+      assert.deepEqual(attackerDamage.at(-1)?.payload, {
+        accumulated: 4,
+        amount: 2,
+        direct: true,
+        instanceId: attackerInstanceId,
+        seat: 'north',
+      });
+      const lastDeathriteIndex = ordered.receipt.events.findLastIndex(({ type }) =>
+        type === 'deathrite-damage-allocated');
+      const firstDeathIndex = ordered.receipt.events.findIndex(({ type }) => type === 'minion-died');
+      const returnStrikeIndex = ordered.receipt.events.findLastIndex(({ payload, type }) =>
+        type === 'damage-dealt'
+          && payload !== null
+          && typeof payload === 'object'
+          && 'instanceId' in payload
+          && payload.instanceId === attackerInstanceId);
+      assert.ok(lastDeathriteIndex < firstDeathIndex && firstDeathIndex < returnStrikeIndex);
+      assert.equal(ordered.receipt.events.filter(({ type }) => type === 'minion-died').length, 2);
+      assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === attackerInstanceId)?.damage, 4);
+      assert.equal(ctx.state.players.south.avatar.life, 20);
+      assert.equal(deathriteIds.every((instanceId) => ctx.state.players.south.cemetery
+        .some((card) => card.instanceId === instanceId)), true);
+      assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === survivingDefenderId)?.damage, 2);
+      assert.equal(ctx.state.phase, 'main');
+      assert.equal(ctx.state.pendingCombat, null);
+      assert.equal(ctx.state.pendingDeathrites ?? null, null);
+      assert.equal(await ctx.verifyReplay(), true);
+    },
   );
-  const defenderIds = ordering.session.state.realm.units
-    .filter(({ controller, location }) => controller === 'south' && location === 'C1')
-    .map(({ instanceId }) => instanceId)
-    .sort();
-  assert.equal(defenderIds.length, 2);
-  const deathriteIds = [ordering.targetInstanceId, defenderIds[0]!].sort();
-  const survivingDefenderId = defenderIds[1]!;
-  session = accept(ordering.session, action(ordering.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === ordering.targetInstanceId));
-  for (const unitInstanceId of defenderIds) {
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'defend'
-        && descriptor.unitInstanceId === unitInstanceId));
-  }
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(session.state.phase, 'allocate');
-  while (session.state.phase === 'allocate') {
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'allocate-strike'
-        && descriptor.amount === (deathriteIds.includes(descriptor.targetInstanceId) ? 3 : 0)));
-  }
 
-  assert.equal(session.state.phase, 'deathrite-order');
-  assert.equal(session.state.decisionSeat, 'south');
-  assert.equal(deathriteIds.every((instanceId) => !session.state.players.south.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
-  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'minion-died'), false);
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === ordering.attackerInstanceId)?.damage, 0);
-  assert.equal(session.transcript.at(-1)?.events.some(({ payload, type }) =>
-    type === 'damage-dealt'
-      && payload !== null
-      && typeof payload === 'object'
-      && 'instanceId' in payload
-      && payload.instanceId === ordering.attackerInstanceId), false);
-  const orderActions = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites');
-  assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-    descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), deathriteIds);
-  const ordered = stepGame(session, orderActions[0]!);
-  assert.equal(ordered.accepted, true);
-  if (!ordered.accepted) return;
-  session = ordered.session;
-
-  const orderedAllocations = ordered.receipt.events.filter(({ type }) =>
-    type === 'deathrite-damage-allocated');
-  const orderedSources = orderedAllocations
-    .map(({ payload }) => payload !== null && typeof payload === 'object'
-      && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined)
-    .filter((source, index, sources) => source !== undefined && sources.indexOf(source) === index);
-  assert.deepEqual(orderedSources, [
-    orderActions[0]!.descriptor.kind === 'order-deathrites'
-      ? orderActions[0]!.descriptor.sourceInstanceId
-      : '',
-    deathriteIds.find((instanceId) => instanceId !== orderedSources[0])!,
-  ]);
-  const attackerDamage = ordered.receipt.events.filter(({ payload, type }) =>
-    type === 'damage-dealt'
-      && payload !== null
-      && typeof payload === 'object'
-      && 'instanceId' in payload
-      && payload.instanceId === ordering.attackerInstanceId);
-  assert.deepEqual(attackerDamage.at(-1)?.payload, {
-    accumulated: 4,
-    amount: 2,
-    direct: true,
-    instanceId: ordering.attackerInstanceId,
-    seat: 'north',
+  await withNorthAttacksAtC2(118, vanilla, undefined, false, firstStrike, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  const lastDeathriteIndex = ordered.receipt.events.findLastIndex(({ type }) =>
-    type === 'deathrite-damage-allocated');
-  const firstDeathIndex = ordered.receipt.events.findIndex(({ type }) => type === 'minion-died');
-  const returnStrikeIndex = ordered.receipt.events.findLastIndex(({ payload, type }) =>
-    type === 'damage-dealt'
-      && payload !== null
-      && typeof payload === 'object'
-      && 'instanceId' in payload
-      && payload.instanceId === ordering.attackerInstanceId);
-  assert.ok(lastDeathriteIndex < firstDeathIndex && firstDeathIndex < returnStrikeIndex);
-  assert.equal(ordered.receipt.events.filter(({ type }) => type === 'minion-died').length, 2);
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === ordering.attackerInstanceId)?.damage, 4);
-  assert.equal(session.state.players.south.avatar.life, 20);
-  assert.equal(deathriteIds.every((instanceId) => session.state.players.south.cemetery
-    .some((card) => card.instanceId === instanceId)), true);
-  assert.equal(session.state.realm.units.find(({ instanceId }) =>
-    instanceId === survivingDefenderId)?.damage, 2);
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.pendingCombat, null);
-  assert.equal(session.state.pendingDeathrites ?? null, null);
-  assert.equal(verifyGameReplay(session), true);
-
-  const defending = northAttacksAtC2(118, vanilla, undefined, false, firstStrike);
-  session = accept(defending.session, action(defending.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === defending.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(session.state.players.north.cemetery
-    .some(({ instanceId }) => instanceId === defending.attackerInstanceId), true);
-  assert.equal(session.state.players.south.cemetery
-    .some(({ instanceId }) => instanceId === defending.targetInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes', () => {
+test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes', async () => {
   const attacker = {
     attack: 2,
     defense: 6,
@@ -12202,50 +12211,71 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
-  const fight = (seed: number, northSpell: SpellFacts, southSpell: SpellFacts) => {
-    const setup = northAttacksAtC2(seed, northSpell, undefined, false, southSpell);
-    assert.equal(observeGame(setup.session.state, 'north').realm.units
-      .find(({ instanceId }) => instanceId === setup.targetInstanceId)?.disabled, true);
-    let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
-      descriptor.kind === 'declare-attack'
-        && descriptor.target.kind === 'minion'
-        && descriptor.target.instanceId === setup.targetInstanceId));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-    return { ...setup, session };
+  const fight = async (
+    seed: number,
+    northSpell: SpellFacts,
+    southSpell: SpellFacts,
+    run: (setup: Readonly<{
+      attackerInstanceId: string;
+      ctx: SetupCtx;
+      targetInstanceId: string;
+    }>) => Promise<void>,
+  ): Promise<void> => {
+    await withNorthAttacksAtC2(seed, northSpell, undefined, false, southSpell, 0, async ({
+      attackerInstanceId,
+      ctx,
+      targetInstanceId,
+    }) => {
+      assert.equal(ctx.observe('north').realm.units
+        .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, true);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'declare-attack'
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === targetInstanceId);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+      await run({ attackerInstanceId, ctx, targetInstanceId });
+    });
   };
 
-  const ordinary = fight(119, attacker, sleeper);
-  assert.equal(ordinary.session.state.realm.units
-    .find(({ instanceId }) => instanceId === ordinary.attackerInstanceId)?.damage, 0);
-  assert.equal(ordinary.session.state.realm.units
-    .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.damage, 2);
-  assert.equal(observeGame(ordinary.session.state, 'north').realm.units
-    .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.disabled, false);
-  assert.equal(ordinary.session.transcript.at(-1)?.events
-    .filter(({ type }) => type === 'minion-awakened').length, 1);
-  assert.equal(verifyGameReplay(ordinary.session), true);
+  await fight(119, attacker, sleeper, async ({ attackerInstanceId, ctx, targetInstanceId }) => {
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.damage, 0);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 2);
+    assert.equal(ctx.observe('north').realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, false);
+    assert.equal(ctx.session.transcript.at(-1)?.events
+      .filter(({ type }) => type === 'minion-awakened').length, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const early = fight(120, { ...attacker, strikesFirstWhileAttacking: true }, sleeper);
-  assert.equal(early.session.state.realm.units
-    .find(({ instanceId }) => instanceId === early.attackerInstanceId)?.damage, 5);
-  assert.equal(early.session.state.realm.units
-    .find(({ instanceId }) => instanceId === early.targetInstanceId)?.damage, 2);
-  assert.equal(observeGame(early.session.state, 'north').realm.units
-    .find(({ instanceId }) => instanceId === early.targetInstanceId)?.disabled, false);
-  assert.equal(verifyGameReplay(early.session), true);
+  await fight(120, { ...attacker, strikesFirstWhileAttacking: true }, sleeper, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.damage, 5);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 2);
+    assert.equal(ctx.observe('north').realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const warded = fight(121, attacker, { ...sleeper, ward: true });
-  assert.equal(warded.session.state.realm.units
-    .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.damage, 0);
-  assert.equal(observeGame(warded.session.state, 'north').realm.units
-    .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.disabled, true);
-  assert.equal(warded.session.transcript.at(-1)?.events
-    .some(({ type }) => type === 'minion-awakened'), false);
-  assert.equal(verifyGameReplay(warded.session), true);
+  await fight(121, attacker, { ...sleeper, ward: true }, async ({ ctx, targetInstanceId }) => {
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 0);
+    assert.equal(ctx.observe('north').realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.disabled, true);
+    assert.equal(ctx.session.transcript.at(-1)?.events
+      .some(({ type }) => type === 'minion-awakened'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Lance buffs and breaks on the next unit strike but not a site strike', () => {
+test('RULE-04 Lance buffs and breaks on the next unit strike but not a site strike', async () => {
   const lance = {
     attack: 1,
     defense: 1,
@@ -12260,121 +12290,139 @@ test('RULE-04 Lance buffs and breaks on the next unit strike but not a site stri
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
 
-  const attacking = northAttacksAtC2(124, lance, undefined, false, twoPower);
-  assert.equal(observeGame(attacking.session.state, 'south').realm.units
-    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, 1);
-  assert.equal(attacking.session.transcript.some(({ events }) => events.some(({ payload, type }) =>
-    type === 'lance-gained'
-      && canonicalJson(payload) === canonicalJson({
-        bearerInstanceId: attacking.attackerInstanceId,
-        count: 1,
-        sourceInstanceId: attacking.attackerInstanceId,
-      }))), true);
-  let session = accept(attacking.session, action(attacking.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === attacking.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  const attackEvents = session.transcript.at(-1)!.events;
-  assert.deepEqual(attackEvents.find(({ type }) => type === 'lance-broken')?.payload, {
-    bearerInstanceId: attacking.attackerInstanceId,
-    count: 1,
-    sourceInstanceId: attacking.attackerInstanceId,
+  await withNorthAttacksAtC2(124, lance, undefined, false, twoPower, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    assert.equal(ctx.observe('south').realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.carriedLanceCount, 1);
+    assert.equal(ctx.session.transcript.some(({ events }) => events.some(({ payload, type }) =>
+      type === 'lance-gained'
+        && canonicalJson(payload) === canonicalJson({
+          bearerInstanceId: attackerInstanceId,
+          count: 1,
+          sourceInstanceId: attackerInstanceId,
+        }))), true);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    const attackEvents = ctx.session.transcript.at(-1)!.events;
+    assert.deepEqual(attackEvents.find(({ type }) => type === 'lance-broken')?.payload, {
+      bearerInstanceId: attackerInstanceId,
+      count: 1,
+      sourceInstanceId: attackerInstanceId,
+    });
+    assert.ok(attackEvents.findIndex(({ type }) => type === 'lance-broken')
+      < attackEvents.findIndex(({ type }) => type === 'minion-died'));
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.damage, 0);
+    assert.equal(ctx.state.players.south.cemetery
+      .some(({ instanceId }) => instanceId === targetInstanceId), true);
+    assert.equal(ctx.observe('north').realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.carriedLanceCount, undefined);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.ok(attackEvents.findIndex(({ type }) => type === 'lance-broken')
-    < attackEvents.findIndex(({ type }) => type === 'minion-died'));
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.damage, 0);
-  assert.equal(session.state.players.south.cemetery
-    .some(({ instanceId }) => instanceId === attacking.targetInstanceId), true);
-  assert.equal(observeGame(session.state, 'north').realm.units
-    .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, undefined);
-  assert.equal(verifyGameReplay(session), true);
 
-  const site = northAttacksAtC2(125, lance, undefined, false, twoPower);
-  session = accept(site.session, action(site.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-defend'));
-  const siteEvents = session.transcript.at(-1)!.events;
-  assert.equal(siteEvents.some(({ type }) => type === 'lance-broken'), false);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === site.attackerInstanceId)?.carriedLanceCount, 1);
-  const siteStruck = siteEvents.find(({ type }) => type === 'undefended-site-struck');
-  assert.ok(siteStruck);
-  assert.equal(canonicalJson(siteStruck.payload).includes('"amount":1'), true);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(125, lance, undefined, false, twoPower, 0, async ({
+    attackerInstanceId,
+    ctx,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-defend');
+    const siteEvents = ctx.session.transcript.at(-1)!.events;
+    assert.equal(siteEvents.some(({ type }) => type === 'lance-broken'), false);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.carriedLanceCount, 1);
+    const siteStruck = siteEvents.find(({ type }) => type === 'undefended-site-struck');
+    assert.ok(siteStruck);
+    assert.equal(canonicalJson(siteStruck.payload).includes('"amount":1'), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
   const tripleLance = { ...lance, defense: 3, lanceCount: 3 as const };
-  const defending = northAttacksAtC2(126, {
+  await withNorthAttacksAtC2(126, {
     ...lance,
     defense: 4,
-  }, undefined, false, tripleLance);
-  session = accept(defending.session, action(defending.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === defending.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  const defendEvents = session.transcript.at(-1)!.events;
-  assert.equal(session.state.players.north.cemetery
-    .some(({ instanceId }) => instanceId === defending.attackerInstanceId), true);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === defending.targetInstanceId)?.damage, 2);
-  assert.deepEqual(defendEvents.find(({ payload, type }) =>
-    type === 'lance-broken' && canonicalJson(payload).includes(defending.targetInstanceId))?.payload, {
-    bearerInstanceId: defending.targetInstanceId,
-    count: 3,
-    sourceInstanceId: defending.targetInstanceId,
+  }, undefined, false, tripleLance, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    const defendEvents = ctx.session.transcript.at(-1)!.events;
+    assert.equal(ctx.state.players.north.cemetery
+      .some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.damage, 2);
+    assert.deepEqual(defendEvents.find(({ payload, type }) =>
+      type === 'lance-broken' && canonicalJson(payload).includes(targetInstanceId))?.payload, {
+      bearerInstanceId: targetInstanceId,
+      count: 3,
+      sourceInstanceId: targetInstanceId,
+    });
+    assert.deepEqual(defendEvents.find(({ payload, type }) =>
+      type === 'damage-dealt' && canonicalJson(payload).includes(attackerInstanceId))?.payload, {
+      accumulated: 4,
+      amount: 4,
+      direct: true,
+      instanceId: attackerInstanceId,
+      seat: 'north',
+    });
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  assert.deepEqual(defendEvents.find(({ payload, type }) =>
-    type === 'damage-dealt' && canonicalJson(payload).includes(defending.attackerInstanceId))?.payload, {
-    accumulated: 4,
-    amount: 4,
-    direct: true,
-    instanceId: defending.attackerInstanceId,
-    seat: 'north',
-  });
-  assert.equal(verifyGameReplay(session), true);
 
-  const ranged = northAttacksAtC2(127, { ...lance, ranged: true }, undefined, false, {
+  await withNorthAttacksAtC2(127, { ...lance, ranged: true }, undefined, false, {
     ...twoPower,
     defense: 3,
     ward: true,
+  }, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    if (ctx.state.phase === 'intercept') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'shoot-projectile'
+        && descriptor.shooterInstanceId === attackerInstanceId
+        && descriptor.hit?.instanceId === targetInstanceId);
+    const rangedEvents = ctx.session.transcript.at(-1)!.events;
+    assert.deepEqual(rangedEvents.map(({ type }) => type), [
+      'projectile-shot',
+      'strike-damage-allocated',
+      'damage-dealt',
+      'ward-broken',
+      'lance-broken',
+    ]);
+    assert.equal(canonicalJson(rangedEvents[1]!.payload).includes('"amount":2'), true);
+    const rangedTarget = ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId);
+    assert.deepEqual(
+      rangedTarget && { damage: rangedTarget.damage, warded: rangedTarget.warded },
+      { damage: 0, warded: false },
+    );
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.carriedLanceCount, undefined);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  session = accept(ranged.session, action(ranged.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  if (session.state.phase === 'intercept') {
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
-  }
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'shoot-projectile'
-      && descriptor.shooterInstanceId === ranged.attackerInstanceId
-      && descriptor.hit?.instanceId === ranged.targetInstanceId));
-  const rangedEvents = session.transcript.at(-1)!.events;
-  assert.deepEqual(rangedEvents.map(({ type }) => type), [
-    'projectile-shot',
-    'strike-damage-allocated',
-    'damage-dealt',
-    'ward-broken',
-    'lance-broken',
-  ]);
-  assert.equal(canonicalJson(rangedEvents[1]!.payload).includes('"amount":2'), true);
-  const rangedTarget = session.state.realm.units
-    .find(({ instanceId }) => instanceId === ranged.targetInstanceId);
-  assert.deepEqual(
-    rangedTarget && { damage: rangedTarget.damage, warded: rangedTarget.warded },
-    { damage: 0, warded: false },
-  );
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === ranged.attackerInstanceId)?.carriedLanceCount, undefined);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Ranged strikes without return damage and Ward prevents the first positive damage event', () => {
@@ -13416,26 +13464,26 @@ test('RULE-03 Granary Rats suppresses its site threshold while enabled', () => {
   assert.equal(canSummonGated(allDisabled), true);
 });
 
-test('RULE-03 a provider adds affinity until that minion dies', () => {
-  const setup = northAttacksAtC2(46, {
+test('RULE-03 a provider adds affinity until that minion dies', async () => {
+  await withNorthAttacksAtC2(46, {
     attack: 1,
     defense: 1,
     manaCost: 1,
     provides: 'earth',
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, undefined, 0, async ({ ctx, targetInstanceId }) => {
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 3);
+    assert.equal(ctx.observe('south').players.south.affinity.earth, 4);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.observe('north').players.north.affinity.earth, 2);
+    assert.equal(ctx.observe('south').players.south.affinity.earth, 3);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  let { session } = setup;
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 3);
-  assert.equal(observeGame(session.state, 'south').players.south.affinity.earth, 4);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(observeGame(session.state, 'north').players.north.affinity.earth, 2);
-  assert.equal(observeGame(session.state, 'south').players.south.affinity.earth, 3);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Lethal kills a tougher minion with positive damage but not zero damage', async () => {
@@ -13471,7 +13519,7 @@ test('RULE-04 Lethal kills a tougher minion with positive damage but not zero da
   });
 });
 
-test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept', () => {
+test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept', async () => {
   const spell = {
     attack: 2,
     cannotDefend: true,
@@ -13479,33 +13527,45 @@ test('RULE-04 a prohibited minion cannot move to Defend but can still Intercept'
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
-  const defend = northAttacksAtC2(50, spell);
-  let session = accept(defend.session, action(defend.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === defend.targetInstanceId));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'defend' && descriptor.unitInstanceId === defend.defenderInstanceId), false);
+  await withNorthAttacksAtC2(50, spell, undefined, false, undefined, 0, async ({
+    ctx,
+    defenderInstanceId,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'defend' && descriptor.unitInstanceId === defenderInstanceId), false);
+  });
 
-  const stationary = northAttacksAtC2(51, spell);
-  const site = stationary.session.state.realm.sites.C2;
-  assert.ok(site);
-  session = accept(stationary.session, action(stationary.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'site'
-      && descriptor.target.instanceId === site.instanceId));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'defend' && descriptor.unitInstanceId === stationary.targetInstanceId), true);
+  await withNorthAttacksAtC2(51, spell, undefined, false, undefined, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    const site = ctx.state.realm.sites.C2;
+    assert.ok(site);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'site'
+        && descriptor.target.instanceId === site.instanceId);
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'defend' && descriptor.unitInstanceId === targetInstanceId), true);
+  });
 
-  const intercept = northAttacksAtC2(52, spell);
-  session = accept(intercept.session, action(intercept.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'intercept' && descriptor.unitInstanceId === intercept.targetInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(52, spell, undefined, false, undefined, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'intercept' && descriptor.unitInstanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Immobile units attack and Defend in place but cannot move themselves', () => {
+test('RULE-04 Immobile units attack and Defend in place but cannot move themselves', async () => {
   const vanilla = {
     airborne: true,
     attack: 2,
@@ -13520,64 +13580,76 @@ test('RULE-04 Immobile units attack and Defend in place but cannot move themselv
     movementBonus: 2 as const,
   };
 
-  const movingDefend = northAttacksAtC2(145, vanilla, undefined, false, immobile);
-  let session = accept(movingDefend.session, action(movingDefend.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
+  await withNorthAttacksAtC2(145, vanilla, undefined, false, immobile, 0, async ({
+    ctx,
+    defenderInstanceId,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'defend'
+        && descriptor.unitInstanceId === defenderInstanceId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withNorthAttacksAtC2(146, vanilla, undefined, false, immobile, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    const site = ctx.state.realm.sites.C2;
+    assert.ok(site);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'site'
+        && descriptor.target.instanceId === site.instanceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'defend'
+      && descriptor.unitInstanceId === targetInstanceId
+      && descriptor.path.length === 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withNorthAttacksAtC2(147, vanilla, undefined, false, immobile, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const moves = (await ctx.legalActions('south')).filter(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === targetInstanceId);
+    assert.equal(moves.length, 1);
+    const zero = moves[0];
+    assert.ok(zero);
+    assert.equal(zero.descriptor.kind === 'move-and-attack'
+      && zero.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(','), 'C2/surface');
+    assert.equal(zero.descriptor.kind, 'move-and-attack');
+    const forged: GameLegalAction = {
+      ...zero,
+      descriptor: {
+        ...zero.descriptor,
+        path: [...zero.descriptor.path, { cell: 'C3', region: 'surface' }],
+        to: { cell: 'C3', region: 'surface' },
+      },
+    };
+    const ignored = await ctx.step(forged);
+    assert.equal(ignored.accepted, true);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === targetInstanceId)?.location, 'C2');
+    assert.doesNotMatch(canonicalJson(ignored.receipt.events), /"C3"/);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === movingDefend.targetInstanceId));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'defend'
-      && descriptor.unitInstanceId === movingDefend.defenderInstanceId), false);
-  assert.equal(verifyGameReplay(session), true);
-
-  const stationary = northAttacksAtC2(146, vanilla, undefined, false, immobile);
-  const site = stationary.session.state.realm.sites.C2;
-  assert.ok(site);
-  session = accept(stationary.session, action(stationary.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'site'
-      && descriptor.target.instanceId === site.instanceId));
-  const stationaryDefend = action(session, ({ descriptor }) => descriptor.kind === 'defend'
-    && descriptor.unitInstanceId === stationary.targetInstanceId
-    && descriptor.path.length === 1);
-  session = accept(session, stationaryDefend);
-  assert.equal(verifyGameReplay(session), true);
-
-  const local = northAttacksAtC2(147, vanilla, undefined, false, immobile);
-  session = accept(local.session, action(local.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const moves = legalGameActions(session.state, 'south').filter(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack' && descriptor.unitInstanceId === local.targetInstanceId);
-  assert.equal(moves.length, 1);
-  const zero = moves[0];
-  assert.ok(zero);
-  assert.equal(zero.descriptor.kind === 'move-and-attack'
-    && zero.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(','), 'C2/surface');
-  assert.equal(zero.descriptor.kind, 'move-and-attack');
-  const forged: GameLegalAction = {
-    ...zero,
-    descriptor: {
-      ...zero.descriptor,
-      path: [...zero.descriptor.path, { cell: 'C3', region: 'surface' }],
-      to: { cell: 'C3', region: 'surface' },
-    },
-  };
-  const ignored = stepGame(session, forged);
-  assert.equal(ignored.accepted, true);
-  session = ignored.session;
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === local.targetInstanceId)?.location, 'C2');
-  assert.doesNotMatch(canonicalJson(ignored.receipt.events), /"C3"/);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'declare-attack'
-    && descriptor.target.kind === 'minion'
-    && descriptor.target.instanceId === local.attackerInstanceId));
-  assert.equal(verifyGameReplay(session), true);
+      && descriptor.target.instanceId === attackerInstanceId);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 a fully prohibited minion cannot use Defend or Intercept', () => {
+test('RULE-04 a fully prohibited minion cannot use Defend or Intercept', async () => {
   const spell = {
     attack: 4,
     cannotDefendOrIntercept: true,
@@ -13585,26 +13657,31 @@ test('RULE-04 a fully prohibited minion cannot use Defend or Intercept', () => {
     manaCost: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
-  const defend = northAttacksAtC2(112, spell);
-  let session = accept(defend.session, action(defend.session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === defend.targetInstanceId));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'defend' && descriptor.unitInstanceId === defend.defenderInstanceId), false);
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates), true);
+  await withNorthAttacksAtC2(112, spell, undefined, false, undefined, 0, async ({
+    ctx,
+    defenderInstanceId,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'defend' && descriptor.unitInstanceId === defenderInstanceId), false);
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates), true);
+  });
 
-  const intercept = northAttacksAtC2(113, spell);
-  session = accept(intercept.session, action(intercept.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.phase, 'main');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'intercept'), false);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(113, spell, undefined, false, undefined, 0, async ({ ctx }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'intercept'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', () => {
+test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', async () => {
   const ground = {
     attack: 3,
     defense: 3,
@@ -13613,72 +13690,86 @@ test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', ()
   } as const;
   const airborne = { ...ground, airborne: true };
   const ranged = { ...ground, ranged: true };
-  const canTarget = (
-    session: GameSession,
+  const canTarget = async (
+    ctx: SetupCtx,
     targetInstanceId: string,
-  ): boolean => legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  ): Promise<boolean> => (await ctx.legalActions('north')).some(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'minion'
       && descriptor.target.instanceId === targetInstanceId);
-  const addDiagonalSite = (initial: GameSession): GameSession => {
-    let session = initial;
-    if (session.state.phase === 'intercept') {
-      session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
+  const addDiagonalSite = async (ctx: SetupCtx): Promise<void> => {
+    if (ctx.state.phase === 'intercept') {
+      await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
     }
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-    return accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'play-site' && descriptor.cell === 'B3'));
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site' && descriptor.cell === 'B3');
   };
 
-  const rangedAttacksAirborne = northAttacksAtC2(118, ranged, undefined, false, airborne);
-  assert.equal(canTarget(rangedAttacksAirborne.session, rangedAttacksAirborne.targetInstanceId), false);
+  await withNorthAttacksAtC2(118, ranged, undefined, false, airborne, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    assert.equal(await canTarget(ctx, targetInstanceId), false);
+  });
 
-  const airborneAttacksAirborne = northAttacksAtC2(119, airborne, undefined, false, airborne);
-  assert.equal(canTarget(airborneAttacksAirborne.session, airborneAttacksAirborne.targetInstanceId), true);
-  let session = accept(airborneAttacksAirborne.session, action(airborneAttacksAirborne.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.phase, 'intercept');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'intercept'
-      && descriptor.unitInstanceId === airborneAttacksAirborne.targetInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(119, airborne, undefined, false, airborne, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    assert.equal(await canTarget(ctx, targetInstanceId), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'intercept');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'intercept'
+        && descriptor.unitInstanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const groundIntercept = northAttacksAtC2(120, airborne, undefined, false, ground);
-  session = accept(groundIntercept.session, action(groundIntercept.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.phase, 'main');
-  session = addDiagonalSite(session);
-  const diagonal = action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === groundIntercept.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3');
-  session = accept(session, diagonal);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === groundIntercept.attackerInstanceId)?.location, 'B3');
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(120, airborne, undefined, false, ground, 0, async ({
+    attackerInstanceId,
+    ctx,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'main');
+    await addDiagonalSite(ctx);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.location, 'B3');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const rangedIntercept = northAttacksAtC2(121, airborne, undefined, false, ranged);
-  session = accept(rangedIntercept.session, action(rangedIntercept.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.phase, 'intercept');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'intercept' && descriptor.unitInstanceId === rangedIntercept.targetInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(121, airborne, undefined, false, ranged, 0, async ({
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'intercept');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'intercept' && descriptor.unitInstanceId === targetInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const groundMovement = northAttacksAtC2(122, ground, undefined, false, ground);
-  session = accept(groundMovement.session, action(groundMovement.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  session = addDiagonalSite(session);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === groundMovement.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3'), false);
-  assert.equal(verifyGameReplay(session), true);
+  await withNorthAttacksAtC2(122, ground, undefined, false, ground, 0, async ({
+    attackerInstanceId,
+    ctx,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await addDiagonalSite(ctx);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,B3'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants', () => {
@@ -13983,7 +14074,7 @@ test('RULE-04 Mountain Pass blocks only occupied ground-minion entry', () => {
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction', () => {
+test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction', async () => {
   const ground = {
     attack: 1,
     defense: 5,
@@ -13991,89 +14082,95 @@ test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until i
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
   const stealth = { ...ground, attack: 3, stealth: true };
-  const setup = northAttacksAtC2(123, stealth, undefined, false, ground);
-  let session = accept(setup.session, action(setup.session, ({ descriptor }) =>
-    descriptor.kind === 'decline-attack'));
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === setup.attackerInstanceId)?.stealthed, true);
+  await withNorthAttacksAtC2(123, stealth, undefined, false, ground, 0, async ({
+    attackerInstanceId,
+    ctx,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.stealthed, true);
 
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.targetInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.attackerInstanceId), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.targetInstanceId));
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'defend-window-closed'), false);
-  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === setup.attackerInstanceId)?.stealthed, false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === targetInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === attackerInstanceId), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.session.transcript.at(-1)?.events.some(({ type }) => type === 'defend-window-closed'), false);
+    assert.equal(ctx.session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
+    assert.equal(ctx.state.realm.units
+      .find(({ instanceId }) => instanceId === attackerInstanceId)?.stealthed, false);
 
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.targetInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.attackerInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === targetInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === attackerInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  const ranged = northAttacksAtC2(
+  await withNorthAttacksAtC2(
     124,
     { ...ground, ranged: true, stealth: true },
     undefined,
     false,
     stealth,
+    0,
+    async ({ attackerInstanceId, ctx, targetInstanceId }) => {
+      assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+        descriptor.kind === 'declare-attack'
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === targetInstanceId), false);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      const shots = (await ctx.legalActions('north'))
+        .filter(({ descriptor }) => descriptor.kind === 'shoot-projectile');
+      assert.equal(shots.some(({ descriptor }) =>
+        descriptor.kind === 'shoot-projectile'
+          && descriptor.hit?.instanceId === targetInstanceId), false);
+      const miss = shots.find(({ descriptor }) =>
+        descriptor.kind === 'shoot-projectile' && descriptor.direction === 'north');
+      assert.ok(miss);
+      await ctx.accept(miss);
+      assert.equal(ctx.state.realm.units
+        .find(({ instanceId }) => instanceId === attackerInstanceId)?.stealthed, false);
+      assert.equal(ctx.state.realm.units
+        .find(({ instanceId }) => instanceId === targetInstanceId)?.stealthed, true);
+      assert.equal(ctx.session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
+      assert.equal(await ctx.verifyReplay(), true);
+    },
   );
-  session = ranged.session;
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === ranged.targetInstanceId), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const shots = legalGameActions(session.state, 'north')
-    .filter(({ descriptor }) => descriptor.kind === 'shoot-projectile');
-  assert.equal(shots.some(({ descriptor }) =>
-    descriptor.kind === 'shoot-projectile'
-      && descriptor.hit?.instanceId === ranged.targetInstanceId), false);
-  const miss = shots.find(({ descriptor }) =>
-    descriptor.kind === 'shoot-projectile' && descriptor.direction === 'north');
-  assert.ok(miss);
-  session = accept(session, miss);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === ranged.attackerInstanceId)?.stealthed, false);
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === ranged.targetInstanceId)?.stealthed, true);
-  assert.equal(session.transcript.at(-1)?.events.some(({ type }) => type === 'stealth-lost'), true);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Sly Fox gains Stealth once at the end of its controller turn', () => {
@@ -15548,38 +15645,38 @@ test('RULE-03 an outer-column cast restriction filters surface and Voidwalk summ
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths', () => {
-  const setup = northAttacksAtC2(53, {
+test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths', async () => {
+  await withNorthAttacksAtC2(53, {
     attack: 2,
     defense: 2,
     manaCost: 1,
     movementBonus: 1,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, undefined, 0, async ({ attackerInstanceId, ctx }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const actions = await ctx.legalActions('north');
+    const twoStep = actions.find(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4');
+    assert.ok(twoStep);
+    assert.equal(actions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
+    const result = await ctx.step(twoStep);
+    assert.equal(result.accepted, true);
+    assert.equal(ctx.state.pendingCombat?.cell, 'C4');
+    assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":2/);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  let session = accept(setup.session, action(setup.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const actions = legalGameActions(session.state, 'north');
-  const twoStep = actions.find(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4');
-  assert.ok(twoStep);
-  assert.equal(actions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
-  const result = stepGame(session, twoStep);
-  assert.equal(result.accepted, true);
-  session = result.session;
-  assert.equal(session.state.pendingCombat?.cell, 'C4');
-  assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":2/);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Movement +1 can take an exact two-step path to Defend', () => {
@@ -15640,53 +15737,57 @@ test('RULE-04 Movement +1 can take an exact two-step path to Defend', () => {
   assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Movement +2 issues exact three-step paths and attacks after moving', () => {
-  const setup = northAttacksAtC2(125, {
+test('RULE-04 Movement +2 issues exact three-step paths and attacks after moving', async () => {
+  await withNorthAttacksAtC2(125, {
     attack: 2,
     defense: 2,
     manaCost: 1,
     movementBonus: 2,
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+  }, undefined, false, undefined, 0, async ({
+    attackerInstanceId,
+    ctx,
+    defenderInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const actions = await ctx.legalActions('north');
+    assert.equal(actions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
+    assert.equal(actions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C3'), false);
+    assert.equal(actions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4,C3'), true);
+    const threeStep = actions.find(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C1');
+    assert.ok(threeStep);
+    assert.equal(actions.some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerInstanceId
+        && descriptor.path.length > 4), false);
+    const result = await ctx.step(threeStep);
+    assert.equal(result.accepted, true);
+    assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":3/);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === defenderInstanceId), true);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  let session = accept(setup.session, action(setup.session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'close-intercept'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const actions = legalGameActions(session.state, 'north');
-  assert.equal(actions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2'), true);
-  assert.equal(actions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C3'), false);
-  assert.equal(actions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C4,C3'), true);
-  const threeStep = actions.find(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C2,C3,C2,C1');
-  assert.ok(threeStep);
-  assert.equal(actions.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === setup.attackerInstanceId
-      && descriptor.path.length > 4), false);
-  const result = stepGame(session, threeStep);
-  assert.equal(result.accepted, true);
-  session = result.session;
-  assert.match(canonicalJson(result.receipt.events[0]?.payload ?? null), /\"steps\":3/);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === setup.defenderInstanceId), true);
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Deathrites', () => {
@@ -16474,54 +16575,58 @@ test('RULE-04 Move and Attack stages movement before an undefended enemy-site st
   });
 });
 
-test('RULE-04 Defend moves a unit into a simultaneous fight and stages exact split damage', () => {
-  const setup = northAttacksAtC2(53);
-  const { attackerInstanceId, defenderInstanceId, targetInstanceId } = setup;
-  let { session } = setup;
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === targetInstanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'defend' && descriptor.unitInstanceId === defenderInstanceId));
-  const movedDefender = session.state.realm.units.find(({ instanceId }) => instanceId === defenderInstanceId);
-  assert.deepEqual({ location: movedDefender?.location, tapped: movedDefender?.tapped }, {
-    location: 'C2',
-    tapped: true,
+test('RULE-04 Defend moves a unit into a simultaneous fight and stages exact split damage', async () => {
+  await withNorthAttacksAtC2(53, undefined, undefined, false, undefined, 0, async ({
+    attackerInstanceId,
+    ctx,
+    defenderInstanceId,
+    targetInstanceId,
+  }) => {
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === targetInstanceId);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'defend' && descriptor.unitInstanceId === defenderInstanceId);
+    const movedDefender = ctx.state.realm.units.find(({ instanceId }) => instanceId === defenderInstanceId);
+    assert.deepEqual({ location: movedDefender?.location, tapped: movedDefender?.tapped }, {
+      location: 'C2',
+      tapped: true,
+    });
+
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+    assert.equal(ctx.state.phase, 'allocate');
+    assert.equal(ctx.state.activeSeat, 'north');
+    assert.equal(ctx.state.decisionSeat, 'north');
+    const firstAllocation = (await ctx.legalActions('north'))
+      .find(({ descriptor }) => descriptor.kind === 'allocate-strike' && descriptor.amount === 0);
+    assert.ok(firstAllocation);
+    await ctx.accept(firstAllocation);
+    const finalAllocation = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'allocate-strike' && descriptor.amount === 1);
+    const damagedInstanceId = finalAllocation.descriptor.kind === 'allocate-strike'
+      ? finalAllocation.descriptor.targetInstanceId
+      : '';
+    await ctx.accept(finalAllocation);
+
+    assert.equal(ctx.state.phase, 'main');
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === attackerInstanceId), false);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === damagedInstanceId), false);
+    assert.equal(ctx.state.realm.units.filter(({ controller }) => controller === 'south').length, 1);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) => instanceId === attackerInstanceId), true);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) => instanceId === damagedInstanceId), true);
+    assert.equal(ctx.session.transcript.flatMap(({ events }) => events).filter(({ type }) => type === 'minion-died').length, 2);
+    assert.equal(await ctx.verifyReplay(), true);
   });
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(session.state.phase, 'allocate');
-  assert.equal(session.state.activeSeat, 'north');
-  assert.equal(session.state.decisionSeat, 'north');
-  const firstAllocation = legalGameActions(session.state, 'north')
-    .find(({ descriptor }) => descriptor.kind === 'allocate-strike' && descriptor.amount === 0);
-  assert.ok(firstAllocation);
-  session = accept(session, firstAllocation);
-  const finalAllocation = action(session, ({ descriptor }) =>
-    descriptor.kind === 'allocate-strike' && descriptor.amount === 1);
-  const damagedInstanceId = finalAllocation.descriptor.kind === 'allocate-strike'
-    ? finalAllocation.descriptor.targetInstanceId
-    : '';
-  session = accept(session, finalAllocation);
-
-  assert.equal(session.state.phase, 'main');
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === attackerInstanceId), false);
-  assert.equal(session.state.realm.units.some(({ instanceId }) => instanceId === damagedInstanceId), false);
-  assert.equal(session.state.realm.units.filter(({ controller }) => controller === 'south').length, 1);
-  assert.equal(session.state.players.north.cemetery.some(({ instanceId }) => instanceId === attackerInstanceId), true);
-  assert.equal(session.state.players.south.cemetery.some(({ instanceId }) => instanceId === damagedInstanceId), true);
-  assert.equal(session.transcript.flatMap(({ events }) => events).filter(({ type }) => type === 'minion-died').length, 2);
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 takes-less prevention applies to each simultaneous damage source before Lethal', () => {
+test('RULE-04 takes-less prevention applies to each simultaneous damage source before Lethal', async () => {
   for (const scenario of [
     { attack: 2, defense: 2, enemyPower: 1, expectedDamage: 0, lethal: true, seed: 142 },
     { attack: 4, defense: 3, enemyPower: 2, expectedDamage: 2, lethal: false, seed: 143 },
   ] as const) {
-    const setup = northAttacksAtC2(
+    await withNorthAttacksAtC2(
       scenario.seed,
       {
         attack: scenario.attack,
@@ -16539,41 +16644,42 @@ test('RULE-04 takes-less prevention applies to each simultaneous damage source b
         manaCost: 1,
         thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
       },
-    );
-    let { session } = setup;
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'declare-attack'
-        && descriptor.target.kind === 'minion'
-        && descriptor.target.instanceId === setup.targetInstanceId));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'defend'
-        && descriptor.unitInstanceId === setup.defenderInstanceId));
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-    const allocated = stepGame(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
-    assert.equal(allocated.accepted, true);
-    const fought = stepGame(allocated.session, action(allocated.session, ({ descriptor }) =>
-      descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
-    assert.equal(fought.accepted, true);
-    session = fought.session;
+      0,
+      async ({ attackerInstanceId, ctx, defenderInstanceId, targetInstanceId }) => {
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'declare-attack'
+            && descriptor.target.kind === 'minion'
+            && descriptor.target.instanceId === targetInstanceId);
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'defend'
+            && descriptor.unitInstanceId === defenderInstanceId);
+        await ctx.take(({ descriptor }) =>
+          descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+        const allocated = await ctx.step(await ctx.action(({ descriptor }) =>
+          descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
+        assert.equal(allocated.accepted, true);
+        const fought = await ctx.step(await ctx.action(({ descriptor }) =>
+          descriptor.kind === 'allocate-strike' && descriptor.amount === scenario.enemyPower));
+        assert.equal(fought.accepted, true);
 
-    assert.equal(session.state.realm.units.find(({ instanceId }) =>
-      instanceId === setup.attackerInstanceId)?.damage, scenario.expectedDamage);
-    assert.equal(session.state.realm.units.filter(({ controller }) => controller === 'south').length, 0);
-    assert.deepEqual(fought.receipt.events.find(({ payload, type }) =>
-      type === 'damage-dealt'
-        && canonicalJson(payload).includes(setup.attackerInstanceId))?.payload, {
-      accumulated: scenario.expectedDamage,
-      amount: scenario.expectedDamage,
-      attemptedAmount: scenario.enemyPower * 2,
-      direct: true,
-      instanceId: setup.attackerInstanceId,
-      prevented: true,
-      seat: 'north',
-    });
-    assert.equal(fought.receipt.randomDraws.length, 0);
-    assert.equal(verifyGameReplay(session), true);
+        assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+          instanceId === attackerInstanceId)?.damage, scenario.expectedDamage);
+        assert.equal(ctx.state.realm.units.filter(({ controller }) => controller === 'south').length, 0);
+        assert.deepEqual(fought.receipt.events.find(({ payload, type }) =>
+          type === 'damage-dealt'
+            && canonicalJson(payload).includes(attackerInstanceId))?.payload, {
+          accumulated: scenario.expectedDamage,
+          amount: scenario.expectedDamage,
+          attemptedAmount: scenario.enemyPower * 2,
+          direct: true,
+          instanceId: attackerInstanceId,
+          prevented: true,
+          seat: 'north',
+        });
+        assert.equal(fought.receipt.randomDraws.length, 0);
+        assert.equal(await ctx.verifyReplay(), true);
+      },
+    );
   }
 });
 
