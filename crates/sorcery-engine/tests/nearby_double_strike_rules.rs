@@ -5,6 +5,8 @@
 //! the source, including distant Ranged strikers. Ordinary combat already uses
 //! the shared helper; these proofs cover the remaining strike apply sites.
 
+use std::sync::OnceLock;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -196,16 +198,37 @@ fn cast_south_mask(session: &mut Session, carry_on_minion: bool) {
     }
 }
 
+fn ranged_opening_manifest() -> &'static str {
+    static MANIFEST: OnceLock<String> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        south_opening_manifest(
+            "synthetic-nearby-ranged-double-strike-v1",
+            "north-shooter",
+            &minion(json!({
+                "defense": 4,
+                "ranged": true,
+            })),
+        )
+    })
+}
+
+fn genesis_opening_manifest() -> &'static str {
+    static MANIFEST: OnceLock<String> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        south_opening_manifest(
+            "synthetic-nearby-genesis-double-strike-v1",
+            "north-titan",
+            &minion(json!({
+                "defense": 4,
+                "genesisStrikeEachEnemyHere": true,
+                "summonToAnySite": true,
+            })),
+        )
+    })
+}
+
 fn after_ranged_ready(carry_mask: bool) -> Session {
-    let mut session = Session::new(&south_opening_manifest(
-        "synthetic-nearby-ranged-double-strike-v1",
-        "north-shooter",
-        &minion(json!({
-            "defense": 4,
-            "ranged": true,
-        })),
-    ))
-    .expect("valid ranged session");
+    let mut session = Session::new(ranged_opening_manifest()).expect("valid ranged session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -261,13 +284,8 @@ fn shoot_south(session: &mut Session, shooter_id: &Value, target_id: &Value) -> 
     .1
 }
 
-fn after_south_holds_c4(carry_mask: bool, north_spell: &str, north_card: &Value) -> Session {
-    let mut session = Session::new(&south_opening_manifest(
-        "synthetic-nearby-genesis-double-strike-v1",
-        north_spell,
-        north_card,
-    ))
-    .expect("valid genesis session");
+fn after_south_holds_c4(carry_mask: bool) -> Session {
+    let mut session = Session::new(genesis_opening_manifest()).expect("valid genesis session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -335,15 +353,7 @@ fn rule_catalog_0253_ranged_strike_is_not_doubled_when_the_struck_unit_is_not_ne
 
 #[test]
 fn rule_catalog_0254_genesis_strike_deals_double_damage_when_the_struck_unit_is_nearby() {
-    let mut session = after_south_holds_c4(
-        true,
-        "north-titan",
-        &minion(json!({
-            "defense": 4,
-            "genesisStrikeEachEnemyHere": true,
-            "summonToAnySite": true,
-        })),
-    );
+    let mut session = after_south_holds_c4(true);
     let target_id = unit_id(&session, "south-minion");
     let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
@@ -364,15 +374,7 @@ fn rule_catalog_0254_genesis_strike_deals_double_damage_when_the_struck_unit_is_
 
 #[test]
 fn rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_nearby() {
-    let mut session = after_south_holds_c4(
-        false,
-        "north-titan",
-        &minion(json!({
-            "defense": 4,
-            "genesisStrikeEachEnemyHere": true,
-            "summonToAnySite": true,
-        })),
-    );
+    let mut session = after_south_holds_c4(false);
     let target_id = unit_id(&session, "south-minion");
     let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
