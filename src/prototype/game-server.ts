@@ -420,7 +420,8 @@ export function createGamePrototypeServer(
       const session = await refreshSession(client);
       if (session.state.terminal.status !== 'active' || session.state.decisionSeat !== 'south') break;
       if (count >= MAX_OPPONENT_ACTIONS) throw new Error('deterministic opponent exceeded action limit');
-      const action = await client.selectPolicyAction();
+      const [action] = asGameLegalActions([await client.selectPolicyAction()]);
+      if (!action) throw new Error('deterministic opponent has no policy action');
       const result = await client.step(action);
       if (!result.accepted) {
         throw new Error(`deterministic opponent action rejected: ${
