@@ -4453,15 +4453,21 @@ impl Game {
         facts.ranged || self.minion_atop_tower(unit)
     }
 
-    fn has_nearby_enemy_minion(&self, unit: &UnitPosition) -> bool {
-        self.position.units.iter().any(|enemy| {
-            enemy.controller != unit.controller
-                && enemy.region == unit.region
-                && Self::footprints_nearby(
-                    Self::unit_occupied_cells(unit),
-                    Self::unit_occupied_cells(enemy),
-                )
-        })
+    fn has_nearby_enemy(&self, unit: &UnitPosition) -> bool {
+        let enemy_avatar = &self.position.players[seat_index(other_seat(unit.controller))].avatar;
+        (unit.region == Region::Surface
+            && Self::footprints_nearby(
+                Self::unit_occupied_cells(unit),
+                std::slice::from_ref(&enemy_avatar.location),
+            ))
+            || self.position.units.iter().any(|enemy| {
+                enemy.controller != unit.controller
+                    && enemy.region == unit.region
+                    && Self::footprints_nearby(
+                        Self::unit_occupied_cells(unit),
+                        Self::unit_occupied_cells(enemy),
+                    )
+            })
     }
 
     fn unit_occupied_cells(unit: &UnitPosition) -> &[Cell] {
@@ -16761,7 +16767,7 @@ impl Game {
                 };
                 match facts.end_turn_stealth {
                     Some(EndTurnStealth::Always) => true,
-                    Some(EndTurnStealth::IfNoEnemiesNearby) => !self.has_nearby_enemy_minion(unit),
+                    Some(EndTurnStealth::IfNoEnemiesNearby) => !self.has_nearby_enemy(unit),
                     None => false,
                 }
             })
