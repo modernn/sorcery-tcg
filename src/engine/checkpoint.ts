@@ -3,8 +3,6 @@ import { identityHash } from '../authority/hash.ts';
 import { deepFreeze, type StateHash } from './contract.ts';
 import {
   createGameManifest,
-  createGameSession,
-  stepGame,
   type GameActionRequest,
   type GameManifest,
   type GameSession,
@@ -154,16 +152,4 @@ export async function resumeGameCheckpointAsync(checkpoint: GameCheckpoint): Pro
     }
     return session;
   });
-}
-
-export function resumeGameCheckpoint(checkpoint: GameCheckpoint): GameSession {
-  const validated = validateCheckpoint(checkpoint);
-  let session = createGameSession(validated.manifest);
-  for (const request of validated.requests) {
-    session = stepGame(session, request).session;
-  }
-  if (sessionHash(session) !== validated.expectedSessionHash) {
-    throw new RangeError('checkpoint session hash does not match reconstructed history');
-  }
-  return session;
 }

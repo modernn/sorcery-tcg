@@ -1066,9 +1066,10 @@ fn deathrite_area_damage_should_chain_in_ordered_simultaneous_batches() {
     let mut invalid_zero = manifest.clone();
     invalid_zero["cards"][&scarab_card_ids[0]]["deathriteDamageEachUnitHere"] = json!(0);
     assert!(Session::new(&finish_manifest(invalid_zero, "invalid-zero-deathrite")).is_err());
-    let mut invalid_area = manifest.clone();
-    invalid_area["cards"][&scarab_card_ids[0]]["occupiesSquareArea"] = json!(2);
-    assert!(Session::new(&finish_manifest(invalid_area, "invalid-area-deathrite")).is_err());
+    let mut valid_area = manifest.clone();
+    valid_area["cards"][&scarab_card_ids[0]]["occupiesSquareArea"] = json!(2);
+    Session::new(&finish_manifest(valid_area, "valid-area-deathrite"))
+        .expect("oversized Deathrite with summonToAnySite is admitted");
     let mut valid_three = manifest.clone();
     valid_three["cards"][&scarab_card_ids[0]]["deathriteDamageEachUnitHere"] = json!(3);
     Session::new(&finish_manifest(valid_three, "valid-three-deathrite"))

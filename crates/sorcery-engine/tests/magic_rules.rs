@@ -1171,6 +1171,138 @@ fn rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
 #[test]
 #[expect(
     clippy::too_many_lines,
+    reason = "one Chain Magic filter proof keeps low-mana and underground hop exclusion together"
+)]
+fn chain_magic_should_require_mana_and_same_region_hops() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-burrower": minion(json!({
+            "burrowing": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "north-chain": {
+            "cardType": "magic",
+            "damageChainNearbyUnits": true,
+            "manaCost": 2,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "north-site": site(false),
+        "north-target": minion(json!({
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "south-site": site(false),
+    });
+    let north_spellbook = [
+        "north-chain",
+        "north-target",
+        "north-burrower",
+        "north-chain",
+        "north-target",
+        "north-burrower",
+    ];
+    let chosen = (1..=512)
+        .map(|seed| manifest(seed, &cards, &north_spellbook, &["south-minion"; 6]))
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("Chain Magic filter candidate");
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            ["north-chain", "north-target", "north-burrower"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("seed with Chain Magic and both minions");
+    let mut session = opening_main(&chosen);
+    let chain_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-chain")
+        .expect("Chain Magic in hand")["instanceId"]
+        .as_str()
+        .expect("Chain Magic identity")
+        .to_owned();
+    assert_eq!(state(&session)["players"]["north"]["mana"], 1);
+    assert!(
+        session
+            .legal_actions()
+            .expect("low-mana actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "begin-chain-magic"
+                    || action.descriptor["cardInstanceId"] != chain_id
+            })
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-target"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-burrower"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+    });
+
+    let target_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-target")
+        .expect("surface target")["instanceId"]
+        .as_str()
+        .expect("target identity")
+        .to_owned();
+    let burrower_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-burrower")
+        .expect("burrower")["instanceId"]
+        .as_str()
+        .expect("burrower identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    assert!(
+        session
+            .legal_actions()
+            .expect("staged Chain Magic")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "extend-chain-magic"
+                    || action.descriptor["target"]["instanceId"] != burrower_id
+            })
+    );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
     reason = "one direct proof retains region filtering, Stealth, Ward, Deathrite, and replay"
 )]
 fn rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion() {
@@ -6949,4 +7081,3715 @@ fn rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_re
             .expect("resumed state hash"),
         session.state_hash().expect("session state hash")
     );
+}
+
+#[test]
+fn rule_catalog_0196_draw_spells_magic_draws_hidden_spellbook_cards() {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-draw": magic(("drawSpells", json!(2)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    let encoded = manifest(196, &cards, &["north-draw"; 6], &["south-minion"; 6]);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let expected: Vec<_> = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .take(2)
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(expected.len(), 2);
+    let south_before = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_before["players"]["north"]["hand"]["spellbook"], 3);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    });
+    let spell_id = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("draw Magic identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "spell-drawn", "spell-drawn", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], spell_id);
+    let after = state(&session);
+    let hand = after["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand");
+    assert_eq!(hand.len(), 4);
+    for instance_id in &expected {
+        assert!(
+            hand.iter().any(|card| &card["instanceId"] == instance_id),
+            "the drawn identities must enter the hidden Spellbook hand"
+        );
+    }
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    let south_after = session
+        .public_view(Seat::South)
+        .expect("South public view after the draws");
+    assert_eq!(
+        south_after["players"]["north"]["hand"]["spellbook"], 4,
+        "the opponent sees only the new hand count"
+    );
+    assert_eq!(south_after["players"]["north"]["spellbookCount"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library() {
+    for remaining in 0..=1 {
+        let mut cards = json!({
+            "north-avatar": avatar(20),
+            "north-draw": magic(("drawSpells", json!(2)), 1),
+            "north-site": site(false),
+            "south-avatar": avatar(20),
+            "south-minion": minion(json!({})),
+            "south-site": site(false),
+        });
+        let mut north_spells = vec!["north-draw", "north-draw", "north-draw"];
+        if remaining > 0 {
+            cards["north-filler"] = minion(json!({}));
+            north_spells.extend(std::iter::repeat_n("north-filler", remaining));
+        }
+        let encoded = manifest(
+            197 + u32::try_from(remaining).expect("small remaining count"),
+            &cards,
+            &north_spells,
+            &["south-minion"; 6],
+        );
+        let mut session = opening_main(&encoded);
+        let before = state(&session);
+        let expected = before["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .clone();
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+        });
+        let kinds = event_types(&receipt);
+        assert_eq!(kinds.first(), Some(&"magic-cast"));
+        assert_eq!(
+            kinds.iter().filter(|kind| **kind == "spell-drawn").count(),
+            expected.len()
+        );
+        assert_eq!(kinds.last(), Some(&"game-ended"));
+        assert!(kinds.contains(&"magic-resolved"));
+        let after = state(&session);
+        assert_eq!(after["players"]["north"]["spellbook"], json!([]));
+        assert_eq!(after["terminal"]["reason"], "deck_empty");
+        assert_eq!(after["terminal"]["loser"], "north");
+        for card in expected {
+            assert!(
+                after["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("north hand")
+                    .contains(&card)
+            );
+        }
+        assert_exact_replay(&session);
+    }
+}
+
+fn kill_target_minion_manifest(ward: bool) -> String {
+    let mut south_minion = minion(json!({ "defense": 3 }));
+    if ward {
+        south_minion["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-kill": magic(("killTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": south_minion,
+        "south-site": site(false),
+    });
+    manifest(198, &cards, &["north-kill"; 6], &["south-minion"; 6])
+}
+
+fn kill_target_minion_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("kill-minion actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-kill"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_minion_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned enemy identity")
+        .to_owned()
+}
+
+#[test]
+fn rule_catalog_0198_kill_target_minion_destroys_a_healthy_minion_and_excludes_avatars() {
+    let manifest = kill_target_minion_manifest(false);
+    let mut session = opening_main(&manifest);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let targets = kill_target_minion_targets(&session);
+    assert_eq!(targets, [enemy_id.as_str()]);
+    assert!(!targets.contains(&north_avatar));
+    assert!(!targets.contains(&south_avatar));
+    assert_eq!(
+        realm_unit(&before, &enemy_id).expect("healthy enemy")["damage"],
+        0
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-kill"
+    });
+    assert_eq!(descriptor["target"]["instanceId"], enemy_id.as_str());
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    let killed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("unconditional kill event");
+    assert_eq!(killed.payload["cardId"], "south-minion");
+    assert_eq!(killed.payload["owner"], "south");
+    assert_eq!(killed.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt")
+    );
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("kill-minion checkpoint");
+    let serialized =
+        serialize_game_checkpoint(&checkpoint).expect("serialized kill-minion checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed kill-minion checkpoint");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed kill-minion session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0199_kill_target_minion_ward_absorbs_the_kill() {
+    let manifest = kill_target_minion_manifest(true);
+    let mut session = opening_main(&manifest);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    assert_eq!(kill_target_minion_targets(&session), [enemy_id.as_str()]);
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_id).expect("warded enemy")["warded"],
+        true
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-kill"
+            && descriptor["target"]["instanceId"] == enemy_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorption");
+    assert_eq!(broken.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
+    assert_eq!(survivor["warded"], false);
+    assert_eq!(survivor["damage"], 0);
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_exact_replay(&session);
+}
+
+fn draw_sites_manifest(seed: u32, atlas_count: usize) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-draw": magic(("drawSites", json!(2)), 1),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; atlas_count],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-draw"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+#[test]
+fn rule_catalog_0200_draw_sites_magic_draws_hidden_atlas_cards() {
+    let encoded = draw_sites_manifest(200, 6);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let expected: Vec<_> = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .iter()
+        .take(2)
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(expected.len(), 2);
+    let south_before = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_before["players"]["north"]["hand"]["atlas"], 2);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    });
+    let spell_id = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("draw Magic identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-drawn", "site-drawn", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], spell_id);
+    let after = state(&session);
+    let hand = after["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand");
+    assert_eq!(hand.len(), 4);
+    for instance_id in &expected {
+        assert!(
+            hand.iter().any(|card| &card["instanceId"] == instance_id),
+            "the drawn identities must enter the hidden Atlas hand"
+        );
+    }
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == spell_id)
+    );
+    let south_after = session
+        .public_view(Seat::South)
+        .expect("South public view after the draws");
+    assert_eq!(
+        south_after["players"]["north"]["hand"]["atlas"], 4,
+        "the opponent sees only the new Atlas hand count"
+    );
+    assert_eq!(south_after["players"]["north"]["atlasCount"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library() {
+    for remaining in 0..=1 {
+        let encoded = draw_sites_manifest(
+            201 + u32::try_from(remaining).expect("small remaining count"),
+            3 + remaining,
+        );
+        let mut session = opening_main(&encoded);
+        let before = state(&session);
+        let expected = before["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .clone();
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+        });
+        let kinds = event_types(&receipt);
+        assert_eq!(kinds.first(), Some(&"magic-cast"));
+        assert_eq!(
+            kinds.iter().filter(|kind| **kind == "site-drawn").count(),
+            expected.len()
+        );
+        assert_eq!(kinds.last(), Some(&"game-ended"));
+        assert!(kinds.contains(&"magic-resolved"));
+        let after = state(&session);
+        assert_eq!(after["players"]["north"]["atlas"], json!([]));
+        assert_eq!(after["terminal"]["reason"], "deck_empty");
+        assert_eq!(after["terminal"]["loser"], "north");
+        for card in expected {
+            assert!(
+                after["players"]["north"]["hand"]["atlas"]
+                    .as_array()
+                    .expect("north Atlas hand")
+                    .contains(&card)
+            );
+        }
+        assert_exact_replay(&session);
+    }
+}
+
+fn bounce_manifest(ward: bool) -> String {
+    let mut south_minion = minion(json!({ "defense": 3 }));
+    if ward {
+        south_minion["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bounce": magic(("returnTargetMinionToOwnerHand", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": south_minion,
+        "south-site": site(false),
+    });
+    manifest(202, &cards, &["north-bounce"; 6], &["south-minion"; 6])
+}
+
+fn bounce_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("bounce actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-bounce"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0202_bounce_returns_a_healthy_minion_to_its_owners_hand() {
+    let encoded = bounce_manifest(false);
+    let mut session = opening_main(&encoded);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let south_hand_before = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+    assert_eq!(bounce_targets(&session), [enemy_id.as_str()]);
+    assert!(!bounce_targets(&session).contains(&north_avatar));
+    assert!(!bounce_targets(&session).contains(&south_avatar));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-bounce"
+    });
+    assert_eq!(descriptor["target"]["instanceId"], enemy_id.as_str());
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-returned-to-hand")
+        .expect("bounce return event");
+    assert_eq!(returned.payload["cardId"], "south-minion");
+    assert_eq!(returned.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died"
+                || event.event_type == "minion-killed"
+                || event.event_type == "damage-dealt")
+    );
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert!(
+        finished["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_eq!(
+        finished["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        south_hand_before + 1
+    );
+    assert!(
+        !finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    let north_view = session
+        .public_view(Seat::North)
+        .expect("North public view after the bounce");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["spellbook"],
+        south_hand_before + 1,
+        "the opponent sees only the new Spellbook hand count"
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("bounce checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized bounce checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed bounce checkpoint");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed bounce session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0203_bounce_ward_absorbs_the_return() {
+    let encoded = bounce_manifest(true);
+    let mut session = opening_main(&encoded);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    assert_eq!(bounce_targets(&session), [enemy_id.as_str()]);
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_id).expect("warded enemy")["warded"],
+        true
+    );
+    let hand_before = state(&session)["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == enemy_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorption");
+    assert_eq!(broken.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "minion-banished"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
+    assert_eq!(survivor["warded"], false);
+    assert!(
+        !after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
+fn destroy_site_manifest(seed: u32, protected: bool) -> String {
+    let mut south_site = site(false);
+    if protected {
+        south_site["cannotBeMovedDestroyedOrModified"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-destroy": magic(("destroyTargetSite", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": south_site,
+    });
+    manifest(seed, &cards, &["north-destroy"; 6], &["south-minion"; 6])
+}
+
+fn stage_south_site_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let south_site_id = state(session)["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    south_site_id
+}
+
+fn destroy_site_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("destroy-site actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-destroy"
+        })
+        .filter_map(|action| {
+            Some((
+                action.descriptor["targetLocation"]["cell"]
+                    .as_str()?
+                    .to_owned(),
+                action.descriptor["targetSiteInstanceId"]
+                    .as_str()?
+                    .to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0207_destroy_target_site_replaces_the_site_with_rubble() {
+    let encoded = destroy_site_manifest(207, false);
+    let mut session = opening_main(&encoded);
+    let north_site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("North site identity")
+        .to_owned();
+    let south_site_id = stage_south_site_at_c1(&mut session);
+    let before = state(&session);
+    assert_eq!(
+        destroy_site_targets(&session),
+        [
+            ("C1".to_owned(), south_site_id.clone()),
+            ("C4".to_owned(), north_site_id.clone()),
+        ]
+    );
+    assert_eq!(before["realm"]["sites"]["C1"]["cardId"], "south-site");
+    assert_eq!(before["realm"]["sites"]["C1"]["rubble"], Value::Null);
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        descriptor["targetLocation"],
+        json!({ "cell": "C1", "region": "surface" })
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-destroyed",
+            "rubble-created",
+            "magic-resolved"
+        ]
+    );
+    let destroyed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-destroyed")
+        .expect("site destruction");
+    assert_eq!(destroyed.payload["cell"], "C1");
+    assert_eq!(destroyed.payload["instanceId"], south_site_id);
+    assert_eq!(destroyed.payload["owner"], "south");
+    assert_eq!(
+        destroyed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let rubble = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "rubble-created")
+        .expect("Rubble creation");
+    assert_eq!(rubble.payload["cell"], "C1");
+    assert_eq!(
+        rubble.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "minion-died"
+                || event.event_type == "card-discarded")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"]["rubble"], true);
+    assert_eq!(
+        after["realm"]["sites"]["C1"]["instanceId"],
+        rubble.payload["instanceId"]
+    );
+    assert_eq!(after["realm"]["sites"]["C4"]["instanceId"], north_site_id);
+    assert_eq!(after["players"]["south"]["avatar"]["location"], "C1");
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_eq!(
+        destroy_site_targets(&session),
+        [("C4".to_owned(), north_site_id)]
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("destroy-site checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized destroy-site");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed destroy-site");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed destroy-site session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site() {
+    let encoded = destroy_site_manifest(208, true);
+    let mut session = opening_main(&encoded);
+    let south_site_id = stage_south_site_at_c1(&mut session);
+    let before = state(&session);
+    let south_site = before["realm"]["sites"]["C1"].clone();
+    assert_eq!(south_site["instanceId"], south_site_id);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-destruction-prevented", "magic-resolved"]
+    );
+    let prevented = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-destruction-prevented")
+        .expect("protected-site prevention");
+    assert_eq!(prevented.payload["cell"], "C1");
+    assert_eq!(prevented.payload["instanceId"], south_site_id);
+    assert_eq!(prevented.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-destroyed"
+                || event.event_type == "rubble-created")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"], south_site);
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_exact_replay(&session);
+}
+
+fn return_site_manifest(seed: u32, protected: bool) -> String {
+    let mut south_site = site(false);
+    if protected {
+        south_site["cannotBeMovedDestroyedOrModified"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bounce-site": magic(("returnTargetSiteToOwnerHand", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": south_site,
+    });
+    manifest(
+        seed,
+        &cards,
+        &["north-bounce-site"; 6],
+        &["south-minion"; 6],
+    )
+}
+
+fn return_site_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("return-site actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-bounce-site"
+        })
+        .filter_map(|action| {
+            Some((
+                action.descriptor["targetLocation"]["cell"]
+                    .as_str()?
+                    .to_owned(),
+                action.descriptor["targetSiteInstanceId"]
+                    .as_str()?
+                    .to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps targeting, return events, void banishment, observation, checkpoint, and replay together"
+)]
+fn rule_catalog_0209_return_target_site_returns_owners_site_and_banishes_surface_minions() {
+    let encoded = return_site_manifest(209, false);
+    let mut session = opening_main(&encoded);
+    let north_site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("North site identity")
+        .to_owned();
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let south_site_id = before["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let south_atlas_before = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("South Atlas hand")
+        .len();
+    assert_eq!(
+        return_site_targets(&session),
+        [
+            ("C1".to_owned(), south_site_id.clone()),
+            ("C4".to_owned(), north_site_id.clone()),
+        ]
+    );
+    assert_eq!(before["realm"]["sites"]["C1"]["cardId"], "south-site");
+    assert!(realm_unit(&before, &minion_id).is_some());
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce-site"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        descriptor["targetLocation"],
+        json!({ "cell": "C1", "region": "surface" })
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-returned-to-hand",
+            "minion-banished",
+            "magic-resolved"
+        ]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-returned-to-hand")
+        .expect("site return");
+    assert_eq!(returned.payload["cardId"], "south-site");
+    assert_eq!(returned.payload["cell"], "C1");
+    assert_eq!(returned.payload["instanceId"], south_site_id);
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert_eq!(
+        returned.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let banished = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-banished")
+        .expect("surface minion banishment");
+    assert_eq!(banished.payload["cardId"], "south-minion");
+    assert_eq!(banished.payload["instanceId"], minion_id);
+    assert_eq!(banished.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died"
+                || event.event_type == "rubble-created"
+                || event.event_type == "site-destroyed"
+                || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    assert!(after["realm"]["sites"].get("C1").is_none());
+    assert_eq!(after["realm"]["sites"]["C4"]["instanceId"], north_site_id);
+    assert_eq!(after["players"]["south"]["avatar"]["location"], "C1");
+    assert!(realm_unit(&after, &minion_id).is_none());
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id
+                || card["instanceId"] == minion_id.as_str())
+    );
+    assert!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .len(),
+        south_atlas_before + 1
+    );
+    let north_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["atlas"],
+        json!(south_atlas_before + 1)
+    );
+    assert_eq!(
+        return_site_targets(&session),
+        [("C4".to_owned(), north_site_id)]
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("return-site checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized return-site");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed return-site");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed return-site session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site() {
+    let encoded = return_site_manifest(210, true);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let south_site = before["realm"]["sites"]["C1"].clone();
+    let south_site_id = south_site["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let south_atlas_before = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("South Atlas hand")
+        .len();
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce-site"
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == south_site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-return-prevented", "magic-resolved"]
+    );
+    let prevented = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-return-prevented")
+        .expect("protected-site return prevention");
+    assert_eq!(prevented.payload["cell"], "C1");
+    assert_eq!(prevented.payload["instanceId"], south_site_id);
+    assert_eq!(prevented.payload["owner"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-returned-to-hand"
+                || event.event_type == "minion-banished"
+                || event.event_type == "minion-died"
+                || event.event_type == "rubble-created")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["realm"]["sites"]["C1"], south_site);
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(
+        after["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("South Atlas hand")
+            .len(),
+        south_atlas_before
+    );
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == south_site_id)
+    );
+    assert_exact_replay(&session);
+}
+
+fn artifact_magic_manifest(seed: u32, effect: &str) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-artifact-magic": magic((effect, json!(true)), 0),
+        "north-site": site(false),
+        "south-artifact": {
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "south-avatar": avatar(20),
+        "south-site": site(false),
+    });
+    manifest(
+        seed,
+        &cards,
+        &["north-artifact-magic"; 6],
+        &["south-artifact"; 6],
+    )
+}
+
+fn stage_south_artifact(session: &mut Session, carried: bool) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-artifact"
+            && if carried {
+                descriptor["bearer"]["kind"] == "avatar"
+            } else {
+                descriptor["bearer"].is_null() && descriptor["cell"] == "C1"
+            }
+    });
+    let artifact_id = state(session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()
+        .expect("artifact identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    artifact_id
+}
+
+fn artifact_magic_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("artifact-magic actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-artifact-magic"
+        })
+        .filter_map(|action| {
+            action.descriptor["targetArtifactInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn realm_has_artifact(value: &Value, instance_id: &str) -> bool {
+    value["realm"]
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .is_some_and(|artifacts| {
+            artifacts
+                .iter()
+                .any(|artifact| artifact["instanceId"] == instance_id)
+        })
+}
+
+#[test]
+fn rule_catalog_0211_destroy_target_artifact_moves_a_loose_artifact_to_its_owners_cemetery() {
+    let encoded = artifact_magic_manifest(211, "destroyTargetArtifact");
+    let mut session = opening_main(&encoded);
+    let artifact_id = stage_south_artifact(&mut session, false);
+    assert_eq!(
+        artifact_magic_targets(&session).as_slice(),
+        std::slice::from_ref(&artifact_id)
+    );
+    assert!(realm_has_artifact(&state(&session), &artifact_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-artifact-magic"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-destroyed", "magic-resolved"]
+    );
+    let destroyed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "artifact-destroyed")
+        .expect("artifact destruction");
+    assert_eq!(destroyed.payload["cardId"], "south-artifact");
+    assert_eq!(destroyed.payload["instanceId"], artifact_id);
+    assert_eq!(destroyed.payload["owner"], "south");
+    assert_eq!(
+        destroyed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-returned-to-hand"
+                || event.event_type == "artifact-banished"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    assert!(!realm_has_artifact(&after, &artifact_id));
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert!(
+        !after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert_eq!(artifact_magic_targets(&session), Vec::<String>::new());
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("destroy-artifact checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized destroy-artifact");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed destroy-artifact");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed destroy-artifact session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand() {
+    let encoded = artifact_magic_manifest(212, "returnTargetArtifactToOwnerHand");
+    let mut session = opening_main(&encoded);
+    let artifact_id = stage_south_artifact(&mut session, true);
+    let before = state(&session);
+    let south_hand_before = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+    assert_eq!(
+        artifact_magic_targets(&session).as_slice(),
+        std::slice::from_ref(&artifact_id)
+    );
+    assert!(realm_has_artifact(&before, &artifact_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-artifact-magic"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "artifact-returned-to-hand")
+        .expect("artifact return");
+    assert_eq!(returned.payload["cardId"], "south-artifact");
+    assert_eq!(returned.payload["instanceId"], artifact_id);
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert_eq!(
+        returned.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-destroyed"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    assert!(!realm_has_artifact(&after, &artifact_id));
+    assert!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        south_hand_before + 1
+    );
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    let north_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["spellbook"],
+        json!(south_hand_before + 1)
+    );
+    assert_eq!(artifact_magic_targets(&session), Vec::<String>::new());
+    assert_exact_replay(&session);
+}
+
+fn life_loss_magic_manifest(seed: u32, north_life: u8, south_life: u8) -> String {
+    let cards = json!({
+        "north-avatar": avatar(north_life),
+        "north-life-loss": magic(("targetPlayerLosesLife", json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(south_life),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-life-loss"; 6], &["south-minion"; 6])
+}
+
+fn life_loss_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("life-loss actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-loss"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0213_target_player_life_loss_reduces_avatar_life_without_dealing_damage() {
+    let encoded = life_loss_magic_manifest(213, 20, 20);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        life_loss_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("life-loss actions")
+            .into_iter()
+            .filter(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-loss")
+            .all(|action| {
+                action.descriptor["target"]["kind"] == "avatar"
+                    && action.descriptor["target"]["instanceId"] != minion_id
+            })
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "avatar-life-lost", "magic-resolved"]
+    );
+    let lost = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-life-lost")
+        .expect("life-loss event");
+    assert_eq!(lost.payload["amount"], 2);
+    assert_eq!(lost.payload["life"], 18);
+    assert_eq!(lost.payload["seat"], "south");
+    assert_eq!(
+        lost.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "avatar-reached-deaths-door")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 18);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(
+        after["players"]["south"]["avatar"]["card"]["instanceId"],
+        south_avatar
+    );
+    assert_eq!(
+        after["players"]["north"]["avatar"]["card"]["instanceId"],
+        north_avatar
+    );
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("life-loss checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized life-loss");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed life-loss");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed life-loss session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow() {
+    let encoded = life_loss_magic_manifest(214, 2, 20);
+    let mut session = opening_main(&encoded);
+    let north_avatar = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+
+    let (descriptor, first) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(
+        event_types(&first),
+        [
+            "magic-cast",
+            "avatar-life-lost",
+            "avatar-reached-deaths-door",
+            "magic-resolved"
+        ]
+    );
+    let lost = first
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-life-lost")
+        .expect("life-loss event");
+    assert_eq!(lost.payload["amount"], 2);
+    assert_eq!(lost.payload["life"], 0);
+    assert_eq!(lost.payload["seat"], "north");
+    assert_eq!(
+        lost.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    let door = first
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-reached-deaths-door")
+        .expect("Death's Door event");
+    assert_eq!(door.payload["seat"], "north");
+    assert_eq!(
+        door.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !first
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt" || event.event_type == "death-blow")
+    );
+
+    let after_first = state(&session);
+    assert_eq!(after_first["players"]["north"]["avatar"]["life"], 0);
+    let death_door_turn = after_first["players"]["north"]["avatar"]["deathDoorTurn"].clone();
+    assert!(!death_door_turn.is_null());
+    assert_eq!(after_first["terminal"]["status"], "active");
+
+    let (_, second) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-life-lost"
+                || event.event_type == "avatar-reached-deaths-door"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "game-ended")
+    );
+
+    let after_second = state(&session);
+    assert_eq!(after_second["players"]["north"]["avatar"]["life"], 0);
+    assert_eq!(
+        after_second["players"]["north"]["avatar"]["deathDoorTurn"],
+        death_door_turn
+    );
+    assert_eq!(after_second["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn life_gain_magic_manifest(seed: u32, north_life: u8) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(north_life),
+        "north-life-gain": magic(("targetPlayerGainsLife", json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-site": site(false),
+    });
+    let south_spellbook = if north_life == 2 {
+        cards.as_object_mut().expect("cards").insert(
+            "south-lash".to_owned(),
+            magic(("damageTargetUnit", json!(2)), 0),
+        );
+        ["south-lash"; 6]
+    } else {
+        cards.as_object_mut().expect("cards").insert(
+            "south-loss".to_owned(),
+            minion(json!({ "genesisLoseControllerLife": 2 })),
+        );
+        ["south-loss"; 6]
+    };
+    manifest(seed, &cards, &["north-life-gain"; 6], &south_spellbook)
+}
+
+fn life_gain_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("life-gain actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-gain"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0215_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap() {
+    let encoded = life_gain_magic_manifest(215, 20);
+    let mut session = opening_main(&encoded);
+    let minion_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    assert_eq!(before["players"]["south"]["avatar"]["life"], 18);
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        life_gain_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("life-gain actions")
+            .into_iter()
+            .filter(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-life-gain")
+            .all(|action| {
+                action.descriptor["target"]["kind"] == "avatar"
+                    && action.descriptor["target"]["instanceId"] != minion_id
+            })
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-gain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "avatar-healed", "magic-resolved"]
+    );
+    let healed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "avatar-healed")
+        .expect("life-gain event");
+    assert_eq!(healed.payload["amount"], 2);
+    assert_eq!(healed.payload["attemptedAmount"], 2);
+    assert_eq!(healed.payload["life"], 20);
+    assert_eq!(healed.payload["seat"], "south");
+    assert_eq!(
+        healed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "damage-dealt"
+                || event.event_type == "avatar-life-lost")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert!(realm_unit(&after, &minion_id).is_some());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("life-gain checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized life-gain");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed life-gain");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed life-gain session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door() {
+    let encoded = life_gain_magic_manifest(216, 2);
+    let mut session = opening_main(&encoded);
+    let north_avatar = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (_, damage) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-lash"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert!(event_types(&damage).contains(&"avatar-reached-deaths-door"));
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
+    let death_door_turn = state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-gain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+            && descriptor["target"]["instanceId"] == north_avatar
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-healed"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "death-blow"
+                || event.event_type == "game-ended")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
+    assert_eq!(
+        after["players"]["north"]["avatar"]["deathDoorTurn"],
+        death_door_turn
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn untap_magic_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-untap": magic(("untapTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(json!({
+            "charge": true,
+            "ward": true,
+        })),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-untap"; 6], &["south-charger"; 6])
+}
+
+fn untap_minion_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("untap actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-untap"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_charger(session: &mut Session, tap: bool) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-charger"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let charger_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("South Charge identity")
+        .to_owned();
+    if tap {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "move-and-attack"
+                && descriptor["unitInstanceId"] == charger_id
+                && descriptor["to"]["cell"] == "C1"
+        });
+        if session
+            .legal_actions()
+            .expect("post-activation actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "decline-attack")
+        {
+            accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+        }
+    }
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    charger_id
+}
+
+#[test]
+fn rule_catalog_0217_untap_target_minion_readies_a_tapped_minion_without_breaking_ward() {
+    let encoded = untap_magic_manifest(217);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_charger(&mut session, true);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("tapped charger");
+    assert_eq!(charger["tapped"], true);
+    assert_eq!(charger["warded"], true);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        untap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !untap_minion_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-untap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-untapped", "magic-resolved"]
+    );
+    let untapped = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-untapped")
+        .expect("untap event");
+    assert_eq!(untapped.payload["instanceId"], charger_id);
+    assert_eq!(untapped.payload["seat"], "south");
+    assert_eq!(
+        untapped.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("untapped charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("untap checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized untap");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed untap");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed untap session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped() {
+    let encoded = untap_magic_manifest(218);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_charger(&mut session, false);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        untap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-untap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-untapped"
+                || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+}
+
+fn tap_magic_manifest(seed: u32, ward: bool) -> String {
+    let mut charger = json!({ "charge": true });
+    if ward {
+        charger["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-tap": magic(("tapTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(charger),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-tap"; 6], &["south-charger"; 6])
+}
+
+fn tap_minion_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("tap actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-tap"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_ready_charger(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-charger"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let charger_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("South Charge identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    charger_id
+}
+
+#[test]
+fn rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion() {
+    let encoded = tap_magic_manifest(219, false);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], false);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        tap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !tap_minion_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-tapped", "magic-resolved"]
+    );
+    let tapped = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-tapped")
+        .expect("tap event");
+    assert_eq!(tapped.payload["instanceId"], charger_id);
+    assert_eq!(tapped.payload["seat"], "south");
+    assert_eq!(
+        tapped.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("exhausted charger");
+    assert_eq!(charger["tapped"], true);
+    assert_eq!(charger["warded"], false);
+
+    let (_, noop) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&noop), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !noop
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-tapped")
+    );
+    let still = state(&session);
+    assert_eq!(
+        realm_unit(&still, &charger_id).expect("still exhausted")["tapped"],
+        true
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("tap checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized tap");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed tap");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed tap session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward() {
+    let encoded = tap_magic_manifest(220, true);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("warded charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        tap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorb");
+    assert_eq!(broken.payload["instanceId"], charger_id);
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-tapped")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], false);
+    assert_exact_replay(&session);
+}
+
+fn grant_ward_manifest(seed: u32, printed_ward: bool) -> String {
+    let mut charger = json!({ "charge": true });
+    if printed_ward {
+        charger["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-ward": magic(("grantWardToTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(charger),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-ward"; 6], &["south-charger"; 6])
+}
+
+fn grant_ward_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("grant-Ward actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-ward"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0221_grant_ward_marks_an_unwarded_minion() {
+    let encoded = grant_ward_manifest(221, false);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("unwarded charger");
+    assert_eq!(charger["warded"], false);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        grant_ward_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !grant_ward_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-ward"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-warded", "magic-resolved"]
+    );
+    let granted = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-warded")
+        .expect("Ward grant");
+    assert_eq!(granted.payload["instanceId"], charger_id);
+    assert_eq!(granted.payload["seat"], "south");
+    assert_eq!(
+        granted.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("warded charger");
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("grant-Ward checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized grant-Ward");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed grant-Ward");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed grant-Ward session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0222_grant_ward_is_a_paid_noop_when_already_warded() {
+    let encoded = grant_ward_manifest(222, true);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("printed-Ward charger");
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        grant_ward_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-ward"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-warded" || event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-warded charger");
+    assert_eq!(charger["warded"], true);
+    assert_exact_replay(&session);
+}
+
+fn grant_stealth_manifest(seed: u32, printed_stealth: bool) -> String {
+    let mut charger = json!({ "charge": true });
+    if printed_stealth {
+        charger["stealth"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-stealth": magic(("grantStealthToTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(charger),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-stealth"; 6], &["south-charger"; 6])
+}
+
+fn grant_stealth_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("grant-Stealth actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-stealth"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0223_grant_stealth_hides_an_enemy_minion_from_later_targeting() {
+    let encoded = grant_stealth_manifest(223, false);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("visible charger");
+    assert_eq!(charger["stealthed"], false);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        grant_stealth_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !grant_stealth_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-stealth"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-stealthed", "magic-resolved"]
+    );
+    let granted = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-stealthed")
+        .expect("Stealth grant");
+    assert_eq!(granted.payload["instanceId"], charger_id);
+    assert_eq!(granted.payload["seat"], "south");
+    assert_eq!(
+        granted.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("stealthed charger");
+    assert_eq!(charger["stealthed"], true);
+    assert_eq!(grant_stealth_targets(&session), []);
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("grant-Stealth checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized grant-Stealth");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed grant-Stealth");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed grant-Stealth session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0224_grant_stealth_cannot_target_an_enemy_already_stealthed() {
+    let encoded = grant_stealth_manifest(224, true);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("printed-Stealth charger");
+    assert_eq!(charger["stealthed"], true);
+    assert_eq!(grant_stealth_targets(&session), []);
+    assert!(
+        !session
+            .legal_actions()
+            .expect("post-stealth actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-stealth")
+    );
+    let after = state(&session);
+    assert_eq!(
+        realm_unit(&after, &charger_id).expect("still-stealthed")["stealthed"],
+        true
+    );
+    assert_exact_replay(&session);
+}
+
+fn mill_player_manifest(
+    seed: u32,
+    field: &str,
+    south_spellbook: usize,
+    south_atlas: usize,
+) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-mill": magic((field, json!(2)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-mill"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; south_atlas],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; south_spellbook],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn mill_player_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("mill actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-mill"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["seat"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn mill_south_library(session: &Session, zone: &str) -> Vec<Value> {
+    state(session)["players"]["south"][zone]
+        .as_array()
+        .expect("south library")
+        .clone()
+}
+
+#[test]
+fn rule_catalog_0225_mill_spells_puts_opponent_library_cards_in_the_cemetery() {
+    let encoded = mill_player_manifest(225, "millSpells", 6, 6);
+    let mut session = opening_main(&encoded);
+    let before = mill_south_library(&session, "spellbook");
+    let expected: Vec<_> = before.iter().take(2).cloned().collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "spell-discarded",
+            "spell-discarded",
+            "magic-resolved"
+        ]
+    );
+    let discarded: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "spell-discarded")
+        .collect();
+    assert_eq!(
+        discarded[0].payload["instanceId"],
+        expected[0]["instanceId"]
+    );
+    assert_eq!(discarded[0].payload["cardId"], "south-minion");
+    assert_eq!(discarded[0].payload["seat"], "south");
+    assert_eq!(
+        discarded[0].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        discarded[1].payload["instanceId"],
+        expected[1]["instanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "game-ended"
+                || event.event_type == "spell-drawn"
+                || event.event_type == "damage-dealt")
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["south"]["spellbook"]
+            .as_array()
+            .expect("remaining")
+            .len(),
+        1
+    );
+    let cemetery = after["players"]["south"]["cemetery"]
+        .as_array()
+        .expect("south cemetery");
+    for card in &expected {
+        assert!(
+            cemetery
+                .iter()
+                .any(|entry| entry["instanceId"] == card["instanceId"])
+        );
+    }
+    let south_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(south_view["players"]["south"]["spellbookCount"], 1);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("mill-spells checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized mill-spells");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed mill-spells");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed mill-spells session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0226_mill_spells_is_a_paid_noop_on_an_empty_library() {
+    let encoded = mill_player_manifest(226, "millSpells", 3, 6);
+    let mut session = opening_main(&encoded);
+    assert_eq!(mill_south_library(&session, "spellbook").len(), 0);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-discarded" || event.event_type == "game-ended")
+    );
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["spellbook"], json!([]));
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0227_mill_sites_puts_opponent_atlas_cards_in_the_cemetery() {
+    let encoded = mill_player_manifest(227, "millSites", 6, 6);
+    let mut session = opening_main(&encoded);
+    let before = mill_south_library(&session, "atlas");
+    let expected: Vec<_> = before.iter().take(2).cloned().collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "site-discarded",
+            "site-discarded",
+            "magic-resolved"
+        ]
+    );
+    let discarded: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-discarded")
+        .collect();
+    assert_eq!(
+        discarded[0].payload["instanceId"],
+        expected[0]["instanceId"]
+    );
+    assert_eq!(discarded[0].payload["cardId"], "south-site");
+    assert_eq!(
+        discarded[0].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        discarded[1].payload["instanceId"],
+        expected[1]["instanceId"]
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["south"]["atlas"]
+            .as_array()
+            .expect("remaining")
+            .len(),
+        1
+    );
+    let cemetery = after["players"]["south"]["cemetery"]
+        .as_array()
+        .expect("south cemetery");
+    for card in &expected {
+        assert!(
+            cemetery
+                .iter()
+                .any(|entry| entry["instanceId"] == card["instanceId"])
+        );
+    }
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas() {
+    let encoded = mill_player_manifest(228, "millSites", 6, 3);
+    let mut session = opening_main(&encoded);
+    assert_eq!(mill_south_library(&session, "atlas").len(), 0);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-discarded" || event.event_type == "game-ended")
+    );
+    let after = state(&session);
+    assert_eq!(after["players"]["south"]["atlas"], json!([]));
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn cemetery_magic_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-return": magic(("returnTargetMagicFromOwnCemetery", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-return"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn cemetery_magic_cast_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("cemetery Magic actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return"
+        })
+        .filter_map(|action| {
+            action.descriptor["cemeteryMinionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0229_cemetery_magic_return_restores_own_cemetery_magic_to_hidden_hand() {
+    let encoded = cemetery_magic_manifest(229);
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_magic_cast_ids(&session), Vec::<String>::new());
+    let (seed_descriptor, seed_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert_eq!(event_types(&seed_receipt), ["magic-cast", "magic-resolved"]);
+    let seed_id = seed_descriptor["cardInstanceId"]
+        .as_str()
+        .expect("seed Magic identity")
+        .to_owned();
+    let before = state(&session);
+    assert!(
+        before["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == seed_id)
+    );
+    let cemetery_targets = cemetery_magic_cast_ids(&session);
+    assert!(!cemetery_targets.is_empty());
+    assert!(cemetery_targets.iter().all(|id| id == &seed_id));
+    let before_hand_count = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == seed_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-returned-to-hand", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["cardId"], "north-return");
+    assert_eq!(receipt.events[1].payload["instanceId"], seed_id);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "ward-broken")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        before_hand_count
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == seed_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != seed_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_view["players"]["north"]["hand"]["spellbook"], 2);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("cemetery-magic checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized cemetery-magic");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed cemetery-magic");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed cemetery-magic session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0230_cemetery_magic_return_is_a_paid_noop_without_cemetery_magic() {
+    let encoded = cemetery_magic_manifest(230);
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_magic_cast_ids(&session), Vec::<String>::new());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "magic-returned-to-hand"
+                || event.event_type == "minion-returned-to-hand")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn cemetery_artifact_cards(include_setup: bool) -> Value {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-return": magic(("returnTargetArtifactFromOwnCemetery", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    if include_setup {
+        cards["north-destroy"] = magic(("destroyTargetArtifact", json!(true)), 0);
+        cards["north-relic"] = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+    }
+    cards
+}
+
+fn cemetery_artifact_cast_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("cemetery artifact actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return"
+        })
+        .filter_map(|action| {
+            action.descriptor["cemeteryMinionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed cemetery filtering, hidden-hand, and replay together"
+)]
+fn rule_catalog_0231_cemetery_artifact_return_restores_own_cemetery_artifact_to_hidden_hand() {
+    let encoded = manifest(
+        231,
+        &cemetery_artifact_cards(true),
+        &["north-relic", "north-destroy", "north-return"],
+        &["south-minion"; 6],
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_artifact_cast_ids(&session), Vec::<String>::new());
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == "C4"
+    });
+    let relic_id = state(&session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()
+        .expect("relic identity")
+        .to_owned();
+    let (_, destroyed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetArtifactInstanceId"] == relic_id
+    });
+    assert!(
+        destroyed
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-destroyed")
+    );
+    let before = state(&session);
+    let destroy_id = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")
+        .expect("destroy Magic in cemetery")["instanceId"]
+        .as_str()
+        .expect("destroy identity")
+        .to_owned();
+    assert_ne!(destroy_id, relic_id);
+    let cemetery_targets = cemetery_artifact_cast_ids(&session);
+    assert!(!cemetery_targets.is_empty());
+    assert!(cemetery_targets.iter().all(|id| id == &relic_id));
+    assert!(!cemetery_targets.iter().any(|id| id == &destroy_id));
+    let before_hand_count = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == relic_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["cardId"], "north-relic");
+    assert_eq!(receipt.events[1].payload["instanceId"], relic_id);
+    assert_eq!(receipt.events[1].payload["owner"], "north");
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "magic-returned-to-hand")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        before_hand_count
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == relic_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != relic_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == destroy_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_view["players"]["north"]["hand"]["spellbook"], 1);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("cemetery-artifact checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized cemetery-artifact");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed cemetery-artifact");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed cemetery-artifact session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0232_cemetery_artifact_return_is_a_paid_noop_without_cemetery_artifact() {
+    let encoded = manifest(
+        232,
+        &cemetery_artifact_cards(false),
+        &["north-return"; 6],
+        &["south-minion"; 6],
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_artifact_cast_ids(&session), Vec::<String>::new());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-returned-to-hand"
+                || event.event_type == "magic-returned-to-hand")
+    );
+    assert_eq!(cemetery_artifact_cast_ids(&session), Vec::<String>::new());
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn cemetery_site_cards(include_destroy: bool) -> Value {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-return": magic(("returnTargetSiteFromOwnCemetery", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    if include_destroy {
+        cards["north-destroy"] = magic(("destroyTargetSite", json!(true)), 0);
+    }
+    cards
+}
+
+fn cemetery_site_cast_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("cemetery site actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return"
+        })
+        .filter_map(|action| {
+            action.descriptor["cemeteryMinionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed cemetery filtering, Atlas-hand, and replay together"
+)]
+fn rule_catalog_0233_cemetery_site_return_restores_own_cemetery_site_to_hidden_atlas() {
+    let encoded = manifest(
+        233,
+        &cemetery_site_cards(true),
+        &["north-destroy", "north-return", "north-return"],
+        &["south-minion"; 6],
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_site_cast_ids(&session), Vec::<String>::new());
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B4"
+    });
+    let site_id = state(&session)["realm"]["sites"]["B4"]["instanceId"]
+        .as_str()
+        .expect("B4 site identity")
+        .to_owned();
+    let (_, destroyed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "B4"
+            && descriptor["targetSiteInstanceId"] == site_id
+    });
+    assert!(
+        destroyed
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-destroyed")
+    );
+    let before = state(&session);
+    let destroy_id = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")
+        .expect("destroy Magic in cemetery")["instanceId"]
+        .as_str()
+        .expect("destroy identity")
+        .to_owned();
+    assert_ne!(destroy_id, site_id);
+    let cemetery_targets = cemetery_site_cast_ids(&session);
+    assert!(!cemetery_targets.is_empty());
+    assert!(cemetery_targets.iter().all(|id| id == &site_id));
+    assert!(!cemetery_targets.iter().any(|id| id == &destroy_id));
+    let before_atlas = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "site-returned-to-hand", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["cardId"], "north-site");
+    assert_eq!(receipt.events[1].payload["instanceId"], site_id);
+    assert_eq!(receipt.events[1].payload["owner"], "north");
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(receipt.events[1].payload.get("cell").is_none());
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "magic-returned-to-hand"
+                || event.event_type == "artifact-returned-to-hand")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        before_atlas + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .iter()
+            .any(|card| card["instanceId"] == site_id)
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .iter()
+            .all(|card| card["instanceId"] != site_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != site_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == destroy_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(
+        south_view["players"]["north"]["hand"]["atlas"],
+        before_atlas + 1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("cemetery-site checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized cemetery-site");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed cemetery-site");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed cemetery-site session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0234_cemetery_site_return_is_a_paid_noop_without_cemetery_site() {
+    let encoded = manifest(
+        234,
+        &cemetery_site_cards(false),
+        &["north-return"; 6],
+        &["south-minion"; 6],
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_site_cast_ids(&session), Vec::<String>::new());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "site-returned-to-hand"
+                || event.event_type == "magic-returned-to-hand")
+    );
+    assert_eq!(cemetery_site_cast_ids(&session), Vec::<String>::new());
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn discard_cost_cards() -> Value {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-fodder": magic(("healController", json!(1)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    cards["north-cost"] = {
+        let mut cost = magic(("drawSites", json!(1)), 0);
+        cost.as_object_mut()
+            .expect("chosen-discard Magic")
+            .insert("discardCardAsAdditionalCost".to_owned(), json!(true));
+        cost
+    };
+    cards
+}
+
+fn discard_cost_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("chosen-discard actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-cost"
+        })
+        .filter_map(|action| {
+            action.descriptor["discardCardInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn discard_cost_session(seed: u32) -> Session {
+    opening_main(&manifest(
+        seed,
+        &discard_cost_cards(),
+        &["north-cost", "north-fodder", "north-fodder"],
+        &["south-minion"; 6],
+    ))
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed-zone filtering, cost payment, draw, and replay together"
+)]
+fn rule_catalog_0235_chosen_discard_cost_discards_another_spell_then_resolves() {
+    let mut session = discard_cost_session(235);
+    let before = state(&session);
+    let cost_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-cost")
+        .expect("cost Magic")["instanceId"]
+        .as_str()
+        .expect("cost identity")
+        .to_owned();
+    let fodder_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-fodder")
+        .expect("fodder Magic")["instanceId"]
+        .as_str()
+        .expect("fodder identity")
+        .to_owned();
+    let atlas_ids: Vec<_> = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("atlas identity")
+                .to_owned()
+        })
+        .collect();
+    let drawn_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas library")
+        .first()
+        .expect("next site")["instanceId"]
+        .clone();
+    let discard_ids = discard_cost_ids(&session);
+    assert!(!discard_ids.is_empty());
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(discard_ids.iter().any(|id| id == &fodder_id));
+    assert!(atlas_ids.iter().all(|id| discard_ids.contains(id)));
+    let south_observation = session.observe(Seat::South);
+    let atlas_before = atlas_ids.len();
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cost"
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["cardId"], "north-fodder");
+    assert_eq!(receipt.events[0].payload["instanceId"], fodder_id);
+    assert_eq!(receipt.events[0].payload["owner"], "north");
+    assert_eq!(receipt.events[0].payload["seat"], "north");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], cost_id);
+    assert_eq!(receipt.events[0].payload["zone"], "spellbook");
+    assert_eq!(descriptor["discardCardInstanceId"], fodder_id);
+    assert_eq!(
+        receipt.events[1].payload["discardCardInstanceId"],
+        fodder_id
+    );
+    assert_eq!(receipt.events[2].payload["sourceInstanceId"], cost_id);
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == fodder_id)
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .iter()
+            .all(|card| card["instanceId"] != fodder_id && card["instanceId"] != cost_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(
+        south_view["players"]["north"]["hand"]["atlas"],
+        atlas_before + 1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("chosen-discard checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized chosen-discard");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed chosen-discard");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed chosen-discard session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card() {
+    let mut session = discard_cost_session(236);
+    let before = state(&session);
+    let cost_id = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .find(|card| card["cardId"] == "north-cost")
+        .expect("cost Magic")["instanceId"]
+        .as_str()
+        .expect("cost identity")
+        .to_owned();
+    let site_id = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("Atlas card")["instanceId"]
+        .as_str()
+        .expect("site identity")
+        .to_owned();
+    let discard_ids = discard_cost_ids(&session);
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(discard_ids.iter().any(|id| id == &site_id));
+    assert!(
+        session
+            .legal_actions()
+            .expect("chosen-discard actions")
+            .into_iter()
+            .filter(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "north-cost"
+            })
+            .all(|action| action.descriptor.get("discardCardInstanceId").is_some())
+    );
+    let atlas_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cost"
+            && descriptor["discardCardInstanceId"] == site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["cardId"], "north-site");
+    assert_eq!(receipt.events[0].payload["instanceId"], site_id);
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == site_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+fn discard_cards_manifest(seed: u32, count: u8, north_spells: &[&str]) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-discard": magic(("targetPlayerDiscardsCards", json!(count)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, north_spells, &["south-minion"; 6])
+}
+
+fn discard_card_ids(session: &Session) -> Vec<(String, String)> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter_map(|action| {
+            if action.descriptor["kind"] != "discard-card" {
+                return None;
+            }
+            Some((
+                action.descriptor["cardInstanceId"]
+                    .as_str()
+                    .expect("discard identity")
+                    .to_owned(),
+                action.descriptor["zone"]
+                    .as_str()
+                    .expect("discard zone")
+                    .to_owned(),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one replayed scenario proves targeting, seat transfer, hidden hands, and forged rejection"
+)]
+fn rule_catalog_0239_target_player_discard_lets_the_targeted_player_choose() {
+    let mut session = opening_main(&discard_cards_manifest(239, 1, &["north-discard"; 6]));
+    let before = state(&session);
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    let south_spells: Vec<_> = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("south Spellbook")
+        .iter()
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    let south_sites: Vec<_> = before["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .expect("south Atlas")
+        .iter()
+        .map(|card| card["instanceId"].clone())
+        .collect();
+    assert_eq!(south_spells.len(), 3);
+    assert_eq!(south_sites.len(), 3);
+    let chosen = south_spells[0].clone();
+    let targets: Vec<_> = session
+        .legal_actions()
+        .expect("cast actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-discard"
+        })
+        .map(|action| action.descriptor["target"]["seat"].clone())
+        .collect();
+    assert!(targets.iter().any(|seat| *seat == "north"));
+    assert!(targets.iter().any(|seat| *seat == "south"));
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    let spell_id = descriptor["cardInstanceId"].clone();
+    assert_eq!(event_types(&cast), ["magic-cast"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "discard-card");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["remaining"], 1);
+    assert_eq!(pending["pendingDiscardCards"]["seat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["sourceInstanceId"], spell_id);
+    let offered = discard_card_ids(&session);
+    assert_eq!(offered.len(), 6);
+    assert!(
+        offered
+            .iter()
+            .any(|(id, zone)| { id == chosen.as_str().expect("chosen") && zone == "spellbook" })
+    );
+    assert!(south_sites.iter().all(|id| {
+        offered
+            .iter()
+            .any(|(offered_id, zone)| offered_id == id.as_str().expect("site") && zone == "atlas")
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("pending discard actions")
+            .iter()
+            .all(|action| action.seat == Seat::South)
+    );
+    let north_view = session
+        .public_view(Seat::North)
+        .expect("North public view during the choice");
+    assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
+    assert_eq!(north_view["players"]["south"]["hand"]["atlas"], 3);
+    let south_json = north_view.to_string();
+    assert!(
+        !south_json.contains(chosen.as_str().expect("chosen identity")),
+        "the caster must not see the opponent's hidden hand identities"
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let checkpoint = session.clone();
+    let forged = session
+        .step(ActionRequest {
+            action_id: identity_hash(&json!({
+                "descriptor": {
+                    "cardInstanceId": chosen,
+                    "kind": "discard-card",
+                    "zone": "spellbook",
+                },
+                "engineVersion": "sorcery-core-v1",
+                "seat": "north",
+                "stateVersion": pending["stateVersion"],
+            }))
+            .expect("forged action id")
+            .to_string(),
+            seat: Seat::North,
+            state_version: pending["stateVersion"].as_u64().expect("state version"),
+        })
+        .expect("forged step");
+    assert!(matches!(
+        forged,
+        StepResult::Rejected(rejection)
+            if rejection.code == RejectionCode::UnknownAction
+                || rejection.code == RejectionCode::WrongSeat
+    ));
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == chosen
+            && descriptor["zone"] == "spellbook"
+    });
+    assert_eq!(event_types(&receipt), ["card-discarded", "magic-resolved"]);
+    assert_eq!(receipt.events[0].payload["cardId"], "south-minion");
+    assert_eq!(receipt.events[0].payload["instanceId"], chosen);
+    assert_eq!(receipt.events[0].payload["owner"], "south");
+    assert_eq!(receipt.events[0].payload["seat"], "south");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], spell_id);
+    assert_eq!(receipt.events[0].payload["zone"], "spellbook");
+    assert_eq!(receipt.events[1].payload["instanceId"], spell_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["decisionSeat"], "north");
+    assert!(after.get("pendingDiscardCards").is_none());
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("south cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == chosen)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("south hand")
+            .len(),
+        2
+    );
+    let mut resumed = checkpoint;
+    accept_where(&mut resumed, |descriptor| {
+        descriptor["kind"] == "discard-card" && descriptor["cardInstanceId"] == chosen
+    });
+    assert_eq!(
+        resumed.replay_value().expect("resumed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0240_target_player_discard_is_a_paid_noop_without_cards() {
+    let mut session = opening_main(&discard_cards_manifest(
+        240,
+        6,
+        &["north-discard", "north-discard", "north-discard"],
+    ));
+    let south_avatar = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    let mut discarded = 0;
+    while state(&session)["phase"] == "discard-card" {
+        let (_, receipt) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "discard-card"
+        });
+        assert_eq!(receipt.events[0].event_type, "card-discarded");
+        discarded += 1;
+    }
+    assert_eq!(discarded, 6);
+    let emptied = state(&session);
+    assert_eq!(emptied["phase"], "main");
+    assert_eq!(
+        emptied["players"]["south"]["hand"]["atlas"]
+            .as_array()
+            .expect("south Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        emptied["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("south Spellbook")
+            .len(),
+        0
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert_eq!(state(&session)["phase"], "main");
+    assert_eq!(state(&session)["decisionSeat"], "north");
+    assert_exact_replay(&session);
 }

@@ -478,7 +478,7 @@ fn disabled_raw_stealth_should_not_hide_an_attack_target() {
         .expect("disabled raw-Stealth target")
         .clone();
 
-    assert_eq!(target["stealthed"], true);
+    assert_eq!(target["stealthed"], false);
     assert!(minion_is_attack_target(
         &setup.session,
         &setup.target_instance_id

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 
-import type { JsonValue } from '../../src/authority/canonical-json.ts';
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import {
+  createGameCheckpoint,
   resumeGameCheckpointAsync,
   type GameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
@@ -19,7 +20,9 @@ import {
   hashGameState,
   observeGame,
 } from '../../src/engine/game.ts';
+import { RustSessionClient } from '../../src/engine/rust-engine.ts';
 import {
+  parseExportedSession,
   RustGameSessionHandle,
 } from '../../src/engine/rust-session-helpers.ts';
 
@@ -68,6 +71,11 @@ export class SetupCtx {
     return result.session;
   }
 
+  /** Finds and applies one matching legal action. */
+  async take(predicate: (candidate: GameLegalAction) => boolean): Promise<GameSession> {
+    return this.accept(await this.action(predicate));
+  }
+
   /** Applies one bound action request and requires acceptance. */
   async acceptRequest(request: GameActionRequest): Promise<GameSession> {
     const result = await this.handle.step(request);
@@ -108,6 +116,23 @@ export class SetupCtx {
     return this.handle.verifyReplay();
   }
 
+  /** Captures a resume-safe checkpoint of the current journals. */
+  checkpoint(): GameCheckpoint {
+    return createGameCheckpoint(this.session);
+  }
+
+  /** Opens an independent live session at this exact history. */
+  async fork(): Promise<SetupCtx> {
+    const forked = await SetupCtx.open(this.session.manifest);
+    await forked.resume(createGameCheckpoint(this.session));
+    return forked;
+  }
+
+  /** Replaces the live session with a fresh opening of one manifest. */
+  async reset(manifest: GameManifest): Promise<GameSession> {
+    return this.handle.reset(manifest);
+  }
+
   /** Resumes one parsed checkpoint into this live session. */
   async resume(checkpoint: GameCheckpoint): Promise<GameSession> {
     return this.handle.resume(checkpoint as unknown as JsonValue);
@@ -124,22 +149,57 @@ export class SetupCtx {
 }
 
 /** Runs one callback against a dedicated Rust-backed setup session. */
-export async function withSetup(
+export async function withSetup<T>(
   manifest: GameManifest,
-  run: (ctx: SetupCtx) => Promise<void>,
-): Promise<void> {
+  run: (ctx: SetupCtx) => Promise<T>,
+): Promise<T> {
   const ctx = await SetupCtx.open(manifest);
   try {
-    await run(ctx);
+    return await run(ctx);
   } finally {
     await ctx.close();
   }
 }
 
 /** Opens one independent preview session for dry-run assertions. */
-export async function withPreview(
+export async function withPreview<T>(
   manifest: GameManifest,
-  run: (ctx: SetupCtx) => Promise<void>,
-): Promise<void> {
-  await withSetup(manifest, run);
+  run: (ctx: SetupCtx) => Promise<T>,
+): Promise<T> {
+  return withSetup(manifest, run);
+}
+
+/** Runs one callback against a fork of the current live history. */
+export async function withFork<T>(
+  ctx: SetupCtx,
+  run: (forked: SetupCtx) => Promise<T>,
+): Promise<T> {
+  const forked = await ctx.fork();
+  try {
+    return await run(forked);
+  } finally {
+    await forked.close();
+  }
+}
+
+/** Finds the first seed whose opening session matches a predicate. */
+export async function findOpeningManifest(
+  build: (seed: number) => GameManifest,
+  matches: (session: GameSession) => boolean,
+  range: Readonly<{ from?: number; to?: number }> = {},
+): Promise<GameManifest> {
+  const from = range.from ?? 1;
+  const to = range.to ?? 4_096;
+  const client = await RustSessionClient.start();
+  try {
+    for (let seed = from; seed <= to; seed += 1) {
+      const candidate = build(seed);
+      await client.newSession(canonicalJson(candidate as unknown as JsonValue));
+      const session = parseExportedSession(await client.exportSession(), candidate);
+      if (matches(session)) return candidate;
+    }
+  } finally {
+    await client.close();
+  }
+  throw new Error(`no opening seed in ${from}..${to} matched`);
 }

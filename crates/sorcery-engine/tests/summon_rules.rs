@@ -1180,6 +1180,245 @@ fn hamlet_should_discount_only_ordinary_minions_at_that_site() {
     assert!(discounted.verify_replay().expect("verified replay"));
 }
 
+fn hamlet_board_manifest(seed: u32, north_minion: &Value, helpers: bool) -> String {
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let mut ordinary_site = site("earth", false);
+    if helpers {
+        ordinary_site["genesisGainMana"] = json!(6);
+    }
+    let mut cards = json!({
+        "hamlet": site("earth", true),
+        "north-avatar": avatar,
+        "north-minion": north_minion,
+        "ordinary-site": ordinary_site,
+        "south-avatar": avatar,
+        "south-minion": minion(0, &thresholds(None, 0)),
+    });
+    let north_spellbook = if helpers {
+        cards["helper"] = minion(0, &thresholds(None, 0));
+        vec!["helper", "helper", "helper", "north-minion"]
+    } else {
+        vec!["north-minion"; 4]
+    };
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "hamlet-payment-matrix" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-hamlet-payment-matrix-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": ["hamlet", "ordinary-site", "hamlet", "ordinary-site"],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["hamlet"; 4],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+    canonical_json(&manifest).expect("canonical synthetic manifest")
+}
+
+fn try_accept(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    let Ok(actions) = session.legal_actions() else {
+        return false;
+    };
+    let Some(action) = actions
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+    else {
+        return false;
+    };
+    matches!(
+        session.step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        }),
+        Ok(StepResult::Accepted(_))
+    )
+}
+
+fn hamlet_three_sites(north_minion: &Value, helpers: bool) -> Session {
+    (1..=512)
+        .find_map(|seed| {
+            let manifest = hamlet_board_manifest(seed, north_minion, helpers);
+            let mut session = Session::new(&manifest).ok()?;
+            keep(&mut session);
+            keep(&mut session);
+            if !try_accept(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site"
+                    && descriptor["cardId"] == "hamlet"
+                    && descriptor["cell"] == "C4"
+            }) {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| descriptor["kind"] == "end-turn") {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+            }) {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site"
+                    && descriptor["cardId"] == "hamlet"
+                    && descriptor["cell"] == "C1"
+            }) {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| descriptor["kind"] == "end-turn") {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            }) {
+                return None;
+            }
+            if !try_accept(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site"
+                    && descriptor["cardId"] == "ordinary-site"
+                    && descriptor["cell"] == "C3"
+            }) {
+                return None;
+            }
+            Some(session)
+        })
+        .expect("bounded seed with Hamlet, enemy Hamlet, and an ordinary site")
+}
+
+fn summon_costs(session: &Session, card_id: &str) -> Vec<(String, u64, String)> {
+    summon_descriptors(session)
+        .into_iter()
+        .filter(|descriptor| descriptor["cardId"] == card_id)
+        .map(|descriptor| {
+            (
+                descriptor["cell"].as_str().expect("summon cell").to_owned(),
+                descriptor["manaCost"].as_u64().expect("mana cost"),
+                descriptor["paymentMode"]
+                    .as_str()
+                    .unwrap_or("mana")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn hamlet_should_discount_only_ordinary_payments_across_sites_and_payment_modes() {
+    let mut ordinary = minion(1, &thresholds(None, 0));
+    ordinary["ordinary"] = json!(true);
+    let ordinary_board = hamlet_three_sites(&ordinary, false);
+    let mut ordinary_costs = summon_costs(&ordinary_board, "north-minion");
+    ordinary_costs.sort();
+    ordinary_costs.dedup();
+    assert_eq!(
+        ordinary_costs,
+        [
+            ("C3".to_owned(), 1, "mana".to_owned()),
+            ("C4".to_owned(), 0, "mana".to_owned()),
+        ]
+    );
+
+    let nonordinary_board = hamlet_three_sites(&minion(1, &thresholds(None, 0)), false);
+    let mut nonordinary_costs = summon_costs(&nonordinary_board, "north-minion");
+    nonordinary_costs.sort();
+    nonordinary_costs.dedup();
+    assert_eq!(
+        nonordinary_costs,
+        [
+            ("C3".to_owned(), 1, "mana".to_owned()),
+            ("C4".to_owned(), 1, "mana".to_owned()),
+        ]
+    );
+
+    let mut roaming = minion(1, &thresholds(None, 0));
+    roaming["ordinary"] = json!(true);
+    roaming["summonToAnySite"] = json!(true);
+    let roaming_board = hamlet_three_sites(&roaming, false);
+    assert!(
+        summon_costs(&roaming_board, "north-minion")
+            .iter()
+            .any(|(cell, mana_cost, mode)| cell == "C1" && *mana_cost == 0 && mode == "mana")
+    );
+
+    let mut aramos = minion(3, &thresholds(None, 0));
+    aramos["discardRandomCardInsteadOfMana"] = json!(true);
+    aramos["ordinary"] = json!(true);
+    let aramos_board = hamlet_three_sites(&aramos, false);
+    let mut aramos_costs = summon_costs(&aramos_board, "north-minion")
+        .into_iter()
+        .map(|(cell, mana_cost, mode)| format!("{cell}:{mana_cost}:{mode}"))
+        .collect::<Vec<_>>();
+    aramos_costs.sort();
+    aramos_costs.dedup();
+    assert_eq!(
+        aramos_costs,
+        [
+            "C3:0:random-card-discard".to_owned(),
+            "C4:0:random-card-discard".to_owned(),
+            "C4:2:mana".to_owned(),
+        ]
+    );
+
+    let mut gnarled = minion(6, &thresholds(None, 0));
+    gnarled["sacrificeMinionAtSummoningLocationForManaDiscount"] = json!(2);
+    let mut gnarled_board = hamlet_three_sites(&gnarled, true);
+    for _ in 0..3 {
+        assert!(try_accept(&mut gnarled_board, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "helper"
+                && descriptor["cell"] == "C4"
+        }));
+    }
+    let mut gnarled_costs = summon_descriptors(&gnarled_board)
+        .into_iter()
+        .filter(|descriptor| descriptor["cardId"] == "north-minion" && descriptor["cell"] == "C4")
+        .map(|descriptor| {
+            format!(
+                "{}:{}",
+                descriptor["sacrificedMinionInstanceIds"]
+                    .as_array()
+                    .map_or(0, Vec::len),
+                descriptor["manaCost"].as_u64().expect("gnarled mana cost")
+            )
+        })
+        .collect::<Vec<_>>();
+    gnarled_costs.sort();
+    gnarled_costs.dedup();
+    assert_eq!(
+        gnarled_costs,
+        [
+            "0:6".to_owned(),
+            "1:4".to_owned(),
+            "2:2".to_owned(),
+            "3:0".to_owned()
+        ]
+    );
+    assert!(
+        ordinary_board
+            .verify_replay()
+            .expect("verified ordinary Hamlet replay")
+    );
+}
+
 #[test]
 fn explicit_permission_should_allow_summoning_to_any_site() {
     let ordinary_manifest = scenario_manifest(

@@ -8,7 +8,10 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 #[path = "../src/facts.rs"]
 mod facts;
 
-use facts::{CardFacts, Element, MagicEffect, MinionGenesis, Thresholds, parse_card_definition};
+use facts::{
+    ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, MinionGenesis,
+    RequiredCastRegion, Thresholds, parse_card_definition,
+};
 
 fn thresholds() -> Value {
     json!({ "earth": 0, "fire": 0, "water": 0, "air": 0 })
@@ -149,12 +152,19 @@ fn parse_should_use_utf16_length_and_ecmascript_whitespace_for_card_ids() {
 }
 
 #[test]
+#[expect(clippy::too_many_lines)]
 fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
     let artifact_effects = [
         ("atEndOfEachTurnSiteControllerLosesLife", json!(2)),
+        (
+            "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
+            json!(2),
+        ),
         ("bearerControllerChoosesExtraRandomOutcome", json!(true)),
         ("grantsBearerLethal", json!(true)),
         ("grantsBearerPower", json!(2)),
+        ("nearbyMinionsMustAttackIfAble", json!(true)),
+        ("nearbyStrikesAgainstUnitsDealDoubleDamage", json!(true)),
         (
             "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
             json!(true),
@@ -174,11 +184,40 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             "Artifact effect {field}"
         );
     }
+    let composed_mask = with(
+        spell("artifact", ("nearbyMinionsMustAttackIfAble", json!(true))),
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        json!(true),
+    );
+    let CardFacts::Artifact(facts) =
+        parse_card_definition("composed-mask", &composed_mask).expect("composed Mask")
+    else {
+        panic!("expected Artifact facts");
+    };
+    assert_eq!(facts.effect, ArtifactEffect::NearbyMinionsMustAttackIfAble);
+    assert!(facts.nearby_strikes_against_units_deal_double_damage);
 
     let aura_effects = [
+        ("affectedSitesAreFlooded", json!(true)),
+        (
+            "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+            json!(true),
+        ),
+        (
+            "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+            json!(true),
+        ),
         (
             "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
             json!(3),
+        ),
+        (
+            "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
+            json!(3),
+        ),
+        (
+            "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+            json!(true),
         ),
         (
             "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
@@ -200,24 +239,54 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("damageEachUnitAtLocationWithinTwoSteps", json!(2)),
         ("damageRandomUnitAtLocation", json!(2)),
         ("damageTargetUnit", json!(2)),
+        ("destroyTargetArtifact", json!(true)),
+        ("destroyTargetAura", json!(true)),
+        ("destroyTargetSite", json!(true)),
         ("disableTargetNearbyMinionUntilNextTurn", json!(true)),
         ("fightAllyWithAdjacentEnemy", json!(true)),
         ("gainControlOfTargetNearbyMinion", json!(true)),
+        ("grantAirborneToAllyThisTurn", json!(true)),
         ("grantChargeToAllyThisTurn", json!(true)),
+        ("grantFirstStrikeToAllyThisTurn", json!(true)),
+        ("grantLethalToAllyThisTurn", json!(true)),
+        ("grantRangedToAllyThisTurn", json!(true)),
         ("grantPowerToAllyThisTurn", json!(2)),
+        ("grantStealthToTargetMinion", json!(true)),
+        ("grantWardToTargetMinion", json!(true)),
         ("healController", json!(2)),
+        ("healTargetMinion", json!(1)),
+        ("drawSites", json!(2)),
+        ("drawSpells", json!(2)),
+        ("killTargetMinion", json!(true)),
         ("killTargetWoundedMinion", json!(true)),
         ("leapAttackAlly", json!(true)),
         ("lureEnemyMinionOneStepCloser", json!(true)),
+        ("millSites", json!(2)),
+        ("millSpells", json!(2)),
+        ("targetPlayerDrawsSites", json!(1)),
+        ("targetPlayerDrawsSpells", json!(1)),
         ("returnMinionFromOwnCemetery", json!(true)),
+        ("returnTargetArtifactFromOwnCemetery", json!(true)),
+        ("returnTargetAuraFromOwnCemetery", json!(true)),
+        ("returnTargetMagicFromOwnCemetery", json!(true)),
+        ("returnTargetArtifactToOwnerHand", json!(true)),
+        ("returnTargetAuraToOwnerHand", json!(true)),
+        ("returnTargetMinionToOwnerHand", json!(true)),
+        ("returnTargetSiteFromOwnCemetery", json!(true)),
+        ("returnTargetSiteToOwnerHand", json!(true)),
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
         (
             "summonTokenToEachControlledSiteBorderingEnemySite",
             json!("foot-soldier"),
         ),
+        ("targetPlayerDiscardsCards", json!(1)),
+        ("targetPlayerGainsLife", json!(2)),
+        ("targetPlayerLosesLife", json!(2)),
+        ("tapTargetMinion", json!(true)),
         ("teleportAllyToTargetSite", json!(true)),
         ("teleportNearbyAllyThenDrawCard", json!(true)),
+        ("untapTargetMinion", json!(true)),
     ];
     for (field, value) in magic_effects {
         assert!(
@@ -242,6 +311,17 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         json!(true),
     );
     assert!(parse_card_definition("damage-grid", &grid).is_ok());
+    assert!(
+        parse_card_definition(
+            "chosen-discard-cost",
+            &with(
+                spell("magic", ("drawSites", json!(1))),
+                "discardCardAsAdditionalCost",
+                json!(true),
+            ),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -367,6 +447,10 @@ fn rule_06_should_validate_elements_thresholds_and_token_reference_ids() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one table documents every fail-closed Magic auxiliary pairing"
+)]
 fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
     let invalid = [
         (
@@ -382,6 +466,28 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(true),
             ),
             "exactly one",
+        ),
+        (
+            "nearby-must-attack flag",
+            spell("artifact", ("nearbyMinionsMustAttackIfAble", json!(false))),
+            "must be true",
+        ),
+        (
+            "nearby-double-strike flag",
+            spell(
+                "artifact",
+                ("nearbyStrikesAgainstUnitsDealDoubleDamage", json!(false)),
+            ),
+            "must be true",
+        ),
+        (
+            "mask plus exclusive",
+            with(
+                spell("artifact", ("grantsBearerLethal", json!(true))),
+                "nearbyStrikesAgainstUnitsDealDoubleDamage",
+                json!(true),
+            ),
+            "competing artifact",
         ),
         (
             "aura two effects",
@@ -406,6 +512,20 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(2),
             ),
             "exactly one",
+        ),
+        (
+            "heal target minion exclusive",
+            with(
+                spell("magic", ("healTargetMinion", json!(1))),
+                "healController",
+                json!(2),
+            ),
+            "exactly one",
+        ),
+        (
+            "heal target minion range",
+            spell("magic", ("healTargetMinion", json!(0))),
+            "must be between",
         ),
         (
             "targetNearby false still needs target damage",
@@ -435,6 +555,52 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 ),
             ),
             "defined together",
+        ),
+        (
+            "destroy plus discard without grid",
+            with(
+                spell("magic", ("destroyTargetSite", json!(true))),
+                "discardSiteAsAdditionalCost",
+                json!(true),
+            ),
+            "defined together",
+        ),
+        (
+            "chosen discard without an effect",
+            spell("magic", ("discardCardAsAdditionalCost", json!(true))),
+            "exactly one supported effect",
+        ),
+        (
+            "chosen discard is not a boolean false",
+            with(
+                spell("magic", ("drawSites", json!(1))),
+                "discardCardAsAdditionalCost",
+                json!(false),
+            ),
+            "must be true when defined",
+        ),
+        (
+            "competing additional discard costs",
+            with(
+                with(
+                    with(
+                        spell(
+                            "magic",
+                            (
+                                "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+                                json!([1, 2, 3, 4, 5]),
+                            ),
+                        ),
+                        "discardSiteAsAdditionalCost",
+                        json!(true),
+                    ),
+                    "destroyTargetSite",
+                    json!(true),
+                ),
+                "discardCardAsAdditionalCost",
+                json!(true),
+            ),
+            "competing additional discard costs",
         ),
         (
             "bad damage grid value",
@@ -576,7 +742,7 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "oversized ability",
             with(
                 with(minion(), "occupiesSquareArea", json!(2)),
-                "ranged",
+                "voidwalk",
                 json!(true),
             ),
             "unsupported ability combination",
@@ -614,13 +780,218 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "token Genesis",
         ),
         (
-            "Waterbound Ward",
+            "start-turn draw range",
+            with(minion(), "atStartOfControllerTurnDrawSpells", json!(0)),
+            "must be between",
+        ),
+        (
+            "start-turn Atlas draw range",
+            with(minion(), "atStartOfControllerTurnDrawSites", json!(0)),
+            "must be between",
+        ),
+        (
+            "start-turn mill range",
+            with(minion(), "atStartOfControllerTurnMillSpells", json!(0)),
+            "must be between",
+        ),
+        (
+            "start-turn Atlas mill range",
+            with(minion(), "atStartOfControllerTurnMillSites", json!(0)),
+            "must be between",
+        ),
+        (
+            "must-attack flag",
+            with(minion(), "mustAttackAUnitIfAble", json!(false)),
+            "must be true",
+        ),
+        (
+            "does-not-untap flag",
             with(
-                with(minion(), "waterbound", json!(true)),
-                "ward",
+                minion(),
+                "doesNotUntapDuringControllersStartPhase",
+                json!(false),
+            ),
+            "must be true",
+        ),
+        (
+            "forced-attack source flag",
+            with(minion(), "enemiesMustAttackThisIfAble", json!(false)),
+            "must be true",
+        ),
+        (
+            "competing start-turn triggers",
+            with(
+                with(
+                    with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                    "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                    json!(true),
+                ),
+                "voidwalk",
                 json!(true),
             ),
-            "Waterbound with Ward",
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn draws",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnDrawSites",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn mill",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnMillSpells",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn lure",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnLureNearbyEnemyMinion",
+                json!(true),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn life loss",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnControllerLosesLife",
+                json!(2),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn life gain",
+            with(
+                with(
+                    minion(),
+                    "atStartOfControllerTurnControllerLosesLife",
+                    json!(2),
+                ),
+                "atStartOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "competing start-turn mana gain",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnControllerGainsMana",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "start-turn mana gain range",
+            with(
+                minion(),
+                "atStartOfControllerTurnControllerGainsMana",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "competing start-turn here damage",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnDamageEachOtherUnitHere",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "start-turn here damage range",
+            with(
+                minion(),
+                "atStartOfControllerTurnDamageEachOtherUnitHere",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "end-turn here damage range",
+            with(
+                minion(),
+                "atEndOfControllerTurnDamageEachOtherUnitHere",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "end-turn controller life gain range",
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "end-turn controller life loss range",
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerLosesLife",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "competing end-turn life pulses",
+            with(
+                with(
+                    minion(),
+                    "atEndOfControllerTurnControllerGainsLife",
+                    json!(2),
+                ),
+                "atEndOfControllerTurnControllerLosesLife",
+                json!(2),
+            ),
+            "competing end-turn",
+        ),
+        (
+            "competing end-turn here damage and life gain",
+            with(
+                with(
+                    minion(),
+                    "atEndOfControllerTurnDamageEachOtherUnitHere",
+                    json!(1),
+                ),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "competing end-turn",
+        ),
+        (
+            "start-turn lure flag",
+            with(
+                minion(),
+                "atStartOfControllerTurnLureNearbyEnemyMinion",
+                json!(false),
+            ),
+            "must be true",
+        ),
+        (
+            "Deathrite spell-draw flag",
+            with(minion(), "deathriteDrawSpells", json!(1)),
+            "must be boolean",
+        ),
+        (
+            "Deathrite spell-mill flag",
+            with(minion(), "deathriteMillSpells", json!(1)),
+            "must be boolean",
+        ),
+        (
+            "Deathrite site-mill flag",
+            with(minion(), "deathriteMillSites", json!(1)),
+            "must be boolean",
         ),
     ];
 
@@ -634,6 +1005,10 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one function retains every normalized start-turn draw fact"
+)]
 fn typed_effects_should_retain_only_normalized_values() {
     let definition = with(
         with(
@@ -665,6 +1040,670 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(2)));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-draw",
+        &with(minion(), "atStartOfControllerTurnDrawSpells", json!(2)),
+    )
+    .expect("valid start-turn draw minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-atlas-draw",
+        &with(minion(), "atStartOfControllerTurnDrawSites", json!(2)),
+    )
+    .expect("valid start-turn Atlas draw minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_draw_sites, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-mill",
+        &with(minion(), "atStartOfControllerTurnMillSpells", json!(2)),
+    )
+    .expect("valid start-turn mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_mill_spells, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-atlas-mill",
+        &with(minion(), "atStartOfControllerTurnMillSites", json!(2)),
+    )
+    .expect("valid start-turn Atlas mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_mill_sites, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "deathrite-draw-spells",
+        &with(minion(), "deathriteDrawSpells", json!(true)),
+    )
+    .expect("valid Deathrite spell-draw minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.deathrite_draw_spells);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "deathrite-mill-spells",
+        &with(minion(), "deathriteMillSpells", json!(true)),
+    )
+    .expect("valid Deathrite spell-mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.deathrite_mill_spells);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "deathrite-mill-sites",
+        &with(minion(), "deathriteMillSites", json!(true)),
+    )
+    .expect("valid Deathrite site-mill minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.deathrite_mill_sites);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-lure",
+        &with(
+            minion(),
+            "atStartOfControllerTurnLureNearbyEnemyMinion",
+            json!(true),
+        ),
+    )
+    .expect("valid start-turn lure minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.at_start_of_controller_turn_lure_nearby_enemy_minion);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-life-loss",
+        &with(
+            minion(),
+            "atStartOfControllerTurnControllerLosesLife",
+            json!(2),
+        ),
+    )
+    .expect("valid start-turn life-loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_loses_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-life-gain",
+        &with(
+            minion(),
+            "atStartOfControllerTurnControllerGainsLife",
+            json!(2),
+        ),
+    )
+    .expect("valid start-turn life-gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-mana-gain",
+        &with(
+            minion(),
+            "atStartOfControllerTurnControllerGainsMana",
+            json!(1),
+        ),
+    )
+    .expect("valid start-turn mana-gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_gains_mana,
+        Some(1)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-here-damage",
+        &with(
+            minion(),
+            "atStartOfControllerTurnDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid start-turn here-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_damage_each_other_unit_here,
+        Some(1)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-here-damage",
+        &with(
+            minion(),
+            "atEndOfControllerTurnDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid end-turn here-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_damage_each_other_unit_here,
+        Some(1)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-gain",
+        &with(
+            minion(),
+            "atEndOfControllerTurnControllerGainsLife",
+            json!(2),
+        ),
+    )
+    .expect("valid end-turn life-gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-loss",
+        &with(
+            minion(),
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(2),
+        ),
+    )
+    .expect("valid end-turn life-loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_loses_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-life-gain-with-ignited",
+        &with(
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "diesAtEndOfControllerTurn",
+            json!(true),
+        ),
+    )
+    .expect("Ignited may coexist with an end-turn life pulse") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    assert!(facts.dies_at_end_of_controller_turn);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "must-attack",
+        &with(minion(), "mustAttackAUnitIfAble", json!(true)),
+    )
+    .expect("valid must-attack minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.must_attack_a_unit_if_able);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "does-not-untap",
+        &with(
+            minion(),
+            "doesNotUntapDuringControllersStartPhase",
+            json!(true),
+        ),
+    )
+    .expect("valid does-not-untap minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.does_not_untap_during_controllers_start_phase);
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "forced-attack-source",
+        &with(minion(), "enemiesMustAttackThisIfAble", json!(true)),
+    )
+    .expect("valid forced-attack source minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.enemies_must_attack_this_if_able);
     assert_eq!(facts.thresholds, Thresholds::default());
     assert_eq!(facts.provides, None::<Element>);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-draw",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "genesisDrawSpells",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Genesis minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(1)));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-caster",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "spellcaster",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Spellcaster") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.spellcaster);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-deathrite",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "deathriteDamageEachUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Deathrite minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.deathrite_damage_each_unit_here, Some(1));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-here",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "genesisDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized Genesis here minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.genesis,
+        Some(MinionGenesis::DamageEachOtherUnitHereOne)
+    );
+}
+
+#[test]
+fn oversized_discard_here_and_any_site_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-discard-here",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "discardSpellToDamageRandomOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized discard-here minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.discard_spell_to_damage_random_other_unit_here,
+        Some(1)
+    );
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-any-site",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "summonToAnySite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized summon-to-any-site minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.summon_to_any_site);
+}
+
+#[test]
+fn oversized_waterbound_and_threshold_suppression_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-waterbound",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "waterbound",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Waterbound minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.waterbound);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-rats",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "siteProvidesNoThreshold",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized threshold-suppression minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.site_provides_no_threshold);
+}
+
+#[test]
+fn oversized_ranged_and_tower_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-ranged",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "ranged",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Ranged minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-tower",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "gainsPowerRangedAndSpellcasterAtopTower",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized Tower-conditional minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.gains_power_ranged_and_spellcaster_atop_tower);
+}
+
+#[test]
+fn oversized_ordinary_and_sacrifice_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-ordinary",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "ordinary",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Ordinary minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ordinary);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-sacrifice",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "sacrificeMinionAtSummoningLocationForManaDiscount",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized sacrifice-discount minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.alternative_summon_payment,
+        Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
+    );
+}
+
+#[test]
+fn oversized_water_site_cast_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-water-cast",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "mustBeCastToWaterSite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized water-site cast minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_water_site);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-water-cast-any-site",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "mustBeCastToWaterSite",
+                json!(true),
+            ),
+            "summonToAnySite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized water-site any-site minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_water_site);
+    assert!(facts.summon_to_any_site);
+}
+
+#[test]
+fn oversized_activated_and_drag_projectiles_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-activated-projectile",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "tapToShootProjectileDamage",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized activated-projectile minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(facts.tap_to_shoot_projectile_damage, Some(1));
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-drag-projectile",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "shootsDragProjectile",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized drag-projectile minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.shoots_drag_projectile);
+}
+
+#[test]
+fn oversized_burrowing_and_submerge_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-burrowing",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "burrowing",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Burrowing minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.burrowing);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-submerge",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "submerge",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Submerge minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.submerge);
+}
+
+#[test]
+fn oversized_required_cast_regions_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-burrowed-only",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "burrowing",
+                json!(true),
+            ),
+            "mustBeCastBurrowed",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized burrowed-only minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.burrowing);
+    assert_eq!(
+        facts.required_cast_region,
+        Some(RequiredCastRegion::Underground)
+    );
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-submerged-only",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "submerge",
+                json!(true),
+            ),
+            "mustBeCastSubmerged",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized submerged-only minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.submerge);
+    assert_eq!(
+        facts.required_cast_region,
+        Some(RequiredCastRegion::Underwater)
+    );
+}
+
+#[test]
+fn oversized_area_damage_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-area-damage",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "tapToDamageEachUnitAtAdjacentLocation",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized area-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.tap_to_damage_each_unit_at_adjacent_location);
+}
+
+#[test]
+fn oversized_nearby_aura_and_stealth_loss_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-nearby-aura",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "otherNearbyAlliesPowerBonus",
+            json!(1),
+        ),
+    )
+    .expect("valid oversized nearby-aura minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.other_nearby_allies_power_bonus);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-scent-hounds",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "nearbyEnemiesPermanentlyLoseStealth",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Scent Hounds minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.nearby_enemies_permanently_lose_stealth);
+}
+
+#[test]
+fn oversized_conditional_end_turn_stealth_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-conditional-stealth",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "gainsStealthAtEndOfTurnIfNoEnemiesNearby",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized conditional end-turn Stealth minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert_eq!(
+        facts.end_turn_stealth,
+        Some(EndTurnStealth::IfNoEnemiesNearby)
+    );
+}
+
+#[test]
+fn oversized_during_movement_and_post_ranged_step_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-during-movement-ranged",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "ranged",
+                json!(true),
+            ),
+            "mayRangedStrikeOnceDuringBasicMovement",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized during-movement Ranged minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+    assert!(facts.may_ranged_strike_once_during_basic_movement);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-post-ranged-step",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "ranged",
+                json!(true),
+            ),
+            "mayStepAfterRangedStrike",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized post-Ranged step minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+    assert!(facts.may_step_after_ranged_strike);
 }

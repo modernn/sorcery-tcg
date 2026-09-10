@@ -351,6 +351,152 @@ fn attacking_only_first_strike_should_kill_before_return_and_be_inactive_defendi
 }
 
 #[test]
+fn rule_catalog_0204_defending_first_strike_should_kill_before_the_attacker_strikes() {
+    let vanilla = minion(json!({ "attack": 3, "defense": 3 }));
+    let defending_first_strike = minion(json!({
+        "attack": 3,
+        "defense": 3,
+        "strikesFirstWhileDefending": true,
+    }));
+
+    let defending = resolve_single_target(prepare_attack(
+        204,
+        &vanilla,
+        &defending_first_strike,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&defending.session);
+    assert!(in_cemetery(&position, "north", &defending.attacker_id));
+    assert_eq!(
+        unit(&position, &defending.target_id).expect("surviving defender")["damage"],
+        0
+    );
+    let final_receipt = defending
+        .session
+        .transcript()
+        .last()
+        .expect("fight receipt");
+    let attacker_damage = final_receipt
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "damage-dealt"
+                && event.payload["instanceId"] == defending.attacker_id
+        })
+        .expect("defending first-strike damage");
+    let death = final_receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "minion-died")
+        .expect("defending first-strike death");
+    assert!(attacker_damage < death);
+    assert!(final_receipt.events.iter().all(|event| {
+        event.event_type != "damage-dealt" || event.payload["instanceId"] != defending.target_id
+    }));
+    assert_exact_replay(&defending.session);
+    assert_checkpoint_round_trip(&defending.session);
+}
+
+#[test]
+fn rule_catalog_0205_defending_only_first_strike_should_be_inactive_while_attacking() {
+    let vanilla = minion(json!({ "attack": 3, "defense": 3 }));
+    let defending_first_strike = minion(json!({
+        "attack": 3,
+        "defense": 3,
+        "strikesFirstWhileDefending": true,
+    }));
+
+    let attacking = resolve_single_target(prepare_attack(
+        205,
+        &defending_first_strike,
+        &vanilla,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&attacking.session);
+    assert!(in_cemetery(&position, "north", &attacking.attacker_id));
+    assert!(in_cemetery(&position, "south", &attacking.target_id));
+    assert_exact_replay(&attacking.session);
+}
+
+#[test]
+fn rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_defending() {
+    let vanilla = minion(json!({ "attack": 3, "defense": 3 }));
+    let first_strike = minion(json!({
+        "attack": 3,
+        "defense": 3,
+        "strikesFirstWhileAttacking": true,
+        "strikesFirstWhileDefending": true,
+    }));
+
+    let attacking = resolve_single_target(prepare_attack(
+        206,
+        &first_strike,
+        &vanilla,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&attacking.session);
+    assert_eq!(
+        unit(&position, &attacking.attacker_id).expect("surviving attacker")["damage"],
+        0
+    );
+    assert!(in_cemetery(&position, "south", &attacking.target_id));
+    assert!(
+        attacking
+            .session
+            .transcript()
+            .last()
+            .expect("fight receipt")
+            .events
+            .iter()
+            .all(|event| {
+                event.event_type != "damage-dealt"
+                    || event.payload["instanceId"] != attacking.attacker_id
+            })
+    );
+    assert_exact_replay(&attacking.session);
+
+    let defending = resolve_single_target(prepare_attack(
+        207,
+        &vanilla,
+        &first_strike,
+        &vanilla,
+        &vanilla,
+        false,
+        false,
+    ));
+    let position = state(&defending.session);
+    assert!(in_cemetery(&position, "north", &defending.attacker_id));
+    assert_eq!(
+        unit(&position, &defending.target_id).expect("surviving defender")["damage"],
+        0
+    );
+    assert!(
+        defending
+            .session
+            .transcript()
+            .last()
+            .expect("fight receipt")
+            .events
+            .iter()
+            .all(|event| {
+                event.event_type != "damage-dealt"
+                    || event.payload["instanceId"] != defending.target_id
+            })
+    );
+    assert_exact_replay(&defending.session);
+    assert_checkpoint_round_trip(&defending.session);
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "the direct continuation proof keeps allocation, ordering, resume, and event order together"

@@ -807,3 +807,48 @@ fn rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty() 
             .expect("verified exact replay")
     );
 }
+
+#[test]
+fn rule_catalog_0040_blink_should_stay_active_when_drawing_the_other_deck() {
+    let mut checkpoint = blink_checkpoint(true);
+    assert_eq!(
+        state(&checkpoint.session)["players"]["north"]["spellbook"],
+        json!([])
+    );
+    let atlas_before = state(&checkpoint.session)["players"]["north"]["atlas"]
+        .as_array()
+        .expect("North Atlas")
+        .len();
+    assert!(atlas_before > 0);
+
+    let spell = checkpoint.spell.clone();
+    let sparkmage = checkpoint.sparkmage.clone();
+    let receipt = cast_blink(&mut checkpoint.session, &spell, &sparkmage, "E4", "atlas");
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "minion-died",
+            "site-drawn",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(
+        state(&checkpoint.session)["terminal"],
+        json!({ "status": "active" })
+    );
+    assert_eq!(
+        state(&checkpoint.session)["players"]["north"]["atlas"]
+            .as_array()
+            .expect("North Atlas")
+            .len(),
+        atlas_before - 1
+    );
+    assert!(
+        checkpoint
+            .session
+            .verify_replay()
+            .expect("verified exact replay")
+    );
+}

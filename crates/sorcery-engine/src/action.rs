@@ -290,6 +290,13 @@ pub enum ActionDescriptor {
     DrawSite,
     /// Tap a capable Avatar to draw the top Spellbook card during the main phase.
     DrawSpell,
+    /// The targeted player discards one chosen hand card for a pending Magic effect.
+    DiscardCard {
+        /// Exact Atlas or Spellbook card discarded.
+        card_instance_id: IdentityHash,
+        /// Hand the discarded card is taken from.
+        zone: DeckZone,
+    },
     /// Play a site from the player's hand.
     PlaySite {
         /// Stable rules card identity.
@@ -374,7 +381,7 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sacrificed_minion_instance_ids: Option<Vec<IdentityHash>>,
     },
-    /// Conjure one Aura across a canonical two-by-two realm area.
+    /// Conjure one Aura across its engine-issued cells.
     CastAura {
         /// Stable rules card identity.
         card_id: String,
@@ -382,8 +389,8 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Authoritative caster instance identity.
         caster_instance_id: IdentityHash,
-        /// Exact canonical two-by-two area the Aura covers.
-        cells: SquareArea,
+        /// Covered cells: a canonical two-by-two area, or one Ordinary or Exceptional site.
+        cells: Vec<Cell>,
     },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
@@ -393,6 +400,9 @@ pub enum ActionDescriptor {
         /// Optional one-step destination chosen for a Leap Attack ally.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally_destination: Option<Location>,
+        /// Exact canonical two-by-two footprint a Teleport or Blink ally occupies on arrival.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ally_destination_cells: Option<SquareArea>,
         /// Selected strike cell inside an oversized Leap Attack footprint.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally_strike_location: Option<Location>,
@@ -402,9 +412,12 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Authoritative Spellcaster instance identity.
         caster_instance_id: IdentityHash,
-        /// Exact own cemetery minion selected by Rescue.
+        /// Exact own cemetery card selected by Rescue or cemetery Magic/Artifact/Site return.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
+        /// Exact hand card discarded as an additional player-chosen cost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        discard_card_instance_id: Option<IdentityHash>,
         /// Exact Atlas card in hand discarded as an additional cost.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         discard_site_instance_id: Option<IdentityHash>,
@@ -417,6 +430,9 @@ pub enum ActionDescriptor {
         /// Exact engine-issued Artifact target for Bury.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_artifact_instance_id: Option<IdentityHash>,
+        /// Exact engine-issued Aura target.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_aura_instance_id: Option<IdentityHash>,
         /// Exact engine-issued realm location targeted by the Magic.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_location: Option<Location>,
@@ -603,8 +619,14 @@ pub enum ActionDescriptor {
         /// Authoritative candidate identity chosen by the controller.
         outcome_instance_id: IdentityHash,
     },
-    /// Resolve one start-turn random teleport trigger for a minion.
+    /// Resolve one start-turn trigger for a minion.
     ResolveStartTurnTrigger {
+        /// One-step destination a nearby enemy must take, when this trigger lures.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lure_destination: Option<Location>,
+        /// Nearby enemy minion forced one step closer, when this trigger lures.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lure_target_instance_id: Option<IdentityHash>,
         /// Authoritative triggering minion identity.
         source_instance_id: IdentityHash,
     },
@@ -619,9 +641,9 @@ pub enum ActionDescriptor {
     ResolveEndTurnAuraMove {
         /// Authoritative Aura identity.
         aura_instance_id: IdentityHash,
-        /// Exact destination area, omitted to decline the optional move.
+        /// Exact destination cells, omitted to decline an optional Thunderstorm step.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cells: Option<SquareArea>,
+        cells: Option<Vec<Cell>>,
     },
     /// End the acting player's turn.
     EndTurn,
@@ -670,16 +692,18 @@ impl ActionDescriptor {
                 ally_strike_location,
                 card_id,
                 cemetery_minion_instance_id,
+                discard_card_instance_id,
                 discard_site_instance_id,
                 draw_zone,
                 target,
                 target_artifact_instance_id,
+                target_aura_instance_id,
                 target_location,
                 tempted_destination,
                 tempted_enemy,
                 ..
-            } => Some(
-                if let (Some(discarded), Some(location)) =
+            } => {
+                let mut label = if let (Some(discarded), Some(location)) =
                     (discard_site_instance_id, target_location)
                 {
                     format!(
@@ -747,6 +771,8 @@ impl ActionDescriptor {
                         "Cast {card_id} on artifact {}…",
                         short_identity(instance_id)
                     )
+                } else if let Some(instance_id) = target_aura_instance_id {
+                    format!("Cast {card_id} on aura {}…", short_identity(instance_id))
                 } else if let Some(target) = target {
                     format!(
                         "Cast {card_id} on {} {}…",
@@ -761,8 +787,12 @@ impl ActionDescriptor {
                     )
                 } else {
                     format!("Cast {card_id}")
-                },
-            ),
+                };
+                if let Some(instance_id) = discard_card_instance_id {
+                    label = format!("{label}; discard card {}…", short_identity(instance_id));
+                }
+                Some(label)
+            }
             Self::CastArtifact {
                 bearer,
                 card_id,
@@ -781,14 +811,18 @@ impl ActionDescriptor {
                 };
                 Some(format!("Cast {card_id} {destination} ({mana_cost} mana)"))
             }
-            Self::CastAura { card_id, cells, .. } => Some(format!(
-                "Conjure {card_id} across {}",
-                cells
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
+            Self::CastAura { card_id, cells, .. } => Some(if let [cell] = cells.as_slice() {
+                format!("Conjure {card_id} atop {cell}")
+            } else {
+                format!(
+                    "Conjure {card_id} across {}",
+                    cells
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }),
             Self::DropArtifacts {
                 artifact_instance_ids,
                 unit,
@@ -982,6 +1016,7 @@ impl ActionDescriptor {
             | Self::ResolveStartTurnTrigger { .. }
             | Self::ResolveEndTurnAuraRandom { .. }
             | Self::ResolveEndTurnAuraMove { .. }
+            | Self::DiscardCard { .. }
             | Self::ActivateDiscardRandomDamage { .. }
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
@@ -1187,15 +1222,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 ActionDescriptor::CastMagic {
                     ally: left_ally,
                     ally_destination: left_destination,
+                    ally_destination_cells: left_destination_cells,
                     ally_strike_location: left_strike,
                     card_id: left_card,
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
+                    discard_card_instance_id: left_discard_card,
                     discard_site_instance_id: left_discard,
                     draw_zone: left_draw_zone,
                     target: left_target,
                     target_artifact_instance_id: left_artifact,
+                    target_aura_instance_id: left_aura,
                     target_location: left_location,
                     target_site_instance_id: left_site,
                     tempted_destination: left_tempted_destination,
@@ -1204,15 +1242,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 ActionDescriptor::CastMagic {
                     ally: right_ally,
                     ally_destination: right_destination,
+                    ally_destination_cells: right_destination_cells,
                     ally_strike_location: right_strike,
                     card_id: right_card,
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
+                    discard_card_instance_id: right_discard_card,
                     discard_site_instance_id: right_discard,
                     draw_zone: right_draw_zone,
                     target: right_target,
                     target_artifact_instance_id: right_artifact,
+                    target_aura_instance_id: right_aura,
                     target_location: right_location,
                     target_site_instance_id: right_site,
                     tempted_destination: right_tempted_destination,
@@ -1220,12 +1261,21 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 },
             ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
                 .then_with(|| compare_optional_locations(*left_destination, *right_destination))
+                .then_with(|| {
+                    compare_optional_square_areas(*left_destination_cells, *right_destination_cells)
+                })
                 .then_with(|| compare_optional_locations(*left_strike, *right_strike))
                 .then_with(|| compare_json_strings(left_card, right_card))
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| {
                     compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
+                })
+                .then_with(|| {
+                    compare_optional_identities(
+                        left_discard_card.as_ref(),
+                        right_discard_card.as_ref(),
+                    )
                 })
                 .then_with(|| {
                     compare_optional_identities(left_discard.as_ref(), right_discard.as_ref())
@@ -1237,6 +1287,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| {
                     compare_optional_identities(left_artifact.as_ref(), right_artifact.as_ref())
                 })
+                .then_with(|| compare_optional_identities(left_aura.as_ref(), right_aura.as_ref()))
                 .then_with(|| compare_optional_locations(*left_location, *right_location))
                 .then_with(|| compare_optional_identities(left_site.as_ref(), right_site.as_ref()))
                 .then_with(|| {
@@ -1311,6 +1362,23 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::CastAura { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
             }
+            (
+                ActionDescriptor::CastAura {
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    caster_instance_id: left_caster,
+                    cells: left_cells,
+                },
+                ActionDescriptor::CastAura {
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    caster_instance_id: right_caster,
+                    cells: right_cells,
+                },
+            ) => compare_json_strings(left_card, right_card)
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| compare_json_array(left_cells, right_cells, Cell::cmp)),
             (ActionDescriptor::CastMagic { .. }, ActionDescriptor::BeginChainMagic { .. })
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::BeginChainMagic { .. })
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastMagic { .. })
@@ -1570,15 +1638,26 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ResolveRandomOutcome {
                             outcome_instance_id: right,
                         },
-                    )
-                    | (
+                    ) => left.cmp(right),
+                    (
                         ActionDescriptor::ResolveStartTurnTrigger {
+                            lure_destination: left_destination,
+                            lure_target_instance_id: left_target,
                             source_instance_id: left,
                         },
                         ActionDescriptor::ResolveStartTurnTrigger {
+                            lure_destination: right_destination,
+                            lure_target_instance_id: right_target,
                             source_instance_id: right,
                         },
-                    ) => left.cmp(right),
+                    ) => left
+                        .cmp(right)
+                        .then_with(|| {
+                            compare_optional_identities(left_target.as_ref(), right_target.as_ref())
+                        })
+                        .then_with(|| {
+                            compare_optional_locations(*left_destination, *right_destination)
+                        }),
                     (
                         ActionDescriptor::DeclareAttack { target: left },
                         ActionDescriptor::DeclareAttack { target: right },
@@ -1587,6 +1666,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::Draw { zone: left },
                         ActionDescriptor::Draw { zone: right },
                     ) => deck_zone_order(*left).cmp(&deck_zone_order(*right)),
+                    (
+                        ActionDescriptor::DiscardCard {
+                            card_instance_id: left,
+                            zone: left_zone,
+                        },
+                        ActionDescriptor::DiscardCard {
+                            card_instance_id: right,
+                            zone: right_zone,
+                        },
+                    ) => left
+                        .cmp(right)
+                        .then_with(|| deck_zone_order(*left_zone).cmp(&deck_zone_order(*right_zone))),
                     (
                         ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
                             target_cell: left_cell,
@@ -2053,6 +2144,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 42,
         ActionDescriptor::ResolveRandomOutcome { .. } => 43,
         ActionDescriptor::ResolveStartTurnTrigger { .. } => 44,
+        ActionDescriptor::DiscardCard { .. } => 45,
         ActionDescriptor::ExtendChainMagic { .. } => 24,
         ActionDescriptor::FlySite { .. } => 25,
         ActionDescriptor::Intercept { .. } => 26,

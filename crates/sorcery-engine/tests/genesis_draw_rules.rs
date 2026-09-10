@@ -1493,11 +1493,11 @@ fn private_spell_genesis_should_skip_an_empty_spellbook() {
     }
 }
 
-fn geomancer_manifest(seed: u32, north_atlas: &[&str], site_facts: &Value) -> String {
+fn geomancer_cards(seed: u32, north_atlas: &[&str], site_facts: &Value) -> Value {
     let mut geomancer = avatar(false, 20);
     geomancer["earthSitePlayCreatesAdjacentRubble"] = json!(true);
     geomancer["replaceAdjacentRubbleWithTopAtlasSite"] = json!(true);
-    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 6, 4);
+    let mut value = manifest_value(seed, &geomancer, &minion(1, 1), &minion(1, 1), 4, 8, 4);
     let cards = value["cards"].as_object_mut().expect("card definitions");
     cards.remove("north-site");
     cards.remove("south-site");
@@ -1540,7 +1540,43 @@ fn geomancer_manifest(seed: u32, north_atlas: &[&str], site_facts: &Value) -> St
         "south-site-3",
         "south-site-4",
     ]);
-    finish_manifest(value)
+    value
+}
+
+fn geomancer_manifest(seed: u32, north_atlas: &[&str], site_facts: &Value) -> String {
+    finish_manifest(geomancer_cards(seed, north_atlas, site_facts))
+}
+
+fn geomancer_through_south_turn(mut session: Session) -> Session {
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    session
+}
+
+fn play_geomancer_c4_rubble_c3(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["createRubbleAt"] == "C3"
+    });
+    receipt
+}
+
+fn replace_rubble_at_c3(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    receipt
 }
 
 #[test]
@@ -1810,6 +1846,161 @@ fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site()
     assert_eq!(
         final_state["realm"]["units"][0]["instanceId"],
         json!(expected_token_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws() {
+    let atlas = ["leyline", "leyline", "leyline", "leyline"];
+    let manifest = geomancer_manifest(
+        180,
+        &atlas,
+        &json!({ "genesisDrawSpellPerAdjacentSameCard": true }),
+    );
+    let mut session = opening_checkpoint(&manifest);
+    let first = play_geomancer_c4_rubble_c3(&mut session);
+    assert_eq!(event_types(&first), ["site-played", "rubble-created"]);
+    session = geomancer_through_south_turn(session);
+    let replacement = replace_rubble_at_c3(&mut session);
+    assert_eq!(
+        event_types(&replacement),
+        ["rubble-replaced", "site-played", "spell-drawn"]
+    );
+    assert_eq!(
+        replacement.events[2].payload,
+        json!({
+            "seat": "north",
+            "sourceInstanceId": replacement.events[1].payload["instanceId"],
+        })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rubble_replacement_should_discard_top_spells_like_play_site() {
+    let atlas = ["cemetery-1", "cemetery-2", "cemetery-3", "cemetery-4"];
+    let manifest = geomancer_manifest(181, &atlas, &json!({ "genesisDiscardTopSpells": 2 }));
+    let mut session = opening_checkpoint(&manifest);
+    let first = play_geomancer_c4_rubble_c3(&mut session);
+    assert_eq!(
+        event_types(&first),
+        [
+            "site-played",
+            "spell-discarded",
+            "spell-discarded",
+            "rubble-created"
+        ]
+    );
+    session = geomancer_through_south_turn(session);
+    let replacement = replace_rubble_at_c3(&mut session);
+    assert_eq!(
+        event_types(&replacement),
+        [
+            "rubble-replaced",
+            "site-played",
+            "spell-discarded",
+            "spell-discarded"
+        ]
+    );
+    assert_eq!(
+        replacement.events[2].payload["sourceInstanceId"],
+        replacement.events[1].payload["instanceId"]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rubble_replacement_should_immobilize_nearby_after_the_first_area_expires() {
+    let atlas = ["trap-1", "trap-2", "trap-3", "trap-4"];
+    let manifest = geomancer_manifest(
+        182,
+        &atlas,
+        &json!({ "genesisImmobilizeNearbyUntilNextTurn": true }),
+    );
+    let mut session = opening_checkpoint(&manifest);
+    let first = play_geomancer_c4_rubble_c3(&mut session);
+    assert_eq!(event_types(&first), ["site-played", "rubble-created"]);
+    assert_eq!(
+        state(&session)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": first.events[0].payload["instanceId"],
+        }])
+    );
+    session = geomancer_through_south_turn(session);
+    assert_eq!(state(&session)["realm"]["immobileAreas"], Value::Null);
+    let replacement = replace_rubble_at_c3(&mut session);
+    assert_eq!(
+        event_types(&replacement),
+        ["rubble-replaced", "site-played"]
+    );
+    assert_eq!(
+        state(&session)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C3", "C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": replacement.events[1].payload["instanceId"],
+        }])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rubble_replacement_should_strip_enemy_stealth_like_play_site() {
+    let atlas = ["lodge-1", "lodge-2", "lodge-3", "lodge-4"];
+    let mut value = geomancer_cards(183, &atlas, &json!({ "genesisEnemiesLoseStealth": true }));
+    value["cards"]["north-minion"]["stealth"] = json!(true);
+    value["cards"]["south-minion"]["stealth"] = json!(true);
+    value["cards"]["south-minion"]["thresholds"]["earth"] = json!(0);
+    let manifest = finish_manifest(value);
+    let mut session = opening_checkpoint(&manifest);
+    play_geomancer_c4_rubble_c3(&mut session);
+    let (north_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    let north_id = north_summon["cardInstanceId"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (south_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    let south_id = south_summon["cardInstanceId"].clone();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let replacement = replace_rubble_at_c3(&mut session);
+    assert_eq!(
+        event_types(&replacement),
+        ["rubble-replaced", "site-played", "stealth-lost"]
+    );
+    assert_eq!(
+        replacement.events[2].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": replacement.events[1].payload["instanceId"],
+        })
+    );
+    let after = state(&session);
+    let units = after["realm"]["units"].as_array().expect("realm units");
+    assert!(
+        units
+            .iter()
+            .any(|unit| unit["instanceId"] == north_id && unit["stealthed"] == true)
+    );
+    assert!(
+        units
+            .iter()
+            .any(|unit| unit["instanceId"] == south_id && unit["stealthed"] == false)
     );
     assert_exact_replay(&session);
 }

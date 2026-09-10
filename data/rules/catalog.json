@@ -3271,6 +3271,3445 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0162",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Geomancer Rubble replacement resumes the same adjacent same-card Spellbook draws as playing that site from hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "rubble"
+      ],
+      "actionHints": [
+        "replace-rubble"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0163",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound Disable suppresses printed abilities but the Ward mark still prevents the next damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0164",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound Disable skips end-turn Stealth and permanently reveals it; returning to Water can gain Stealth on a later End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "stealth"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "stealth-gained",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0164_waterbound_skips_end_turn_stealth_while_disabled_then_gains_it_on_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0165",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Waterbound Genesis still draws after summoning onto Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0165_waterbound_genesis_still_draws_after_summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0166",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Waterbound Stealth token enters stealthed on Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "stealth",
+        "token"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0166_waterbound_stealth_token_enters_stealthed_on_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0167",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized minion's Genesis still draws after occupying a canonical 2x2.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0167_oversized_genesis_still_draws_after_summoning"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0168",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed Spellcaster occupying a 2x2 originates Nearby Magic from every footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0169",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized Deathrite damages every other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "deathrite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0169_oversized_deathrite_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0170",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Oversized Genesis here damages every other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "genesis-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0170_oversized_genesis_here_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0171",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "An oversized Genesis strike hits enemies sharing any occupied footprint cell and skips allies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0171_oversized_genesis_strike_hits_enemies_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0172",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Optional adjacent Genesis from a 2x2 reaches units orthogonally bordering any footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "genesis-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0173",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Discard-funded random-here from a 2x2 damages a hidden other unit sharing any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "discardSpellToDamageRandomOtherUnitHere"
+      ],
+      "actionHints": [
+        "activate-discard-random-damage"
+      ],
+      "eventHints": [
+        "discard-random-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0173_oversized_discard_here_damages_units_sharing_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0174",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 with summonToAnySite may occupy any canonical square whose every cell has surface terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "summonToAnySite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0175",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 Waterbound minion stays enabled when any occupied cell is a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "waterbound"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0176",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Threshold suppression from a 2x2 covers every occupied site, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "siteProvidesNoThreshold"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0177",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Ranged minion originates cardinal projectiles from every occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0177_oversized_ranged_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0178",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 gains power, Ranged, and Spellcaster when any occupied cell is a Tower.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsPowerRangedAndSpellcasterAtopTower"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0179",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Ordinary minion pays Hamlet's destination discount when any occupied cell is that Site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ordinary",
+        "ordinaryMinionManaDiscount"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0179_oversized_ordinary_uses_any_occupied_hamlet"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0180",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 sacrifice discount selects controlled minions on every occupied summoning cell, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0181",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 water-site cast is illegal when any occupied cell is land, even if another occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0181_oversized_water_site_cast_rejects_a_mixed_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0182",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 water-site cast may occupy an enemy all-Water square when every occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "mustBeCastToWaterSite",
+        "summonToAnySite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0183",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 activated projectile originates cardinal rays from every occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "projectile-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0183_oversized_activated_projectile_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0184",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 drag projectile originates from every occupied cell and hauls the hit unit back to that origin, not only the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "shootsDragProjectile"
+      ],
+      "actionHints": [
+        "shoot-drag-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "unit-dragged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0185",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Burrowing minion can be summoned underground only when every occupied cell is land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "burrowing"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0185_oversized_burrowing_summons_underground_on_an_all_land_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0186",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Submerge minion can be summoned underwater only when every occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "submerge"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0186_oversized_submerge_summons_underwater_on_an_all_water_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0187",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that must be cast burrowed is offered only the underground placement of an all-land square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "burrowing",
+        "mustBeCastBurrowed"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0187_oversized_burrowed_only_cast_offers_only_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0188",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that must be cast submerged is offered only the underwater placement of an all-Water square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "submerge",
+        "mustBeCastSubmerged"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0188_oversized_submerged_only_cast_offers_only_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0189",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 area-damage minion can blanket a location adjacent to any occupied footprint cell and never targets its own square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "tapToDamageEachUnitAtAdjacentLocation"
+      ],
+      "actionHints": [
+        "activate-area-damage"
+      ],
+      "eventHints": [
+        "area-damage-activated",
+        "area-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0190",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 nearby-ally power aura reaches units nearby any occupied footprint cell, including a cell that is not nearby the anchor.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0190_oversized_nearby_ally_aura_reaches_units_near_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0191",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Scent Hounds effect permanently removes Stealth from enemies nearby any occupied footprint cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "nearbyEnemiesPermanentlyLoseStealth"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0191_oversized_scent_hounds_strip_stealth_near_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0192",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that gains Stealth only with no nearby enemies treats an enemy nearby any occupied footprint cell as nearby.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsStealthAtEndOfTurnIfNoEnemiesNearby"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0192_oversized_conditional_stealth_sees_enemies_near_any_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0193",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that gains Stealth only with no nearby enemies still gains it when the only enemy Avatar is far from every occupied cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "gainsStealthAtEndOfTurnIfNoEnemiesNearby"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "stealth-gained",
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0194",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that may Ranged strike once during basic movement can fire from any occupied footprint cell while the square is still on its starting cells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayRangedStrikeOnceDuringBasicMovement"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "shoot-projectile",
+        "continue-basic-movement"
+      ],
+      "eventHints": [
+        "basic-movement-started",
+        "projectile-shot",
+        "basic-movement-continued"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0194_oversized_during_movement_ranged_originates_from_every_footprint_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0195",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that may step after a Ranged strike translates every occupied footprint cell when it takes that optional step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "shoot-projectile",
+        "resolve-ranged-step"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0195_oversized_post_ranged_step_translates_the_whole_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0196",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic pays its cost, draws the printed number of hidden Spellbook cards in deck order, and enters its owner's cemetery. The opponent sees only the new hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0196_draw_spells_magic_draws_hidden_spellbook_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0197",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic draws every remaining Spellbook card it can, then loses immediately when a required draw finds an empty library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-drawn",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0198",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Unconditional kill-minion Magic pays its cost, offers every same-region minion including healthy copies, never offers an Avatar, and destroys the chosen minion through the shared kill and Deathrite pipeline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0198_kill_target_minion_destroys_a_healthy_minion_and_excludes_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0199",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Unconditional kill-minion Magic that would destroy a Warded minion breaks Ward instead, leaves the minion in play with no damage, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0199_kill_target_minion_ward_absorbs_the_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0200",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic pays its cost, draws the printed number of hidden Atlas cards in deck order, and enters its owner's cemetery. The opponent sees only the new Atlas hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0200_draw_sites_magic_draws_hidden_atlas_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0201",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic draws every remaining Atlas card it can, then loses immediately when a required draw finds an empty library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0202",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Bounce Magic pays its cost, offers every same-region minion including healthy copies, never offers an Avatar, and returns the chosen minion to its owner's hidden Spellbook hand without dying or entering a cemetery. The opponent sees only the new hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0202_bounce_returns_a_healthy_minion_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0203",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Bounce Magic that would return a Warded minion to hand breaks Ward instead, leaves the minion in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0203_bounce_ward_absorbs_the_return"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0204",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defending first strike resolves the defender's strike, deaths, and Deathrites before the attacker can strike, so a lethal defender takes no return damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0204_defending_first_strike_should_kill_before_the_attacker_strikes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0205",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defending-only first strike is inactive while attacking, so a defending-only first-strike attacker and a vanilla defender trade simultaneously.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0205_defending_only_first_strike_should_be_inactive_while_attacking"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0206",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Printed first strike is the combination of attacking and defending first strike: the same minion kills before a return strike while attacking and takes no damage from a simultaneous attacker while defending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0207",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-site Magic pays its cost, offers every real site including the caster's own, never offers Rubble or a void, replaces the chosen site with Rubble, and moves that site into its owner's cemetery. Occupants remain on the Rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-destroyed",
+        "rubble-created",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0207_destroy_target_site_replaces_the_site_with_rubble"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0208",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-site Magic that would destroy a site that cannot be moved, destroyed, or modified is prevented, leaves the site in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeMovedDestroyedOrModified",
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-destruction-prevented",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0209",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-site Magic pays its cost, offers every real site including the caster's own, never offers Rubble or a void, returns the chosen site to its owner's Atlas hand, leaves no Rubble, and banishes surface minions that occupied the site. Avatars remain at the emptied cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0209_return_target_site_returns_owners_site_and_banishes_surface_minions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0210",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-site Magic that would return a site that cannot be moved, destroyed, or modified is prevented, leaves the site and its occupants in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeMovedDestroyedOrModified",
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-return-prevented",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0211",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-artifact Magic pays its cost, offers every Artifact in the caster region whether loose or carried, moves a real Artifact into its owner's cemetery, and leaves no later Artifact target once the realm is empty of them.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-destroyed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0211_destroy_target_artifact_moves_a_loose_artifact_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0212",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-artifact Magic detaches a carried Artifact and returns it to its owner's Spellbook hand. The opponent sees only the resulting hand count, and the Artifact does not enter a cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0213",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-loss Magic pays its cost, offers only both Avatars, never offers a minion, and reduces the chosen Avatar's life without dealing damage. The loss is not a death blow.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-life-lost",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0213_target_player_life_loss_reduces_avatar_life_without_dealing_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0214",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-loss Magic that reduces an Avatar to zero life reaches Death's Door without ending the game. Further life loss against that Avatar is a no-op and is never a death blow.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-life-lost",
+        "avatar-reached-deaths-door",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0215",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-gain Magic pays its cost, offers only both Avatars, never offers a minion, and heals the chosen Avatar through the shared printed-life cap. Unlike controller-only healing, it can restore an opponent.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "avatar-healed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0215_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0216",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Target-player life-gain Magic that would heal an Avatar at Death's Door is a paid no-op. Life stays at zero, the game stays active, and no healing event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0217",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Untap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and readies a tapped minion without dealing damage or breaking Ward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-untapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0217_untap_target_minion_readies_a_tapped_minion_without_breaking_ward"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0218",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Untap-minion Magic that targets an already-untapped minion is a paid no-op. The minion stays ready, keeps Ward, and no untap event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0219",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Tap-minion Magic pays its cost, offers only same-region minions, never offers an Avatar, and marks a ready minion tapped. A second cast on the already-tapped minion is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-tapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0220",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Tap-minion Magic that targets an enemy warded minion is absorbed. Ward breaks, the minion stays ready, and no tap event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0221",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Grant-Ward Magic pays its cost, offers only same-region minions, never offers an Avatar, and marks an unwarded minion with Ward without dealing damage or breaking an existing mark.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantWardToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-warded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0221_grant_ward_marks_an_unwarded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0222",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Grant-Ward Magic that targets an already-warded minion is a paid no-op. The minion keeps Ward and no grant event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantWardToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0222_grant_ward_is_a_paid_noop_when_already_warded"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0223",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Grant-Stealth Magic pays its cost, offers only same-region visible minions, never offers an Avatar, and marks an enemy minion Stealthed. After the grant, that enemy is no longer a legal target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-stealthed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0223_grant_stealth_hides_an_enemy_minion_from_later_targeting"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0224",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Grant-Stealth Magic does not offer an already-stealthed enemy minion. The spell cannot be cast when that is the only candidate, and the printed Stealth mark stays.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0224_grant_stealth_cannot_target_an_enemy_already_stealthed"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0225",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic offers only both Avatars, never a minion, and puts the printed number of the chosen player's top Spellbook cards into that owner's cemetery in deck order. Identities are public. The game stays active when cards remain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0225_mill_spells_puts_opponent_library_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0226",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic that finds an empty Spellbook is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0226_mill_spells_is_a_paid_noop_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0227",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic is the Atlas sibling of mill-spell Magic: it offers only both Avatars and puts top Atlas cards into the owner's cemetery in deck order without drawing or decking.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0227_mill_sites_puts_opponent_atlas_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0228",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic that finds an empty Atlas is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0229",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Magic return is the Rescue sibling for Magic cards: it offers only Magic in the caster's own cemetery, never a minion, site, artifact, or an opponent's cemetery card, and returns the unchanged instance to the hidden Spellbook hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0229_cemetery_magic_return_restores_own_cemetery_magic_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0230",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Magic return that finds no Magic in the caster's own cemetery is a paid no-choice resolution. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0230_cemetery_magic_return_is_a_paid_noop_without_cemetery_magic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0231",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Artifact return is the Rescue sibling for Artifacts: it offers only Artifacts in the caster's own cemetery, never a Magic card, minion, site, or an opponent's cemetery card, and returns the unchanged instance to the hidden Spellbook hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0231_cemetery_artifact_return_restores_own_cemetery_artifact_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0232",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Artifact return that finds no Artifact in the caster's own cemetery is a paid no-choice resolution, even when the cemetery holds Magic. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0232_cemetery_artifact_return_is_a_paid_noop_without_cemetery_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0233",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Site return is the Rescue sibling for Sites: it offers only Sites in the caster's own cemetery, never Magic already there, and returns the unchanged instance to the hidden Atlas hand rather than the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0233_cemetery_site_return_restores_own_cemetery_site_to_hidden_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0234",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Site return that finds no Site in the caster's own cemetery is a paid no-choice resolution, even when the cemetery holds Magic. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0234_cemetery_site_return_is_a_paid_noop_without_cemetery_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0235",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "A player-chosen additional discard cost is a Storyline choice among every other hand card. It cannot select the spell being cast, pays into the owner's cemetery before the cast is announced, and then the companion effect resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0235_chosen_discard_cost_discards_another_spell_then_resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0236",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "The same additional discard cost may take an Atlas card instead of a spell. Every issued cast includes the chosen identity; there is no no-choice cast while another hand card remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0237",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Spellbook draw is a start-turn trigger. It draws the printed number of hidden spells through the shared private-draw helper before the Draw step, redacts those identities from the opponent, and leaves the ordinary Draw step pending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0237_start_turn_draw_spells_draws_a_hidden_spell_before_the_draw_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0238",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-turn Spellbook draw loses immediately when a required draw finds an empty library. That required empty draw is a deck-out, not a paid no-op, and the Draw step never begins.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0238_start_turn_draw_spells_decks_out_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0239",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player discard Magic offers only both Avatars. After the cast is announced, the targeted player chooses one of their own Atlas or Spellbook hand cards. The choice is a pending Storyline that transfers the decision seat; the caster cannot pick the card, and opponent hand identities stay redacted until the discard is public in the cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "discard-card"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "card-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0239_target_player_discard_lets_the_targeted_player_choose"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0240",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "The same targeted discard is a paid no-op when the chosen player has no hand cards. It never becomes a random discard and never decks out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0240_target_player_discard_is_a_paid_noop_without_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0241",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Atlas draw is a start-turn trigger. It draws the printed number of hidden sites through the shared private-draw helper before the Draw step, redacts those identities from the opponent, and leaves the ordinary Draw step pending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0241_start_turn_draw_sites_draws_a_hidden_site_before_the_draw_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0242",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-turn Atlas draw loses immediately when a required draw finds an empty library. That required empty draw is a deck-out, not a paid no-op, and the Draw step never begins.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0242_start_turn_draw_sites_decks_out_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0243",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that must attack a unit if able treats that attack as a mandatory main-phase action. While a legal unit attack is in its range of motion, the engine offers only those Move and Attack paths and then requires a unit Declare Attack. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0243_must_attack_a_unit_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0244",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same mandatory-attack fact does not constrain the main phase when no enemy unit is in range of motion. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0244_must_attack_does_not_constrain_when_no_unit_is_in_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0245",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that enemies must attack if able forces every opposing minion that can reach it. Those minions may take only Move and Attack paths that can strike it, then must Declare Attack on it. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0245_enemies_must_attack_this_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0246",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same forced-attack source does not constrain an opposing minion that cannot reach it. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_0246_enemies_must_attack_this_does_not_constrain_out_of_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0247",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "An artifact that nearby minions must attack if able forces every nearby opposing minion that can attack. Those minions may take only Move and Attack actions, then must Declare Attack while they remain nearby and have a target. Optional main-phase actions and Decline Attack wait.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0247_nearby_minions_must_attack_if_able_before_optional_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0248",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-must-attack artifact does not constrain a minion that is not nearby. Ordinary optional actions, including End Turn, remain legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0248_nearby_must_attack_does_not_constrain_when_not_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0249",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion forced by a nearby-must-attack artifact may choose a Move and Attack path that leaves nearby. After it is no longer nearby, Declare Attack is optional and Decline Attack is legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "decline-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0249_nearby_must_attack_may_decline_after_leaving_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0250",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby strikes against units deal double damage. The multiplier uses the struck unit's location, composes with nearby-must-attack on the same Artifact, and stacks by doubling once per nearby source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0250_nearby_strikes_against_units_deal_double_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0251",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a strike whose struck unit is not nearby the source. A 1-power undoubled strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0251_nearby_double_damage_does_not_apply_when_the_struck_unit_is_not_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0252",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location, not the shooter's.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0252_ranged_strike_deals_double_damage_when_the_struck_unit_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0253",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Ranged strike whose struck unit is not nearby the source. A 1-power undoubled projectile leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0253_ranged_strike_is_not_doubled_when_the_struck_unit_is_not_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0254",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Genesis strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0254_genesis_strike_deals_double_damage_when_the_struck_unit_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0255",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Genesis strike whose struck unit is not nearby the source. A 1-power undoubled Genesis strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0256",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn lure forces a nearby same-region enemy minion to take one card-effect step toward the source. The ability is mandatory, does not tap, and cannot be intercepted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0256_start_turn_lure_forces_a_nearby_enemy_one_step_closer"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0257",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn lure is a paid no-op when no nearby same-region enemy minion exists. The Start Phase then continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0257_start_turn_lure_no_ops_when_no_enemy_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0258",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site destroys that site, the minions standing atop it, and itself. Avatars are not minions and survive on the resulting rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble-created",
+        "minion-died",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
+        "testName": "rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop_it"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0259",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn Aura still destroys an empty Ordinary site and itself, without killing the Avatar. Unique or Legendary sites are not legal conjure targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+        "uniqueOrLegendary"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
+        "testName": "rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0260",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn life-loss ability makes the controller lose the printed amount of life, then the Start Phase continues to the Draw step. The ability is mandatory and does not tap the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_loss_rules.rs",
+        "testName": "rule_catalog_0260_start_turn_life_loss_reduces_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0261",
+      "requirementIds": [
+        "RULE-01",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn life loss can reduce the controller to 0 life and open Death's Door without immediately ending the game. The Start Phase still continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_loss_rules.rs",
+        "testName": "rule_catalog_0261_start_turn_life_loss_can_open_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0262",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A wandering end-of-each-turn Aura conjures atop a single nearby site, deals its printed damage to each unit there, then must move to an adjacent location it has not visited. The move is mandatory and does not hold or immobilize the area.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-end-turn-aura-move"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "aura-end-turn-damage-allocated",
+        "aura-moved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
+        "testName": "rule_catalog_0262_wandering_aura_damages_each_unit_then_must_move"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0263",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same wandering Aura cannot be conjured on a site that is not nearby the spellcaster. It triggers at the end of each player's turn, and it dispels when no unvisited adjacent location remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-end-turn-aura-move"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
+        "testName": "rule_catalog_0263_far_sites_are_illegal_and_each_turn_can_box_the_aura_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0264",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "An Artifact can grant its current site a start-of-controller-turn ability that makes that player lose the printed life and gain the same amount of mana this turn. The Artifact remains, and the Start Phase continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "mana-gained",
+        "start-turn-site-life-loss-triggered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_artifact_rules.rs",
+        "testName": "rule_catalog_0264_site_artifact_loses_life_and_gains_mana_this_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0265",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same site-granted start-of-turn life loss can reduce the site controller to 0 life and open Death's Door without immediately ending the game. The printed mana gain still happens, and the Start Phase still continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_artifact_rules.rs",
+        "testName": "rule_catalog_0265_site_artifact_can_open_deaths_door_and_still_gain_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0266",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A persistent 2×2 Aura can flood affected sites. Those sites become Water sites and still provide their other elemental affinities. The Aura does not immobilize, does not use the 3-turn duration machine, and remains after the controller's next turn starts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0266_flood_adds_water_and_keeps_other_affinities"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0267",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A later-entered persistent 2×2 Drought Aura covering the same site wins the timestamp: the site is no longer a Water site and provides no Water threshold, while its other affinities remain. Flood entered first stays in the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0267_later_drought_wins_over_flood"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0268",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can gain its controller a printed amount of life at the start of that player's turn. The heal uses the shared Avatar helper, is capped at printed life, and the Start Phase continues to the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_gain_rules.rs",
+        "testName": "rule_catalog_0268_start_turn_life_gain_heals_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0269",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn life gain cannot take an Avatar off Death's Door. The trigger still resolves, the minion remains, and the Start Phase continues to the Draw step with the game active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_life_gain_rules.rs",
+        "testName": "rule_catalog_0269_start_turn_life_gain_cannot_leave_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0270",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can destroy a realm Aura. The Aura moves to its owner's cemetery, matching immobile areas lift, Flood or Drought water overlays leave the covered sites, and the event is aura-destroyed rather than a duration dispel.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0270_destroy_target_aura_sends_flood_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0271",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can return a realm Aura to its owner's Spellbook hand. The Aura leaves the realm, Flood water leaves the covered sites, and the opponent sees only the updated hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0271_return_target_aura_returns_flood_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0272",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can return an Aura from its caster's own cemetery to the hidden Spellbook hand. Only Aura cards are offered, so a destroy Magic already in that cemetery is not a legal choice, and the opponent sees only the updated hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0272_cemetery_aura_return_restores_own_cemetery_aura_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0273",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same cemetery Aura return still pays and resolves when the caster's cemetery has no Aura. The spell enters the cemetery, no Aura returns, and a later Magic card there is not offered as a substitute target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0273_cemetery_aura_return_is_a_paid_noop_without_cemetery_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0274",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can grant Airborne to a controlled ally for the current turn. The grant is recorded on minions as a temporary source, public observations show the minion as Airborne, and the shared End Phase cleanup expires the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0274_grant_airborne_makes_a_grounded_minion_airborne_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0275",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A grounded minion cannot strike an Airborne enemy. After grant-Airborne Magic, the same minion can declare that strike. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0275_granted_airborne_is_required_to_strike_an_airborne_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0276",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant Ranged to a controlled ally for the current turn. After summoning sickness clears, the minion may shoot a projectile. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "ranged-granted",
+        "ranged-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_0276_grant_ranged_lets_a_ready_minion_shoot_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0277",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Granted Ranged does not bypass summoning sickness. Charge lets a sick minion Move and Attack; it does not let that minion shoot, and grant-Ranged Magic does not either. The opponent sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ranged-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0278",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant Lethal to a controlled ally for the current turn. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0279",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A 1-power minion without Lethal only wounds a 2-defense enemy. After grant-Lethal Magic, the same strike destroys that enemy. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "lethal-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_0279_granted_lethal_is_required_to_kill_a_tougher_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0280",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse reaches both seats, including a Surface Avatar on the same cell, and does not hit the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0280_start_turn_here_damage_hits_other_units_sharing_the_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0281",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-of-turn here-area damage is lethal enough to destroy a 1-defense visitor sharing the cell. The source remains, the controller Avatar still takes the pulse, and the visitor enters its owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0281_start_turn_here_damage_destroys_a_wounded_visitor"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0282",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant First Strike to a controlled ally for the current turn. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "first-strike-granted",
+        "first-strike-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0283",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Equal 3/3 combat without First Strike is simultaneous. After grant-First-Strike Magic, the same attacker kills before taking return damage. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "first-strike-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_0283_granted_first_strike_kills_before_return_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0284",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can add mana to the site-produced pool already present in the Start Phase. The trigger is mandatory and then the turn proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsMana"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mana_gain_rules.rs",
+        "testName": "rule_catalog_0284_start_turn_mana_gain_adds_to_site_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0285",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-of-turn controller mana gain can pay a two-mana spell that one site alone cannot. After Draw, the gained mana is spent and the pool returns to empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsMana"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "magic-cast"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mana_gain_rules.rs",
+        "testName": "rule_catalog_0285_start_turn_mana_gain_pays_a_two_mana_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0286",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Spellbook draw Magic makes the chosen player draw from that player's remaining Spellbook. Drawn card identities stay private, including in events and the opponent's public view.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0286_target_player_draw_puts_opponent_library_card_in_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0287",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Spellbook draw on an empty library is a deck-out for the targeted player, not a paid no-op. That is the opposite of mill, which leaves the game active when the library is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0287_target_player_draw_decks_out_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0288",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Atlas draw Magic makes the chosen player draw from that player's remaining Atlas. Drawn site identities stay private, including in events and the opponent's public view.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0288_target_player_draw_puts_opponent_atlas_card_in_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0289",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Target-player Atlas draw on an empty library is a deck-out for the targeted player, not a paid no-op. That is the opposite of mill, which leaves the game active when the Atlas is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDrawsSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_draw_rules.rs",
+        "testName": "rule_catalog_0289_target_player_draw_sites_decks_out_an_empty_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0290",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the end of its controller's turn, a minion can deal damage to each other unit sharing its footprint. The pulse hits both seats, including a Surface Avatar on the same cell, and never hits the source. End Phase then removes leftover damage from survivors before the opponent draws.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0290_end_turn_here_damage_hits_other_units_sharing_the_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0291",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "End-of-controller-turn here-area damage can destroy a 1-defense visitor on the same cell. The source remains, Deathrites resolve through the existing end-turn continuation, and the opponent then draws.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_here_damage_rules.rs",
+        "testName": "rule_catalog_0291_end_turn_here_damage_destroys_a_wounded_visitor"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0292",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can mill the top Spellbook card into that player's cemetery. The discarded identity is public, the hand is unchanged, and the Start Phase then proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0292_start_turn_mill_spells_puts_the_top_spell_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0293",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Spellbook mill is a no-op when the library is empty. The game stays active, no card is discarded, and the Start Phase still proceeds to Draw. Required start-turn draws still deck out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0293_start_turn_mill_spells_is_a_no_op_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0294",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can mill the top Atlas card into that player's cemetery. The discarded site identity is public and the Start Phase then proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0294_start_turn_mill_sites_puts_the_top_site_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0295",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Atlas mill is a no-op when the Atlas is empty. The game stays active and the Start Phase still proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
+        "testName": "rule_catalog_0295_start_turn_mill_sites_is_a_no_op_on_an_empty_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0296",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can draw a hidden Spellbook card for its controller before the corpse enters the cemetery. The opponent sees only the hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_draw_spells_rules.rs",
+        "testName": "rule_catalog_0296_deathrite_draw_spells_draws_a_hidden_spell_before_cemetery_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0297",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Spellbook draw from an empty library is a deck-out. The corpse still dies, the game ends, and no card is drawn. Deathrite site draws keep the same empty-library loss.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_draw_spells_rules.rs",
+        "testName": "rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0298",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Heal-target-minion Magic removes damage from a living minion in the same turn it was wounded. Avatars are not legal targets. The heal does not kill the minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0298_heal_target_minion_clears_same_turn_damage_without_targeting_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0299",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Healing an undamaged minion is a paid no-op. No heal event is emitted, Ward is not broken, and the minion stays in play at zero damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0299_heal_target_minion_is_a_paid_noop_on_an_undamaged_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0300",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can mill the top Spellbook card into the cemetery before the corpse enters. The milled identity is public. An empty Spellbook does not lose.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "spell-discarded",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0300_deathrite_mill_spells_puts_the_top_spell_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0301",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Spellbook mill from an empty library is a no-op. The corpse still dies, the game stays active, and no card is discarded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0301_deathrite_mill_spells_is_a_no_op_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0302",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can mill the top Atlas card into the cemetery before the corpse enters. The milled identity is public.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSites"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "site-discarded",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0302_deathrite_mill_sites_puts_the_top_site_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0303",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Atlas mill from an empty library is a no-op. The corpse still dies and the game stays active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteMillSites"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_mill_rules.rs",
+        "testName": "rule_catalog_0303_deathrite_mill_sites_is_a_no_op_on_an_empty_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0304",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can gain its controller a printed amount of life at the end of that player's turn. The heal uses the shared Avatar helper and is capped at printed life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0304_end_turn_controller_life_gain_heals_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0305",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same end-of-controller-turn life gain cannot take an Avatar off Death's Door. The pulse still runs, the minion remains, and the game stays active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0305_end_turn_controller_life_gain_cannot_leave_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0306",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion can make its controller lose a printed amount of life at the end of that player's turn. The ability is mandatory and does not tap the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0307",
+      "requirementIds": [
+        "RULE-01",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same end-of-controller-turn life loss can reduce the controller to 0 life and open Death's Door without immediately ending the game.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_controller_life_rules.rs",
+        "testName": "rule_catalog_0307_end_turn_controller_life_loss_can_open_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0308",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion can skip the controller Start Phase untap. After it taps, it stays tapped on that player's next turn and cannot Move and Attack until something else readies it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "doesNotUntapDuringControllersStartPhase"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
+        "testName": "rule_catalog_0308_does_not_untap_during_the_controllers_start_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0309",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Disable suppresses the Start Phase doesn't-untap replacement. A frozen copy untaps with the rest of the controller's minions, then Freeze expires at the caster's next turn start.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "doesNotUntapDuringControllersStartPhase"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-disable-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/does_not_untap_rules.rs",
+        "testName": "rule_catalog_0309_disable_suppresses_the_does_not_untap_replacement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0310",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 Aura can flood only non-Ordinary sites. Those sites become Water sites and provide only Water threshold. Ordinary sites under the same area keep their printed elements and are not flooded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "ordinary"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/atlantean_fate_rules.rs",
+        "testName": "rule_catalog_0310_fate_makes_non_ordinary_sites_water_only_and_spares_ordinary"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0311",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "The same Aura's Genesis submerges minions atop affected non-Ordinary sites. A minion without Submerge dies through region settlement and enters its owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured",
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/atlantean_fate_rules.rs",
+        "testName": "rule_catalog_0311_fate_genesis_submerges_and_kills_a_minion_without_submerge"
+      }
     }
   ]
 }

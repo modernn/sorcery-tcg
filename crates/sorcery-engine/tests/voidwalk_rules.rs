@@ -80,7 +80,6 @@ fn manifest(seed: u32, cards: &Value, north_site: &str, north_spellbook: &[&str]
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
-    eprintln!("PHASE {:?}", state(session)["phase"]);
     let action = session
         .legal_actions()
         .expect("legal actions")
@@ -523,6 +522,64 @@ fn rule_catalog_0050_region_settlement_should_kill_inhospitable_minions_and_bani
     assert!(realm_unit(&after_banishment, &stranded).is_none());
     assert!(!in_cemetery(&after_banishment, "north", &stranded));
     assert_exact_replay(&banished);
+}
+
+#[test]
+fn waterbound_voidwalk_should_stop_at_the_first_inhospitable_void_cell() {
+    let walker = minion(json!({
+        "burrowing": true,
+        "deathriteDrawSite": true,
+        "movementBonus": 1,
+        "voidwalk": true,
+        "waterbound": true,
+    }));
+    let cards = voidwalk_cards(&walker, &site(&["water"]));
+    let mut session = Session::new(&manifest(146, &cards, "north-site", &["north-spell"; 8]))
+        .expect("valid truncated voidwalk scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let walker_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("walker identity")
+        .to_owned();
+    pass_turn(&mut session);
+    play_site(&mut session, "C1");
+    pass_turn(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == walker_id.as_str()
+            && path_locations(descriptor) == ["C4/surface", "B4/void", "A4/void"]
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["move-and-attack-activated", "minion-banished"]
+    );
+    assert_eq!(
+        receipt.events[0].payload,
+        json!({
+            "from": { "cell": "C4", "region": "surface" },
+            "path": [
+                { "cell": "C4", "region": "surface" },
+                { "cell": "B4", "region": "void" },
+            ],
+            "seat": "north",
+            "steps": 1,
+            "to": { "cell": "B4", "region": "void" },
+            "unitInstanceId": walker_id,
+        })
+    );
+    let after = state(&session);
+    assert!(realm_unit(&after, &walker_id).is_none());
+    assert!(!in_cemetery(&after, "north", &walker_id));
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingCombat"].is_null());
+    assert_exact_replay(&session);
 }
 
 #[test]

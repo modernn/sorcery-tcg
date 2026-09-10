@@ -55,6 +55,30 @@ impl ElementSet {
         self.0 & (1 << element.index()) != 0
     }
 
+    /// Returns this set with `element` present.
+    #[must_use]
+    pub const fn with(self, element: Element) -> Self {
+        Self(self.0 | (1 << element.index()))
+    }
+
+    /// Returns this set with `element` absent.
+    #[must_use]
+    pub const fn without(self, element: Element) -> Self {
+        Self(self.0 & !(1 << element.index()))
+    }
+
+    /// Returns a set that contains only `element`.
+    #[must_use]
+    pub const fn only(element: Element) -> Self {
+        Self(0).with(element)
+    }
+
+    /// Returns an empty elemental set.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
     /// Iterates present elements in canonical rules order.
     pub fn iter(self) -> impl Iterator<Item = Element> {
         Element::ALL
@@ -139,19 +163,24 @@ pub struct SiteFacts {
     pub genesis_reorder_next_spells: bool,
     pub is_tower: bool,
     pub minions_here_gain_voidwalk_until_leaving_void: bool,
+    pub ordinary: bool,
     pub ordinary_minion_mana_discount: bool,
     pub prevents_units_with_power_at_least_from_entering: Option<u8>,
     pub ranged_units_here_range_bonus: bool,
     pub sacrifice_to_destroy_nearby_site: bool,
+    pub unique_or_legendary: bool,
 }
 
 /// The single supported effect carried by an Artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArtifactEffect {
     AtEndOfEachTurnSiteControllerLosesLife(u8),
+    AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(u8),
     BearerControllerChoosesExtraRandomOutcome,
     GrantsBearerLethal,
     GrantsBearerPowerTwo,
+    NearbyMinionsMustAttackIfAble,
+    NearbyStrikesAgainstUnitsDealDoubleDamage,
     TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
     TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
     TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
@@ -162,13 +191,19 @@ pub enum ArtifactEffect {
 pub struct ArtifactFacts {
     pub effect: ArtifactEffect,
     pub mana_cost: u64,
+    pub nearby_strikes_against_units_deal_double_damage: bool,
     pub thresholds: Thresholds,
 }
 
 /// The single supported effect carried by an Aura.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuraEffect {
+    AffectedSitesAreFlooded,
+    AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold,
+    AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities,
     AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
+    AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
+    AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
     ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns,
 }
 
@@ -194,27 +229,58 @@ pub enum MagicEffect {
         target_nearby: bool,
         untap_target_minion_after_damage: bool,
     },
+    DestroyTargetArtifact,
+    DestroyTargetAura,
+    DestroyTargetSite,
     DestroyTargetSiteWithDamageGrid([u8; 5]),
     DisableTargetNearbyMinionUntilNextTurn,
+    DrawSites(u8),
+    DrawSpells(u8),
     FightAllyWithAdjacentEnemy,
     GainControlOfTargetNearbyMinion,
+    GrantAirborneToAllyThisTurn,
     GrantChargeToAllyThisTurn,
+    GrantFirstStrikeToAllyThisTurn,
+    GrantLethalToAllyThisTurn,
     GrantPowerTwoToAllyThisTurn,
+    GrantRangedToAllyThisTurn,
+    GrantStealthToTargetMinion,
+    GrantWardToTargetMinion,
     HealController(u8),
+    HealTargetMinion(u8),
+    KillTargetMinion,
     KillTargetWoundedMinion,
     LeapAttackAlly,
     LureEnemyMinionOneStepCloser,
+    MillSites(u8),
+    MillSpells(u8),
     ReturnMinionFromOwnCemetery,
+    ReturnTargetArtifactFromOwnCemetery,
+    ReturnTargetAuraFromOwnCemetery,
+    ReturnTargetMagicFromOwnCemetery,
+    ReturnTargetArtifactToOwnerHand,
+    ReturnTargetAuraToOwnerHand,
+    ReturnTargetMinionToOwnerHand,
+    ReturnTargetSiteFromOwnCemetery,
+    ReturnTargetSiteToOwnerHand,
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
     SummonTokenToEachControlledSiteBorderingEnemySite(String),
+    TargetPlayerDiscardsCards(u8),
+    TargetPlayerDrawsSites(u8),
+    TargetPlayerDrawsSpells(u8),
+    TargetPlayerGainsLife(u8),
+    TargetPlayerLosesLife(u8),
+    TapTargetMinion,
     TeleportAllyToTargetSite,
     TeleportNearbyAllyThenDrawCard,
+    UntapTargetMinion,
 }
 
 /// Magic facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MagicFacts {
+    pub discard_card_as_additional_cost: bool,
     pub effect: MagicEffect,
     pub mana_cost: u64,
     pub thresholds: Thresholds,
@@ -278,6 +344,18 @@ pub enum DamagePrevention {
 pub struct MinionFacts {
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
+    pub at_end_of_controller_turn_controller_gains_life: Option<u8>,
+    pub at_end_of_controller_turn_controller_loses_life: Option<u8>,
+    pub at_end_of_controller_turn_damage_each_other_unit_here: Option<u8>,
+    pub at_start_of_controller_turn_controller_gains_life: Option<u8>,
+    pub at_start_of_controller_turn_controller_gains_mana: Option<u8>,
+    pub at_start_of_controller_turn_controller_loses_life: Option<u8>,
+    pub at_start_of_controller_turn_damage_each_other_unit_here: Option<u8>,
+    pub at_start_of_controller_turn_draw_sites: Option<u8>,
+    pub at_start_of_controller_turn_draw_spells: Option<u8>,
+    pub at_start_of_controller_turn_mill_sites: Option<u8>,
+    pub at_start_of_controller_turn_mill_spells: Option<u8>,
+    pub at_start_of_controller_turn_lure_nearby_enemy_minion: bool,
     pub at_start_of_controller_turn_teleport_to_random_site_or_void: bool,
     pub attack: u8,
     pub burrowing: bool,
@@ -289,10 +367,15 @@ pub struct MinionFacts {
     pub damage_prevention: Option<DamagePrevention>,
     pub deathrite_damage_each_unit_here: Option<u8>,
     pub deathrite_draw_site: bool,
+    pub deathrite_draw_spells: bool,
     pub deathrite_heal: Option<u8>,
     pub deathrite_lose_life_per_nearby_site_controlled: bool,
+    pub deathrite_mill_sites: bool,
+    pub deathrite_mill_spells: bool,
     pub defense: u8,
     pub dies_at_end_of_controller_turn: bool,
+    pub does_not_untap_during_controllers_start_phase: bool,
+    pub enemies_must_attack_this_if_able: bool,
     pub discard_spell_to_damage_random_other_unit_here: Option<u8>,
     pub end_turn_stealth: Option<EndTurnStealth>,
     pub gains_power_ranged_and_spellcaster_atop_tower: bool,
@@ -306,6 +389,7 @@ pub struct MinionFacts {
     pub mortal: bool,
     pub movement_bonus: Option<u8>,
     pub movement_restriction: Option<BasicMovementRestriction>,
+    pub must_attack_a_unit_if_able: bool,
     pub must_be_cast_to_outer_column: bool,
     pub must_be_cast_to_water_site: bool,
     pub nearby_enemies_permanently_lose_stealth: bool,
@@ -321,6 +405,7 @@ pub struct MinionFacts {
     pub spellcaster: bool,
     pub stealth: bool,
     pub strikes_first_while_attacking: bool,
+    pub strikes_first_while_defending: bool,
     pub submerge: bool,
     pub summon_to_any_site: bool,
     pub tap_for_mana: Option<u8>,
@@ -648,19 +733,24 @@ const SITE_FIELDS: &[&str] = &[
     "genesisReorderNextSpells",
     "isTower",
     "minionsHereGainVoidwalkUntilLeavingVoid",
+    "ordinary",
     "ordinaryMinionManaDiscount",
     "preventsUnitsWithPowerAtLeastFromEntering",
     "rangedUnitsHereRangeBonus",
     "sacrificeToDestroyNearbySite",
+    "uniqueOrLegendary",
 ];
 
 const ARTIFACT_FIELDS: &[&str] = &[
     "atEndOfEachTurnSiteControllerLosesLife",
+    "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
     "cardType",
     "grantsBearerLethal",
     "grantsBearerPower",
     "manaCost",
+    "nearbyMinionsMustAttackIfAble",
+    "nearbyStrikesAgainstUnitsDealDoubleDamage",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
     "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
     "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
@@ -668,7 +758,12 @@ const ARTIFACT_FIELDS: &[&str] = &[
 ];
 
 const AURA_FIELDS: &[&str] = &[
+    "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+    "affectedSitesAreFlooded",
+    "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
     "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
+    "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
+    "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
     "cardType",
     "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
     "manaCost",
@@ -685,31 +780,73 @@ const MAGIC_FIELDS: &[&str] = &[
     "damageRandomUnitAtLocation",
     "damageTargetUnit",
     "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+    "destroyTargetArtifact",
+    "destroyTargetAura",
     "destroyTargetSite",
     "disableTargetNearbyMinionUntilNextTurn",
+    "discardCardAsAdditionalCost",
+    "drawSites",
+    "drawSpells",
     "discardSiteAsAdditionalCost",
     "fightAllyWithAdjacentEnemy",
     "gainControlOfTargetNearbyMinion",
+    "grantAirborneToAllyThisTurn",
     "grantChargeToAllyThisTurn",
+    "grantFirstStrikeToAllyThisTurn",
+    "grantLethalToAllyThisTurn",
     "grantPowerToAllyThisTurn",
+    "grantRangedToAllyThisTurn",
+    "grantStealthToTargetMinion",
+    "grantWardToTargetMinion",
     "healController",
+    "healTargetMinion",
+    "killTargetMinion",
     "killTargetWoundedMinion",
     "leapAttackAlly",
     "lureEnemyMinionOneStepCloser",
     "manaCost",
+    "millSites",
+    "millSpells",
     "returnMinionFromOwnCemetery",
+    "returnTargetArtifactFromOwnCemetery",
+    "returnTargetAuraFromOwnCemetery",
+    "returnTargetMagicFromOwnCemetery",
+    "returnTargetArtifactToOwnerHand",
+    "returnTargetAuraToOwnerHand",
+    "returnTargetMinionToOwnerHand",
+    "returnTargetSiteFromOwnCemetery",
+    "returnTargetSiteToOwnerHand",
     "submergeTargetMinion",
     "summonRandomMinionFromAnyCemetery",
     "summonTokenToEachControlledSiteBorderingEnemySite",
+    "tapTargetMinion",
     "targetNearby",
+    "targetPlayerDiscardsCards",
+    "targetPlayerDrawsSites",
+    "targetPlayerDrawsSpells",
+    "targetPlayerGainsLife",
+    "targetPlayerLosesLife",
     "teleportAllyToTargetSite",
     "teleportNearbyAllyThenDrawCard",
     "thresholds",
+    "untapTargetMinion",
     "untapTargetMinionAfterDamage",
 ];
 
 const MINION_FIELDS: &[&str] = &[
     "airborne",
+    "atEndOfControllerTurnControllerGainsLife",
+    "atEndOfControllerTurnControllerLosesLife",
+    "atEndOfControllerTurnDamageEachOtherUnitHere",
+    "atStartOfControllerTurnControllerGainsLife",
+    "atStartOfControllerTurnControllerGainsMana",
+    "atStartOfControllerTurnControllerLosesLife",
+    "atStartOfControllerTurnDamageEachOtherUnitHere",
+    "atStartOfControllerTurnDrawSites",
+    "atStartOfControllerTurnDrawSpells",
+    "atStartOfControllerTurnLureNearbyEnemyMinion",
+    "atStartOfControllerTurnMillSites",
+    "atStartOfControllerTurnMillSpells",
     "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
     "attack",
     "burrowing",
@@ -721,10 +858,15 @@ const MINION_FIELDS: &[&str] = &[
     "connectsTopBottom",
     "deathriteDamageEachUnitHere",
     "deathriteDrawSite",
+    "deathriteDrawSpells",
     "deathriteHeal",
     "deathriteLoseLifePerNearbySiteControlled",
+    "deathriteMillSites",
+    "deathriteMillSpells",
     "defense",
     "diesAtEndOfControllerTurn",
+    "doesNotUntapDuringControllersStartPhase",
+    "enemiesMustAttackThisIfAble",
     "discardRandomCardInsteadOfMana",
     "discardSpellToDamageRandomOtherUnitHere",
     "gainsPowerRangedAndSpellcasterAtopTower",
@@ -748,6 +890,7 @@ const MINION_FIELDS: &[&str] = &[
     "movementBonus",
     "movesOnlyForward",
     "movesOnlySideways",
+    "mustAttackAUnitIfAble",
     "mustBeCastBurrowed",
     "mustBeCastSubmerged",
     "mustBeCastToOuterColumn",
@@ -766,6 +909,7 @@ const MINION_FIELDS: &[&str] = &[
     "spellcaster",
     "stealth",
     "strikesFirstWhileAttacking",
+    "strikesFirstWhileDefending",
     "submerge",
     "summonToAnySite",
     "takesLessDamage",
@@ -957,6 +1101,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             "minionsHereGainVoidwalkUntilLeavingVoid",
             path,
         )?,
+        ordinary: true_only(object, "ordinary", path)?,
         ordinary_minion_mana_discount: fixed_integer(
             object,
             "ordinaryMinionManaDiscount",
@@ -973,64 +1118,100 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         .map(compact_u8),
         ranged_units_here_range_bonus: fixed_integer(object, "rangedUnitsHereRangeBonus", 1, path)?,
         sacrifice_to_destroy_nearby_site: true_only(object, "sacrificeToDestroyNearbySite", path)?,
+        unique_or_legendary: true_only(object, "uniqueOrLegendary", path)?,
     })
 }
 
 fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFacts, FactError> {
     reject_unknown(object, ARTIFACT_FIELDS, path)?;
-    let life_loss = optional_bounded_integer(
-        object,
-        "atEndOfEachTurnSiteControllerLosesLife",
-        1,
-        MAX_COMBAT_STAT,
-        path,
-    )?
-    .map(|value| ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(compact_u8(value)));
-    let effect = one_effect(
-        [
-            life_loss,
-            true_only(
-                object,
-                "bearerControllerChoosesExtraRandomOutcome",
-                path,
-            )?
-            .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
-            true_only(object, "grantsBearerLethal", path)?
-                .then_some(ArtifactEffect::GrantsBearerLethal),
-            fixed_integer(object, "grantsBearerPower", 2, path)?
-                .then_some(ArtifactEffect::GrantsBearerPowerTwo),
-            true_only(
-                object,
-                "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
-            ),
-            fixed_integer(
-                object,
-                "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
-                3,
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
-            ),
-            fixed_integer(
-                object,
-                "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
-                4,
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
-            ),
-        ],
-        path,
-    )?;
+    let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
+    let nearby_double = true_only(object, "nearbyStrikesAgainstUnitsDealDoubleDamage", path)?;
+    let exclusive = [
+        optional_bounded_integer(
+            object,
+            "atEndOfEachTurnSiteControllerLosesLife",
+            1,
+            MAX_COMBAT_STAT,
+            path,
+        )?
+        .map(|value| ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(compact_u8(value))),
+        optional_bounded_integer(
+            object,
+            "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
+            1,
+            MAX_COMBAT_STAT,
+            path,
+        )?
+        .map(|value| {
+            ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(compact_u8(value))
+        }),
+        true_only(
+            object,
+            "bearerControllerChoosesExtraRandomOutcome",
+            path,
+        )?
+        .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
+        true_only(object, "grantsBearerLethal", path)?
+            .then_some(ArtifactEffect::GrantsBearerLethal),
+        fixed_integer(object, "grantsBearerPower", 2, path)?
+            .then_some(ArtifactEffect::GrantsBearerPowerTwo),
+        true_only(
+            object,
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
+        ),
+        fixed_integer(
+            object,
+            "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+            3,
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
+        ),
+        fixed_integer(
+            object,
+            "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
+            4,
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
+        ),
+    ];
+    let exclusive_count = exclusive.iter().filter(|effect| effect.is_some()).count();
+    if exclusive_count > 1 {
+        return Err(FactError::new(
+            path,
+            "must define exactly one supported effect",
+        ));
+    }
+    if exclusive_count == 1 && (nearby_must_attack || nearby_double) {
+        return Err(FactError::new(
+            path,
+            "competing artifact effects are unsupported",
+        ));
+    }
+    if exclusive_count == 0 && !nearby_must_attack && !nearby_double {
+        return Err(FactError::new(
+            path,
+            "must define exactly one supported effect",
+        ));
+    }
+    let effect = if let Some(effect) = exclusive.into_iter().flatten().next() {
+        effect
+    } else if nearby_must_attack {
+        ArtifactEffect::NearbyMinionsMustAttackIfAble
+    } else {
+        ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+    };
     Ok(ArtifactFacts {
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
+        nearby_strikes_against_units_deal_double_damage: nearby_double,
         thresholds: parse_thresholds(object, path)?,
     })
 }
@@ -1039,6 +1220,22 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
     reject_unknown(object, AURA_FIELDS, path)?;
     let effect = one_effect(
         [
+            true_only(object, "affectedSitesAreFlooded", path)?
+                .then_some(AuraEffect::AffectedSitesAreFlooded),
+            true_only(
+                object,
+                "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+                path,
+            )?
+            .then_some(AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold),
+            true_only(
+                object,
+                "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+                path,
+            )?
+            .then_some(
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities,
+            ),
             fixed_integer(
                 object,
                 "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
@@ -1048,6 +1245,15 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
             .then_some(
                 AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
             ),
+            fixed_integer(
+                object,
+                "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent",
+                3,
+                path,
+            )?
+            .then_some(
+                AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree,
+            ),
             true_only(
                 object,
                 "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
@@ -1056,6 +1262,12 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
             .then_some(
                 AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns,
             ),
+            true_only(
+                object,
+                "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+                path,
+            )?
+            .then_some(AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf),
         ],
         path,
     )?;
@@ -1131,15 +1343,21 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         ));
     }
 
+    let discard_card = true_only(object, "discardCardAsAdditionalCost", path)?;
     let discard_site = true_only(object, "discardSiteAsAdditionalCost", path)?;
     let destroy_site = true_only(object, "destroyTargetSite", path)?;
     let damage_grid = parse_damage_grid(object, path)?;
-    let target_site_fact_count =
-        u8::from(discard_site) + u8::from(destroy_site) + u8::from(damage_grid.is_some());
-    if target_site_fact_count != 0 && target_site_fact_count != 3 {
+    let craterize = discard_site && destroy_site && damage_grid.is_some();
+    if (discard_site || damage_grid.is_some()) && !craterize {
         return Err(FactError::new(
             path,
             "site-destruction grid damage facts must be defined together",
+        ));
+    }
+    if discard_card && discard_site {
+        return Err(FactError::new(
+            path,
+            "competing additional discard costs are unsupported",
         ));
     }
 
@@ -1179,39 +1397,95 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 target_nearby,
                 untap_target_minion_after_damage,
             }),
+            true_only(object, "destroyTargetArtifact", path)?
+                .then_some(MagicEffect::DestroyTargetArtifact),
+            true_only(object, "destroyTargetAura", path)?.then_some(MagicEffect::DestroyTargetAura),
+            (destroy_site && damage_grid.is_none()).then_some(MagicEffect::DestroyTargetSite),
             damage_grid.map(MagicEffect::DestroyTargetSiteWithDamageGrid),
             true_only(object, "disableTargetNearbyMinionUntilNextTurn", path)?
                 .then_some(MagicEffect::DisableTargetNearbyMinionUntilNextTurn),
+            optional_bounded_integer(object, "drawSites", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::DrawSites(compact_u8(count))),
+            optional_bounded_integer(object, "drawSpells", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::DrawSpells(compact_u8(count))),
             true_only(object, "fightAllyWithAdjacentEnemy", path)?
                 .then_some(MagicEffect::FightAllyWithAdjacentEnemy),
             true_only(object, "gainControlOfTargetNearbyMinion", path)?
                 .then_some(MagicEffect::GainControlOfTargetNearbyMinion),
+            true_only(object, "grantAirborneToAllyThisTurn", path)?
+                .then_some(MagicEffect::GrantAirborneToAllyThisTurn),
             true_only(object, "grantChargeToAllyThisTurn", path)?
                 .then_some(MagicEffect::GrantChargeToAllyThisTurn),
+            true_only(object, "grantFirstStrikeToAllyThisTurn", path)?
+                .then_some(MagicEffect::GrantFirstStrikeToAllyThisTurn),
+            true_only(object, "grantLethalToAllyThisTurn", path)?
+                .then_some(MagicEffect::GrantLethalToAllyThisTurn),
             fixed_integer(object, "grantPowerToAllyThisTurn", 2, path)?
                 .then_some(MagicEffect::GrantPowerTwoToAllyThisTurn),
+            true_only(object, "grantRangedToAllyThisTurn", path)?
+                .then_some(MagicEffect::GrantRangedToAllyThisTurn),
+            true_only(object, "grantStealthToTargetMinion", path)?
+                .then_some(MagicEffect::GrantStealthToTargetMinion),
+            true_only(object, "grantWardToTargetMinion", path)?
+                .then_some(MagicEffect::GrantWardToTargetMinion),
             optional_bounded_integer(object, "healController", 1, MAX_COMBAT_STAT, path)?
                 .map(|amount| MagicEffect::HealController(compact_u8(amount))),
+            optional_bounded_integer(object, "healTargetMinion", 1, MAX_COMBAT_STAT, path)?
+                .map(|amount| MagicEffect::HealTargetMinion(compact_u8(amount))),
+            true_only(object, "killTargetMinion", path)?.then_some(MagicEffect::KillTargetMinion),
             true_only(object, "killTargetWoundedMinion", path)?
                 .then_some(MagicEffect::KillTargetWoundedMinion),
             true_only(object, "leapAttackAlly", path)?.then_some(MagicEffect::LeapAttackAlly),
             true_only(object, "lureEnemyMinionOneStepCloser", path)?
                 .then_some(MagicEffect::LureEnemyMinionOneStepCloser),
+            optional_bounded_integer(object, "millSites", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::MillSites(compact_u8(count))),
+            optional_bounded_integer(object, "millSpells", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::MillSpells(compact_u8(count))),
+            optional_bounded_integer(object, "targetPlayerDrawsSites", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::TargetPlayerDrawsSites(compact_u8(count))),
+            optional_bounded_integer(object, "targetPlayerDrawsSpells", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::TargetPlayerDrawsSpells(compact_u8(count))),
             true_only(object, "returnMinionFromOwnCemetery", path)?
                 .then_some(MagicEffect::ReturnMinionFromOwnCemetery),
+            true_only(object, "returnTargetArtifactFromOwnCemetery", path)?
+                .then_some(MagicEffect::ReturnTargetArtifactFromOwnCemetery),
+            true_only(object, "returnTargetAuraFromOwnCemetery", path)?
+                .then_some(MagicEffect::ReturnTargetAuraFromOwnCemetery),
+            true_only(object, "returnTargetMagicFromOwnCemetery", path)?
+                .then_some(MagicEffect::ReturnTargetMagicFromOwnCemetery),
+            true_only(object, "returnTargetArtifactToOwnerHand", path)?
+                .then_some(MagicEffect::ReturnTargetArtifactToOwnerHand),
+            true_only(object, "returnTargetAuraToOwnerHand", path)?
+                .then_some(MagicEffect::ReturnTargetAuraToOwnerHand),
+            true_only(object, "returnTargetMinionToOwnerHand", path)?
+                .then_some(MagicEffect::ReturnTargetMinionToOwnerHand),
+            true_only(object, "returnTargetSiteFromOwnCemetery", path)?
+                .then_some(MagicEffect::ReturnTargetSiteFromOwnCemetery),
+            true_only(object, "returnTargetSiteToOwnerHand", path)?
+                .then_some(MagicEffect::ReturnTargetSiteToOwnerHand),
             true_only(object, "submergeTargetMinion", path)?
                 .then_some(MagicEffect::SubmergeTargetMinion),
             true_only(object, "summonRandomMinionFromAnyCemetery", path)?
                 .then_some(MagicEffect::SummonRandomMinionFromAnyCemetery),
             token_reference.map(MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite),
+            optional_bounded_integer(object, "targetPlayerDiscardsCards", 1, MAX_DECK_CARDS, path)?
+                .map(|count| MagicEffect::TargetPlayerDiscardsCards(compact_u8(count))),
+            optional_bounded_integer(object, "targetPlayerGainsLife", 1, MAX_COMBAT_STAT, path)?
+                .map(|amount| MagicEffect::TargetPlayerGainsLife(compact_u8(amount))),
+            optional_bounded_integer(object, "targetPlayerLosesLife", 1, MAX_COMBAT_STAT, path)?
+                .map(|amount| MagicEffect::TargetPlayerLosesLife(compact_u8(amount))),
+            true_only(object, "tapTargetMinion", path)?.then_some(MagicEffect::TapTargetMinion),
             true_only(object, "teleportAllyToTargetSite", path)?
                 .then_some(MagicEffect::TeleportAllyToTargetSite),
             true_only(object, "teleportNearbyAllyThenDrawCard", path)?
                 .then_some(MagicEffect::TeleportNearbyAllyThenDrawCard),
+            true_only(object, "untapTargetMinion", path)?.then_some(MagicEffect::UntapTargetMinion),
         ],
         path,
     )?;
     Ok(MagicFacts {
+        discard_card_as_additional_cost: discard_card,
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
         thresholds: parse_thresholds(object, path)?,
@@ -1387,6 +1661,96 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     reject_unknown(object, MINION_FIELDS, path)?;
     let airborne = optional_bool(object, "airborne", path)?;
     let alternative_summon_payment = parse_alternative_summon_payment(object, path)?;
+    let at_end_of_controller_turn_controller_gains_life = optional_bounded_integer(
+        object,
+        "atEndOfControllerTurnControllerGainsLife",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_end_of_controller_turn_controller_loses_life = optional_bounded_integer(
+        object,
+        "atEndOfControllerTurnControllerLosesLife",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_end_of_controller_turn_damage_each_other_unit_here = optional_bounded_integer(
+        object,
+        "atEndOfControllerTurnDamageEachOtherUnitHere",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_controller_gains_life = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnControllerGainsLife",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_controller_gains_mana = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnControllerGainsMana",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_controller_loses_life = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnControllerLosesLife",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_damage_each_other_unit_here = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnDamageEachOtherUnitHere",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_draw_sites = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnDrawSites",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_draw_spells = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnDrawSpells",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_mill_sites = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnMillSites",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_mill_spells = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnMillSpells",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
+    let at_start_of_controller_turn_lure_nearby_enemy_minion =
+        true_only(object, "atStartOfControllerTurnLureNearbyEnemyMinion", path)?;
     let at_start_of_controller_turn_teleport_to_random_site_or_void = true_only(
         object,
         "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
@@ -1413,6 +1777,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let submerge = optional_bool(object, "submerge", path)?;
     let required_cast_region = parse_required_cast_region(object, path, burrowing, submerge)?;
     let summon_to_any_site = optional_bool(object, "summonToAnySite", path)?;
+    let must_attack_a_unit_if_able = true_only(object, "mustAttackAUnitIfAble", path)?;
     let must_be_cast_to_outer_column = optional_bool(object, "mustBeCastToOuterColumn", path)?;
     let must_be_cast_to_water_site = optional_bool(object, "mustBeCastToWaterSite", path)?;
     let tap_to_shoot_projectile_damage = optional_bounded_integer(
@@ -1465,6 +1830,33 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "oversized start-turn random teleport is unsupported",
         ));
     }
+    let start_turn_trigger_count =
+        usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
+            + usize::from(at_start_of_controller_turn_controller_gains_mana.is_some())
+            + usize::from(at_start_of_controller_turn_controller_loses_life.is_some())
+            + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
+            + usize::from(at_start_of_controller_turn_draw_sites.is_some())
+            + usize::from(at_start_of_controller_turn_draw_spells.is_some())
+            + usize::from(at_start_of_controller_turn_mill_sites.is_some())
+            + usize::from(at_start_of_controller_turn_mill_spells.is_some())
+            + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
+            + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
+    if start_turn_trigger_count > 1 {
+        return Err(FactError::new(
+            path,
+            "competing start-turn triggers are unsupported",
+        ));
+    }
+    let end_turn_pulse_count =
+        usize::from(at_end_of_controller_turn_controller_gains_life.is_some())
+            + usize::from(at_end_of_controller_turn_controller_loses_life.is_some())
+            + usize::from(at_end_of_controller_turn_damage_each_other_unit_here.is_some());
+    if end_turn_pulse_count > 1 {
+        return Err(FactError::new(
+            path,
+            "competing end-turn pulses are unsupported",
+        ));
+    }
 
     let deathrite_damage_each_unit_here = optional_bounded_integer(
         object,
@@ -1483,32 +1875,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     )?
     .map(compact_u8);
     if occupies_square_area_two
-        && (ordinary
-            || connects_top_bottom
-            || matches!(
-                alternative_summon_payment,
-                Some(
-                    AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo
-                )
-            )
-            || required_cast_region.is_some()
-            || must_be_cast_to_water_site
-            || burrowing
-            || submerge
-            || voidwalk
-            || waterbound
-            || ranged
-            || tap_to_shoot_projectile_damage.is_some()
-            || shoots_drag_projectile
-            || site_provides_no_threshold
-            || spellcaster
-            || gains_power_ranged_and_spellcaster_atop_tower
-            || summon_to_any_site
-            || must_be_cast_to_outer_column
-            || token
-            || deathrite_damage_each_unit_here.is_some()
-            || discard_spell_to_damage_random_other_unit_here.is_some()
-            || genesis.is_some())
+        && (connects_top_bottom || voidwalk || must_be_cast_to_outer_column || token)
     {
         return Err(FactError::new(
             format!("{path}.occupiesSquareArea"),
@@ -1521,30 +1888,22 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "token Genesis effects are unsupported",
         ));
     }
-    if token && waterbound && stealth {
-        return Err(FactError::new(
-            path,
-            "Waterbound Stealth tokens are unsupported",
-        ));
-    }
-    if waterbound
-        && (matches!(damage_prevention, Some(DamagePrevention::Ward)) || end_turn_stealth.is_some())
-    {
-        return Err(FactError::new(
-            path,
-            "Waterbound with Ward or end-turn Stealth is unsupported",
-        ));
-    }
-    if waterbound && genesis.is_some() {
-        return Err(FactError::new(
-            path,
-            "Waterbound with Genesis is unsupported",
-        ));
-    }
 
     Ok(MinionFacts {
         airborne,
         alternative_summon_payment,
+        at_end_of_controller_turn_controller_gains_life,
+        at_end_of_controller_turn_controller_loses_life,
+        at_end_of_controller_turn_damage_each_other_unit_here,
+        at_start_of_controller_turn_controller_gains_life,
+        at_start_of_controller_turn_controller_gains_mana,
+        at_start_of_controller_turn_controller_loses_life,
+        at_start_of_controller_turn_damage_each_other_unit_here,
+        at_start_of_controller_turn_draw_sites,
+        at_start_of_controller_turn_draw_spells,
+        at_start_of_controller_turn_mill_sites,
+        at_start_of_controller_turn_mill_spells,
+        at_start_of_controller_turn_lure_nearby_enemy_minion,
         at_start_of_controller_turn_teleport_to_random_site_or_void,
         attack: compact_u8(required_nonnegative_integer(
             object,
@@ -1561,6 +1920,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         damage_prevention,
         deathrite_damage_each_unit_here,
         deathrite_draw_site: optional_bool(object, "deathriteDrawSite", path)?,
+        deathrite_draw_spells: optional_bool(object, "deathriteDrawSpells", path)?,
         deathrite_heal: optional_bounded_integer(
             object,
             "deathriteHeal",
@@ -1575,6 +1935,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             1,
             path,
         )?,
+        deathrite_mill_sites: optional_bool(object, "deathriteMillSites", path)?,
+        deathrite_mill_spells: optional_bool(object, "deathriteMillSpells", path)?,
         defense: compact_u8(required_nonnegative_integer(
             object,
             "defense",
@@ -1582,6 +1944,12 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             path,
         )?),
         dies_at_end_of_controller_turn: true_only(object, "diesAtEndOfControllerTurn", path)?,
+        does_not_untap_during_controllers_start_phase: true_only(
+            object,
+            "doesNotUntapDuringControllersStartPhase",
+            path,
+        )?,
+        enemies_must_attack_this_if_able: true_only(object, "enemiesMustAttackThisIfAble", path)?,
         discard_spell_to_damage_random_other_unit_here,
         end_turn_stealth,
         gains_power_ranged_and_spellcaster_atop_tower,
@@ -1596,6 +1964,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         movement_bonus: optional_bounded_integer(object, "movementBonus", 1, 2, path)?
             .map(compact_u8),
         movement_restriction,
+        must_attack_a_unit_if_able,
         must_be_cast_to_outer_column,
         must_be_cast_to_water_site,
         nearby_enemies_permanently_lose_stealth: true_only(
@@ -1625,6 +1994,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         spellcaster,
         stealth,
         strikes_first_while_attacking: optional_bool(object, "strikesFirstWhileAttacking", path)?,
+        strikes_first_while_defending: optional_bool(object, "strikesFirstWhileDefending", path)?,
         submerge,
         summon_to_any_site,
         tap_for_mana: optional_bounded_integer(object, "tapForMana", 1, MAX_COMBAT_STAT, path)?

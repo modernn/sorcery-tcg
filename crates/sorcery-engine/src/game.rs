@@ -18,9 +18,9 @@ use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
-    BasicMovementRestriction, CardFacts, DamagePrevention, Element, EndTurnStealth, FactError,
-    MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts, Thresholds,
-    parse_card_definition, validate_identifier,
+    BasicMovementRestriction, CardFacts, DamagePrevention, Element, ElementSet, EndTurnStealth,
+    FactError, MagicEffect, MagicFacts, MinionFacts, MinionGenesis, RequiredCastRegion, SiteFacts,
+    Thresholds, parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
 
@@ -58,6 +58,7 @@ pub struct Position {
     immobile_areas: Vec<ImmobileArea>,
     pending_basic_movement: PendingField<PendingBasicMovement>,
     pending_cemetery_summon: Option<PendingCemeterySummon>,
+    pending_discard_cards: Option<PendingDiscardCards>,
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
@@ -376,8 +377,12 @@ struct UnitPosition {
     stealthed: bool,
     summoning_sickness: bool,
     tapped: bool,
+    temporary_airborne_sources: Vec<IdentityHash>,
     temporary_charge_sources: Vec<IdentityHash>,
+    temporary_first_strike_sources: Vec<IdentityHash>,
+    temporary_lethal_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
+    temporary_ranged_sources: Vec<IdentityHash>,
     warded: bool,
 }
 
@@ -412,8 +417,12 @@ impl SummonPlacement {
             stealthed: self.stealthed,
             summoning_sickness: true,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: self.warded,
         }
     }
@@ -427,12 +436,17 @@ struct DisableEffect {
 
 /// Where a realm Artifact currently sits: carried by one unit, or loose in the realm.
 ///
-/// Oversized bearers would need the exact carried cell inside their footprint; manifests that mix
-/// Artifacts with oversized minions are refused for self-play instead of guessing that cell.
+/// An oversized bearer carries the Artifact at one exact cell of its footprint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ArtifactPlacement {
-    Carried { bearer: UnitTarget },
-    Loose { location: Cell, region: Region },
+    Carried {
+        bearer: UnitTarget,
+        cell: Option<Cell>,
+    },
+    Loose {
+        location: Cell,
+        region: Region,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -445,7 +459,7 @@ impl ArtifactPosition {
     /// The bearer carrying this Artifact, when it is not lying loose in the realm.
     const fn bearer(&self) -> Option<&UnitTarget> {
         match &self.placement {
-            ArtifactPlacement::Carried { bearer } => Some(bearer),
+            ArtifactPlacement::Carried { bearer, .. } => Some(bearer),
             ArtifactPlacement::Loose { .. } => None,
         }
     }
@@ -509,21 +523,64 @@ struct ImmobileArea {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AuraPosition {
     card: CardInstance,
-    cells: SquareArea,
+    cells: Vec<Cell>,
     controller: Seat,
     turn_counters: u8,
+    visited_cells: BTreeSet<Cell>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnCemeteryReturn {
+    Artifact,
+    Aura,
+    Magic,
+    Minion,
+    Site,
+}
+
+impl OwnCemeteryReturn {
+    const fn event(self) -> &'static str {
+        match self {
+            Self::Artifact => "artifact-returned-to-hand",
+            Self::Aura => "aura-returned-to-hand",
+            Self::Magic => "magic-returned-to-hand",
+            Self::Minion => "minion-returned-to-hand",
+            Self::Site => "site-returned-to-hand",
+        }
+    }
+
+    const fn matches(self, facts: &CardFacts) -> bool {
+        matches!(
+            (self, facts),
+            (Self::Artifact, CardFacts::Artifact(_))
+                | (Self::Aura, CardFacts::Aura(_))
+                | (Self::Magic, CardFacts::Magic(_))
+                | (Self::Minion, CardFacts::Minion(_))
+                | (Self::Site, CardFacts::Site(_))
+        )
+    }
+
+    const fn zone(self) -> DeckZone {
+        match self {
+            Self::Site => DeckZone::Atlas,
+            Self::Artifact | Self::Aura | Self::Magic | Self::Minion => DeckZone::Spellbook,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MagicChoice {
     ally: Option<UnitTarget>,
     ally_destination: Option<Location>,
+    ally_destination_cells: Option<SquareArea>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
+    discard_card_instance_id: Option<IdentityHash>,
     discard_site_instance_id: Option<IdentityHash>,
     draw_zone: Option<DeckZone>,
     target: Option<UnitTarget>,
     target_artifact_instance_id: Option<IdentityHash>,
+    target_aura_instance_id: Option<IdentityHash>,
     target_location: Option<Location>,
     target_site_instance_id: Option<IdentityHash>,
     tempted_destination: Option<Location>,
@@ -660,6 +717,7 @@ enum EndTurnAuraStage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingEndTurnAura {
     aura_instance_id: IdentityHash,
+    ending_seat: Seat,
     outcome_instance_ids: Option<Vec<IdentityHash>>,
     remaining_aura_instance_ids: Vec<IdentityHash>,
     seat: Seat,
@@ -681,6 +739,7 @@ struct LuckyRandomRequest {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct EndTurnContinuation {
+    remaining_here_damage_ids: Vec<IdentityHash>,
     remaining_instance_ids: Vec<IdentityHash>,
     seat: Seat,
 }
@@ -793,6 +852,16 @@ struct PendingGenesisSpellOrder {
     source_instance_id: IdentityHash,
 }
 
+/// The targeted player's remaining Storyline discards after a Magic pays and announces.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingDiscardCards {
+    remaining: u8,
+    seat: Seat,
+    source_card_id: String,
+    source_instance_id: IdentityHash,
+    source_owner: Seat,
+}
+
 /// The free placement a cemetery summon owes after its public random selection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingCemeterySummon {
@@ -840,6 +909,7 @@ enum Phase {
     ChainMagic,
     DeathriteOrder,
     Defend,
+    DiscardCard,
     Draw,
     EndTurnAura,
     Genesis,
@@ -853,6 +923,29 @@ enum Phase {
     Terminal,
 }
 
+/// Later-timestamp Flood / Drought / Fate overlay on one played site.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SiteWaterOverlay {
+    Drought,
+    Fate,
+    Flooded,
+    None,
+    Printed,
+}
+
+enum FateSubmerge {
+    Artifact {
+        cell: Cell,
+        instance_id: IdentityHash,
+        owner: Seat,
+    },
+    Minion {
+        cell: Cell,
+        instance_id: IdentityHash,
+        seat: Seat,
+    },
+}
+
 impl Phase {
     const fn as_str(self) -> &'static str {
         match self {
@@ -862,6 +955,7 @@ impl Phase {
             Self::ChainMagic => "chain-magic",
             Self::DeathriteOrder => "deathrite-order",
             Self::Defend => "defend",
+            Self::DiscardCard => "discard-card",
             Self::Draw => "draw",
             Self::EndTurnAura => "end-turn-aura",
             Self::Genesis => "genesis",
@@ -1182,26 +1276,6 @@ fn token_reference(facts: &CardFacts) -> Option<&str> {
     }
 }
 
-fn has_unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> bool {
-    unsupported_site_genesis_after_rubble_replacement(facts).is_some()
-}
-
-fn unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> Option<&'static str> {
-    if facts.genesis_discard_top_spells {
-        Some("genesisDiscardTopSpells")
-    } else if facts.genesis_draw_spell_per_adjacent_same_card {
-        Some("genesisDrawSpellPerAdjacentSameCard")
-    } else if facts.genesis_enemies_lose_stealth {
-        Some("genesisEnemiesLoseStealth")
-    } else if facts.genesis_heal_nearby_avatars {
-        Some("genesisHealNearbyAvatars")
-    } else if facts.genesis_immobilize_nearby_until_next_turn {
-        Some("genesisImmobilizeNearbyUntilNextTurn")
-    } else {
-        None
-    }
-}
-
 fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
     match facts {
         CardFacts::Avatar(facts) => {
@@ -1218,10 +1292,13 @@ fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
 
 const fn unsupported_selfplay_aura(facts: &AuraFacts) -> Option<&'static str> {
     match facts.effect {
-        AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
-        | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
-            None
-        }
+        AuraEffect::AffectedSitesAreFlooded
+        | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+        | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+        | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+        | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+        | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf => None,
     }
 }
 
@@ -1237,8 +1314,11 @@ fn unsupported_selfplay_artifact(facts: &ArtifactFacts) -> Option<&'static str> 
 const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static str> {
     match effect {
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+        | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
+        | ArtifactEffect::NearbyMinionsMustAttackIfAble
+        | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
         | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -1251,8 +1331,11 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     matches!(
         effect,
         ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(_)
+            | ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(_)
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
+            | ArtifactEffect::NearbyMinionsMustAttackIfAble
+            | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -1260,23 +1343,10 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
     )
 }
 
-/// Facts that reach realm Artifacts through paths the engine does not implement yet.
-fn unsupported_alongside_artifacts(facts: &CardFacts) -> Option<&'static str> {
-    match facts {
-        CardFacts::Magic(facts) => match facts.effect {
-            MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
-                Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
-            }
-            _ => None,
-        },
-        // An oversized bearer carries each Artifact at one exact cell of its footprint.
-        _ => None,
-    }
-}
-
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
     match effect {
         MagicEffect::HealController(_)
+        | MagicEffect::HealTargetMinion(_)
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::DamageChainNearbyUnits
@@ -1284,21 +1354,50 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
+        | MagicEffect::ReturnTargetArtifactFromOwnCemetery
+        | MagicEffect::ReturnTargetAuraFromOwnCemetery
+        | MagicEffect::ReturnTargetMagicFromOwnCemetery
+        | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
+        | MagicEffect::DestroyTargetArtifact
+        | MagicEffect::DestroyTargetAura
+        | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
+        | MagicEffect::DrawSites(_)
+        | MagicEffect::DrawSpells(_)
         | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
+        | MagicEffect::GrantAirborneToAllyThisTurn
         | MagicEffect::GrantChargeToAllyThisTurn
+        | MagicEffect::GrantFirstStrikeToAllyThisTurn
+        | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::GrantRangedToAllyThisTurn
+        | MagicEffect::GrantStealthToTargetMinion
+        | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::GainControlOfTargetNearbyMinion
+        | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::MillSites(_)
+        | MagicEffect::MillSpells(_)
+        | MagicEffect::TargetPlayerDrawsSites(_)
+        | MagicEffect::TargetPlayerDrawsSpells(_)
+        | MagicEffect::ReturnTargetArtifactToOwnerHand
+        | MagicEffect::ReturnTargetAuraToOwnerHand
+        | MagicEffect::ReturnTargetMinionToOwnerHand
+        | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
+        | MagicEffect::TargetPlayerDiscardsCards(_)
+        | MagicEffect::TargetPlayerGainsLife(_)
+        | MagicEffect::TargetPlayerLosesLife(_)
+        | MagicEffect::TapTargetMinion
         | MagicEffect::TeleportAllyToTargetSite
-        | MagicEffect::TeleportNearbyAllyThenDrawCard => None,
+        | MagicEffect::TeleportNearbyAllyThenDrawCard
+        | MagicEffect::UntapTargetMinion => None,
     }
 }
 
@@ -1364,10 +1463,12 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         genesis_reorder_next_spells: _,
         is_tower: _,
         minions_here_gain_voidwalk_until_leaving_void: _,
+        ordinary: _,
         ordinary_minion_mana_discount: _,
         prevents_units_with_power_at_least_from_entering: _,
         ranged_units_here_range_bonus: _,
         sacrifice_to_destroy_nearby_site: _,
+        unique_or_legendary: _,
     } = facts;
 }
 
@@ -1375,6 +1476,18 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_end_of_controller_turn_controller_gains_life: _,
+        at_end_of_controller_turn_controller_loses_life: _,
+        at_end_of_controller_turn_damage_each_other_unit_here: _,
+        at_start_of_controller_turn_controller_gains_life: _,
+        at_start_of_controller_turn_controller_gains_mana: _,
+        at_start_of_controller_turn_controller_loses_life: _,
+        at_start_of_controller_turn_damage_each_other_unit_here: _,
+        at_start_of_controller_turn_draw_sites: _,
+        at_start_of_controller_turn_draw_spells: _,
+        at_start_of_controller_turn_mill_sites: _,
+        at_start_of_controller_turn_mill_spells: _,
+        at_start_of_controller_turn_lure_nearby_enemy_minion: _,
         at_start_of_controller_turn_teleport_to_random_site_or_void: _,
         attack: _,
         burrowing: _,
@@ -1386,10 +1499,15 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         damage_prevention: _,
         deathrite_damage_each_unit_here: _,
         deathrite_draw_site: _,
+        deathrite_draw_spells: _,
         deathrite_heal: _,
         deathrite_lose_life_per_nearby_site_controlled: _,
+        deathrite_mill_sites: _,
+        deathrite_mill_spells: _,
         defense: _,
         dies_at_end_of_controller_turn: _,
+        does_not_untap_during_controllers_start_phase: _,
+        enemies_must_attack_this_if_able: _,
         discard_spell_to_damage_random_other_unit_here: _,
         end_turn_stealth: _,
         gains_power_ranged_and_spellcaster_atop_tower: _,
@@ -1403,6 +1521,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         mortal: _,
         movement_bonus: _,
         movement_restriction: _,
+        must_attack_a_unit_if_able: _,
         must_be_cast_to_outer_column: _,
         must_be_cast_to_water_site: _,
         nearby_enemies_permanently_lose_stealth: _,
@@ -1418,6 +1537,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         spellcaster: _,
         stealth: _,
         strikes_first_while_attacking: _,
+        strikes_first_while_defending: _,
         submerge: _,
         summon_to_any_site: _,
         tap_for_mana: _,
@@ -1540,6 +1660,7 @@ impl Game {
                 immobile_areas: Vec::new(),
                 pending_basic_movement: PendingField::Absent,
                 pending_cemetery_summon: None,
+                pending_discard_cards: None,
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
@@ -1585,39 +1706,6 @@ impl Game {
                 return Err(GameError::UnsupportedManifestFact(field.to_owned()));
             }
         }
-        if self
-            .rules
-            .cards
-            .iter()
-            .any(|card| matches!(card.facts, CardFacts::Artifact(_)))
-        {
-            for card in &self.rules.cards {
-                if let Some(field) = unsupported_alongside_artifacts(&card.facts) {
-                    return Err(GameError::UnsupportedManifestFact(format!(
-                        "{field} with cardType:artifact"
-                    )));
-                }
-            }
-        }
-        for player in &self.position.players {
-            let CardFacts::Avatar(avatar) =
-                &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-            else {
-                return Err(invalid("player avatar lacks avatar facts"));
-            };
-            if !avatar.replace_adjacent_rubble_with_top_atlas_site {
-                continue;
-            }
-            for card in player.atlas.iter().chain(&player.hand_atlas) {
-                let CardFacts::Site(site) = &self.rules.cards[usize::from(card.card_id.0)].facts
-                else {
-                    return Err(invalid("player Atlas card lacks site facts"));
-                };
-                if let Some(field) = unsupported_site_genesis_after_rubble_replacement(site) {
-                    return Err(GameError::UnsupportedManifestFact(field.to_owned()));
-                }
-            }
-        }
         Ok(())
     }
 
@@ -1658,7 +1746,7 @@ impl Game {
                             "owner": artifact.card.owner,
                         });
                         match &artifact.placement {
-                            ArtifactPlacement::Carried { bearer } => {
+                            ArtifactPlacement::Carried { bearer, .. } => {
                                 let carried = self.artifact_location(artifact)?;
                                 value["bearer"] = json!(bearer);
                                 value["controller"] = json!(bearer.seat());
@@ -1683,16 +1771,7 @@ impl Game {
                 self.position
                     .auras
                     .iter()
-                    .map(|aura| {
-                        json!({
-                            "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
-                            "cells": aura.cells,
-                            "controller": aura.controller,
-                            "instanceId": aura.card.instance_id,
-                            "owner": aura.card.owner,
-                            "turnCounters": aura.turn_counters,
-                        })
-                    })
+                    .map(|aura| self.aura_public_value(aura))
                     .collect::<Vec<_>>(),
             )
         };
@@ -1778,7 +1857,8 @@ impl Game {
                     cell: unit.location,
                     region: unit.region,
                 };
-                let immobile = facts.immobile
+                let disabled = self.minion_is_disabled(unit);
+                let immobile = (!disabled && facts.immobile)
                     || self.footprint_is_immobilized(
                         unit.occupied_cells,
                         unit.location,
@@ -1792,7 +1872,7 @@ impl Game {
                     "controller": unit.controller,
                     "damage": unit.damage,
                     "defense": defense,
-                    "disabled": self.minion_is_disabled(unit),
+                    "disabled": disabled,
                     "immobile": immobile,
                     "instanceId": unit.card.instance_id,
                     "location": unit.location,
@@ -1852,16 +1932,20 @@ impl Game {
 
     fn observed_player(&self, owner: Seat, viewer: Seat) -> Result<Value, GameError> {
         let player = &self.position.players[seat_index(owner)];
-        let CardFacts::Avatar(facts) =
-            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-        else {
+        if !matches!(
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts,
+            CardFacts::Avatar(_),
+        ) {
             return Err(invalid("player Avatar lacks Avatar facts"));
-        };
-        let (attack, _) = self.combatant_attack_and_lethal(
-            UnitKind::Avatar,
-            owner,
-            &player.avatar.card.instance_id,
-        )?;
+        }
+        let (attack, defense) = self.avatar_current_stats(owner)?;
+        let immobile = self.location_is_immobilized(
+            Location {
+                cell: player.avatar.location,
+                region: Region::Surface,
+            },
+            false,
+        );
         let affinity = self.elemental_affinities(owner);
         let observed_card = |card: &CardInstance| {
             json!({
@@ -1882,8 +1966,8 @@ impl Game {
                 "attack": attack,
                 "cardId": self.rules.cards[usize::from(player.avatar.card.card_id.0)].id,
                 "deathDoorTurn": player.avatar.death_door_turn,
-                "defense": facts.defense,
-                "immobile": false,
+                "defense": defense,
+                "immobile": immobile,
                 "instanceId": player.avatar.card.instance_id,
                 "life": player.avatar.life,
                 "location": player.avatar.location,
@@ -2004,6 +2088,7 @@ impl Game {
             Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
             Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
+            Phase::DiscardCard => self.append_discard_card_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::EndTurnAura => self.append_end_turn_aura_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
@@ -2308,18 +2393,71 @@ impl Game {
     }
 
     fn append_attack_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
-        for target in self.attack_targets()? {
+        let pending = self
+            .position
+            .pending_combat
+            .as_ref()
+            .ok_or(GameError::IllegalAction)?;
+        let must_attack_a_unit = matches!(pending.attacker_kind, UnitKind::Minion)
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == pending.attacker_instance_id)
+                .and_then(|unit| {
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        return None;
+                    };
+                    Some(facts.must_attack_a_unit_if_able)
+                })
+                .unwrap_or(false);
+        let targets = self.attack_targets()?;
+        let forced: Vec<_> = targets
+            .iter()
+            .filter(|target| self.combat_target_forces_attack(target))
+            .cloned()
+            .collect();
+        let unit_targets = targets
+            .iter()
+            .any(|target| !matches!(target, CombatTarget::Site { .. }));
+        let nearby_must_attack = matches!(pending.attacker_kind, UnitKind::Minion)
+            && self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == pending.attacker_instance_id)
+                .is_some_and(|unit| self.minion_is_nearby_must_attack_artifact(unit));
+        let (offered, omit_decline) = if !forced.is_empty() {
+            (forced, true)
+        } else if must_attack_a_unit && unit_targets {
+            (
+                targets
+                    .into_iter()
+                    .filter(|target| !matches!(target, CombatTarget::Site { .. }))
+                    .collect(),
+                true,
+            )
+        } else if nearby_must_attack && !targets.is_empty() {
+            (targets, true)
+        } else {
+            (targets, false)
+        };
+        for target in offered {
             let descriptor = ActionDescriptor::DeclareAttack { target };
             let label = descriptor
                 .state_independent_label()
                 .ok_or_else(|| invalid("declare-attack action requires a label"))?;
             self.push_action(actions, descriptor, label);
         }
-        let descriptor = ActionDescriptor::DeclineAttack;
-        let label = descriptor
-            .state_independent_label()
-            .ok_or_else(|| invalid("decline-attack action requires a label"))?;
-        self.push_action(actions, descriptor, label);
+        if !omit_decline {
+            let descriptor = ActionDescriptor::DeclineAttack;
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("decline-attack action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
         Ok(())
     }
 
@@ -2335,7 +2473,7 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         let destination = Location {
             cell: pending.cell,
-            region: Region::Surface,
+            region: pending.region,
         };
         for (_kind, instance_id, start, profile) in self.defender_candidates()? {
             for path in self
@@ -2670,6 +2808,50 @@ impl Game {
         Ok(targets)
     }
 
+    fn append_discard_card_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_discard_cards
+            .as_ref()
+            .ok_or_else(|| invalid("discard-card phase lacks a pending Magic"))?;
+        if pending.seat != self.position.decision_seat {
+            return Err(invalid("discard-card choice belongs to another seat"));
+        }
+        let player = &self.position.players[seat_index(pending.seat)];
+        let mut cards: Vec<_> = player
+            .hand_atlas
+            .iter()
+            .map(|card| (DeckZone::Atlas, card))
+            .chain(
+                player
+                    .hand_spellbook
+                    .iter()
+                    .map(|card| (DeckZone::Spellbook, card)),
+            )
+            .collect();
+        cards.sort_unstable_by(|left, right| left.1.instance_id.cmp(&right.1.instance_id));
+        for (zone, card) in cards {
+            let card_id = &self.rules.cards[usize::from(card.card_id.0)].id;
+            let identity = card.instance_id.as_str();
+            self.push_action(
+                actions,
+                ActionDescriptor::DiscardCard {
+                    card_instance_id: card.instance_id.clone(),
+                    zone,
+                },
+                format!(
+                    "Discard {card_id} {} from {}",
+                    &identity[..15.min(identity.len())],
+                    zone.as_str()
+                ),
+            );
+        }
+        Ok(())
+    }
+
     fn append_draw_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
             let descriptor = ActionDescriptor::Draw { zone };
@@ -2709,6 +2891,7 @@ impl Game {
                 seat,
                 &card.instance_id,
                 destination.cell,
+                destination.cells,
                 facts.genesis,
             ) {
                 let genesis_suffix = Self::genesis_damage_suffix(
@@ -3009,7 +3192,10 @@ impl Game {
             else {
                 return Err(invalid("realm site lacks Site facts"));
             };
-            if source.controller != seat || !source_facts.sacrifice_to_destroy_nearby_site {
+            if source.controller != seat
+                || !source_facts.sacrifice_to_destroy_nearby_site
+                || self.site_abilities_lost(source_cell)
+            {
                 continue;
             }
             let nearby = std::iter::once(source_cell)
@@ -3082,68 +3268,129 @@ impl Game {
                     }
                     continue;
                 }
-                for choice in self.magic_choices(seat, caster_instance_id, &facts.effect)? {
+                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                if facts.discard_card_as_additional_cost {
+                    choices = self.with_chosen_hand_discard(seat, &card.instance_id, choices);
+                }
+                for choice in choices {
                     let descriptor = ActionDescriptor::CastMagic {
                         ally: choice.ally,
                         ally_destination: choice.ally_destination,
+                        ally_destination_cells: choice.ally_destination_cells,
                         ally_strike_location: choice.ally_strike_location,
                         card_id: definition.id.clone(),
                         card_instance_id: card.instance_id.clone(),
                         caster_instance_id: caster_instance_id.clone(),
                         cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
+                        discard_card_instance_id: choice.discard_card_instance_id,
                         discard_site_instance_id: choice.discard_site_instance_id,
                         draw_zone: choice.draw_zone,
                         target: choice.target,
                         target_artifact_instance_id: choice.target_artifact_instance_id,
+                        target_aura_instance_id: choice.target_aura_instance_id,
                         target_location: choice.target_location,
                         target_site_instance_id: choice.target_site_instance_id,
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy,
                     };
-                    let label = (if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn)
-                    {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Overpower action requires an ally"));
-                        };
-                        format!(
-                            "Cast {} to grant +2 power to {} {}…",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15]
-                        )
-                    } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally),
-                            ally_destination: Some(destination),
-                            ally_strike_location,
-                            ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Leap Attack action requires an ally destination"));
-                        };
-                        let from = self.unit_target_location(ally)?;
-                        let stays = from == *destination;
-                        let strike = ally_strike_location.unwrap_or(*destination);
-                        format!(
-                            "Cast {}: {} {}… {} and strikes enemies at {}",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15],
-                            if stays {
-                                "stays".to_owned()
-                            } else {
-                                format!("steps to {}", destination.cell)
-                            },
-                            strike.cell
-                        )
-                    } else {
-                        descriptor
-                            .state_independent_label()
-                            .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                    }) + &self.minion_caster_suffix(seat, caster_instance_id);
+                    let label =
+                        (if matches!(facts.effect, MagicEffect::GrantFirstStrikeToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("First Strike grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant First Strike to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Lethal grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Lethal to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Ranged grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Ranged to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Airborne grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Airborne to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Overpower action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant +2 power to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally),
+                                ally_destination: Some(destination),
+                                ally_strike_location,
+                                ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid(
+                                    "Leap Attack action requires an ally destination",
+                                ));
+                            };
+                            let from = self.unit_target_location(ally)?;
+                            let stays = from == *destination;
+                            let strike = ally_strike_location.unwrap_or(*destination);
+                            format!(
+                                "Cast {}: {} {}… {} and strikes enemies at {}",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15],
+                                if stays {
+                                    "stays".to_owned()
+                                } else {
+                                    format!("steps to {}", destination.cell)
+                                },
+                                strike.cell
+                            )
+                        } else {
+                            descriptor
+                                .state_independent_label()
+                                .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                        }) + &self.minion_caster_suffix(seat, caster_instance_id);
                     self.push_action(actions, descriptor, label);
                 }
             }
@@ -3182,18 +3429,11 @@ impl Game {
                         AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo,
                     )
                 {
-                    let mut sacrifice_candidates = self
-                        .position
-                        .units
-                        .iter()
-                        .filter(|unit| {
-                            unit.controller == seat
-                                && unit.region == Region::Surface
-                                && Self::unit_occupies_cell(unit, destination.cell)
-                        })
-                        .map(|unit| unit.card.instance_id.clone())
-                        .collect::<Vec<_>>();
-                    sacrifice_candidates.sort_unstable();
+                    let sacrifice_candidates = self.sacrifice_minions_at_summoning_location(
+                        seat,
+                        destination.cell,
+                        destination.cells.as_ref(),
+                    );
                     let useful_count = usize::try_from(destination.mana_cost.div_ceil(2))
                         .unwrap_or(usize::MAX)
                         .min(sacrifice_candidates.len());
@@ -3214,6 +3454,7 @@ impl Game {
                     seat,
                     &card.instance_id,
                     destination.cell,
+                    destination.cells,
                     facts.genesis,
                 );
                 for (mana_cost, payment_mode, sacrificed_minion_instance_ids) in
@@ -3380,7 +3621,346 @@ impl Game {
             }
         }
         self.push_action(actions, ActionDescriptor::EndTurn, "End turn".to_owned());
+        self.retain_mandatory_unit_attacks(actions);
         Ok(())
+    }
+
+    fn retain_mandatory_unit_attacks(&self, actions: &mut Vec<IssuedAction>) {
+        let seat = self.position.decision_seat;
+        let mandatory: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| self.minion_must_attack_now(unit, seat, actions))
+            .map(|unit| unit.card.instance_id.clone())
+            .collect();
+        if mandatory.is_empty() {
+            return;
+        }
+        let forced_movers: Vec<_> = mandatory
+            .iter()
+            .filter(|instance_id| self.mover_has_forced_attack_path(instance_id, actions))
+            .cloned()
+            .collect();
+        let unit_movers: Vec<_> = mandatory
+            .iter()
+            .filter(|instance_id| self.mover_has_printed_unit_attack_path(instance_id, actions))
+            .cloned()
+            .collect();
+        actions.retain(|action| {
+            self.keep_mandatory_attack_action(action, &mandatory, &forced_movers, &unit_movers)
+        });
+    }
+
+    fn minion_must_attack_now(
+        &self,
+        unit: &UnitPosition,
+        seat: Seat,
+        actions: &[IssuedAction],
+    ) -> bool {
+        if !self.minion_can_move_and_attack(unit, seat) {
+            return false;
+        }
+        self.mover_has_forced_attack_path(&unit.card.instance_id, actions)
+            || self.mover_has_printed_unit_attack_path(&unit.card.instance_id, actions)
+            || (self.minion_is_nearby_must_attack_artifact(unit)
+                && actions.iter().any(|action| {
+                    matches!(
+                        &action.descriptor,
+                        ActionDescriptor::MoveAndAttack {
+                            unit_instance_id,
+                            to,
+                            ..
+                        } if unit_instance_id == &unit.card.instance_id
+                            && self.minion_would_have_any_attack_target(unit, *to)
+                    )
+                }))
+    }
+
+    fn mover_has_forced_attack_path(
+        &self,
+        instance_id: &IdentityHash,
+        actions: &[IssuedAction],
+    ) -> bool {
+        let Some(unit) = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+        else {
+            return false;
+        };
+        actions.iter().any(|action| {
+            matches!(
+                &action.descriptor,
+                ActionDescriptor::MoveAndAttack {
+                    unit_instance_id,
+                    to,
+                    ..
+                } if unit_instance_id == instance_id
+                    && self.minion_would_attack_forced_source(unit, *to)
+            )
+        })
+    }
+
+    fn mover_has_printed_unit_attack_path(
+        &self,
+        instance_id: &IdentityHash,
+        actions: &[IssuedAction],
+    ) -> bool {
+        let Some(unit) = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)
+        else {
+            return false;
+        };
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        facts.must_attack_a_unit_if_able
+            && actions.iter().any(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::MoveAndAttack {
+                        unit_instance_id,
+                        to,
+                        ..
+                    } if unit_instance_id == instance_id
+                        && self.minion_would_have_unit_attack_target(unit, *to)
+                )
+            })
+    }
+
+    fn keep_mandatory_attack_action(
+        &self,
+        action: &IssuedAction,
+        mandatory: &[IdentityHash],
+        forced_movers: &[IdentityHash],
+        unit_movers: &[IdentityHash],
+    ) -> bool {
+        let ActionDescriptor::MoveAndAttack {
+            unit_instance_id,
+            to,
+            ..
+        } = &action.descriptor
+        else {
+            return false;
+        };
+        let Some(unit) = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *unit_instance_id)
+        else {
+            return false;
+        };
+        if !mandatory
+            .iter()
+            .any(|instance_id| instance_id == unit_instance_id)
+        {
+            return false;
+        }
+        if forced_movers
+            .iter()
+            .any(|instance_id| instance_id == unit_instance_id)
+        {
+            self.minion_would_attack_forced_source(unit, *to)
+        } else if unit_movers
+            .iter()
+            .any(|instance_id| instance_id == unit_instance_id)
+        {
+            self.minion_would_have_unit_attack_target(unit, *to)
+        } else {
+            true
+        }
+    }
+
+    fn minion_is_nearby_must_attack_artifact(&self, unit: &UnitPosition) -> bool {
+        let unit_cells = Self::unit_occupied_cells(unit);
+        self.position.artifacts.iter().any(|artifact| {
+            let Ok(facts) = self.artifact_facts(artifact) else {
+                return false;
+            };
+            if facts.effect != ArtifactEffect::NearbyMinionsMustAttackIfAble {
+                return false;
+            }
+            let Ok(location) = self.artifact_location(artifact) else {
+                return false;
+            };
+            location.region == unit.region
+                && Self::footprints_nearby(unit_cells, std::slice::from_ref(&location.cell))
+        })
+    }
+
+    fn artifact_doubles_nearby_unit_strikes(&self, artifact: &ArtifactPosition) -> bool {
+        let Ok(facts) = self.artifact_facts(artifact) else {
+            return false;
+        };
+        facts.nearby_strikes_against_units_deal_double_damage
+            || facts.effect == ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+    }
+
+    fn nearby_unit_strike_multiplier(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u16, GameError> {
+        let region = self.combatant_region(kind, seat, instance_id)?;
+        let cells = self.combatant_occupied_cells(kind, seat, instance_id)?;
+        let doubles = self
+            .position
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                self.artifact_doubles_nearby_unit_strikes(artifact)
+                    && self.artifact_location(artifact).is_ok_and(|location| {
+                        location.region == region
+                            && Self::footprints_nearby(cells, std::slice::from_ref(&location.cell))
+                    })
+            })
+            .count();
+        1_u16
+            .checked_shl(u32::try_from(doubles).map_err(|_| GameError::IllegalAction)?)
+            .ok_or(GameError::IllegalAction)
+    }
+
+    fn nearby_unit_strike_amount(
+        &self,
+        amount: u16,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u16, GameError> {
+        amount
+            .checked_mul(self.nearby_unit_strike_multiplier(kind, seat, instance_id)?)
+            .ok_or(GameError::IllegalAction)
+    }
+
+    fn minion_would_have_any_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        self.minion_would_have_unit_attack_target(unit, destination)
+            || self.minion_would_have_site_attack_target(unit, destination)
+    }
+
+    fn minion_would_have_site_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        if facts.cannot_attack_sites || destination.region != Region::Surface {
+            return false;
+        }
+        let attacker_cells =
+            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let opposing_seat = other_seat(unit.controller);
+        attacker_cells.iter().any(|cell| {
+            self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| site.controller == opposing_seat)
+        })
+    }
+
+    fn minion_would_have_unit_attack_target(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        let attacker_airborne = self.minion_is_airborne(unit, facts);
+        let attacker_cells =
+            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let opposing_seat = other_seat(unit.controller);
+        let opposing_player = &self.position.players[seat_index(opposing_seat)];
+        if destination.region == Region::Surface
+            && attacker_cells.contains(&opposing_player.avatar.location)
+        {
+            return true;
+        }
+        self.position.units.iter().any(|enemy| {
+            if enemy.controller != opposing_seat
+                || enemy.region != destination.region
+                || enemy.card.instance_id == unit.card.instance_id
+                || !Self::unit_occupied_cells(enemy)
+                    .iter()
+                    .any(|cell| attacker_cells.contains(cell))
+                || self.minion_has_active_stealth(enemy)
+            {
+                return false;
+            }
+            let CardFacts::Minion(enemy_facts) =
+                &self.rules.cards[usize::from(enemy.card.card_id.0)].facts
+            else {
+                return false;
+            };
+            !self.minion_is_airborne(enemy, enemy_facts) || attacker_airborne
+        })
+    }
+
+    fn minion_would_attack_forced_source(
+        &self,
+        unit: &UnitPosition,
+        destination: Location,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        let attacker_airborne = self.minion_is_airborne(unit, facts);
+        let attacker_cells =
+            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let opposing_seat = other_seat(unit.controller);
+        self.position.units.iter().any(|enemy| {
+            if enemy.controller != opposing_seat
+                || enemy.region != destination.region
+                || enemy.card.instance_id == unit.card.instance_id
+                || !Self::unit_occupied_cells(enemy)
+                    .iter()
+                    .any(|cell| attacker_cells.contains(cell))
+                || self.minion_has_active_stealth(enemy)
+            {
+                return false;
+            }
+            let CardFacts::Minion(enemy_facts) =
+                &self.rules.cards[usize::from(enemy.card.card_id.0)].facts
+            else {
+                return false;
+            };
+            enemy_facts.enemies_must_attack_this_if_able
+                && (!self.minion_is_airborne(enemy, enemy_facts) || attacker_airborne)
+        })
+    }
+
+    fn combat_target_forces_attack(&self, target: &CombatTarget) -> bool {
+        let CombatTarget::Minion { instance_id, seat } = target else {
+            return false;
+        };
+        self.position
+            .units
+            .iter()
+            .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+            .and_then(|unit| {
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                Some(facts.enemies_must_attack_this_if_able)
+            })
+            .unwrap_or(false)
     }
 
     fn mana_activation_amount(&self, seat: Seat, instance_id: &IdentityHash) -> Option<u8> {
@@ -3643,18 +4223,7 @@ impl Game {
         {
             return Ok(Vec::new());
         }
-        let maximum_steps = if self.position.sites[shooter.location.index()]
-            .as_ref()
-            .is_some_and(|site| {
-                matches!(
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                    CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
-                )
-            }) {
-            2
-        } else {
-            1
-        };
+        let maximum_steps = self.ranged_projectile_range(shooter);
         Ok(self
             .projectile_options(shooter, maximum_steps)
             .into_iter()
@@ -3667,15 +4236,45 @@ impl Game {
             .collect())
     }
 
+    /// One or two cardinal steps: a range-bonus site under any occupied cell grants the longer shot.
+    fn ranged_projectile_range(&self, shooter: &UnitPosition) -> usize {
+        if Self::unit_occupied_cells(shooter).iter().any(|cell| {
+            self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(site_facts) if site_facts.ranged_units_here_range_bonus
+                    ) && !self.site_abilities_lost(*cell)
+                })
+        }) {
+            2
+        } else {
+            1
+        }
+    }
+
     fn projectile_options(
         &self,
         shooter: &UnitPosition,
         maximum_steps: usize,
     ) -> Vec<ProjectileOption> {
+        Self::unit_occupied_cells(shooter)
+            .iter()
+            .flat_map(|cell| self.projectile_options_from(shooter, *cell, maximum_steps))
+            .collect()
+    }
+
+    fn projectile_options_from(
+        &self,
+        shooter: &UnitPosition,
+        origin_cell: Cell,
+        maximum_steps: usize,
+    ) -> Vec<ProjectileOption> {
         let seat = shooter.controller;
         let shooter_instance_id = &shooter.card.instance_id;
         let origin = Location {
-            cell: shooter.location,
+            cell: origin_cell,
             region: Region::Surface,
         };
         let mut options = Vec::new();
@@ -3689,11 +4288,12 @@ impl Game {
             loop {
                 let location = path.last().copied().unwrap_or(origin);
                 let mut hits = Vec::new();
+                let on_own_footprint = Self::unit_occupies_cell(shooter, location.cell);
                 for target_seat in [Seat::North, Seat::South] {
                     let avatar = &self.position.players[seat_index(target_seat)].avatar;
                     if avatar.card.instance_id != *shooter_instance_id
                         && avatar.location == location.cell
-                        && (path.len() > 1 || target_seat != seat)
+                        && (!on_own_footprint || target_seat != seat)
                     {
                         hits.push(UnitTarget::Avatar {
                             instance_id: avatar.card.instance_id.clone(),
@@ -3710,7 +4310,7 @@ impl Game {
                                 && unit.region == Region::Surface
                                 && Self::unit_occupies_cell(unit, location.cell)
                                 && !self.minion_has_active_stealth(unit)
-                                && (path.len() > 1 || unit.controller != seat)
+                                && (!on_own_footprint || unit.controller != seat)
                         })
                         .map(|unit| UnitTarget::Minion {
                             instance_id: unit.card.instance_id.clone(),
@@ -3847,21 +4447,30 @@ impl Game {
                 continue;
             }
             for (_, caster_instance_id) in &spellcasters {
-                let conjure = |bearer, cell| ActionDescriptor::CastArtifact {
+                let conjure = |bearer, bearer_cell, cell| ActionDescriptor::CastArtifact {
                     bearer,
-                    bearer_cell: None,
+                    bearer_cell,
                     card_id: definition.id.clone(),
                     card_instance_id: card.instance_id.clone(),
                     caster_instance_id: caster_instance_id.clone(),
                     cell,
                     mana_cost: facts.mana_cost,
                 };
-                descriptors.extend(cells.iter().map(|cell| conjure(None, Some(*cell))));
-                descriptors.extend(
-                    bearers
-                        .iter()
-                        .map(|bearer| conjure(Some(bearer.clone()), None)),
-                );
+                descriptors.extend(cells.iter().map(|cell| conjure(None, None, Some(*cell))));
+                for bearer in &bearers {
+                    let Ok(occupied) = self.unit_target_occupied_cells(bearer) else {
+                        continue;
+                    };
+                    if occupied.len() <= 1 {
+                        descriptors.push(conjure(Some(bearer.clone()), None, None));
+                        continue;
+                    }
+                    descriptors.extend(
+                        occupied
+                            .iter()
+                            .map(|cell| conjure(Some(bearer.clone()), Some(*cell), None)),
+                    );
+                }
             }
         }
         descriptors
@@ -3949,7 +4558,7 @@ impl Game {
         {
             return Ok(None);
         }
-        let carried_at = self.unit_target_location(bearer)?;
+        let carried_at = self.artifact_location(artifact)?;
         let mut helpers = Vec::new();
         for helper in allies {
             if helper.instance_id() != bearer.instance_id()
@@ -4222,6 +4831,30 @@ impl Game {
             .collect()
     }
 
+    /// Keeps carried Artifact bearer seats aligned with a minion's new controller.
+    fn retarget_carried_minion_artifacts(
+        &mut self,
+        instance_id: &IdentityHash,
+        from_seat: Seat,
+        to_seat: Seat,
+    ) {
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Carried {
+                bearer:
+                    UnitTarget::Minion {
+                        instance_id: bearer_id,
+                        seat,
+                    },
+                ..
+            } = &mut artifact.placement
+                && *bearer_id == *instance_id
+                && *seat == from_seat
+            {
+                *seat = to_seat;
+            }
+        }
+    }
+
     /// Every unit the seat controls, Avatar first, mirroring the authoritative unit reference order.
     fn seat_unit_targets(&self, seat: Seat) -> Vec<UnitTarget> {
         std::iter::once(UnitTarget::Avatar {
@@ -4254,10 +4887,17 @@ impl Game {
         Ok(*facts)
     }
 
-    /// Where an Artifact currently sits: the cell its bearer stands on, or the cell it lies on.
+    /// Where an Artifact currently sits: its exact carried cell, the bearer's cell, or the cell it
+    /// lies on.
     fn artifact_location(&self, artifact: &ArtifactPosition) -> Result<Location, GameError> {
         match &artifact.placement {
-            ArtifactPlacement::Carried { bearer } => self.unit_target_location(bearer),
+            ArtifactPlacement::Carried { bearer, cell } => {
+                let location = self.unit_target_location(bearer)?;
+                Ok(Location {
+                    cell: cell.unwrap_or(location.cell),
+                    region: location.region,
+                })
+            }
             ArtifactPlacement::Loose { location, region } => Ok(Location {
                 cell: *location,
                 region: *region,
@@ -4355,6 +4995,20 @@ impl Game {
             if aura.controller != seat {
                 continue;
             }
+            let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            if matches!(
+                facts.effect,
+                AuraEffect::AffectedSitesAreFlooded
+                    | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                    | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+                    | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+            ) {
+                continue;
+            }
             aura.turn_counters = aura.turn_counters.saturating_add(1);
             counted.push((
                 aura.card.instance_id.clone(),
@@ -4371,7 +5025,7 @@ impl Game {
     /// Printed Airborne is lost while the minion is disabled or while a conjured area grounds any
     /// cell of its footprint.
     fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        facts.airborne
+        (facts.airborne || !unit.temporary_airborne_sources.is_empty())
             && !self.minion_is_disabled(unit)
             && !Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.location_suppresses_airborne(Location {
@@ -4390,17 +5044,9 @@ impl Game {
             return true;
         };
         facts.waterbound
-            && !self.position.sites[unit.location.index()]
-                .as_ref()
-                .and_then(|site| {
-                    let CardFacts::Site(facts) =
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                    else {
-                        return None;
-                    };
-                    Some(facts.elements.contains(Element::Water))
-                })
-                .unwrap_or(false)
+            && !Self::unit_occupied_cells(unit)
+                .iter()
+                .any(|cell| self.is_water_site(*cell))
     }
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
@@ -4416,29 +5062,37 @@ impl Game {
         facts.gains_power_ranged_and_spellcaster_atop_tower
             && unit.region == Region::Surface
             && !self.minion_is_disabled(unit)
-            && self.position.sites[unit.location.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(site_facts) if site_facts.is_tower
-                    )
-                })
+            && Self::unit_occupied_cells(unit).iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(site_facts) if site_facts.is_tower
+                        ) && !self.site_abilities_lost(*cell)
+                    })
+            })
     }
 
     fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        facts.ranged || self.minion_atop_tower(unit)
+        facts.ranged || !unit.temporary_ranged_sources.is_empty() || self.minion_atop_tower(unit)
     }
 
-    fn has_nearby_enemy_minion(&self, unit: &UnitPosition) -> bool {
-        self.position.units.iter().any(|enemy| {
-            enemy.controller != unit.controller
-                && enemy.region == unit.region
-                && Self::footprints_nearby(
-                    Self::unit_occupied_cells(unit),
-                    Self::unit_occupied_cells(enemy),
-                )
-        })
+    fn has_nearby_enemy(&self, unit: &UnitPosition) -> bool {
+        let enemy_avatar = &self.position.players[seat_index(other_seat(unit.controller))].avatar;
+        (unit.region == Region::Surface
+            && Self::footprints_nearby(
+                Self::unit_occupied_cells(unit),
+                std::slice::from_ref(&enemy_avatar.location),
+            ))
+            || self.position.units.iter().any(|enemy| {
+                enemy.controller != unit.controller
+                    && enemy.region == unit.region
+                    && Self::footprints_nearby(
+                        Self::unit_occupied_cells(unit),
+                        Self::unit_occupied_cells(enemy),
+                    )
+            })
     }
 
     fn unit_occupied_cells(unit: &UnitPosition) -> &[Cell] {
@@ -4450,6 +5104,35 @@ impl Game {
 
     fn unit_occupies_cell(unit: &UnitPosition, cell: Cell) -> bool {
         Self::unit_occupied_cells(unit).contains(&cell)
+    }
+
+    fn summon_occupied_cells<'a>(cell: &'a Cell, cells: Option<&'a SquareArea>) -> &'a [Cell] {
+        cells.map_or(std::slice::from_ref(cell), |area| area.as_slice())
+    }
+
+    /// Controlled surface minions standing on any cell of the summoning footprint.
+    fn sacrifice_minions_at_summoning_location(
+        &self,
+        seat: Seat,
+        cell: Cell,
+        cells: Option<&SquareArea>,
+    ) -> Vec<IdentityHash> {
+        let occupied = Self::summon_occupied_cells(&cell, cells);
+        let mut candidates = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.controller == seat
+                    && unit.region == Region::Surface
+                    && occupied
+                        .iter()
+                        .any(|occupied_cell| Self::unit_occupies_cell(unit, *occupied_cell))
+            })
+            .map(|unit| unit.card.instance_id.clone())
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates
     }
 
     fn footprints_nearby(source: &[Cell], target: &[Cell]) -> bool {
@@ -4590,10 +5273,35 @@ impl Game {
                     .ok_or(GameError::IllegalAction)?,
             );
         }
+        let from = unit.location;
+        let instance_id = unit.card.instance_id.clone();
         unit.location = location.cell;
         unit.planar_gate_voidwalk = retains;
         unit.region = location.region;
+        self.translate_carried_artifact_cells(&instance_id, from, location.cell);
         Ok(())
+    }
+
+    fn translate_carried_artifact_cells(
+        &mut self,
+        instance_id: &IdentityHash,
+        from: Cell,
+        to: Cell,
+    ) {
+        if from == to {
+            return;
+        }
+        for artifact in &mut self.position.artifacts {
+            let ArtifactPlacement::Carried { bearer, cell } = &mut artifact.placement else {
+                continue;
+            };
+            if bearer.instance_id() != instance_id {
+                continue;
+            }
+            if let Some(current) = *cell {
+                *cell = current.translated(from, to);
+            }
+        }
     }
 
     fn settle_nearby_enemy_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
@@ -4668,6 +5376,48 @@ impl Game {
         }
     }
 
+    fn avatar_current_stats(&self, seat: Seat) -> Result<(u16, u16), GameError> {
+        let player = &self.position.players[seat_index(seat)];
+        let CardFacts::Avatar(facts) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let instance_id = player.avatar.card.instance_id.clone();
+        let location = player.avatar.location;
+        let mut bonus = Self::temporary_power_bonus(&player.avatar.temporary_power_sources)?;
+        bonus = bonus
+            .checked_add(self.carried_power_bonus(UnitKind::Avatar, seat, &instance_id)?)
+            .ok_or(GameError::IllegalAction)?;
+        for source in &self.position.units {
+            if source.controller != seat || self.minion_is_disabled(source) {
+                continue;
+            }
+            let CardFacts::Minion(source_facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if source_facts.other_nearby_allies_power_bonus
+                && source.region == Region::Surface
+                && Self::footprints_nearby(
+                    Self::unit_occupied_cells(source),
+                    std::slice::from_ref(&location),
+                )
+            {
+                bonus = bonus.checked_add(1).ok_or(GameError::IllegalAction)?;
+            }
+        }
+        Ok((
+            u16::from(facts.attack)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+            u16::from(facts.defense)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+        ))
+    }
+
     fn minion_current_stats(&self, unit: &UnitPosition) -> Result<(u16, u16, bool), GameError> {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
@@ -4712,6 +5462,7 @@ impl Game {
             )?)
             .ok_or(GameError::IllegalAction)?;
         let lethal = facts.lethal
+            || !unit.temporary_lethal_sources.is_empty()
             || self.carried_lethal(UnitKind::Minion, unit.controller, &unit.card.instance_id)?;
         Ok((
             u16::from(facts.attack)
@@ -4744,22 +5495,37 @@ impl Game {
         seat: Seat,
         caster_instance_id: &IdentityHash,
     ) -> Result<Location, GameError> {
+        Ok(self.spellcaster_occupied_cells(seat, caster_instance_id)?.0)
+    }
+
+    fn spellcaster_occupied_cells(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<(Location, &[Cell]), GameError> {
         let player = &self.position.players[seat_index(seat)];
         if player.avatar.card.instance_id == *caster_instance_id {
-            return Ok(Location {
-                cell: player.avatar.location,
-                region: Region::Surface,
-            });
+            return Ok((
+                Location {
+                    cell: player.avatar.location,
+                    region: Region::Surface,
+                },
+                std::slice::from_ref(&player.avatar.location),
+            ));
         }
-        self.position
+        let unit = self
+            .position
             .units
             .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *caster_instance_id)
-            .map(|unit| Location {
+            .ok_or(GameError::IllegalAction)?;
+        Ok((
+            Location {
                 cell: unit.location,
                 region: unit.region,
-            })
-            .ok_or(GameError::IllegalAction)
+            },
+            Self::unit_occupied_cells(unit),
+        ))
     }
 
     fn targeted_magic_choices(
@@ -4769,8 +5535,8 @@ impl Game {
         target_nearby: bool,
         minion_only: bool,
     ) -> Result<Vec<MagicChoice>, GameError> {
-        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
-        let caster_cells = [caster_location.cell];
+        let (caster_location, caster_cells) =
+            self.spellcaster_occupied_cells(seat, caster_instance_id)?;
         let mut targets = Vec::new();
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
@@ -4778,7 +5544,7 @@ impl Game {
                 && caster_location.region == Region::Surface
                 && (!target_nearby
                     || Self::footprints_nearby(
-                        &caster_cells,
+                        caster_cells,
                         std::slice::from_ref(&player.avatar.location),
                     ))
             {
@@ -4800,7 +5566,7 @@ impl Game {
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
                             && (!target_nearby
                                 || Self::footprints_nearby(
-                                    &caster_cells,
+                                    caster_cells,
                                     Self::unit_occupied_cells(unit),
                                 ))
                     })
@@ -4816,6 +5582,346 @@ impl Game {
         Ok(targets)
     }
 
+    fn destroy_target_site_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        if caster_location.region == Region::Void {
+            return Ok(Vec::new());
+        }
+        Ok(Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                let site = self.position.sites[cell.index()].as_ref()?;
+                let water = self.location_exists_in_region(cell, Region::Underwater);
+                if caster_location.region == Region::Underwater && !water
+                    || caster_location.region == Region::Underground && water
+                {
+                    return None;
+                }
+                Some(MagicChoice {
+                    target_location: Some(Location {
+                        cell,
+                        region: caster_location.region,
+                    }),
+                    target_site_instance_id: Some(site.card.instance_id.clone()),
+                    ..MagicChoice::default()
+                })
+            })
+            .collect())
+    }
+
+    fn avatar_player_choices(&self) -> Vec<MagicChoice> {
+        [Seat::North, Seat::South]
+            .into_iter()
+            .map(|target_seat| MagicChoice {
+                target: Some(UnitTarget::Avatar {
+                    instance_id: self.position.players[seat_index(target_seat)]
+                        .avatar
+                        .card
+                        .instance_id
+                        .clone(),
+                    seat: target_seat,
+                }),
+                ..MagicChoice::default()
+            })
+            .collect()
+    }
+
+    fn targeted_avatar_seat(&self, target: Option<&UnitTarget>) -> Result<Seat, GameError> {
+        let Some(UnitTarget::Avatar {
+            seat: target_seat,
+            instance_id,
+        }) = target
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if self.position.players[seat_index(*target_seat)]
+            .avatar
+            .card
+            .instance_id
+            != *instance_id
+        {
+            return Err(GameError::IllegalAction);
+        }
+        Ok(*target_seat)
+    }
+
+    fn artifact_target_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        Ok(self
+            .position
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
+                let location = self.artifact_location(artifact).ok()?;
+                (location.region == caster_location.region).then_some(MagicChoice {
+                    target_artifact_instance_id: Some(artifact.card.instance_id.clone()),
+                    ..MagicChoice::default()
+                })
+            })
+            .collect())
+    }
+
+    fn aura_target_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        if caster_location.region != Region::Surface {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .position
+            .auras
+            .iter()
+            .map(|aura| MagicChoice {
+                target_aura_instance_id: Some(aura.card.instance_id.clone()),
+                ..MagicChoice::default()
+            })
+            .collect())
+    }
+
+    fn with_chosen_hand_discard(
+        &self,
+        seat: Seat,
+        spell_instance_id: &IdentityHash,
+        choices: Vec<MagicChoice>,
+    ) -> Vec<MagicChoice> {
+        if choices.is_empty() {
+            return Vec::new();
+        }
+        let player = &self.position.players[seat_index(seat)];
+        let mut discard_ids: Vec<_> = player
+            .hand_atlas
+            .iter()
+            .chain(&player.hand_spellbook)
+            .filter(|card| card.instance_id != *spell_instance_id)
+            .map(|card| card.instance_id.clone())
+            .collect();
+        discard_ids.sort_unstable();
+        if discard_ids.is_empty() {
+            return Vec::new();
+        }
+        let mut paid = Vec::with_capacity(choices.len() * discard_ids.len());
+        for choice in choices {
+            for discard_id in &discard_ids {
+                paid.push(MagicChoice {
+                    discard_card_instance_id: Some(discard_id.clone()),
+                    ..choice.clone()
+                });
+            }
+        }
+        paid
+    }
+
+    fn pay_chosen_hand_discard(
+        &mut self,
+        seat: Seat,
+        selected_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player = &mut self.position.players[seat_index(seat)];
+        let (zone, index) = if let Some(index) = player
+            .hand_atlas
+            .iter()
+            .position(|card| card.instance_id == *selected_id)
+        {
+            (DeckZone::Atlas, index)
+        } else if let Some(index) = player
+            .hand_spellbook
+            .iter()
+            .position(|card| card.instance_id == *selected_id)
+        {
+            (DeckZone::Spellbook, index)
+        } else {
+            return Err(GameError::IllegalAction);
+        };
+        let discarded = match zone {
+            DeckZone::Atlas => player.hand_atlas.remove(index),
+            DeckZone::Spellbook => player.hand_spellbook.remove(index),
+        };
+        outcomes.push("card-discarded", || {
+            json!({
+                "cardId": self.rules.cards[usize::from(discarded.card_id.0)].id,
+                "instanceId": discarded.instance_id,
+                "owner": discarded.owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "zone": zone.as_str(),
+            })
+        });
+        self.position.players[seat_index(seat)]
+            .cemetery
+            .push(discarded);
+        Ok(())
+    }
+
+    fn hand_card_count(&self, seat: Seat) -> usize {
+        let player = &self.position.players[seat_index(seat)];
+        player.hand_atlas.len() + player.hand_spellbook.len()
+    }
+
+    fn begin_discard_cards(
+        &mut self,
+        seat: Seat,
+        count: u8,
+        source_card_id: &str,
+        source_instance_id: &IdentityHash,
+        source_owner: Seat,
+    ) -> bool {
+        let remaining = self.hand_card_count(seat).min(usize::from(count));
+        let remaining = u8::try_from(remaining).unwrap_or(count);
+        if remaining == 0 {
+            return false;
+        }
+        self.position.pending_discard_cards = Some(PendingDiscardCards {
+            remaining,
+            seat,
+            source_card_id: source_card_id.to_owned(),
+            source_instance_id: source_instance_id.clone(),
+            source_owner,
+        });
+        self.position.phase = Phase::DiscardCard;
+        self.position.decision_seat = seat;
+        true
+    }
+
+    fn apply_discard_card_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::DiscardCard {
+            card_instance_id,
+            zone,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let pending = self
+            .position
+            .pending_discard_cards
+            .clone()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::DiscardCard
+            || pending.seat != action.seat
+            || pending.remaining == 0
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let player = &self.position.players[seat_index(pending.seat)];
+        let actual_zone = if player
+            .hand_atlas
+            .iter()
+            .any(|card| card.instance_id == *card_instance_id)
+        {
+            DeckZone::Atlas
+        } else if player
+            .hand_spellbook
+            .iter()
+            .any(|card| card.instance_id == *card_instance_id)
+        {
+            DeckZone::Spellbook
+        } else {
+            return Err(GameError::IllegalAction);
+        };
+        if *zone != actual_zone {
+            return Err(GameError::IllegalAction);
+        }
+        self.pay_chosen_hand_discard(
+            pending.seat,
+            card_instance_id,
+            &pending.source_instance_id,
+            outcomes,
+        )?;
+        let remaining = pending.remaining.saturating_sub(1);
+        if remaining == 0 || self.hand_card_count(pending.seat) == 0 {
+            self.position.pending_discard_cards = None;
+            self.position.decision_seat = self.position.active_seat;
+            self.position.phase = if self.position.terminal.is_some() {
+                Phase::Terminal
+            } else {
+                Phase::Main
+            };
+            Self::emit_continuation_magic_resolved(
+                &pending.source_card_id,
+                &pending.source_instance_id,
+                pending.source_owner,
+                outcomes,
+            );
+        } else {
+            self.position.pending_discard_cards = Some(PendingDiscardCards {
+                remaining,
+                ..pending
+            });
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
+        let choices: Vec<_> = self.position.players[seat_index(seat)]
+            .cemetery
+            .iter()
+            .filter(|card| kind.matches(&self.rules.cards[usize::from(card.card_id.0)].facts))
+            .map(|card| MagicChoice {
+                cemetery_minion_instance_id: Some(card.instance_id.clone()),
+                ..MagicChoice::default()
+            })
+            .collect();
+        if choices.is_empty() {
+            vec![MagicChoice::default()]
+        } else {
+            choices
+        }
+    }
+
+    fn return_own_cemetery_card(
+        &mut self,
+        seat: Seat,
+        selected_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        kind: OwnCemeteryReturn,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player = &mut self.position.players[seat_index(seat)];
+        let selected_index = player
+            .cemetery
+            .iter()
+            .position(|card| card.instance_id == *selected_id)
+            .ok_or(GameError::IllegalAction)?;
+        let selected = player.cemetery.remove(selected_index);
+        let definition = &self.rules.cards[usize::from(selected.card_id.0)];
+        if !kind.matches(&definition.facts) {
+            return Err(GameError::IllegalAction);
+        }
+        let selected_card_id = definition.id.clone();
+        let selected_owner = selected.owner;
+        match kind.zone() {
+            DeckZone::Atlas => player.hand_atlas.push(selected),
+            DeckZone::Spellbook => player.hand_spellbook.push(selected),
+        }
+        outcomes.push(kind.event(), || {
+            json!({
+                "cardId": selected_card_id,
+                "instanceId": selected_id,
+                "owner": selected_owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one closed match keeps every supported Magic choice shape explicit"
@@ -4828,97 +5934,31 @@ impl Game {
     ) -> Result<Vec<MagicChoice>, GameError> {
         Ok(match effect {
             MagicEffect::HealController(_)
+            | MagicEffect::DrawSites(_)
+            | MagicEffect::DrawSpells(_)
             | MagicEffect::DamageEachAbovegroundMinionOne
             | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
-            MagicEffect::GrantChargeToAllyThisTurn | MagicEffect::GrantPowerTwoToAllyThisTurn => {
-                self.controlled_allies(seat)
-                    .into_iter()
-                    .map(|ally| MagicChoice {
-                        ally: Some(ally),
-                        ..MagicChoice::default()
-                    })
-                    .collect()
-            }
+            MagicEffect::GrantAirborneToAllyThisTurn
+            | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantFirstStrikeToAllyThisTurn
+            | MagicEffect::GrantLethalToAllyThisTurn
+            | MagicEffect::GrantPowerTwoToAllyThisTurn
+            | MagicEffect::GrantRangedToAllyThisTurn => self
+                .controlled_allies(seat)
+                .into_iter()
+                .map(|ally| MagicChoice {
+                    ally: Some(ally),
+                    ..MagicChoice::default()
+                })
+                .collect(),
             MagicEffect::LeapAttackAlly => self.leap_attack_choices(seat)?,
             MagicEffect::TeleportAllyToTargetSite => {
-                if self.spellcaster_location(seat, caster_instance_id)?.region != Region::Surface {
-                    return Ok(Vec::new());
-                }
-                // Teleport bypasses the entry gates that only restrict deliberate movement.
-                let destinations: Vec<(Location, IdentityHash)> = Cell::ALL
-                    .into_iter()
-                    .filter_map(|cell| {
-                        let instance_id = self.position.sites[cell.index()]
-                            .as_ref()
-                            .map(|site| &site.card.instance_id)
-                            .or(self.position.rubble[cell.index()].as_ref())?
-                            .clone();
-                        Some((
-                            Location {
-                                cell,
-                                region: Region::Surface,
-                            },
-                            instance_id,
-                        ))
-                    })
-                    .collect();
-                let mut choices = Vec::with_capacity(destinations.len());
-                for ally in self.controlled_allies(seat) {
-                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
-                        return Err(GameError::UnsupportedManifestFact(
-                            "teleportAllyToTargetSite:occupiesSquareArea".to_owned(),
-                        ));
-                    }
-                    for (target_location, target_site_instance_id) in &destinations {
-                        choices.push(MagicChoice {
-                            ally: Some(ally.clone()),
-                            target_location: Some(*target_location),
-                            target_site_instance_id: Some(target_site_instance_id.clone()),
-                            ..MagicChoice::default()
-                        });
-                    }
-                }
-                choices
+                self.teleport_ally_to_site_choices(seat, caster_instance_id)?
             }
-            MagicEffect::TeleportNearbyAllyThenDrawCard => {
-                let mut choices = Vec::new();
-                for ally in self.controlled_allies(seat) {
-                    if self.unit_target_occupied_cells(&ally)?.len() > 1 {
-                        return Err(GameError::UnsupportedManifestFact(
-                            "teleportNearbyAllyThenDrawCard:occupiesSquareArea".to_owned(),
-                        ));
-                    }
-                    let from = self.unit_target_location(&ally)?;
-                    // Blink relocates without a deliberate step, so only the layer must exist.
-                    let destinations = std::iter::once(from.cell)
-                        .chain(from.cell.bordering(false))
-                        .chain(from.cell.diagonals(false))
-                        .collect::<BTreeSet<_>>()
-                        .into_iter()
-                        .filter(|cell| self.location_exists_in_region(*cell, from.region));
-                    for cell in destinations {
-                        for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
-                            choices.push(MagicChoice {
-                                ally: Some(ally.clone()),
-                                draw_zone: Some(zone),
-                                target_location: Some(Location {
-                                    cell,
-                                    region: from.region,
-                                }),
-                                target_site_instance_id: self.position.sites[cell.index()]
-                                    .as_ref()
-                                    .map(|site| site.card.instance_id.clone())
-                                    .or_else(|| self.position.rubble[cell.index()].clone()),
-                                ..MagicChoice::default()
-                            });
-                        }
-                    }
-                }
-                choices
-            }
+            MagicEffect::TeleportNearbyAllyThenDrawCard => self.blink_ally_choices(seat)?,
             MagicEffect::LureEnemyMinionOneStepCloser => {
                 let enemy_seat = other_seat(seat);
                 let tempted: Vec<UnitTarget> = self
@@ -5072,25 +6112,19 @@ impl Game {
                     .collect()
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
-                let choices: Vec<_> = self.position.players[seat_index(seat)]
-                    .cemetery
-                    .iter()
-                    .filter(|card| {
-                        matches!(
-                            self.rules.cards[usize::from(card.card_id.0)].facts,
-                            CardFacts::Minion(_)
-                        )
-                    })
-                    .map(|card| MagicChoice {
-                        cemetery_minion_instance_id: Some(card.instance_id.clone()),
-                        ..MagicChoice::default()
-                    })
-                    .collect();
-                if choices.is_empty() {
-                    vec![MagicChoice::default()]
-                } else {
-                    choices
-                }
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Minion)
+            }
+            MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Artifact)
+            }
+            MagicEffect::ReturnTargetAuraFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Aura)
+            }
+            MagicEffect::ReturnTargetMagicFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Magic)
+            }
+            MagicEffect::ReturnTargetSiteFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Site)
             }
             MagicEffect::DamageTargetUnit {
                 target_nearby,
@@ -5102,7 +6136,14 @@ impl Game {
                 *target_nearby,
                 *untap_target_minion_after_damage,
             )?,
-            MagicEffect::SubmergeTargetMinion => {
+            MagicEffect::SubmergeTargetMinion
+            | MagicEffect::KillTargetMinion
+            | MagicEffect::ReturnTargetMinionToOwnerHand
+            | MagicEffect::TapTargetMinion
+            | MagicEffect::GrantStealthToTargetMinion
+            | MagicEffect::GrantWardToTargetMinion
+            | MagicEffect::HealTargetMinion(_)
+            | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::BurrowTargetMinionOrArtifact => {
@@ -5162,6 +6203,22 @@ impl Game {
                     Vec::new()
                 }
             }
+            MagicEffect::DestroyTargetSite | MagicEffect::ReturnTargetSiteToOwnerHand => {
+                self.destroy_target_site_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
+                self.artifact_target_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::DestroyTargetAura | MagicEffect::ReturnTargetAuraToOwnerHand => {
+                self.aura_target_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::TargetPlayerDiscardsCards(_)
+            | MagicEffect::TargetPlayerGainsLife(_)
+            | MagicEffect::TargetPlayerLosesLife(_)
+            | MagicEffect::MillSites(_)
+            | MagicEffect::MillSpells(_)
+            | MagicEffect::TargetPlayerDrawsSites(_)
+            | MagicEffect::TargetPlayerDrawsSpells(_) => self.avatar_player_choices(),
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 if caster_location.region == Region::Void {
@@ -5204,8 +6261,8 @@ impl Game {
                 choices
             }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
-                let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
-                let caster_cells = [caster_location.cell];
+                let (caster_location, caster_cells) =
+                    self.spellcaster_occupied_cells(seat, caster_instance_id)?;
                 let mut targets: Vec<_> = self
                     .position
                     .units
@@ -5214,7 +6271,7 @@ impl Game {
                         unit.region == caster_location.region
                             && (unit.controller == seat || !self.minion_has_active_stealth(unit))
                             && Self::footprints_nearby(
-                                &caster_cells,
+                                caster_cells,
                                 Self::unit_occupied_cells(unit),
                             )
                     })
@@ -5244,6 +6301,190 @@ impl Game {
                 ));
             }
         })
+    }
+
+    fn teleport_ally_to_site_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        if self.spellcaster_location(seat, caster_instance_id)?.region != Region::Surface {
+            return Ok(Vec::new());
+        }
+        // Teleport bypasses the entry gates that only restrict deliberate movement.
+        let destinations: Vec<(Location, IdentityHash)> = Cell::ALL
+            .into_iter()
+            .filter_map(|cell| {
+                let instance_id = self.position.sites[cell.index()]
+                    .as_ref()
+                    .map(|site| &site.card.instance_id)
+                    .or(self.position.rubble[cell.index()].as_ref())?
+                    .clone();
+                Some((
+                    Location {
+                        cell,
+                        region: Region::Surface,
+                    },
+                    instance_id,
+                ))
+            })
+            .collect();
+        let mut choices = Vec::new();
+        for ally in self.controlled_allies(seat) {
+            let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
+            let power = self.unit_target_entry_power(&ally)?;
+            for (target_location, target_site_instance_id) in &destinations {
+                for area in self.teleport_destination_areas(&occupied, *target_location) {
+                    let cells: &[Cell] = area
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&target_location.cell), |cells| cells);
+                    if !self.teleport_cells_allowed(&occupied, cells, target_location.region, power)
+                    {
+                        continue;
+                    }
+                    choices.push(MagicChoice {
+                        ally: Some(ally.clone()),
+                        ally_destination_cells: area,
+                        target_location: Some(*target_location),
+                        target_site_instance_id: Some(target_site_instance_id.clone()),
+                        ..MagicChoice::default()
+                    });
+                }
+            }
+        }
+        Ok(choices)
+    }
+
+    fn blink_ally_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for ally in self.controlled_allies(seat) {
+            let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
+            let from = self.unit_target_location(&ally)?;
+            let power = self.unit_target_entry_power(&ally)?;
+            // Blink relocates without a deliberate step, so only the layer must exist.
+            let destinations = occupied
+                .iter()
+                .copied()
+                .flat_map(|cell| {
+                    std::iter::once(cell)
+                        .chain(cell.bordering(false))
+                        .chain(cell.diagonals(false))
+                })
+                .collect::<BTreeSet<_>>();
+            for cell in destinations {
+                let target_location = Location {
+                    cell,
+                    region: from.region,
+                };
+                if !self.location_exists_in_region(cell, from.region) {
+                    continue;
+                }
+                let site_instance_id = self.position.sites[cell.index()]
+                    .as_ref()
+                    .map(|site| site.card.instance_id.clone())
+                    .or_else(|| self.position.rubble[cell.index()].clone());
+                for area in self.teleport_destination_areas(&occupied, target_location) {
+                    let cells: &[Cell] = area
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&cell), |cells| cells);
+                    if !self.teleport_cells_allowed(&occupied, cells, from.region, power) {
+                        continue;
+                    }
+                    for zone in [DeckZone::Atlas, DeckZone::Spellbook] {
+                        choices.push(MagicChoice {
+                            ally: Some(ally.clone()),
+                            ally_destination_cells: area,
+                            draw_zone: Some(zone),
+                            target_location: Some(target_location),
+                            target_site_instance_id: site_instance_id.clone(),
+                            ..MagicChoice::default()
+                        });
+                    }
+                }
+            }
+        }
+        Ok(choices)
+    }
+
+    fn teleport_destination_areas(
+        &self,
+        occupied: &[Cell],
+        target: Location,
+    ) -> Vec<Option<SquareArea>> {
+        if occupied.len() <= 1 {
+            return vec![None];
+        }
+        Cell::SQUARE_AREAS
+            .into_iter()
+            .filter(|area| {
+                area.contains(&target.cell) && self.footprint_exists(*area, target.region)
+            })
+            .map(Some)
+            .collect()
+    }
+
+    fn footprint_exists(&self, cells: SquareArea, region: Region) -> bool {
+        cells
+            .iter()
+            .all(|cell| self.location_exists_in_region(*cell, region))
+    }
+
+    fn teleport_cells_allowed(
+        &self,
+        occupied: &[Cell],
+        cells: &[Cell],
+        region: Region,
+        power: u8,
+    ) -> bool {
+        cells
+            .iter()
+            .filter(|cell| !occupied.contains(cell))
+            .all(|cell| {
+                self.teleport_entry_allowed(
+                    Location {
+                        cell: *cell,
+                        region,
+                    },
+                    power,
+                )
+            })
+    }
+
+    fn teleport_entry_allowed(&self, candidate: Location, power: u8) -> bool {
+        if candidate.region != Region::Surface {
+            return true;
+        }
+        let Some(site) = &self.position.sites[candidate.cell.index()] else {
+            return true;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return true;
+        };
+        facts
+            .prevents_units_with_power_at_least_from_entering
+            .is_none_or(|threshold| power < threshold)
+    }
+
+    fn unit_target_entry_power(&self, ally: &UnitTarget) -> Result<u8, GameError> {
+        match ally {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(self.avatar_entry_power(*seat))
+            }
+            UnitTarget::Minion { instance_id, seat } => {
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?;
+                self.minion_entry_power(unit)
+            }
+        }
     }
 
     fn leap_attack_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
@@ -5727,7 +6968,9 @@ impl Game {
         else {
             return 1;
         };
-        usize::from(!facts.airborne_minions_atop_move_freely_away)
+        usize::from(
+            !facts.airborne_minions_atop_move_freely_away || self.site_abilities_lost(current.cell),
+        )
     }
 
     fn avatar_entry_power(&self, seat: Seat) -> u8 {
@@ -5757,9 +7000,10 @@ impl Game {
             else {
                 return true;
             };
-            if facts
-                .prevents_units_with_power_at_least_from_entering
-                .is_some_and(|threshold| profile.power >= threshold)
+            if !self.site_abilities_lost(candidate.cell)
+                && facts
+                    .prevents_units_with_power_at_least_from_entering
+                    .is_some_and(|threshold| profile.power >= threshold)
             {
                 return false;
             }
@@ -5780,6 +7024,7 @@ impl Game {
             return true;
         };
         !facts.blocks_ground_minion_entry_while_minion_atop
+            || self.site_abilities_lost(candidate.cell)
             || !self.position.units.iter().any(|unit| {
                 unit.region == Region::Surface && Self::unit_occupies_cell(unit, candidate.cell)
             })
@@ -5833,7 +7078,7 @@ impl Game {
                 matches!(
                     &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                     CardFacts::Site(facts) if facts.connects_burrowed_allies
-                )
+                ) && !self.site_abilities_lost(cell)
             })
     }
 
@@ -5880,6 +7125,7 @@ impl Game {
                             &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                             CardFacts::Site(facts)
                                 if facts.minions_here_gain_voidwalk_until_leaving_void
+                                    && !self.site_abilities_lost(*cell)
                         )
                     })
             })
@@ -5926,16 +7172,95 @@ impl Game {
                 })
     }
 
-    /// Whether a played Water site currently stands at one cell.
+    /// Whether a played site is currently a Water site, after Flooded/Drought/Fate overlays.
+    ///
+    /// Official Flooded gives a site a minimum of one Water affinity. Official Drought says
+    /// affected sites are not Water sites and provide no Water threshold. Official Atlantean Fate
+    /// floods only non-Ordinary sites. Later-entered Auras win when both cover the same cell.
     fn is_water_site(&self, cell: Cell) -> bool {
-        self.position.sites[cell.index()]
-            .as_ref()
-            .is_some_and(|site| {
-                matches!(
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                    CardFacts::Site(facts) if facts.elements.contains(Element::Water)
+        match self.site_water_overlay(cell) {
+            SiteWaterOverlay::Printed => self
+                .position
+                .sites
+                .get(cell.index())
+                .and_then(Option::as_ref)
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(facts) if facts.elements.contains(Element::Water)
+                    )
+                }),
+            SiteWaterOverlay::Flooded | SiteWaterOverlay::Fate => true,
+            SiteWaterOverlay::Drought | SiteWaterOverlay::None => false,
+        }
+    }
+
+    /// Later-timestamp terrain overlay on a played site, if any Aura covers the cell.
+    fn site_water_overlay(&self, cell: Cell) -> SiteWaterOverlay {
+        let Some(site) = self.position.sites[cell.index()].as_ref() else {
+            return SiteWaterOverlay::None;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return SiteWaterOverlay::None;
+        };
+        let ordinary = facts.ordinary;
+        let mut overlay = SiteWaterOverlay::Printed;
+        for aura in &self.position.auras {
+            if !aura.cells.contains(&cell) {
+                continue;
+            }
+            let CardFacts::Aura(aura_facts) =
+                &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            match aura_facts.effect {
+                AuraEffect::AffectedSitesAreFlooded => overlay = SiteWaterOverlay::Flooded,
+                AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold => {
+                    overlay = SiteWaterOverlay::Drought;
+                }
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                    if !ordinary =>
+                {
+                    overlay = SiteWaterOverlay::Fate;
+                }
+                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+                | AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+                | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+                | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {}
+            }
+        }
+        overlay
+    }
+
+    /// Official Fate is a Lose effect: a covered non-Ordinary site has no printed abilities.
+    fn site_abilities_lost(&self, cell: Cell) -> bool {
+        self.fate_covers_non_ordinary_site(cell)
+    }
+
+    fn fate_covers_cell(&self, cell: Cell) -> bool {
+        self.position.auras.iter().any(|aura| {
+            aura.cells.contains(&cell)
+                && matches!(
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts,
+                    CardFacts::Aura(aura_facts)
+                        if aura_facts.effect
+                            == AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
                 )
-            })
+        })
+    }
+
+    fn fate_covers_non_ordinary_site(&self, cell: Cell) -> bool {
+        let Some(site) = self.position.sites[cell.index()].as_ref() else {
+            return false;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        !facts.ordinary && self.fate_covers_cell(cell)
     }
 
     fn underground_location_exists(&self, cell: Cell) -> bool {
@@ -6150,13 +7475,15 @@ impl Game {
             .position
             .units
             .iter()
-            .filter(|unit| !self.minion_is_disabled(unit))
+            .filter(|unit| unit.region != Region::Void && !self.minion_is_disabled(unit))
         {
             if matches!(
                 &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
                 CardFacts::Minion(minion) if minion.site_provides_no_threshold
             ) {
-                suppressed_sites[unit.location.index()] = true;
+                for cell in Self::unit_occupied_cells(unit) {
+                    suppressed_sites[cell.index()] = true;
+                }
             }
         }
         let site_elements = Cell::ALL
@@ -6171,10 +7498,12 @@ impl Game {
                 else {
                     return None;
                 };
-                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified {
+                if suppressed_sites[cell.index()] && !facts.cannot_be_moved_destroyed_or_modified
+                    || self.site_abilities_lost(cell) && suppressed_sites[cell.index()]
+                {
                     return None;
                 }
-                Some(facts.elements)
+                Some(self.effective_site_elements(cell, facts.elements))
             })
             .flat_map(crate::facts::ElementSet::iter);
         let provider_elements = self
@@ -6202,6 +7531,16 @@ impl Game {
         affinities
     }
 
+    fn effective_site_elements(&self, cell: Cell, printed: ElementSet) -> ElementSet {
+        match self.site_water_overlay(cell) {
+            SiteWaterOverlay::Fate => ElementSet::only(Element::Water),
+            SiteWaterOverlay::Flooded => printed.with(Element::Water),
+            SiteWaterOverlay::Drought => printed.without(Element::Water),
+            SiteWaterOverlay::Printed => printed,
+            SiteWaterOverlay::None => ElementSet::empty(),
+        }
+    }
+
     fn thresholds_met(&self, seat: Seat, thresholds: Thresholds) -> bool {
         self.elemental_affinities(seat)
             .into_iter()
@@ -6209,7 +7548,7 @@ impl Game {
             .all(|(available, required)| available >= required)
     }
 
-    /// Every Aura conjuring one seat can afford, across every canonical two-by-two area.
+    /// Every Aura conjuring one seat can afford, across every legal covered area.
     fn aura_cast_descriptors(&self, seat: Seat) -> Vec<ActionDescriptor> {
         let player = &self.position.players[seat_index(seat)];
         let spellcasters = self.spellcasters(seat);
@@ -6219,27 +7558,106 @@ impl Game {
             let CardFacts::Aura(facts) = &definition.facts else {
                 continue;
             };
-            if !matches!(
-                facts.effect,
-                AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
-                    | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
-            ) || u64::from(player.mana) < facts.mana_cost
+            if u64::from(player.mana) < facts.mana_cost
                 || !self.thresholds_met(seat, facts.thresholds)
             {
                 continue;
             }
             for (_, caster_instance_id) in &spellcasters {
-                descriptors.extend(Cell::SQUARE_AREAS.into_iter().map(|cells| {
-                    ActionDescriptor::CastAura {
-                        card_id: definition.id.clone(),
-                        card_instance_id: card.instance_id.clone(),
-                        caster_instance_id: caster_instance_id.clone(),
-                        cells,
+                match facts.effect {
+                    AuraEffect::AffectedSitesAreFlooded
+                    | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                    | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+                    | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                    | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
+                        descriptors.extend(Cell::SQUARE_AREAS.into_iter().map(|cells| {
+                            ActionDescriptor::CastAura {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                cells: cells.to_vec(),
+                            }
+                        }));
                     }
-                }));
+                    AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf => {
+                        for cell in Cell::ALL {
+                            if !self.site_accepts_start_turn_destroy_aura(cell) {
+                                continue;
+                            }
+                            descriptors.push(ActionDescriptor::CastAura {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                cells: vec![cell],
+                            });
+                        }
+                    }
+                    AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => {
+                        for cell in Cell::ALL {
+                            if self.position.sites[cell.index()].is_none()
+                                || !self.cell_is_nearby_spellcaster(
+                                    seat,
+                                    caster_instance_id,
+                                    cell,
+                                )
+                            {
+                                continue;
+                            }
+                            descriptors.push(ActionDescriptor::CastAura {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                cells: vec![cell],
+                            });
+                        }
+                    }
+                }
             }
         }
         descriptors
+    }
+
+    fn site_accepts_start_turn_destroy_aura(&self, cell: Cell) -> bool {
+        let Some(site) = self.position.sites[cell.index()].as_ref() else {
+            return false;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        self.site_abilities_lost(cell)
+            || (!facts.unique_or_legendary && !facts.cannot_be_moved_destroyed_or_modified)
+    }
+
+    fn cell_is_nearby_spellcaster(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+        cell: Cell,
+    ) -> bool {
+        let Ok((_, occupied)) = self.spellcaster_occupied_cells(seat, caster_instance_id) else {
+            return false;
+        };
+        occupied.iter().any(|origin| {
+            *origin == cell
+                || origin.bordering(false).any(|candidate| candidate == cell)
+                || origin.diagonals(false).any(|candidate| candidate == cell)
+        })
+    }
+
+    fn aura_public_value(&self, aura: &AuraPosition) -> Value {
+        let mut value = json!({
+            "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
+            "cells": aura.cells,
+            "controller": aura.controller,
+            "instanceId": aura.card.instance_id,
+            "owner": aura.card.owner,
+            "turnCounters": aura.turn_counters,
+        });
+        if !aura.visited_cells.is_empty() {
+            value["visitedCells"] = json!(aura.visited_cells.iter().collect::<Vec<_>>());
+        }
+        value
     }
 
     /// Offers every nearby empty cell a controlled flying site may settle into this turn.
@@ -6266,6 +7684,7 @@ impl Game {
             if source.controller != seat
                 || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
                 || facts.cannot_be_moved_destroyed_or_modified
+                || self.site_abilities_lost(source_cell)
                 || source.last_flight_turn == Some(self.position.turn_number)
             {
                 continue;
@@ -6306,26 +7725,28 @@ impl Game {
             else {
                 return None;
             };
-            if minion.must_be_cast_to_water_site && !site_facts.elements.contains(Element::Water) {
+            if minion.must_be_cast_to_water_site && !self.is_water_site(cell) {
                 return None;
             }
-            let discount = u64::from(minion.ordinary && site_facts.ordinary_minion_mana_discount);
+            if !self.site_abilities_lost(cell)
+                && site_facts
+                    .prevents_units_with_power_at_least_from_entering
+                    .is_some_and(|threshold| minion.attack >= threshold)
+            {
+                return None;
+            }
+            let discount = u64::from(
+                minion.ordinary
+                    && site_facts.ordinary_minion_mana_discount
+                    && !self.site_abilities_lost(cell),
+            );
             Some(minion.mana_cost.saturating_sub(discount))
         };
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .filter_map(|cells| {
-                    let mana_cost = cells.into_iter().find_map(summon_cell)?;
-                    cells
-                        .into_iter()
-                        .all(|cell| self.surface_location_exists(cell))
-                        .then_some(SummonDestination {
-                            cell: cells[0],
-                            cells: Some(cells),
-                            mana_cost,
-                            region: None,
-                        })
+                .flat_map(|cells| {
+                    self.square_area_summon_destinations(minion, cells, summon_cell, false)
                 })
                 .collect()
         } else {
@@ -6340,6 +7761,63 @@ impl Game {
             destinations.extend(self.void_summon_destinations(minion, minion.mana_cost, false));
             destinations
         }
+    }
+
+    /// Surface plus every lower layer the whole 2x2 can occupy.
+    ///
+    /// Underground needs land under every cell; underwater needs Water under every cell. A mixed
+    /// square stays surface-only. Paid casts keep only the required layer; a free placement
+    /// ignores that printed restriction the same way a 1x1 does.
+    fn square_area_summon_destinations(
+        &self,
+        minion: &MinionFacts,
+        cells: SquareArea,
+        summon_cell: impl Fn(Cell) -> Option<u64>,
+        anywhere: bool,
+    ) -> Vec<SummonDestination> {
+        let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
+            cells
+                .into_iter()
+                .map(&summon_cell)
+                .collect::<Option<Vec<_>>>()
+                .and_then(|costs| costs.into_iter().min())
+        } else {
+            cells.into_iter().filter_map(summon_cell).min()
+        }) else {
+            return Vec::new();
+        };
+        if !cells
+            .into_iter()
+            .all(|cell| self.surface_location_exists(cell))
+        {
+            return Vec::new();
+        }
+        let destination = |region| SummonDestination {
+            cell: cells[0],
+            cells: Some(cells),
+            mana_cost,
+            region,
+        };
+        let mut destinations = Vec::new();
+        let required = (!anywhere).then_some(minion.required_cast_region).flatten();
+        if required.is_none() {
+            destinations.push(destination(None));
+        }
+        if minion.burrowing
+            && required != Some(RequiredCastRegion::Underwater)
+            && cells
+                .into_iter()
+                .all(|cell| self.underground_location_exists(cell))
+        {
+            destinations.push(destination(Some(LowerRegion::Underground)));
+        }
+        if minion.submerge
+            && required != Some(RequiredCastRegion::Underground)
+            && cells.into_iter().all(|cell| self.is_water_site(cell))
+        {
+            destinations.push(destination(Some(LowerRegion::Underwater)));
+        }
+        destinations
     }
 
     /// The void beside every cell no site or rubble covers, offered only to a Voidwalk minion.
@@ -6423,21 +7901,28 @@ impl Game {
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
     /// site control, mana, thresholds, and the printed casting restrictions.
     fn free_summon_destinations(&self, minion: &MinionFacts) -> Vec<SummonDestination> {
+        let may_enter = |cell: Cell| {
+            self.surface_location_exists(cell)
+                && self.teleport_entry_allowed(
+                    Location {
+                        cell,
+                        region: Region::Surface,
+                    },
+                    minion.attack,
+                )
+        };
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
-                .filter(|cells| cells.iter().all(|cell| self.surface_location_exists(*cell)))
-                .map(|cells| SummonDestination {
-                    cell: cells[0],
-                    cells: Some(cells),
-                    mana_cost: 0,
-                    region: None,
+                .flat_map(|cells| {
+                    let summon_cell = |cell: Cell| may_enter(cell).then_some(0);
+                    self.square_area_summon_destinations(minion, cells, summon_cell, true)
                 })
                 .collect()
         } else {
             let mut destinations = Cell::ALL
                 .into_iter()
-                .filter(|cell| self.surface_location_exists(*cell))
+                .filter(|cell| may_enter(*cell))
                 .flat_map(|cell| self.summon_regions(minion, cell, 0, true))
                 .collect::<Vec<_>>();
             destinations.extend(self.void_summon_destinations(minion, 0, true));
@@ -6449,9 +7934,8 @@ impl Game {
         &self,
         seat: Seat,
         source_instance_id: &IdentityHash,
-        cell: Cell,
+        source_cells: &[Cell],
     ) -> Vec<UnitTarget> {
-        let source_cells = [cell];
         let mut targets = vec![UnitTarget::Minion {
             instance_id: source_instance_id.clone(),
             seat,
@@ -6459,7 +7943,7 @@ impl Game {
         for target_seat in [Seat::North, Seat::South] {
             let player = &self.position.players[seat_index(target_seat)];
             if Self::footprints_here_or_bordering(
-                &source_cells,
+                source_cells,
                 std::slice::from_ref(&player.avatar.location),
             ) {
                 targets.push(UnitTarget::Avatar {
@@ -6475,7 +7959,7 @@ impl Game {
                         unit.controller == target_seat
                             && unit.region == Region::Surface
                             && Self::footprints_here_or_bordering(
-                                &source_cells,
+                                source_cells,
                                 Self::unit_occupied_cells(unit),
                             )
                             && (target_seat == seat || !self.minion_has_active_stealth(unit))
@@ -6496,14 +7980,19 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         cell: Cell,
+        cells: Option<SquareArea>,
         genesis: Option<MinionGenesis>,
     ) -> Vec<(Option<GenesisDamageChoice>, Option<UnitTarget>)> {
         if genesis == Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) {
             std::iter::once((Some(GenesisDamageChoice::Decline), None))
                 .chain(
-                    self.genesis_damage_targets(seat, source_instance_id, cell)
-                        .into_iter()
-                        .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
+                    self.genesis_damage_targets(
+                        seat,
+                        source_instance_id,
+                        Self::summon_occupied_cells(&cell, cells.as_ref()),
+                    )
+                    .into_iter()
+                    .map(|target| (Some(GenesisDamageChoice::Target), Some(target))),
                 )
                 .collect()
         } else {
@@ -6530,7 +8019,7 @@ impl Game {
         &self,
         seat: Seat,
         source_instance_id: &IdentityHash,
-        cell: Cell,
+        source_cells: &[Cell],
         genesis: Option<MinionGenesis>,
         choice: Option<GenesisDamageChoice>,
         target: Option<&UnitTarget>,
@@ -6546,7 +8035,7 @@ impl Game {
                 Some(GenesisDamageChoice::Target),
                 Some(target),
             ) => self
-                .genesis_damage_targets(seat, source_instance_id, cell)
+                .genesis_damage_targets(seat, source_instance_id, source_cells)
                 .contains(target),
             (Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo), _, _) => false,
             (_, None, None) => true,
@@ -6769,6 +8258,9 @@ impl Game {
             } => {
                 self.apply_defend_action(action.seat, *from, path, *to, unit_instance_id, outcomes)
             }
+            ActionDescriptor::DiscardCard { .. } => {
+                self.apply_discard_card_action(action, outcomes)
+            }
             ActionDescriptor::Draw { zone } => {
                 self.apply_draw_action(action.seat, *zone, false, outcomes)
             }
@@ -6887,6 +8379,7 @@ impl Game {
         outcomes.move_tail_before_completion(settlement_start);
         // Magic that owns its own resolution event resumes through its continuation instead.
         let continuing_cast = self.position.pending_cemetery_summon.is_some()
+            || self.position.pending_discard_cards.is_some()
             || matches!(
                 action.descriptor,
                 ActionDescriptor::CastMagic {
@@ -6973,22 +8466,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         };
-        outcomes.push("strike-damage-allocated", || {
-            json!({
-                "amount": strike.amount,
-                "strikerInstanceId": shooter_instance_id,
-                "targetInstanceId": target.instance_id(),
-            })
-        });
         let target_kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
+        let amount = self.nearby_unit_strike_amount(
+            strike.amount,
+            target_kind,
+            target.seat(),
+            target.instance_id(),
+        )?;
+        outcomes.push("strike-damage-allocated", || {
+            json!({
+                "amount": amount,
+                "strikerInstanceId": shooter_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
         let damage = self.apply_simple_damage(
             target_kind,
             target.seat(),
             target.instance_id(),
-            strike.amount,
+            amount,
             UnitDamageSource {
                 current_power: strike.current_power,
                 lethal: strike.lethal,
@@ -7630,12 +9129,29 @@ impl Game {
         Ok(())
     }
 
-    /// Walks a declared defender one cell at a time, settling derived power after each interior
-    /// step so an aura the defender carries away kills its allies where it left them instead of
-    /// being restored by the rest of the path. Returns the path index actually reached.
+    fn minion_occupies(&self, seat: Seat, instance_id: &IdentityHash, location: Location) -> bool {
+        self.position.units.iter().any(|unit| {
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && unit.location == location.cell
+                && unit.region == location.region
+        })
+    }
+
+    fn minion_covers(&self, seat: Seat, instance_id: &IdentityHash, location: Location) -> bool {
+        self.position.units.iter().any(|unit| {
+            unit.controller == seat
+                && unit.card.instance_id == *instance_id
+                && unit.region == location.region
+                && Self::unit_occupies_cell(unit, location.cell)
+        })
+    }
+
+    /// Walks a declared minion one cell at a time, settling region occupancy after every step.
     ///
-    /// The arrival step is deliberately left for the shared post-action settlement, so a defender
-    /// that only strands its allies as it lands still joins the combat before they die.
+    /// Derived power deaths stay on interior steps so an aura the defender carries away kills
+    /// its allies where it left them, while the arrival step still joins combat first. A Waterbound
+    /// that enters the void is banished on that cell, so later path cells are never occupied.
     fn walk_declared_defend_path(
         &mut self,
         seat: Seat,
@@ -7661,6 +9177,18 @@ impl Game {
             }
             self.move_minion_to(unit_instance_id, next)?;
             reached += 1;
+            self.settle_region_occupancy(outcomes)?;
+            if self.position.pending_deathrites.is_some() || self.position.terminal.is_some() {
+                break;
+            }
+            if !self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.controller == seat && unit.card.instance_id == *unit_instance_id)
+            {
+                break;
+            }
             self.settle_nearby_enemy_stealth(outcomes);
             if reached + 1 >= path.len() {
                 break;
@@ -7949,25 +9477,19 @@ impl Game {
         unit_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.phase != Phase::Defend
-            || path.is_empty()
-            || path.first() != Some(&from)
-            || path
-                .iter()
-                .any(|location| location.region != Region::Surface)
-        {
+        if self.position.phase != Phase::Defend || path.is_empty() || path.first() != Some(&from) {
             return Err(GameError::IllegalAction);
         }
-        let pending_cell = self
+        let pending = self
             .position
             .pending_combat
             .as_ref()
-            .ok_or(GameError::IllegalAction)?
-            .cell;
+            .ok_or(GameError::IllegalAction)?;
+        let pending_cell = pending.cell;
         if to
             != (Location {
                 cell: pending_cell,
-                region: Region::Surface,
+                region: pending.region,
             })
         {
             return Err(GameError::IllegalAction);
@@ -8024,9 +9546,12 @@ impl Game {
             UnitKind::Minion => {
                 let reached =
                     self.walk_declared_defend_path(seat, path, unit_instance_id, outcomes)?;
-                // An interrupted defender owes the rest of its path, so the combat it was joining
-                // cannot be restored until that movement finishes.
-                if reached + 1 < path.len() {
+                let still_present = self.position.units.iter().any(|unit| {
+                    unit.controller == seat && unit.card.instance_id == *unit_instance_id
+                });
+                // An interrupted living defender owes the rest of its path, so the combat it was
+                // joining cannot be restored until that movement finishes.
+                if reached + 1 < path.len() && still_present {
                     self.position.pending_basic_movement =
                         PendingField::Pending(PendingBasicMovement {
                             path: path.to_vec(),
@@ -8054,6 +9579,22 @@ impl Game {
                             "to": path[path.len() - 1],
                         })
                     });
+                    return Ok(());
+                }
+                if !self.minion_covers(seat, unit_instance_id, to) {
+                    let reported = &path[..=reached];
+                    let reported_to = *reported.last().ok_or(GameError::IllegalAction)?;
+                    outcomes.insert(joined_start, "defender-moved", || {
+                        json!({
+                            "from": from,
+                            "instanceId": unit_instance_id,
+                            "path": reported,
+                            "seat": seat,
+                            "steps": reached,
+                            "to": reported_to,
+                        })
+                    });
+                    self.position.state_version += 1;
                     return Ok(());
                 }
             }
@@ -8531,18 +10072,9 @@ impl Game {
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
-                let CardFacts::Avatar(facts) =
-                    &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                let bonus = Self::temporary_power_bonus(&avatar.temporary_power_sources)?
-                    .checked_add(self.carried_power_bonus(UnitKind::Avatar, seat, instance_id)?)
-                    .ok_or(GameError::IllegalAction)?;
+                let (attack, _) = self.avatar_current_stats(seat)?;
                 Ok((
-                    u16::from(facts.attack)
-                        .checked_add(bonus)
-                        .ok_or(GameError::IllegalAction)?,
+                    attack,
                     self.carried_lethal(UnitKind::Avatar, seat, instance_id)?,
                 ))
             }
@@ -8602,10 +10134,11 @@ impl Game {
             .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
             .ok_or(GameError::IllegalAction)?;
-        Ok(matches!(
-            &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-            CardFacts::Minion(facts) if facts.strikes_first_while_attacking
-        ))
+        Ok(!unit.temporary_first_strike_sources.is_empty()
+            || matches!(
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                CardFacts::Minion(facts) if facts.strikes_first_while_attacking
+            ))
     }
 
     fn break_lance(
@@ -8811,7 +10344,13 @@ impl Game {
                     .find(|unit| unit.card.instance_id == *target.instance_id())
                     .filter(|unit| !self.minion_is_disabled(unit))
                     .and_then(|unit| {
-                        (unit.carried_lance_count > 0).then(|| target.instance_id().clone())
+                        let strikes_first = unit.carried_lance_count > 0
+                            || !unit.temporary_first_strike_sources.is_empty()
+                            || matches!(
+                                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                                CardFacts::Minion(facts) if facts.strikes_first_while_defending
+                            );
+                        strikes_first.then(|| target.instance_id().clone())
                     })
             })
             .collect::<Vec<_>>();
@@ -8973,15 +10512,20 @@ impl Game {
         let return_damage_sources = return_sources
             .iter()
             .map(|(_, _, strike)| {
-                (
-                    strike.amount,
+                Ok((
+                    self.nearby_unit_strike_amount(
+                        strike.amount,
+                        attacker_kind,
+                        attacking_seat,
+                        &attacker_id,
+                    )?,
                     UnitDamageSource {
                         current_power: strike.current_power,
                         lethal: strike.lethal,
                     },
-                )
+                ))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, GameError>>()?;
         let attacker_damage = if return_damage_sources.is_empty() {
             DamageResult {
                 minion_died: false,
@@ -9012,7 +10556,12 @@ impl Game {
                     kind,
                     target.seat(),
                     target.instance_id(),
-                    allocation.amount,
+                    self.nearby_unit_strike_amount(
+                        allocation.amount,
+                        kind,
+                        target.seat(),
+                        target.instance_id(),
+                    )?,
                     UnitDamageSource {
                         current_power: attacker.current_power,
                         lethal: attacker.lethal,
@@ -9478,8 +11027,11 @@ impl Game {
                 };
                 let has_deathrite = facts.deathrite_damage_each_unit_here.is_some()
                     || facts.deathrite_draw_site
+                    || facts.deathrite_draw_spells
                     || facts.deathrite_heal.is_some()
-                    || facts.deathrite_lose_life_per_nearby_site_controlled;
+                    || facts.deathrite_lose_life_per_nearby_site_controlled
+                    || facts.deathrite_mill_sites
+                    || facts.deathrite_mill_spells;
                 if has_deathrite && !self.minion_is_disabled(unit) {
                     let (current_power, _, lethal) = self.minion_current_stats(unit)?;
                     sources.push(PendingDeathriteSource {
@@ -9547,6 +11099,41 @@ impl Game {
         )
     }
 
+    /// Reveals Stealth on every Disabled minion before region occupancy is judged.
+    ///
+    /// Disabled is a loss of abilities, not a delayed interaction: a Waterbound that leaves
+    /// Water is immediately visible, and the reveal is permanent even if it later returns.
+    fn reveal_disabled_stealth(&mut self, outcomes: &mut OutcomeLog<'_>) {
+        let mut revealed: Vec<(IdentityHash, Seat)> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| unit.stealthed && self.minion_is_disabled(unit))
+            .map(|unit| (unit.card.instance_id.clone(), unit.controller))
+            .collect();
+        revealed.sort_by(|left, right| left.0.cmp(&right.0));
+        for (instance_id, seat) in revealed {
+            let Some(unit) = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            if !unit.stealthed {
+                continue;
+            }
+            unit.stealthed = false;
+            outcomes.push("stealth-lost", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                })
+            });
+        }
+    }
+
     /// Settles every unit whose own region stopped holding it, killing or banishing it.
     ///
     /// Banished units leave before the deaths resolve, but their outcomes follow the death
@@ -9555,6 +11142,7 @@ impl Game {
         if self.position.terminal.is_some() || self.position.pending_deathrites.is_some() {
             return Ok(());
         }
+        self.reveal_disabled_stealth(outcomes);
         let (deaths, banishments) = self.region_settlement_removals();
         if deaths.is_empty() && banishments.is_empty() {
             return Ok(());
@@ -9835,31 +11423,7 @@ impl Game {
         };
         let mut triggered_deaths = Vec::new();
         if let Some(amount) = facts.deathrite_damage_each_unit_here {
-            let source_cell = source.unit.location;
-            let mut targets = Vec::new();
-            for seat in [Seat::North, Seat::South] {
-                let avatar = &self.position.players[seat_index(seat)].avatar;
-                if source.unit.region == Region::Surface && source_cell == avatar.location {
-                    targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
-                }
-            }
-            targets.extend(
-                self.position
-                    .units
-                    .iter()
-                    .filter(|unit| {
-                        unit.region == source.unit.region
-                            && Self::unit_occupies_cell(unit, source_cell)
-                    })
-                    .map(|unit| {
-                        (
-                            unit.card.instance_id.clone(),
-                            UnitKind::Minion,
-                            unit.controller,
-                        )
-                    }),
-            );
-            targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            let targets = self.units_sharing_footprint(&source.unit, false);
             let targets = targets
                 .into_iter()
                 .map(|(instance_id, kind, seat)| {
@@ -9970,6 +11534,36 @@ impl Game {
             } else if !pending.deck_losers.contains(&source.controller) {
                 pending.deck_losers.push(source.controller);
             }
+        }
+        if facts.deathrite_draw_spells {
+            if self.draw_private_card(source.controller, DeckZone::Spellbook) {
+                outcomes.push("spell-drawn", || {
+                    json!({
+                        "seat": source.controller,
+                        "sourceInstanceId": source.instance_id,
+                    })
+                });
+            } else if !pending.deck_losers.contains(&source.controller) {
+                pending.deck_losers.push(source.controller);
+            }
+        }
+        if facts.deathrite_mill_sites {
+            self.apply_mill_library(
+                source.controller,
+                DeckZone::Atlas,
+                1,
+                &source.instance_id,
+                outcomes,
+            );
+        }
+        if facts.deathrite_mill_spells {
+            self.apply_mill_library(
+                source.controller,
+                DeckZone::Spellbook,
+                1,
+                &source.instance_id,
+                outcomes,
+            );
         }
         if !triggered_deaths.is_empty() {
             let (sources, corpses) = self.collect_minion_deaths(&triggered_deaths)?;
@@ -10110,8 +11704,9 @@ impl Game {
                 restore();
                 self.continue_drag_projectile(&continuation, false, outcomes)
             }
-            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_deaths(
+            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_effects(
                 continuation.seat,
+                &continuation.remaining_here_damage_ids,
                 &continuation.remaining_instance_ids,
                 outcomes,
                 None,
@@ -10219,6 +11814,7 @@ impl Game {
     fn clear_ordered_terminal_continuations(&mut self) {
         self.position.pending_basic_movement = PendingField::Absent;
         self.position.pending_cemetery_summon = None;
+        self.position.pending_discard_cards = None;
         self.position.pending_chain_magic = PendingField::Absent;
         self.position.pending_ranged_step = PendingField::Absent;
         self.position.pending_combat = None;
@@ -10406,16 +12002,8 @@ impl Game {
                 outcomes,
             );
         }
-        outcomes.push("move-and-attack-activated", || {
-            json!({
-                "from": from,
-                "path": path,
-                "seat": seat,
-                "steps": path.len() - 1,
-                "to": to,
-                "unitInstanceId": unit_instance_id,
-            })
-        });
+        let activation_start = outcomes.len();
+        let mut reported_path = path.to_vec();
         match attacker_kind {
             UnitKind::Avatar => {
                 let avatar = &mut self.position.players[seat_index(seat)].avatar;
@@ -10423,17 +12011,33 @@ impl Game {
                 avatar.tapped = true;
             }
             UnitKind::Minion => {
-                for location in path.iter().skip(1) {
-                    self.move_minion_to(unit_instance_id, *location)?;
-                    self.settle_nearby_enemy_stealth(outcomes);
-                }
-                self.position
-                    .units
-                    .iter_mut()
-                    .find(|unit| unit.card.instance_id == *unit_instance_id)
-                    .ok_or(GameError::IllegalAction)?
-                    .tapped = true;
+                let reached =
+                    self.walk_declared_defend_path(seat, path, unit_instance_id, outcomes)?;
+                reported_path.truncate(reached + 1);
             }
+        }
+        let reported_to = *reported_path.last().ok_or(GameError::IllegalAction)?;
+        outcomes.insert(activation_start, "move-and-attack-activated", || {
+            json!({
+                "from": from,
+                "path": reported_path,
+                "seat": seat,
+                "steps": reported_path.len() - 1,
+                "to": reported_to,
+                "unitInstanceId": unit_instance_id,
+            })
+        });
+        let arrived = match attacker_kind {
+            UnitKind::Avatar => self.position.players[seat_index(seat)].avatar.location == to.cell,
+            UnitKind::Minion => self.minion_occupies(seat, unit_instance_id, to),
+        };
+        if !arrived || self.position.terminal.is_some() {
+            if self.position.pending_deathrites.is_none() && self.position.terminal.is_none() {
+                self.position.phase = Phase::Main;
+                self.position.decision_seat = self.position.active_seat;
+            }
+            self.position.state_version += 1;
+            return Ok(());
         }
         self.position.pending_combat = Some(PendingCombat {
             allocations: Vec::new(),
@@ -10495,6 +12099,40 @@ impl Game {
             });
         }
         Ok(())
+    }
+
+    fn site_genesis_gain_and_draws(
+        &self,
+        seat: Seat,
+        cell: Cell,
+        card_id: CardId,
+        facts: &SiteFacts,
+    ) -> (Option<u8>, usize) {
+        if self.fate_covers_cell(cell) && !facts.ordinary {
+            return (None, 0);
+        }
+        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
+            (facts.genesis_gain_mana_if_only_controlled_copy
+                && !self
+                    .position
+                    .sites
+                    .iter()
+                    .flatten()
+                    .any(|site| site.controller == seat && site.card.card_id == card_id))
+            .then_some(1)
+        });
+        let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
+            cell.bordering(false)
+                .filter(|neighbor| {
+                    self.position.sites[neighbor.index()]
+                        .as_ref()
+                        .is_some_and(|site| site.card.card_id == card_id)
+                })
+                .count()
+        } else {
+            0
+        };
+        (genesis_gain_mana, genesis_spell_draw_count)
     }
 
     #[expect(
@@ -10576,27 +12214,8 @@ impl Game {
             | (None, None) => {}
             _ => return Err(GameError::IllegalAction),
         }
-        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
-            (facts.genesis_gain_mana_if_only_controlled_copy
-                && !self
-                    .position
-                    .sites
-                    .iter()
-                    .flatten()
-                    .any(|site| site.controller == seat && site.card.card_id == played_card_id))
-            .then_some(1)
-        });
-        let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
-            cell.bordering(false)
-                .filter(|neighbor| {
-                    self.position.sites[neighbor.index()]
-                        .as_ref()
-                        .is_some_and(|site| site.card.card_id == played_card_id)
-                })
-                .count()
-        } else {
-            0
-        };
+        let (genesis_gain_mana, genesis_spell_draw_count) =
+            self.site_genesis_gain_and_draws(seat, cell, played_card_id, facts);
         let replacing_rubble_with_water =
             self.position.rubble[cell.index()].is_some() && facts.elements.contains(Element::Water);
         let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
@@ -10681,9 +12300,11 @@ impl Game {
         let CardFacts::Site(facts) = self.rules.cards[usize::from(card_id.0)].facts.clone() else {
             return Err(GameError::IllegalAction);
         };
+        let abilities_lost = self.fate_covers_cell(cell) && !facts.ordinary;
         self.position.phase = Phase::Main;
         self.position.decision_seat = seat;
-        let paid_token = matches!(genesis_token_choice, Some(GenesisTokenChoice::PayOneMana));
+        let paid_token =
+            !abilities_lost && matches!(genesis_token_choice, Some(GenesisTokenChoice::PayOneMana));
         let token = if paid_token {
             Some(
                 self.create_token_unit(
@@ -10707,7 +12328,7 @@ impl Game {
             .checked_add(u16::from(genesis_gain_mana.unwrap_or(0)))
             .and_then(|mana| mana.checked_sub(u16::from(paid_token)))
             .ok_or(GameError::IllegalAction)?;
-        if facts.genesis_heal_nearby_avatars {
+        if !abilities_lost && facts.genesis_heal_nearby_avatars {
             for healed_seat in [Seat::North, Seat::South] {
                 let avatar_cell = self.position.players[seat_index(healed_seat)]
                     .avatar
@@ -10722,7 +12343,7 @@ impl Game {
                 }
             }
         }
-        if facts.genesis_immobilize_nearby_until_next_turn {
+        if !abilities_lost && facts.genesis_immobilize_nearby_until_next_turn {
             let cells: BTreeSet<Cell> = std::iter::once(cell)
                 .chain(cell.bordering(false))
                 .chain(cell.diagonals(false))
@@ -10765,7 +12386,7 @@ impl Game {
                 })
             });
         }
-        if facts.genesis_enemies_lose_stealth {
+        if !abilities_lost && facts.genesis_enemies_lose_stealth {
             let enemy = other_seat(seat);
             for unit in self
                 .position
@@ -10795,29 +12416,10 @@ impl Game {
                 outcomes,
             );
         }
-        if facts.genesis_discard_top_spells {
-            for _ in 0..2 {
-                let Some(card) = (!self.position.players[player_index].spellbook.is_empty())
-                    .then(|| self.position.players[player_index].spellbook.remove(0))
-                else {
-                    break;
-                };
-                let discarded_card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
-                let instance_id = card.instance_id.clone();
-                let owner = card.owner;
-                self.position.players[player_index].cemetery.push(card);
-                outcomes.push("spell-discarded", || {
-                    json!({
-                        "cardId": discarded_card_id,
-                        "instanceId": instance_id,
-                        "owner": owner,
-                        "seat": seat,
-                        "sourceInstanceId": card_instance_id,
-                    })
-                });
-            }
+        if !abilities_lost && facts.genesis_discard_top_spells {
+            self.apply_mill_library(seat, DeckZone::Spellbook, 2, &card_instance_id, outcomes);
         }
-        if self.position.terminal.is_none() && defer_token {
+        if !abilities_lost && self.position.terminal.is_none() && defer_token {
             self.position.pending_genesis_token = PendingField::Pending(PendingGenesisToken {
                 cell,
                 seat,
@@ -10828,8 +12430,8 @@ impl Game {
         self.begin_hidden_spell_genesis(
             seat,
             &card_instance_id,
-            facts.genesis_may_bottom_next_spell,
-            facts.genesis_reorder_next_spells,
+            !abilities_lost && facts.genesis_may_bottom_next_spell,
+            !abilities_lost && facts.genesis_reorder_next_spells,
         );
         if self.position.terminal.is_none()
             && let Some(rubble_cell) = create_rubble_at
@@ -10917,8 +12519,12 @@ impl Game {
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -10954,22 +12560,11 @@ impl Game {
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
-        if has_unsupported_site_genesis_after_rubble_replacement(facts) {
-            return Err(GameError::UnsupportedManifestFact(
-                "site Genesis after Rubble replacement".to_owned(),
-            ));
-        }
         let replacing_with_water = facts.elements.contains(Element::Water);
         let defer_token = facts.genesis_pay_one_mana_to_summon_token.is_some();
         let compact_card_id = top.card_id;
-        let genesis_gain_mana =
-            facts.genesis_gain_mana.or_else(|| {
-                (facts.genesis_gain_mana_if_only_controlled_copy
-                    && !self.position.sites.iter().flatten().any(|site| {
-                        site.controller == seat && site.card.card_id == compact_card_id
-                    }))
-                .then_some(1)
-            });
+        let (genesis_gain_mana, genesis_spell_draw_count) =
+            self.site_genesis_gain_and_draws(seat, target_cell, compact_card_id, facts);
         let origin_state_version = self.position.state_version;
         let next_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
         let card = self.position.players[player_index].atlas.remove(0);
@@ -11010,7 +12605,7 @@ impl Game {
             defer_token,
             from_top_atlas: true,
             genesis_gain_mana,
-            genesis_spell_draw_count: 0,
+            genesis_spell_draw_count,
             genesis_token_choice: None,
             origin_state_version,
             seat,
@@ -11072,6 +12667,7 @@ impl Game {
                 .any(|cell| cell == target_cell);
         if source.controller != seat
             || !source_facts.sacrifice_to_destroy_nearby_site
+            || self.site_abilities_lost(source_cell)
             || !target_matches
             || !nearby
         {
@@ -11083,7 +12679,7 @@ impl Game {
             else {
                 return Err(GameError::IllegalAction);
             };
-            facts.cannot_be_moved_destroyed_or_modified
+            facts.cannot_be_moved_destroyed_or_modified && !self.site_abilities_lost(target_cell)
         } else {
             false
         };
@@ -11187,6 +12783,7 @@ impl Game {
         if source.controller != seat
             || !facts.fly_to_nearby_void_once_per_turn_at_air_threshold
             || facts.cannot_be_moved_destroyed_or_modified
+            || self.site_abilities_lost(source_cell)
             || source.last_flight_turn == Some(self.position.turn_number)
             || !nearby
             || self.surface_location_exists(target_cell)
@@ -11239,8 +12836,9 @@ impl Game {
         Ok(())
     }
 
-    /// Replaces every destroyed site with Rubble, drains the units its Water layer supported, and
-    /// hands back the destroyed cards with the Rubble identities they left behind.
+    /// Replaces every destroyed site with Rubble, drains the Water layer it supported into the
+    /// relative underground layer for loose Artifacts and units, and hands back the destroyed
+    /// cards with the Rubble identities they left behind.
     #[expect(
         clippy::type_complexity,
         reason = "the caller settles the destroyed cards and the Rubble receipts on separate schedules"
@@ -11271,6 +12869,14 @@ impl Game {
                 unit.region = Region::Underground;
             }
         }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && flooded.contains(location)
+                && *region == Region::Underwater
+            {
+                *region = Region::Underground;
+            }
+        }
         let mut rubble = Vec::with_capacity(destroyed.len());
         let mut destroyed_cards = Vec::with_capacity(destroyed.len());
         for (cell, site) in destroyed {
@@ -11286,6 +12892,303 @@ impl Game {
             rubble.push((cell, rubble_instance_id));
         }
         Ok((destroyed_cards, rubble))
+    }
+
+    fn apply_destroy_target_site(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_site = self.position.sites[cell.index()]
+            .as_ref()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let target_protected = matches!(
+            &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
+            CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+        ) && !self.site_abilities_lost(cell);
+        let owner = target_site.card.owner;
+        outcomes.push(
+            if target_protected {
+                "site-destruction-prevented"
+            } else {
+                "site-destroyed"
+            },
+            || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            },
+        );
+        if target_protected {
+            return Ok(());
+        }
+        let (destroyed_cards, rubble) =
+            self.destroy_sites_into_rubble(vec![(cell, target_site)], source_instance_id)?;
+        self.settle_region_occupancy(outcomes)?;
+        for card in destroyed_cards {
+            self.position.players[seat_index(card.owner)]
+                .cemetery
+                .push(card);
+        }
+        for (rubble_cell, instance_id) in rubble {
+            outcomes.push("rubble-created", || {
+                json!({
+                    "cell": rubble_cell,
+                    "instanceId": instance_id,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    /// Returns a real site to its owner's Atlas hand and remaps surface occupants into the void so
+    /// they banish instead of dying as if stranded on missing terrain.
+    fn apply_return_target_site_to_owner_hand(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_site = self.position.sites[cell.index()]
+            .as_ref()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let target_protected = matches!(
+            &self.rules.cards[usize::from(target_site.card.card_id.0)].facts,
+            CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
+        ) && !self.site_abilities_lost(cell);
+        let owner = target_site.card.owner;
+        let card_id = self.rules.cards[usize::from(target_site.card.card_id.0)]
+            .id
+            .clone();
+        if target_protected {
+            outcomes.push("site-return-prevented", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            return Ok(());
+        }
+        for unit in &mut self.position.units {
+            if unit.location == cell && unit.region == Region::Surface {
+                unit.region = Region::Void;
+                unit.planar_gate_voidwalk = false;
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && *location == cell
+                && *region == Region::Surface
+            {
+                *region = Region::Void;
+            }
+        }
+        let card = target_site.card;
+        self.position.sites[cell.index()] = None;
+        self.position.players[seat_index(owner)]
+            .hand_atlas
+            .push(card);
+        outcomes.push("site-returned-to-hand", || {
+            json!({
+                "cardId": card_id,
+                "cell": cell,
+                "instanceId": target_site_instance_id,
+                "owner": owner,
+                "seat": owner,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        self.settle_region_occupancy(outcomes)?;
+        Ok(())
+    }
+
+    fn take_targeted_artifact(
+        &mut self,
+        instance_id: &IdentityHash,
+    ) -> Result<ArtifactPosition, GameError> {
+        let index = self
+            .position
+            .artifacts
+            .iter()
+            .position(|artifact| artifact.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        Ok(self.position.artifacts.remove(index))
+    }
+
+    fn apply_destroy_target_artifact(
+        &mut self,
+        target_artifact_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self.take_targeted_artifact(target_artifact_instance_id)?;
+        let owner = artifact.card.owner;
+        let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
+            .id
+            .clone();
+        if artifact.card.source == CardSource::Token {
+            outcomes.push("artifact-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(artifact.card);
+            outcomes.push("artifact-destroyed", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
+    fn apply_return_target_artifact_to_owner_hand(
+        &mut self,
+        target_artifact_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self.take_targeted_artifact(target_artifact_instance_id)?;
+        let owner = artifact.card.owner;
+        let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
+            .id
+            .clone();
+        if artifact.card.source == CardSource::Token {
+            outcomes.push("artifact-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .hand_spellbook
+                .push(artifact.card);
+            outcomes.push("artifact-returned-to-hand", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                    "seat": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
+    fn take_targeted_aura(
+        &mut self,
+        instance_id: &IdentityHash,
+    ) -> Result<AuraPosition, GameError> {
+        let index = self
+            .position
+            .auras
+            .iter()
+            .position(|aura| aura.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        Ok(self.position.auras.remove(index))
+    }
+
+    fn apply_destroy_target_aura(
+        &mut self,
+        target_aura_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let owner = aura.card.owner;
+        let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
+            .id
+            .clone();
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != *target_aura_instance_id);
+        if aura.card.source == CardSource::Token {
+            outcomes.push("aura-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(aura.card);
+            outcomes.push("aura-destroyed", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_return_target_aura_to_owner_hand(
+        &mut self,
+        target_aura_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let owner = aura.card.owner;
+        let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
+            .id
+            .clone();
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != *target_aura_instance_id);
+        if aura.card.source == CardSource::Token {
+            outcomes.push("aura-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .hand_spellbook
+                .push(aura.card);
+            outcomes.push("aura-returned-to-hand", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_aura_instance_id,
+                    "owner": owner,
+                    "seat": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
     }
 
     fn begin_hidden_spell_genesis(
@@ -12015,8 +13918,7 @@ impl Game {
 
         let (current_power, lethal) =
             self.combatant_attack_and_lethal(UnitKind::Minion, seat, source_instance_id)?;
-        let selected = self.draw_random_other_unit_here(
-            source_location,
+        let selected = self.draw_random_other_unit_sharing_footprint(
             source_instance_id,
             "discard_spell_random_other_unit_here",
             random_draws,
@@ -12058,6 +13960,37 @@ impl Game {
         }
         self.position.state_version += 1;
         Ok(())
+    }
+
+    /// Draws one hidden random unit sharing the source's whole footprint, excluding it.
+    ///
+    /// Discard-funded random-here uses every occupied cell so a 2x2 can hit an Avatar that shares
+    /// only a non-anchor square. Sparkmage keeps the single-cell nearby-location draw below.
+    fn draw_random_other_unit_sharing_footprint(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        purpose: &str,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let candidates = self.units_sharing_footprint(&source, false);
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        let index = draw_index(
+            &mut self.position.prng,
+            candidates.len(),
+            purpose,
+            "unit_index_candidate",
+            random_draws,
+        )?;
+        Ok(Some(candidates[index].clone()))
     }
 
     /// Draws one hidden random unit sharing a location with an activated source, excluding it.
@@ -12514,10 +14447,13 @@ impl Game {
         Ok(true)
     }
 
-    /// Conjures one Aura across a canonical two-by-two area and raises the area it holds.
+    /// Conjures one Aura across its engine-issued cells.
     ///
-    /// The Aura keeps the area immobilized, and grounds the Airborne minions standing on a site
-    /// inside it, until the controller's third turn ends and dispels it.
+    /// Two-by-two immobilize and Thunderstorm Auras keep that area grounded until the controller's
+    /// third turn ends and dispels them. Flood and Drought use the same 2×2 footprint but do not
+    /// hold the area or count controller turns. A start-turn site destruction Aura occupies one
+    /// Ordinary or Exceptional site. An end-of-each-turn wandering Aura occupies one nearby site,
+    /// remembers visited cells, and does not hold the area.
     fn apply_cast_aura_action(
         &mut self,
         action: &IssuedAction,
@@ -12554,6 +14490,16 @@ impl Game {
         let CardFacts::Aura(facts) = &self.rules.cards[usize::from(compact_card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
+        let effect = facts.effect;
+        let holds_immobilizing_area = matches!(
+            effect,
+            AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns
+                | AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+        );
+        let tracks_visited_cells = matches!(
+            effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        );
         let air = u16::try_from(facts.thresholds.get(Element::Air))
             .map_err(|_| GameError::IllegalAction)?;
         let paid_mana = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
@@ -12570,18 +14516,25 @@ impl Game {
         self.record_unit_interaction(caster_kind, seat, caster_instance_id, outcomes)?;
         let instance_id = card.instance_id.clone();
         let owner = card.owner;
-        self.position.immobile_areas.push(ImmobileArea {
-            cells: cells.iter().copied().collect(),
-            expires_at_seat: None,
-            minions_at_sites_only: true,
-            source_instance_id: instance_id.clone(),
-            suppresses_airborne: true,
-        });
+        if holds_immobilizing_area {
+            self.position.immobile_areas.push(ImmobileArea {
+                cells: cells.iter().copied().collect(),
+                expires_at_seat: None,
+                minions_at_sites_only: true,
+                source_instance_id: instance_id.clone(),
+                suppresses_airborne: true,
+            });
+        }
         self.position.auras.push(AuraPosition {
             card,
-            cells: *cells,
+            cells: cells.clone(),
             controller: seat,
             turn_counters: 0,
+            visited_cells: if tracks_visited_cells {
+                cells.iter().copied().collect()
+            } else {
+                BTreeSet::new()
+            },
         });
         outcomes.push("aura-conjured", || {
             json!({
@@ -12594,8 +14547,192 @@ impl Game {
                 "seat": seat,
             })
         });
+        self.settle_after_terrain_aura(effect, cells, &instance_id, outcomes)?;
         self.position.state_version += 1;
         Ok(())
+    }
+
+    fn settle_after_terrain_aura(
+        &mut self,
+        effect: AuraEffect,
+        cells: &[Cell],
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if !matches!(
+            effect,
+            AuraEffect::AffectedSitesAreFlooded
+                | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+        ) {
+            return Ok(());
+        }
+        if matches!(
+            effect,
+            AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+        ) {
+            self.apply_atlantean_fate_genesis(cells, source_instance_id, outcomes);
+        }
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        Ok(())
+    }
+
+    /// Official Fate Genesis submerges minions and loose Artifacts atop affected non-Ordinary sites.
+    fn apply_atlantean_fate_genesis(
+        &mut self,
+        cells: &[Cell],
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let (minion_ids, artifact_ids) = self.atlantean_fate_surface_occupants(cells);
+        let mut submerged = self.submerge_fate_minions(minion_ids);
+        submerged.extend(self.submerge_fate_artifacts(artifact_ids));
+        Self::emit_fate_submerge_events(submerged, source_instance_id, outcomes);
+    }
+
+    fn atlantean_fate_surface_occupants(
+        &self,
+        cells: &[Cell],
+    ) -> (BTreeSet<IdentityHash>, BTreeSet<IdentityHash>) {
+        let mut minion_ids = BTreeSet::new();
+        let mut artifact_ids = BTreeSet::new();
+        for cell in cells
+            .iter()
+            .copied()
+            .filter(|cell| self.site_abilities_lost(*cell))
+        {
+            for unit in &self.position.units {
+                if unit.region == Region::Surface && Self::unit_occupies_cell(unit, cell) {
+                    minion_ids.insert(unit.card.instance_id.clone());
+                }
+            }
+            for artifact in &self.position.artifacts {
+                if let ArtifactPlacement::Loose {
+                    location,
+                    region: Region::Surface,
+                } = artifact.placement
+                    && location == cell
+                {
+                    artifact_ids.insert(artifact.card.instance_id.clone());
+                }
+            }
+        }
+        (minion_ids, artifact_ids)
+    }
+
+    fn submerge_fate_minions(
+        &mut self,
+        minion_ids: BTreeSet<IdentityHash>,
+    ) -> Vec<(IdentityHash, FateSubmerge)> {
+        let mut submerged = Vec::new();
+        for instance_id in minion_ids {
+            let Some(index) = self
+                .position
+                .units
+                .iter()
+                .position(|unit| unit.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            let occupied = Self::unit_occupied_cells(&self.position.units[index]);
+            if self.position.units[index].region != Region::Surface
+                || !occupied
+                    .iter()
+                    .all(|cell| self.location_exists_in_region(*cell, Region::Underwater))
+            {
+                continue;
+            }
+            self.position.units[index].region = Region::Underwater;
+            let cell = self.position.units[index].location;
+            let seat = self.position.units[index].controller;
+            submerged.push((
+                instance_id.clone(),
+                FateSubmerge::Minion {
+                    cell,
+                    instance_id,
+                    seat,
+                },
+            ));
+        }
+        submerged
+    }
+
+    fn submerge_fate_artifacts(
+        &mut self,
+        artifact_ids: BTreeSet<IdentityHash>,
+    ) -> Vec<(IdentityHash, FateSubmerge)> {
+        let mut submerged = Vec::new();
+        for instance_id in artifact_ids {
+            let Some(index) = self
+                .position
+                .artifacts
+                .iter()
+                .position(|artifact| artifact.card.instance_id == instance_id)
+            else {
+                continue;
+            };
+            let ArtifactPlacement::Loose {
+                location,
+                region: Region::Surface,
+            } = self.position.artifacts[index].placement
+            else {
+                continue;
+            };
+            if !self.location_exists_in_region(location, Region::Underwater) {
+                continue;
+            }
+            let owner = self.position.artifacts[index].card.owner;
+            self.position.artifacts[index].placement = ArtifactPlacement::Loose {
+                location,
+                region: Region::Underwater,
+            };
+            submerged.push((
+                instance_id.clone(),
+                FateSubmerge::Artifact {
+                    cell: location,
+                    instance_id,
+                    owner,
+                },
+            ));
+        }
+        submerged
+    }
+
+    fn emit_fate_submerge_events(
+        mut submerged: Vec<(IdentityHash, FateSubmerge)>,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        submerged.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        for (_, outcome) in submerged {
+            match outcome {
+                FateSubmerge::Minion {
+                    cell,
+                    instance_id,
+                    seat,
+                } => outcomes.push("minion-submerged", || {
+                    json!({
+                        "cell": cell,
+                        "instanceId": instance_id,
+                        "seat": seat,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                }),
+                FateSubmerge::Artifact {
+                    cell,
+                    instance_id,
+                    owner,
+                } => outcomes.push("artifact-submerged", || {
+                    json!({
+                        "cell": cell,
+                        "instanceId": instance_id,
+                        "owner": owner,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                }),
+            }
+        }
     }
 
     fn lucky_charm_count(&self, seat: Seat) -> usize {
@@ -12692,7 +14829,23 @@ impl Game {
                     });
                 }
             }
-            ActionDescriptor::ResolveStartTurnTrigger { .. } => {
+            ActionDescriptor::ResolveStartTurnTrigger {
+                lure_target_instance_id,
+                source_instance_id,
+                ..
+            } => {
+                if lure_target_instance_id.is_some() {
+                    return None;
+                }
+                let unit = self.start_turn_trigger_unit(seat, source_instance_id)?;
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                if !facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
+                    return None;
+                }
                 let candidates = self
                     .random_site_or_void_locations()
                     .into_iter()
@@ -12896,10 +15049,14 @@ impl Game {
                     .find(|candidate| *candidate == outcome_instance_id)
             {
                 let card_id = &self.rules.cards[usize::from(
-                    self.position.players[seat_index(pending.seat)]
-                        .cemetery
-                        .iter()
-                        .find(|card| card.instance_id == *dead)
+                    [Seat::North, Seat::South]
+                        .into_iter()
+                        .find_map(|owner| {
+                            self.position.players[seat_index(owner)]
+                                .cemetery
+                                .iter()
+                                .find(|card| card.instance_id == *dead)
+                        })
                         .expect("dead minion")
                         .card_id
                         .0,
@@ -12946,19 +15103,92 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         for source_instance_id in &pending.remaining_trigger_instance_ids {
-            let descriptor = ActionDescriptor::ResolveStartTurnTrigger {
-                source_instance_id: source_instance_id.clone(),
+            if self
+                .start_turn_site_artifact_life_loss_and_mana(pending.seat, source_instance_id)
+                .is_some()
+            {
+                self.push_simple_start_turn_trigger(
+                    actions,
+                    source_instance_id,
+                    "Resolve start-turn site life loss",
+                );
+                continue;
+            }
+            if self
+                .start_turn_destroy_aura(pending.seat, source_instance_id)
+                .is_some()
+            {
+                self.push_simple_start_turn_trigger(
+                    actions,
+                    source_instance_id,
+                    "Resolve start-turn site destruction",
+                );
+                continue;
+            }
+            let Some(unit) = self.start_turn_trigger_unit(pending.seat, source_instance_id) else {
+                continue;
             };
-            self.push_action(
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if facts.at_start_of_controller_turn_lure_nearby_enemy_minion {
+                let choices = self.start_turn_lure_choices(unit)?;
+                if choices.is_empty() {
+                    self.push_simple_start_turn_trigger(
+                        actions,
+                        source_instance_id,
+                        "Resolve start-turn lure",
+                    );
+                } else {
+                    for (target_instance_id, destination) in choices {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveStartTurnTrigger {
+                                lure_destination: Some(destination),
+                                lure_target_instance_id: Some(target_instance_id.clone()),
+                                source_instance_id: source_instance_id.clone(),
+                            },
+                            format!(
+                                "Lure minion {}… one step toward {}…",
+                                &target_instance_id.as_str()
+                                    [..15.min(target_instance_id.as_str().len())],
+                                &source_instance_id.as_str()
+                                    [..15.min(source_instance_id.as_str().len())]
+                            ),
+                        );
+                    }
+                }
+                continue;
+            }
+            self.push_simple_start_turn_trigger(
                 actions,
-                descriptor,
-                format!(
-                    "Resolve start-turn trigger for {}…",
-                    &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
-                ),
+                source_instance_id,
+                "Resolve start-turn trigger",
             );
         }
         Ok(())
+    }
+
+    fn push_simple_start_turn_trigger(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        source_instance_id: &IdentityHash,
+        label: &str,
+    ) {
+        self.push_action(
+            actions,
+            ActionDescriptor::ResolveStartTurnTrigger {
+                lure_destination: None,
+                lure_target_instance_id: None,
+                source_instance_id: source_instance_id.clone(),
+            },
+            format!(
+                "{label} for {}…",
+                &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
+            ),
+        );
     }
 
     fn append_end_turn_aura_actions(
@@ -13002,30 +15232,54 @@ impl Game {
                 }
             }
             EndTurnAuraStage::Move => {
-                self.push_action(
-                    actions,
-                    ActionDescriptor::ResolveEndTurnAuraMove {
-                        aura_instance_id: aura.card.instance_id.clone(),
-                        cells: None,
-                    },
-                    "Decline end-turn Aura move".to_owned(),
-                );
-                for cells in Self::aura_one_step_areas(aura.cells) {
+                let CardFacts::Aura(facts) =
+                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                if matches!(
+                    facts.effect,
+                    AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+                ) {
+                    for cell in Self::wildfire_unvisited_adjacent(aura) {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveEndTurnAuraMove {
+                                aura_instance_id: aura.card.instance_id.clone(),
+                                cells: Some(vec![cell]),
+                            },
+                            format!("Move Aura to {cell}"),
+                        );
+                    }
+                } else {
                     self.push_action(
                         actions,
                         ActionDescriptor::ResolveEndTurnAuraMove {
                             aura_instance_id: aura.card.instance_id.clone(),
-                            cells: Some(cells),
+                            cells: None,
                         },
-                        format!(
-                            "Move Aura to {}",
-                            cells
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
+                        "Decline end-turn Aura move".to_owned(),
                     );
+                    for cells in Self::aura_covered_square(aura)
+                        .into_iter()
+                        .flat_map(Self::aura_one_step_areas)
+                    {
+                        self.push_action(
+                            actions,
+                            ActionDescriptor::ResolveEndTurnAuraMove {
+                                aura_instance_id: aura.card.instance_id.clone(),
+                                cells: Some(cells.to_vec()),
+                            },
+                            format!(
+                                "Move Aura to {}",
+                                cells
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -13075,7 +15329,11 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
-        let ActionDescriptor::ResolveStartTurnTrigger { source_instance_id } = &action.descriptor
+        let ActionDescriptor::ResolveStartTurnTrigger {
+            lure_destination,
+            lure_target_instance_id,
+            source_instance_id,
+        } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
         };
@@ -13093,10 +15351,213 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         if self
-            .start_turn_trigger_unit(action.seat, source_instance_id)
-            .is_none()
+            .start_turn_destroy_aura(action.seat, source_instance_id)
+            .is_some()
         {
-            return Err(GameError::IllegalAction);
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
+            self.apply_start_turn_destroy_occupied_site(action.seat, source_instance_id, outcomes)?;
+            return Ok(());
+        }
+        if let Some((amount, site_instance_id)) =
+            self.start_turn_site_artifact_life_loss_and_mana(action.seat, source_instance_id)
+        {
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
+            self.apply_avatar_life_loss(
+                action.seat,
+                u16::from(amount),
+                source_instance_id,
+                outcomes,
+            );
+            let player = &mut self.position.players[seat_index(action.seat)];
+            player.mana = player
+                .mana
+                .checked_add(u16::from(amount))
+                .ok_or(GameError::IllegalAction)?;
+            outcomes.push("mana-gained", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            outcomes.push("start-turn-site-life-loss-triggered", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "siteInstanceId": site_instance_id,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        if lure_destination.is_some() || lure_target_instance_id.is_some() {
+            self.apply_start_turn_lure(
+                action.seat,
+                source_instance_id,
+                lure_target_instance_id.as_ref(),
+                *lure_destination,
+                outcomes,
+            )?;
+            return Ok(());
+        }
+        let draw = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts
+                .at_start_of_controller_turn_draw_sites
+                .map(|count| (DeckZone::Atlas, count))
+                .or(facts
+                    .at_start_of_controller_turn_draw_spells
+                    .map(|count| (DeckZone::Spellbook, count)))
+        };
+        if let Some((zone, count)) = draw {
+            self.apply_genesis_draws(action.seat, source_instance_id, zone, count, outcomes);
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let mill = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts
+                .at_start_of_controller_turn_mill_sites
+                .map(|count| (DeckZone::Atlas, count))
+                .or(facts
+                    .at_start_of_controller_turn_mill_spells
+                    .map(|count| (DeckZone::Spellbook, count)))
+        };
+        if let Some((zone, count)) = mill {
+            self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let is_lure = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_lure_nearby_enemy_minion
+        };
+        if is_lure {
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let life_loss = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_controller_loses_life
+        };
+        if let Some(amount) = life_loss {
+            self.apply_avatar_life_loss(
+                action.seat,
+                u16::from(amount),
+                source_instance_id,
+                outcomes,
+            );
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let life_gain = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_controller_gains_life
+        };
+        if let Some(amount) = life_gain {
+            self.heal_avatar(action.seat, u16::from(amount), source_instance_id, outcomes)?;
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let mana_gain = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_controller_gains_mana
+        };
+        if let Some(amount) = mana_gain {
+            let player = &mut self.position.players[seat_index(action.seat)];
+            player.mana = player
+                .mana
+                .checked_add(u16::from(amount))
+                .ok_or(GameError::IllegalAction)?;
+            outcomes.push("mana-gained", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        let here_damage = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_damage_each_other_unit_here
+        };
+        if let Some(amount) = here_damage {
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.apply_here_area_damage(
+                source_instance_id,
+                u16::from(amount),
+                "start-turn-damage-allocated",
+                None,
+                outcomes,
+            )?;
+            self.position.state_version += 1;
+            return Ok(());
         }
         let unit_snapshot = self
             .position
@@ -13200,6 +15661,103 @@ impl Game {
         Ok(())
     }
 
+    fn start_turn_destroy_aura(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+    ) -> Option<&AuraPosition> {
+        let aura = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == *source_instance_id)?;
+        if aura.controller != seat {
+            return None;
+        }
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return None;
+        };
+        matches!(
+            facts.effect,
+            AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+        )
+        .then_some(aura)
+    }
+
+    fn apply_start_turn_destroy_occupied_site(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura_index = self
+            .position
+            .auras
+            .iter()
+            .position(|aura| {
+                aura.card.instance_id == *source_instance_id && aura.controller == seat
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let cell = *self.position.auras[aura_index]
+            .cells
+            .first()
+            .ok_or(GameError::IllegalAction)?;
+        let victims = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.region == Region::Surface && Self::unit_occupied_cells(unit).contains(&cell)
+            })
+            .map(|unit| unit.card.instance_id.clone())
+            .collect::<Vec<_>>();
+        let aura = self.position.auras.remove(aura_index);
+        let owner = aura.card.owner;
+        let controller = aura.controller;
+        let instance_id = aura.card.instance_id.clone();
+        self.position.players[seat_index(owner)]
+            .cemetery
+            .push(aura.card);
+        outcomes.push("aura-dispelled", || {
+            json!({
+                "instanceId": instance_id,
+                "owner": owner,
+                "seat": controller,
+                "sourceInstanceId": instance_id,
+            })
+        });
+        self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+        if let Some(site) = self.position.sites[cell.index()].clone() {
+            self.apply_destroy_target_site(
+                cell,
+                &site.card.instance_id,
+                source_instance_id,
+                outcomes,
+            )?;
+        }
+        let remaining_victims = victims
+            .into_iter()
+            .filter(|instance_id| {
+                self.position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == *instance_id)
+            })
+            .collect::<Vec<_>>();
+        if !remaining_victims.is_empty() && self.position.pending_deathrites.is_none() {
+            self.begin_minion_deaths(
+                &remaining_victims,
+                &[],
+                self.position.phase,
+                self.position.decision_seat,
+                outcomes,
+            )?;
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
     fn start_turn_trigger_unit(
         &self,
         seat: Seat,
@@ -13217,20 +15775,181 @@ impl Game {
         else {
             return None;
         };
-        facts
-            .at_start_of_controller_turn_teleport_to_random_site_or_void
-            .then_some(unit)
+        (facts
+            .at_start_of_controller_turn_controller_gains_life
+            .is_some()
+            || facts
+                .at_start_of_controller_turn_controller_gains_mana
+                .is_some()
+            || facts
+                .at_start_of_controller_turn_controller_loses_life
+                .is_some()
+            || facts
+                .at_start_of_controller_turn_damage_each_other_unit_here
+                .is_some()
+            || facts.at_start_of_controller_turn_teleport_to_random_site_or_void
+            || facts.at_start_of_controller_turn_lure_nearby_enemy_minion
+            || facts.at_start_of_controller_turn_draw_sites.is_some()
+            || facts.at_start_of_controller_turn_draw_spells.is_some()
+            || facts.at_start_of_controller_turn_mill_sites.is_some()
+            || facts.at_start_of_controller_turn_mill_spells.is_some())
+        .then_some(unit)
+    }
+
+    fn start_turn_lure_choices(
+        &self,
+        source: &UnitPosition,
+    ) -> Result<Vec<(IdentityHash, Location)>, GameError> {
+        let source_cells = Self::unit_occupied_cells(source);
+        let enemy_seat = other_seat(source.controller);
+        let mut choices = Vec::new();
+        for enemy in &self.position.units {
+            if enemy.controller != enemy_seat
+                || enemy.region != source.region
+                || self.minion_is_disabled(enemy)
+            {
+                continue;
+            }
+            let enemy_cells = Self::unit_occupied_cells(enemy);
+            if !Self::footprints_nearby(source_cells, enemy_cells) {
+                continue;
+            }
+            let from = Location {
+                cell: enemy.location,
+                region: enemy.region,
+            };
+            let starting_distance = minimum_cardinal_distance(enemy_cells, source_cells);
+            let target = UnitTarget::Minion {
+                instance_id: enemy.card.instance_id.clone(),
+                seat: enemy_seat,
+            };
+            let mut added = false;
+            for destination in self.card_effect_step_destinations(&target, from)? {
+                let destination_cells = match enemy.occupied_cells {
+                    Some(area) => translated_square(area, from.cell, destination.cell)
+                        .ok_or(GameError::IllegalAction)?
+                        .to_vec(),
+                    None => vec![destination.cell],
+                };
+                if minimum_cardinal_distance(&destination_cells, source_cells) >= starting_distance
+                {
+                    continue;
+                }
+                choices.push((enemy.card.instance_id.clone(), destination));
+                added = true;
+            }
+            if !added {
+                choices.push((enemy.card.instance_id.clone(), from));
+            }
+        }
+        Ok(choices)
+    }
+
+    fn apply_start_turn_lure(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        target_instance_id: Option<&IdentityHash>,
+        destination: Option<Location>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .start_turn_trigger_unit(seat, source_instance_id)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(source.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !facts.at_start_of_controller_turn_lure_nearby_enemy_minion {
+            return Err(GameError::IllegalAction);
+        }
+        let (Some(target_instance_id), Some(destination)) = (target_instance_id, destination)
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if !self
+            .start_turn_lure_choices(&source)?
+            .iter()
+            .any(|(candidate, to)| candidate == target_instance_id && *to == destination)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let enemy = UnitTarget::Minion {
+            instance_id: target_instance_id.clone(),
+            seat: other_seat(seat),
+        };
+        let from = self.unit_target_location(&enemy)?;
+        let to = self.move_unit_target_to(&enemy, destination)?;
+        let path = if to == from {
+            vec![from]
+        } else {
+            vec![from, to]
+        };
+        outcomes.push("unit-lured", || {
+            json!({
+                "allyInstanceId": source_instance_id,
+                "from": from,
+                "path": path,
+                "seat": other_seat(seat),
+                "sourceInstanceId": source_instance_id,
+                "steps": path.len() - 1,
+                "targetInstanceId": target_instance_id,
+                "to": to,
+            })
+        });
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_static_power_deaths(outcomes)?;
+        self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
     }
 
     fn start_turn_trigger_instance_ids(&self, seat: Seat) -> Vec<IdentityHash> {
-        self.position
+        let mut ids = self
+            .position
             .units
             .iter()
             .filter_map(|unit| {
                 self.start_turn_trigger_unit(seat, &unit.card.instance_id)
                     .map(|unit| unit.card.instance_id.clone())
             })
-            .collect()
+            .collect::<Vec<_>>();
+        ids.extend(self.position.auras.iter().filter_map(|aura| {
+            self.start_turn_destroy_aura(seat, &aura.card.instance_id)
+                .map(|aura| aura.card.instance_id.clone())
+        }));
+        ids.extend(self.position.artifacts.iter().filter_map(|artifact| {
+            self.start_turn_site_artifact_life_loss_and_mana(seat, &artifact.card.instance_id)
+                .map(|_| artifact.card.instance_id.clone())
+        }));
+        ids
+    }
+
+    /// An Artifact whose current Surface site is controlled by the starting seat grants that site
+    /// "at the start of your turn, lose N life and gain (N) this turn."
+    fn start_turn_site_artifact_life_loss_and_mana(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+    ) -> Option<(u8, IdentityHash)> {
+        let artifact = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *source_instance_id)?;
+        let ArtifactEffect::AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(amount) =
+            self.artifact_facts(artifact).ok()?.effect
+        else {
+            return None;
+        };
+        let location = self.artifact_location(artifact).ok()?;
+        if location.region != Region::Surface {
+            return None;
+        }
+        let site = self.position.sites[location.cell.index()].as_ref()?;
+        (site.controller == seat).then(|| (amount, site.card.instance_id.clone()))
     }
 
     fn finish_start_turn_trigger(
@@ -13248,6 +15967,12 @@ impl Game {
             .filter(|instance_id| {
                 self.start_turn_trigger_unit(pending.seat, instance_id)
                     .is_some()
+                    || self
+                        .start_turn_destroy_aura(pending.seat, instance_id)
+                        .is_some()
+                    || self
+                        .start_turn_site_artifact_life_loss_and_mana(pending.seat, instance_id)
+                        .is_some()
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -13269,22 +15994,31 @@ impl Game {
         Ok(())
     }
 
-    fn end_turn_damage_aura_ids(&self, seat: Seat) -> Vec<IdentityHash> {
+    fn end_turn_aura_triggers(&self, aura: &AuraPosition, ending_seat: Seat) -> bool {
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        match facts.effect {
+            AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree => {
+                aura.controller == ending_seat
+            }
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree => true,
+            AuraEffect::AffectedSitesAreFlooded
+            | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+            | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+            | AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+            | AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns => {
+                false
+            }
+        }
+    }
+
+    fn end_turn_damage_aura_ids(&self, ending_seat: Seat) -> Vec<IdentityHash> {
         self.position
             .auras
             .iter()
-            .filter(|aura| {
-                if aura.controller != seat {
-                    return false;
-                }
-                let CardFacts::Aura(facts) =
-                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
-                else {
-                    return false;
-                };
-                facts.effect
-                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
-            })
+            .filter(|aura| self.end_turn_aura_triggers(aura, ending_seat))
             .map(|aura| aura.card.instance_id.clone())
             .collect()
     }
@@ -13346,16 +16080,7 @@ impl Game {
     ) -> Result<(), GameError> {
         let Some(index) = aura_instance_ids.iter().position(|instance_id| {
             self.position.auras.iter().any(|aura| {
-                if aura.card.instance_id != *instance_id || aura.controller != seat {
-                    return false;
-                }
-                let CardFacts::Aura(facts) =
-                    &self.rules.cards[usize::from(aura.card.card_id.0)].facts
-                else {
-                    return false;
-                };
-                facts.effect
-                    == AuraEffect::AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree
+                aura.card.instance_id == *instance_id && self.end_turn_aura_triggers(aura, seat)
             })
         }) else {
             return self.finish_end_turn_cleanup(seat, outcomes);
@@ -13369,6 +16094,21 @@ impl Game {
             .find(|aura| aura.card.instance_id == aura_instance_id)
             .ok_or(GameError::IllegalAction)?
             .clone();
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        if matches!(
+            facts.effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        ) {
+            return self.begin_wildfire_end_turn(
+                seat,
+                &aura,
+                &remaining_aura_instance_ids,
+                outcomes,
+            );
+        }
         outcomes.push("aura-end-turn-triggered", || {
             json!({
                 "cells": aura.cells,
@@ -13388,6 +16128,7 @@ impl Game {
             });
             self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
                 aura_instance_id,
+                ending_seat: seat,
                 outcome_instance_ids: None,
                 remaining_aura_instance_ids,
                 seat,
@@ -13412,6 +16153,7 @@ impl Game {
             )?;
             self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
                 aura_instance_id,
+                ending_seat: seat,
                 outcome_instance_ids: Some(outcome_instance_ids),
                 remaining_aura_instance_ids,
                 seat,
@@ -13440,6 +16182,7 @@ impl Game {
         }
         self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
             aura_instance_id,
+            ending_seat: seat,
             outcome_instance_ids: None,
             remaining_aura_instance_ids,
             seat,
@@ -13520,6 +16263,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let remaining = pending.remaining_aura_instance_ids.clone();
+        let ending_seat = pending.ending_seat;
         self.resolve_end_turn_aura_damage(&aura, target, outcomes)?;
         if self.position.terminal.is_some() {
             self.position.pending_end_turn_aura = None;
@@ -13529,6 +16273,7 @@ impl Game {
         }
         self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
             aura_instance_id: aura_instance_id.clone(),
+            ending_seat,
             outcome_instance_ids: None,
             remaining_aura_instance_ids: remaining,
             seat: action.seat,
@@ -13562,17 +16307,37 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        let legal_move = cells.is_none()
-            || self
-                .position
-                .auras
-                .iter()
-                .find(|aura| aura.card.instance_id == *aura_instance_id)
-                .is_some_and(|aura| {
-                    cells.is_some_and(|destination| {
-                        Self::aura_one_step_areas(aura.cells).contains(&destination)
+        let Some(aura) = self
+            .position
+            .auras
+            .iter()
+            .find(|aura| aura.card.instance_id == *aura_instance_id)
+            .cloned()
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let CardFacts::Aura(facts) = &self.rules.cards[usize::from(aura.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let is_wildfire = matches!(
+            facts.effect,
+            AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
+        );
+        let legal_move = if is_wildfire {
+            cells.as_ref().is_some_and(|destination| {
+                matches!(destination.as_slice(), [cell] if Self::wildfire_unvisited_adjacent(&aura)
+                    .contains(cell))
+            })
+        } else {
+            cells.is_none()
+                || cells.as_ref().is_some_and(|destination| {
+                    Self::vec_as_square(destination).is_some_and(|square| {
+                        Self::aura_covered_square(&aura)
+                            .is_some_and(|area| Self::aura_one_step_areas(area).contains(&square))
                     })
-                });
+                })
+        };
         if !legal_move {
             return Err(GameError::IllegalAction);
         }
@@ -13583,7 +16348,10 @@ impl Game {
                 .iter_mut()
                 .find(|aura| aura.card.instance_id == *aura_instance_id)
             {
-                aura.cells = *destination;
+                if is_wildfire && let Some(cell) = destination.first() {
+                    aura.visited_cells.insert(*cell);
+                }
+                aura.cells.clone_from(destination);
             }
             if let Some(area) = self
                 .position
@@ -13612,11 +16380,22 @@ impl Game {
         }
         self.position.state_version += 1;
         self.begin_end_turn_aura(
-            action.seat,
+            pending.ending_seat,
             &pending.remaining_aura_instance_ids,
             outcomes,
             None,
         )
+    }
+
+    fn aura_covered_square(aura: &AuraPosition) -> Option<SquareArea> {
+        Self::vec_as_square(&aura.cells)
+    }
+
+    fn vec_as_square(cells: &[Cell]) -> Option<SquareArea> {
+        match cells {
+            [a, b, c, d] => Some([*a, *b, *c, *d]),
+            _ => None,
+        }
     }
 
     fn aura_one_step_areas(cells: SquareArea) -> Vec<SquareArea> {
@@ -13628,6 +16407,154 @@ impl Game {
             .collect()
     }
 
+    fn wildfire_unvisited_adjacent(aura: &AuraPosition) -> Vec<Cell> {
+        let Some(current) = aura.cells.first().copied() else {
+            return Vec::new();
+        };
+        current
+            .bordering(false)
+            .filter(|cell| !aura.visited_cells.contains(cell))
+            .collect()
+    }
+
+    fn begin_wildfire_end_turn(
+        &mut self,
+        ending_seat: Seat,
+        aura: &AuraPosition,
+        remaining_aura_instance_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let aura_instance_id = aura.card.instance_id.clone();
+        let controller = aura.controller;
+        outcomes.push("aura-end-turn-triggered", || {
+            json!({
+                "cells": aura.cells,
+                "instanceId": aura_instance_id,
+                "seat": controller,
+                "sourceInstanceId": aura_instance_id,
+            })
+        });
+        let Some(cell) = aura.cells.first().copied() else {
+            return Err(GameError::IllegalAction);
+        };
+        let destinations = Self::wildfire_unvisited_adjacent(aura);
+        if !destinations.is_empty() {
+            self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
+                aura_instance_id: aura_instance_id.clone(),
+                ending_seat,
+                outcome_instance_ids: None,
+                remaining_aura_instance_ids: remaining_aura_instance_ids.to_vec(),
+                seat: controller,
+                stage: EndTurnAuraStage::Move,
+            });
+            self.position.decision_seat = controller;
+        }
+        self.damage_each_unit_here_for_wildfire(&aura_instance_id, cell, outcomes)?;
+        if self.position.terminal.is_some() {
+            self.position.pending_end_turn_aura = None;
+            self.position.phase = Phase::Terminal;
+            self.position.state_version += 1;
+            return Ok(());
+        }
+        if destinations.is_empty() {
+            self.dispel_aura(&aura_instance_id, outcomes)?;
+            return self.begin_end_turn_aura(
+                ending_seat,
+                remaining_aura_instance_ids,
+                outcomes,
+                None,
+            );
+        }
+        if self.position.pending_deathrites.is_none() {
+            self.position.phase = Phase::EndTurnAura;
+            self.position.decision_seat = controller;
+        }
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn damage_each_unit_here_for_wildfire(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let targets = self.units_at_location(Location {
+            cell,
+            region: Region::Surface,
+        });
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, target_seat) in targets {
+            outcomes.push("aura-end-turn-damage-allocated", || {
+                json!({
+                    "amount": 3,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+            let result = self.apply_simple_damage(
+                kind,
+                target_seat,
+                &target_instance_id,
+                3,
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                defeated_avatars.push(target_seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::EndTurnAura,
+                self.position.decision_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn dispel_aura(
+        &mut self,
+        aura_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let index = self
+            .position
+            .auras
+            .iter()
+            .position(|aura| aura.card.instance_id == *aura_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let aura = self.position.auras.remove(index);
+        let owner = aura.card.owner;
+        let controller = aura.controller;
+        let instance_id = aura.card.instance_id.clone();
+        self.position.players[seat_index(owner)]
+            .cemetery
+            .push(aura.card);
+        self.position
+            .immobile_areas
+            .retain(|area| area.source_instance_id != instance_id);
+        outcomes.push("aura-dispelled", || {
+            json!({
+                "instanceId": instance_id,
+                "owner": owner,
+                "seat": controller,
+                "sourceInstanceId": instance_id,
+            })
+        });
+        Ok(())
+    }
+
     fn apply_cast_artifact_action(
         &mut self,
         action: &IssuedAction,
@@ -13635,12 +16562,12 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::CastArtifact {
             bearer,
+            bearer_cell,
             card_id,
             card_instance_id,
             caster_instance_id,
             cell,
             mana_cost,
-            ..
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -13659,6 +16586,7 @@ impl Game {
         let placement = match (bearer, cell) {
             (Some(bearer), _) => ArtifactPlacement::Carried {
                 bearer: bearer.clone(),
+                cell: *bearer_cell,
             },
             (None, Some(cell)) => ArtifactPlacement::Loose {
                 location: *cell,
@@ -13711,6 +16639,9 @@ impl Game {
                     payload["bearerInstanceId"] = json!(bearer.instance_id());
                     payload["bearerKind"] = json!(bearer.kind());
                     payload["bearerSeat"] = json!(bearer.seat());
+                    if let Some(cell) = bearer_cell {
+                        payload["cell"] = json!(cell);
+                    }
                 }
                 (None, Some(cell)) => {
                     payload["cell"] = json!(cell);
@@ -13731,8 +16662,8 @@ impl Game {
     ) -> Result<(), GameError> {
         let ActionDescriptor::PickUpArtifacts {
             artifact_instance_ids,
+            cell,
             unit,
-            ..
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -13750,6 +16681,7 @@ impl Game {
             if selected.contains(&artifact.card.instance_id) {
                 artifact.placement = ArtifactPlacement::Carried {
                     bearer: unit.clone(),
+                    cell: *cell,
                 };
             }
         }
@@ -13791,8 +16723,12 @@ impl Game {
         let selected: BTreeSet<_> = artifact_instance_ids.iter().cloned().collect();
         for artifact in &mut self.position.artifacts {
             if selected.contains(&artifact.card.instance_id) {
+                let location = match &artifact.placement {
+                    ArtifactPlacement::Carried { cell, .. } => cell.unwrap_or(fell_at.cell),
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location,
                     region: fell_at.region,
                 };
             }
@@ -13849,7 +16785,7 @@ impl Game {
         Ok(())
     }
 
-    /// Releases every Artifact the unit carried onto the location where it stood.
+    /// Releases every Artifact the unit carried onto the cell it occupied, or the bearer's cell.
     fn release_carried_artifacts(
         &mut self,
         kind: UnitKind,
@@ -13861,20 +16797,24 @@ impl Game {
         let mut dropped = Vec::new();
         for artifact in &mut self.position.artifacts {
             if artifact.carried_by(kind, seat, instance_id) {
+                let cell = match &artifact.placement {
+                    ArtifactPlacement::Carried { cell, .. } => cell.unwrap_or(fell_at.cell),
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location: cell,
                     region: fell_at.region,
                 };
-                dropped.push(artifact.card.clone());
+                dropped.push((artifact.card.clone(), cell));
             }
         }
-        for card in dropped {
+        for (card, cell) in dropped {
             let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
             outcomes.push("artifact-dropped", || {
                 json!({
                     "bearerInstanceId": instance_id,
                     "cardId": card_id,
-                    "cell": fell_at.cell,
+                    "cell": cell,
                     "instanceId": card.instance_id,
                     "owner": card.owner,
                     "region": fell_at.region,
@@ -13897,15 +16837,18 @@ impl Game {
         let ActionDescriptor::CastMagic {
             ally,
             ally_destination,
+            ally_destination_cells,
             ally_strike_location,
             card_id,
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            discard_card_instance_id,
             discard_site_instance_id,
             draw_zone,
             target,
             target_artifact_instance_id,
+            target_aura_instance_id,
             target_location,
             target_site_instance_id,
             tempted_destination,
@@ -13937,22 +16880,29 @@ impl Game {
         };
         if facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
-            || !self
-                .magic_choices(seat, caster_instance_id, &facts.effect)?
-                .contains(&MagicChoice {
+            || !{
+                let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
+                if facts.discard_card_as_additional_cost {
+                    choices = self.with_chosen_hand_discard(seat, card_instance_id, choices);
+                }
+                choices.contains(&MagicChoice {
                     ally: ally.clone(),
                     ally_destination: *ally_destination,
+                    ally_destination_cells: *ally_destination_cells,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    discard_card_instance_id: discard_card_instance_id.clone(),
                     discard_site_instance_id: discard_site_instance_id.clone(),
                     draw_zone: *draw_zone,
                     target: target.clone(),
                     target_artifact_instance_id: target_artifact_instance_id.clone(),
+                    target_aura_instance_id: target_aura_instance_id.clone(),
                     target_location: *target_location,
                     target_site_instance_id: target_site_instance_id.clone(),
                     tempted_destination: *tempted_destination,
                     tempted_enemy: tempted_enemy.clone(),
                 })
+            }
         {
             return Err(GameError::IllegalAction);
         }
@@ -14088,9 +17038,23 @@ impl Game {
             });
             self.position.players[player_index].cemetery.push(discarded);
         }
-        let card = self.position.players[player_index]
-            .hand_spellbook
-            .remove(hand_index);
+        if let Some(discard_card_instance_id) = discard_card_instance_id {
+            self.pay_chosen_hand_discard(
+                seat,
+                discard_card_instance_id,
+                card_instance_id,
+                outcomes,
+            )?;
+        }
+        let card = {
+            let player = &mut self.position.players[player_index];
+            let hand_index = player
+                .hand_spellbook
+                .iter()
+                .position(|card| card.instance_id == *card_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            player.hand_spellbook.remove(hand_index)
+        };
         let compact_card_id = card.card_id;
         let owner = card.owner;
         let player = &mut self.position.players[player_index];
@@ -14107,6 +17071,9 @@ impl Game {
             });
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
+            }
+            if let Some(discard_card_instance_id) = discard_card_instance_id {
+                payload["discardCardInstanceId"] = json!(discard_card_instance_id);
             }
             if let Some(discard_site_instance_id) = discard_site_instance_id {
                 payload["discardSiteInstanceId"] = json!(discard_site_instance_id);
@@ -14127,6 +17094,9 @@ impl Game {
             }
             if let Some(target_artifact_instance_id) = target_artifact_instance_id {
                 payload["targetArtifactInstanceId"] = json!(target_artifact_instance_id);
+            }
+            if let Some(target_aura_instance_id) = target_aura_instance_id {
+                payload["targetAuraInstanceId"] = json!(target_aura_instance_id);
             }
             if let Some(target_location) = target_location {
                 payload["targetLocation"] = json!(target_location);
@@ -14150,6 +17120,142 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::HealTargetMinion(amount) => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_heal_target_minion(
+                    instance_id,
+                    *target_seat,
+                    amount,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::GrantStealthToTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_grant_stealth_minion(
+                    instance_id,
+                    *target_seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::GrantWardToTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_grant_ward_minion(
+                    instance_id,
+                    *target_seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::TapTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_tap_minion(instance_id, *target_seat, seat, card_instance_id, outcomes)?;
+            }
+            MagicEffect::UntapTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_untap_minion(instance_id, *target_seat, card_instance_id, outcomes)?;
+            }
+            MagicEffect::TargetPlayerDiscardsCards(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                raising =
+                    self.begin_discard_cards(target_seat, count, card_id, card_instance_id, owner);
+            }
+            MagicEffect::TargetPlayerGainsLife(amount) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.heal_avatar(target_seat, u16::from(amount), card_instance_id, outcomes)?;
+            }
+            MagicEffect::TargetPlayerLosesLife(amount) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_avatar_life_loss(
+                    target_seat,
+                    u16::from(amount),
+                    card_instance_id,
+                    outcomes,
+                );
+            }
+            MagicEffect::MillSites(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_mill_library(
+                    target_seat,
+                    DeckZone::Atlas,
+                    count,
+                    card_instance_id,
+                    outcomes,
+                );
+            }
+            MagicEffect::MillSpells(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_mill_library(
+                    target_seat,
+                    DeckZone::Spellbook,
+                    count,
+                    card_instance_id,
+                    outcomes,
+                );
+            }
+            MagicEffect::TargetPlayerDrawsSites(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_genesis_draws(
+                    target_seat,
+                    card_instance_id,
+                    DeckZone::Atlas,
+                    count,
+                    outcomes,
+                );
+            }
+            MagicEffect::TargetPlayerDrawsSpells(count) => {
+                let target_seat = self.targeted_avatar_seat(target.as_ref())?;
+                self.apply_genesis_draws(
+                    target_seat,
+                    card_instance_id,
+                    DeckZone::Spellbook,
+                    count,
+                    outcomes,
+                );
+            }
+            MagicEffect::DrawSites(count) => {
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
+            }
+            MagicEffect::DrawSpells(count) => {
+                self.apply_genesis_draws(
+                    seat,
+                    card_instance_id,
+                    DeckZone::Spellbook,
+                    count,
+                    outcomes,
+                );
+            }
             MagicEffect::SummonRandomMinionFromAnyCemetery => {
                 raising = self.begin_cemetery_summon(
                     CemeterySummonRequest {
@@ -14166,27 +17272,133 @@ impl Game {
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
-                    let player = &mut self.position.players[player_index];
-                    let selected_index = player
-                        .cemetery
-                        .iter()
-                        .position(|card| card.instance_id == *selected_id)
-                        .ok_or(GameError::IllegalAction)?;
-                    let selected = player.cemetery.remove(selected_index);
-                    let selected_card_id =
-                        self.rules.cards[usize::from(selected.card_id.0)].id.clone();
-                    let selected_owner = selected.owner;
-                    player.hand_spellbook.push(selected);
-                    outcomes.push("minion-returned-to-hand", || {
-                        json!({
-                            "cardId": selected_card_id,
-                            "instanceId": selected_id,
-                            "owner": selected_owner,
-                            "seat": seat,
-                            "sourceInstanceId": card_instance_id,
-                        })
-                    });
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Minion,
+                        outcomes,
+                    )?;
                 }
+            }
+            MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Artifact,
+                        outcomes,
+                    )?;
+                }
+            }
+            MagicEffect::ReturnTargetAuraFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Aura,
+                        outcomes,
+                    )?;
+                }
+            }
+            MagicEffect::ReturnTargetMagicFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Magic,
+                        outcomes,
+                    )?;
+                }
+            }
+            MagicEffect::ReturnTargetSiteFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Site,
+                        outcomes,
+                    )?;
+                }
+            }
+            MagicEffect::GrantAirborneToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_airborne_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("airborne-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+            MagicEffect::GrantFirstStrikeToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_first_strike_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("first-strike-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+            MagicEffect::GrantLethalToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_lethal_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("lethal-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
             }
             MagicEffect::GrantChargeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
@@ -14206,6 +17418,31 @@ impl Game {
                         .push(card_instance_id.clone());
                 }
                 outcomes.push("charge-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+            MagicEffect::GrantRangedToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_ranged_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("ranged-granted", || {
                     json!({
                         "instanceId": ally.instance_id(),
                         "seat": ally.seat(),
@@ -14267,58 +17504,31 @@ impl Game {
             }
             MagicEffect::TeleportAllyToTargetSite => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
                 let target_site_instance_id = target_site_instance_id
                     .as_ref()
-                    .ok_or(GameError::IllegalAction)?
-                    .clone();
-                let from = self.unit_target_location(ally)?;
-                let to = self.move_unit_target_to(ally, destination)?;
-                if to != from {
-                    let instance_id = ally.instance_id().clone();
-                    let ally_seat = ally.seat();
-                    let source_instance_id = card_instance_id.clone();
-                    outcomes.push("unit-teleported", || {
-                        json!({
-                            "from": from,
-                            "seat": ally_seat,
-                            "sourceInstanceId": source_instance_id,
-                            "targetInstanceId": instance_id,
-                            "targetSiteInstanceId": target_site_instance_id,
-                            "to": to,
-                        })
-                    });
-                    self.settle_region_occupancy(outcomes)?;
-                    self.settle_static_power_deaths(outcomes)?;
-                }
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_ally_teleport(
+                    ally,
+                    target_location,
+                    *ally_destination_cells,
+                    Some(target_site_instance_id),
+                    card_instance_id,
+                    outcomes,
+                )?;
             }
             MagicEffect::TeleportNearbyAllyThenDrawCard => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 let destination = target_location.ok_or(GameError::IllegalAction)?;
                 let zone = draw_zone.ok_or(GameError::IllegalAction)?;
-                let from = self.unit_target_location(ally)?;
-                let to = self.move_unit_target_to(ally, destination)?;
-                if to != from {
-                    let instance_id = ally.instance_id().clone();
-                    let ally_seat = ally.seat();
-                    let source_instance_id = card_instance_id.clone();
-                    let site_instance_id = target_site_instance_id.clone();
-                    outcomes.push("unit-teleported", || {
-                        let mut payload = json!({
-                            "from": from,
-                            "seat": ally_seat,
-                            "sourceInstanceId": source_instance_id,
-                            "targetInstanceId": instance_id,
-                            "to": to,
-                        });
-                        if let Some(site_instance_id) = site_instance_id {
-                            payload["targetSiteInstanceId"] = json!(site_instance_id);
-                        }
-                        payload
-                    });
-                    self.settle_region_occupancy(outcomes)?;
-                    self.settle_static_power_deaths(outcomes)?;
-                }
+                self.apply_ally_teleport(
+                    ally,
+                    destination,
+                    *ally_destination_cells,
+                    target_site_instance_id.as_ref(),
+                    card_instance_id,
+                    outcomes,
+                )?;
                 let continuation = BlinkContinuation {
                     card_id: card_id.clone(),
                     instance_id: card_instance_id.clone(),
@@ -14694,6 +17904,8 @@ impl Game {
                             || json!({ "instanceId": instance_id, "seat": target_seat }),
                         );
                     } else {
+                        let from_seat = *target_seat;
+                        let transferred_id = instance_id.clone();
                         unit.controller = seat;
                         outcomes.push("minion-control-changed", || {
                             json!({
@@ -14703,11 +17915,79 @@ impl Game {
                                 "sourceInstanceId": card_instance_id,
                             })
                         });
+                        self.retarget_carried_minion_artifacts(&transferred_id, from_seat, seat);
                         self.settle_static_power_deaths(outcomes)?;
                     }
                 }
             }
-            MagicEffect::KillTargetWoundedMinion => {
+            MagicEffect::ReturnTargetMinionToOwnerHand => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let index = self
+                    .position
+                    .units
+                    .iter()
+                    .position(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                // A Ward absorbs the bounce outright, even when its own controller casts the Magic.
+                if self.position.units[index].warded {
+                    self.position.units[index].warded = false;
+                    outcomes.push(
+                        "ward-broken",
+                        || json!({ "instanceId": instance_id, "seat": target_seat }),
+                    );
+                } else {
+                    let unit = self.position.units.remove(index);
+                    let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
+                        .id
+                        .clone();
+                    let owner = unit.card.owner;
+                    let token = unit.card.source == CardSource::Token;
+                    let fell_at = Location {
+                        cell: unit.location,
+                        region: unit.region,
+                    };
+                    let controller = unit.controller;
+                    self.release_carried_artifacts(
+                        UnitKind::Minion,
+                        controller,
+                        instance_id,
+                        fell_at,
+                        outcomes,
+                    );
+                    if token {
+                        outcomes.push("minion-banished", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                            })
+                        });
+                    } else {
+                        self.position.players[seat_index(owner)]
+                            .hand_spellbook
+                            .push(unit.card);
+                        outcomes.push("minion-returned-to-hand", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                                "seat": owner,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                    }
+                    self.settle_static_power_deaths(outcomes)?;
+                }
+            }
+            MagicEffect::KillTargetMinion | MagicEffect::KillTargetWoundedMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
                     seat: target_seat,
@@ -14850,22 +18130,12 @@ impl Game {
                     else {
                         return Err(GameError::IllegalAction);
                     };
-                    let unit = self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| unit.card.instance_id == target_instance_id)
-                        .ok_or(GameError::IllegalAction)?;
-                    if unit.tapped {
-                        unit.tapped = false;
-                        outcomes.push("minion-untapped", || {
-                            json!({
-                                "instanceId": target_instance_id,
-                                "seat": target_seat,
-                                "sourceInstanceId": card_instance_id,
-                            })
-                        });
-                    }
+                    self.apply_untap_minion(
+                        &target_instance_id,
+                        *target_seat,
+                        card_instance_id,
+                        outcomes,
+                    )?;
                 }
             }
             MagicEffect::DamageEachAbovegroundMinionOne => {
@@ -14998,6 +18268,70 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DestroyTargetSite => {
+                let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_site(
+                    cell,
+                    target_site_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::ReturnTargetSiteToOwnerHand => {
+                let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                let target_site_instance_id = target_site_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_site_to_owner_hand(
+                    cell,
+                    target_site_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::DestroyTargetArtifact => {
+                let target_artifact_instance_id = target_artifact_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_artifact(
+                    target_artifact_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::ReturnTargetArtifactToOwnerHand => {
+                let target_artifact_instance_id = target_artifact_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_artifact_to_owner_hand(
+                    target_artifact_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::DestroyTargetAura => {
+                let target_aura_instance_id = target_aura_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_aura(
+                    target_aura_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::ReturnTargetAuraToOwnerHand => {
+                let target_aura_instance_id = target_aura_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_aura_to_owner_hand(
+                    target_aura_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DestroyTargetSiteWithDamageGrid(grid) => {
                 let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
                 let target_site_instance_id = target_site_instance_id
@@ -15017,7 +18351,7 @@ impl Game {
                     matches!(
                         &self.rules.cards[usize::from(site.card.card_id.0)].facts,
                         CardFacts::Site(facts) if facts.cannot_be_moved_destroyed_or_modified
-                    )
+                    ) && !self.site_abilities_lost(cell)
                 });
                 let targets = self.site_grid_damage_targets(cell, grid);
                 let statuses = targets
@@ -15196,6 +18530,56 @@ impl Game {
             return Ok(());
         }
         self.finish_leap_attack(&continuation, outcomes)
+    }
+
+    fn apply_ally_teleport(
+        &mut self,
+        ally: &UnitTarget,
+        target_location: Location,
+        destination_cells: Option<SquareArea>,
+        target_site_instance_id: Option<&IdentityHash>,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let from = self.unit_target_location(ally)?;
+        let occupied = self.unit_target_occupied_cells(ally)?.to_vec();
+        let destination = destination_cells.map_or(target_location, |cells| Location {
+            cell: cells[0],
+            region: target_location.region,
+        });
+        let arrival =
+            destination_cells.map_or_else(|| vec![destination.cell], |cells| cells.to_vec());
+        let stays = from.region == destination.region
+            && occupied.len() == arrival.len()
+            && occupied
+                .iter()
+                .zip(arrival.iter())
+                .all(|(left, right)| left == right);
+        if stays {
+            return Ok(());
+        }
+        let to = self.move_unit_target_to(ally, destination)?;
+        let instance_id = ally.instance_id().clone();
+        let ally_seat = ally.seat();
+        outcomes.push("unit-teleported", || {
+            let mut payload = json!({
+                "from": from,
+                "seat": ally_seat,
+                "sourceInstanceId": source_instance_id,
+                "targetInstanceId": instance_id,
+                "to": to,
+            });
+            if let Some(site_instance_id) = &target_site_instance_id {
+                payload["targetSiteInstanceId"] = json!(site_instance_id);
+            }
+            if let Some(cells) = destination_cells {
+                payload["cells"] = json!(cells);
+            }
+            payload
+        });
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
     }
 
     fn move_unit_target_to(
@@ -15503,18 +18887,8 @@ impl Game {
         let sacrifice_payment_matches = if sacrifices.is_empty() {
             false
         } else {
-            let mut sacrifice_candidates = self
-                .position
-                .units
-                .iter()
-                .filter(|unit| {
-                    unit.controller == seat
-                        && unit.region == Region::Surface
-                        && Self::unit_occupies_cell(unit, *cell)
-                })
-                .map(|unit| unit.card.instance_id.clone())
-                .collect::<Vec<_>>();
-            sacrifice_candidates.sort_unstable();
+            let sacrifice_candidates =
+                self.sacrifice_minions_at_summoning_location(seat, *cell, cells.as_ref());
             let useful_sacrifice_count = usize::try_from(destination.mana_cost.div_ceil(2))
                 .unwrap_or(usize::MAX)
                 .min(sacrifice_candidates.len());
@@ -15557,7 +18931,7 @@ impl Game {
             || !self.valid_genesis_damage_choice(
                 seat,
                 card_instance_id,
-                *cell,
+                Self::summon_occupied_cells(cell, cells.as_ref()),
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),
@@ -15896,7 +19270,7 @@ impl Game {
             || !self.valid_genesis_damage_choice(
                 seat,
                 card_instance_id,
-                *cell,
+                Self::summon_occupied_cells(cell, cells.as_ref()),
                 genesis,
                 *genesis_damage_choice,
                 genesis_damage_target.as_ref(),
@@ -15959,32 +19333,7 @@ impl Game {
                 self.heal_avatar(seat, 2, source_instance_id, outcomes)?;
             }
             Some(MinionGenesis::LoseControllerLifeTwo) => {
-                let player = &mut self.position.players[seat_index(seat)];
-                let old_life = player.avatar.life;
-                player.avatar.life = old_life.saturating_sub(2);
-                let amount = old_life - player.avatar.life;
-                if amount > 0 {
-                    let life = player.avatar.life;
-                    outcomes.push("avatar-life-lost", || {
-                        json!({
-                            "amount": amount,
-                            "life": life,
-                            "seat": seat,
-                            "sourceInstanceId": source_instance_id,
-                        })
-                    });
-                    if life == 0 {
-                        player.avatar.death_door_turn = Some(self.position.turn_number);
-                        let turn_number = self.position.turn_number;
-                        outcomes.push("avatar-reached-deaths-door", || {
-                            json!({
-                                "seat": seat,
-                                "sourceInstanceId": source_instance_id,
-                                "turnNumber": turn_number,
-                            })
-                        });
-                    }
-                }
+                self.apply_avatar_life_loss(seat, 2, source_instance_id, outcomes);
             }
             Some(MinionGenesis::DisableSelfUntilDamaged) => {
                 let unit = self
@@ -16076,6 +19425,16 @@ impl Game {
         strike: bool,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if !strike {
+            self.apply_here_area_damage(
+                source_instance_id,
+                1,
+                "genesis-damage-allocated",
+                None,
+                outcomes,
+            )?;
+            return Ok(());
+        }
         let source = self
             .position
             .units
@@ -16091,9 +19450,88 @@ impl Game {
             source.controller,
             source_instance_id,
         )?;
-        let amount = if strike { current_power } else { 1 };
         let targets = self
-            .units_sharing_footprint(&source, strike)
+            .units_sharing_footprint(&source, true)
+            .into_iter()
+            .map(|(instance_id, kind, seat)| {
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(&instance_id)?)
+                } else {
+                    None
+                };
+                let allocated =
+                    self.nearby_unit_strike_amount(current_power, kind, seat, &instance_id)?;
+                Ok((instance_id, kind, seat, status, allocated))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (target_instance_id, _, _, _, allocated) in &targets {
+            outcomes.push("strike-damage-allocated", || {
+                json!({
+                    "amount": allocated,
+                    "strikerInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (target_instance_id, kind, seat, status, allocated) in targets {
+            let result = self.apply_simple_damage_with_status(
+                kind,
+                seat,
+                &target_instance_id,
+                allocated,
+                UnitDamageSource {
+                    current_power,
+                    lethal,
+                },
+                status,
+                outcomes,
+            )?;
+            if result.minion_died {
+                dead_minions.push(target_instance_id);
+            }
+            if result.avatar_defeated && !defeated_avatars.contains(&seat) {
+                defeated_avatars.push(seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                self.position.phase,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn apply_here_area_damage(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        amount: u16,
+        allocation_event: &'static str,
+        continuation: Option<DeathriteContinuation>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        if self.minion_is_disabled(&source) {
+            return Ok(false);
+        }
+        let (current_power, lethal) = self.combatant_attack_and_lethal(
+            UnitKind::Minion,
+            source.controller,
+            source_instance_id,
+        )?;
+        let targets = self
+            .units_sharing_footprint(&source, false)
             .into_iter()
             .map(|(instance_id, kind, seat)| {
                 let status = if kind == UnitKind::Minion {
@@ -16105,25 +19543,13 @@ impl Game {
             })
             .collect::<Result<Vec<_>, GameError>>()?;
         for (target_instance_id, _, _, _) in &targets {
-            outcomes.push(
-                if strike {
-                    "strike-damage-allocated"
-                } else {
-                    "genesis-damage-allocated"
-                },
-                || {
-                    let mut payload = json!({
-                        "amount": amount,
-                        "targetInstanceId": target_instance_id,
-                    });
-                    payload[if strike {
-                        "strikerInstanceId"
-                    } else {
-                        "sourceInstanceId"
-                    }] = json!(source_instance_id);
-                    payload
-                },
-            );
+            outcomes.push(allocation_event, || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": target_instance_id,
+                })
+            });
         }
         let mut dead_minions = Vec::new();
         let mut defeated_avatars = Vec::new();
@@ -16148,15 +19574,17 @@ impl Game {
             }
         }
         if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
-            self.begin_minion_deaths(
+            self.begin_minion_deaths_with_continuation(
                 &dead_minions,
                 &defeated_avatars,
-                Phase::Main,
+                self.position.phase,
                 self.position.active_seat,
+                continuation,
                 outcomes,
             )?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn apply_targeted_genesis_damage(
@@ -16210,6 +19638,188 @@ impl Game {
         Ok(())
     }
 
+    fn apply_grant_stealth_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if !unit.stealthed {
+            unit.stealthed = true;
+            outcomes.push("minion-stealthed", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_grant_ward_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if !unit.warded {
+            unit.warded = true;
+            outcomes.push("minion-warded", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_tap_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.warded && seat != caster_seat {
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+            return Ok(());
+        }
+        if !unit.tapped {
+            unit.tapped = true;
+            outcomes.push("minion-tapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_heal_target_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        attempted_amount: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        let attempted = u16::from(attempted_amount);
+        let amount = unit.damage.min(attempted);
+        if amount > 0 {
+            unit.damage -= amount;
+            let damage = unit.damage;
+            outcomes.push("minion-healed", || {
+                json!({
+                    "amount": amount,
+                    "attemptedAmount": attempted,
+                    "damage": damage,
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_untap_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.tapped {
+            unit.tapped = false;
+            outcomes.push("minion-untapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_avatar_life_loss(
+        &mut self,
+        seat: Seat,
+        attempted: u16,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let player = &mut self.position.players[seat_index(seat)];
+        let old_life = player.avatar.life;
+        player.avatar.life = old_life.saturating_sub(attempted);
+        let amount = old_life - player.avatar.life;
+        if amount == 0 {
+            return;
+        }
+        let life = player.avatar.life;
+        outcomes.push("avatar-life-lost", || {
+            json!({
+                "amount": amount,
+                "life": life,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        if life == 0 {
+            player.avatar.death_door_turn = Some(self.position.turn_number);
+            let turn_number = self.position.turn_number;
+            outcomes.push("avatar-reached-deaths-door", || {
+                json!({
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                    "turnNumber": turn_number,
+                })
+            });
+        }
+    }
+
     fn heal_avatar(
         &mut self,
         seat: Seat,
@@ -16243,6 +19853,48 @@ impl Game {
             });
         }
         Ok(())
+    }
+
+    fn apply_mill_library(
+        &mut self,
+        seat: Seat,
+        zone: DeckZone,
+        count: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let player_index = seat_index(seat);
+        for _ in 0..count {
+            let Some(card) = ({
+                let library = match zone {
+                    DeckZone::Atlas => &mut self.position.players[player_index].atlas,
+                    DeckZone::Spellbook => &mut self.position.players[player_index].spellbook,
+                };
+                (!library.is_empty()).then(|| library.remove(0))
+            }) else {
+                break;
+            };
+            let discarded_card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
+            let instance_id = card.instance_id.clone();
+            let owner = card.owner;
+            self.position.players[player_index].cemetery.push(card);
+            outcomes.push(
+                if zone == DeckZone::Atlas {
+                    "site-discarded"
+                } else {
+                    "spell-discarded"
+                },
+                || {
+                    json!({
+                        "cardId": discarded_card_id,
+                        "instanceId": instance_id,
+                        "owner": owner,
+                        "seat": seat,
+                        "sourceInstanceId": source_instance_id,
+                    })
+                },
+            );
+        }
     }
 
     fn apply_genesis_draws(
@@ -16282,6 +19934,23 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         self.resolve_end_of_each_turn_site_controller_life_loss(seat, outcomes)?;
+        self.resolve_end_of_controller_turn_controller_life(seat, outcomes)?;
+        let pulses: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts)
+                        if facts.at_end_of_controller_turn_damage_each_other_unit_here.is_some()
+                )
+                .then(|| unit.card.instance_id.clone())
+            })
+            .collect();
         let triggered: Vec<_> = self
             .position
             .units
@@ -16297,8 +19966,45 @@ impl Game {
                 .then(|| unit.card.instance_id.clone())
             })
             .collect();
-        self.continue_end_turn_deaths(seat, &triggered, outcomes, random_draws)?;
+        self.continue_end_turn_effects(seat, &pulses, &triggered, outcomes, random_draws)?;
         self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn resolve_end_of_controller_turn_controller_life(
+        &mut self,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter_map(|unit| {
+                if unit.controller != seat || self.minion_is_disabled(unit) {
+                    return None;
+                }
+                let CardFacts::Minion(facts) =
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                else {
+                    return None;
+                };
+                if let Some(amount) = facts.at_end_of_controller_turn_controller_gains_life {
+                    Some((unit.card.instance_id.clone(), amount, true))
+                } else {
+                    facts
+                        .at_end_of_controller_turn_controller_loses_life
+                        .map(|amount| (unit.card.instance_id.clone(), amount, false))
+                }
+            })
+            .collect();
+        for (instance_id, amount, gain) in sources {
+            if gain {
+                self.heal_avatar(seat, u16::from(amount), &instance_id, outcomes)?;
+            } else {
+                self.apply_avatar_life_loss(seat, u16::from(amount), &instance_id, outcomes);
+            }
+        }
         Ok(())
     }
 
@@ -16388,6 +20094,51 @@ impl Game {
         Ok(())
     }
 
+    fn continue_end_turn_effects(
+        &mut self,
+        seat: Seat,
+        remaining_pulse_ids: &[IdentityHash],
+        remaining_death_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+    ) -> Result<(), GameError> {
+        for (index, instance_id) in remaining_pulse_ids.iter().enumerate() {
+            let Some(amount) = self.end_turn_here_damage_amount(seat, instance_id) else {
+                continue;
+            };
+            let began_deaths = self.apply_here_area_damage(
+                instance_id,
+                u16::from(amount),
+                "end-turn-damage-allocated",
+                Some(DeathriteContinuation::EndTurn(EndTurnContinuation {
+                    remaining_here_damage_ids: remaining_pulse_ids[index + 1..].to_vec(),
+                    remaining_instance_ids: remaining_death_ids.to_vec(),
+                    seat,
+                })),
+                outcomes,
+            )?;
+            if began_deaths || self.position.terminal.is_some() {
+                return Ok(());
+            }
+        }
+        self.continue_end_turn_deaths(seat, remaining_death_ids, outcomes, random_draws)
+    }
+
+    fn end_turn_here_damage_amount(&self, seat: Seat, instance_id: &IdentityHash) -> Option<u8> {
+        let unit = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *instance_id)?;
+        if unit.controller != seat || self.minion_is_disabled(unit) {
+            return None;
+        }
+        match &self.rules.cards[usize::from(unit.card.card_id.0)].facts {
+            CardFacts::Minion(facts) => facts.at_end_of_controller_turn_damage_each_other_unit_here,
+            _ => None,
+        }
+    }
+
     fn continue_end_turn_deaths(
         &mut self,
         seat: Seat,
@@ -16410,6 +20161,7 @@ impl Game {
                 Phase::Main,
                 seat,
                 Some(DeathriteContinuation::EndTurn(EndTurnContinuation {
+                    remaining_here_damage_ids: Vec::new(),
                     remaining_instance_ids: remaining_instance_ids[index + 1..].to_vec(),
                     seat,
                 })),
@@ -16468,7 +20220,7 @@ impl Game {
                 };
                 match facts.end_turn_stealth {
                     Some(EndTurnStealth::Always) => true,
-                    Some(EndTurnStealth::IfNoEnemiesNearby) => !self.has_nearby_enemy_minion(unit),
+                    Some(EndTurnStealth::IfNoEnemiesNearby) => !self.has_nearby_enemy(unit),
                     None => false,
                 }
             })
@@ -16506,12 +20258,68 @@ impl Game {
                     })
             })
             .collect();
+        let expired_airborne_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_airborne_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let expired_charge_sources: Vec<_> = self
             .position
             .units
             .iter()
             .flat_map(|unit| {
                 unit.temporary_charge_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
+        let expired_first_strike_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_first_strike_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
+        let expired_lethal_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_lethal_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
+        let expired_ranged_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_ranged_sources.iter().map(|source| {
                     (
                         unit.card.instance_id.clone(),
                         unit.controller,
@@ -16555,10 +20363,31 @@ impl Game {
                 })
             });
         }
+        let stay_tapped: BTreeSet<_> = self
+            .position
+            .units
+            .iter()
+            .zip(&disabled_units)
+            .filter_map(|(unit, disabled)| {
+                if unit.controller != next_seat || *disabled || !unit.tapped {
+                    return None;
+                }
+                matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts)
+                        if facts.does_not_untap_during_controllers_start_phase
+                )
+                .then(|| unit.card.instance_id.clone())
+            })
+            .collect();
         for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
+            unit.temporary_airborne_sources.clear();
             unit.temporary_charge_sources.clear();
+            unit.temporary_first_strike_sources.clear();
+            unit.temporary_lethal_sources.clear();
             unit.temporary_power_sources.clear();
+            unit.temporary_ranged_sources.clear();
             if unit.controller == seat {
                 if gains_stealth {
                     unit.stealthed = true;
@@ -16569,7 +20398,8 @@ impl Game {
                     );
                 }
                 unit.summoning_sickness = false;
-            } else if unit.controller == next_seat {
+            } else if unit.controller == next_seat && !stay_tapped.contains(&unit.card.instance_id)
+            {
                 unit.tapped = false;
             }
         }
@@ -16601,8 +20431,44 @@ impl Game {
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
+        for (instance_id, controller, source_instance_id) in expired_airborne_sources {
+            outcomes.push("airborne-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_first_strike_sources {
+            outcomes.push("first-strike-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_lethal_sources {
+            outcomes.push("lethal-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_ranged_sources {
+            outcomes.push("ranged-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -16764,6 +20630,18 @@ impl Game {
                     }),
                 );
             }
+            if let Some(pending) = &self.position.pending_discard_cards {
+                object.insert(
+                    "pendingDiscardCards".to_owned(),
+                    json!({
+                        "remaining": pending.remaining,
+                        "seat": pending.seat,
+                        "sourceCardId": pending.source_card_id,
+                        "sourceInstanceId": pending.source_instance_id,
+                        "sourceOwner": pending.source_owner,
+                    }),
+                );
+            }
         }
         self.insert_realm_artifacts(&mut value);
         if !self.position.auras.is_empty() {
@@ -16771,16 +20649,7 @@ impl Game {
                 .position
                 .auras
                 .iter()
-                .map(|aura| {
-                    json!({
-                        "cardId": self.rules.cards[usize::from(aura.card.card_id.0)].id,
-                        "cells": aura.cells,
-                        "controller": aura.controller,
-                        "instanceId": aura.card.instance_id,
-                        "owner": aura.card.owner,
-                        "turnCounters": aura.turn_counters,
-                    })
-                })
+                .map(|aura| self.aura_public_value(aura))
                 .collect();
         }
         if !self.position.immobile_areas.is_empty() {
@@ -16954,11 +20823,18 @@ impl Game {
                 "shooter": continuation.shooter,
                 "target": continuation.target,
             }),
-            DeathriteContinuation::EndTurn(continuation) => json!({
-                "kind": "end-turn",
-                "remainingInstanceIds": continuation.remaining_instance_ids,
-                "seat": continuation.seat,
-            }),
+            DeathriteContinuation::EndTurn(continuation) => {
+                let mut value = json!({
+                    "kind": "end-turn",
+                    "remainingInstanceIds": continuation.remaining_instance_ids,
+                    "seat": continuation.seat,
+                });
+                if !continuation.remaining_here_damage_ids.is_empty() {
+                    value["remainingHereDamageInstanceIds"] =
+                        json!(continuation.remaining_here_damage_ids);
+                }
+                value
+            }
             DeathriteContinuation::FirstStrike(continuation) => json!({
                 "attackerStrikesFirst": continuation.attacker_struck,
                 "firstCombatantInstanceIds": continuation.first_combatant_instance_ids,
@@ -17182,8 +21058,11 @@ impl Game {
         let mut value = self.card_value(&artifact.card);
         if let Value::Object(object) = &mut value {
             match &artifact.placement {
-                ArtifactPlacement::Carried { bearer } => {
+                ArtifactPlacement::Carried { bearer, cell } => {
                     object.insert("bearer".to_owned(), json!(bearer));
+                    if let Some(cell) = cell {
+                        object.insert("bearerCell".to_owned(), json!(cell));
+                    }
                 }
                 ArtifactPlacement::Loose { location, region } => {
                     object.insert("location".to_owned(), json!(location));
@@ -17259,16 +21138,40 @@ impl Game {
                 json!(unit.carried_lance_count),
             );
         }
+        if !unit.temporary_airborne_sources.is_empty() {
+            object.insert(
+                "temporaryAirborneSources".to_owned(),
+                json!(unit.temporary_airborne_sources),
+            );
+        }
         if !unit.temporary_charge_sources.is_empty() {
             object.insert(
                 "temporaryChargeSources".to_owned(),
                 json!(unit.temporary_charge_sources),
             );
         }
+        if !unit.temporary_first_strike_sources.is_empty() {
+            object.insert(
+                "temporaryFirstStrikeSources".to_owned(),
+                json!(unit.temporary_first_strike_sources),
+            );
+        }
+        if !unit.temporary_lethal_sources.is_empty() {
+            object.insert(
+                "temporaryLethalSources".to_owned(),
+                json!(unit.temporary_lethal_sources),
+            );
+        }
         if !unit.temporary_power_sources.is_empty() {
             object.insert(
                 "temporaryPowerSources".to_owned(),
                 json!(unit.temporary_power_sources),
+            );
+        }
+        if !unit.temporary_ranged_sources.is_empty() {
+            object.insert(
+                "temporaryRangedSources".to_owned(),
+                json!(unit.temporary_ranged_sources),
             );
         }
         value
@@ -17801,7 +21704,7 @@ mod tests {
     }
 
     #[test]
-    fn rubble_replacement_support_should_be_scoped_to_its_owners_atlas() {
+    fn rubble_replacement_should_admit_site_genesis_on_the_owners_atlas() {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
                 json!(true);
@@ -17817,15 +21720,14 @@ mod tests {
                 json!(true);
             manifest["cards"]["north-site-1"]["genesisHealNearbyAvatars"] = json!(3);
         });
-        assert!(matches!(
-            Game::from_manifest_json(&same_deck)
-                .expect("valid same-deck game")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "genesisHealNearbyAvatars"
-        ));
+        Game::from_manifest_json(&same_deck)
+            .expect("valid same-deck game")
+            .ensure_selfplay_supported()
+            .expect("Geomancer Atlas Genesis is self-play safe");
     }
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn supported_magic_effects_should_be_selfplay_supported() {
         for (effect, facts) in [
             (
@@ -17839,6 +21741,18 @@ mod tests {
             (
                 MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(3),
                 json!({ "damageEachUnitAtLocationWithinTwoSteps": 3 }),
+            ),
+            (
+                MagicEffect::DestroyTargetArtifact,
+                json!({ "destroyTargetArtifact": true }),
+            ),
+            (
+                MagicEffect::DestroyTargetAura,
+                json!({ "destroyTargetAura": true }),
+            ),
+            (
+                MagicEffect::DestroyTargetSite,
+                json!({ "destroyTargetSite": true }),
             ),
             (
                 MagicEffect::DestroyTargetSiteWithDamageGrid([10, 7, 4, 2, 1]),
@@ -17855,6 +21769,86 @@ mod tests {
             (
                 MagicEffect::LeapAttackAlly,
                 json!({ "leapAttackAlly": true }),
+            ),
+            (MagicEffect::DrawSites(2), json!({ "drawSites": 2 })),
+            (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
+            (MagicEffect::MillSites(2), json!({ "millSites": 2 })),
+            (MagicEffect::MillSpells(2), json!({ "millSpells": 2 })),
+            (
+                MagicEffect::TargetPlayerDrawsSites(1),
+                json!({ "targetPlayerDrawsSites": 1 }),
+            ),
+            (
+                MagicEffect::TargetPlayerDrawsSpells(1),
+                json!({ "targetPlayerDrawsSpells": 1 }),
+            ),
+            (
+                MagicEffect::KillTargetMinion,
+                json!({ "killTargetMinion": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetArtifactToOwnerHand,
+                json!({ "returnTargetArtifactToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetAuraToOwnerHand,
+                json!({ "returnTargetAuraToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetArtifactFromOwnCemetery,
+                json!({ "returnTargetArtifactFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetAuraFromOwnCemetery,
+                json!({ "returnTargetAuraFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetMagicFromOwnCemetery,
+                json!({ "returnTargetMagicFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetMinionToOwnerHand,
+                json!({ "returnTargetMinionToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetSiteFromOwnCemetery,
+                json!({ "returnTargetSiteFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetSiteToOwnerHand,
+                json!({ "returnTargetSiteToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::TargetPlayerDiscardsCards(1),
+                json!({ "targetPlayerDiscardsCards": 1 }),
+            ),
+            (
+                MagicEffect::TargetPlayerGainsLife(2),
+                json!({ "targetPlayerGainsLife": 2 }),
+            ),
+            (
+                MagicEffect::TargetPlayerLosesLife(2),
+                json!({ "targetPlayerLosesLife": 2 }),
+            ),
+            (
+                MagicEffect::GrantStealthToTargetMinion,
+                json!({ "grantStealthToTargetMinion": true }),
+            ),
+            (
+                MagicEffect::GrantWardToTargetMinion,
+                json!({ "grantWardToTargetMinion": true }),
+            ),
+            (
+                MagicEffect::TapTargetMinion,
+                json!({ "tapTargetMinion": true }),
+            ),
+            (
+                MagicEffect::UntapTargetMinion,
+                json!({ "untapTargetMinion": true }),
+            ),
+            (
+                MagicEffect::HealTargetMinion(1),
+                json!({ "healTargetMinion": 1 }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
@@ -18218,6 +22212,85 @@ mod tests {
         .expect("valid random teleport manifest")
         .ensure_selfplay_supported()
         .expect("start-turn random teleport is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnDrawSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw spells is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnDrawSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw sites is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnLureNearbyEnemyMinion",
+            json!(true),
+        )]))
+        .expect("valid start-turn lure manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn lure is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnMillSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill spells is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnMillSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill sites is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteDrawSpells", json!(true))]))
+            .expect("valid Deathrite spell-draw manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell draw is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSpells", json!(true))]))
+            .expect("valid Deathrite spell-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell mill is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSites", json!(true))]))
+            .expect("valid Deathrite site-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite site mill is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atEndOfControllerTurnControllerGainsLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-gain manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life gain is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-loss manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life loss is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "doesNotUntapDuringControllersStartPhase",
+            json!(true),
+        )]))
+        .expect("valid does-not-untap manifest")
+        .ensure_selfplay_supported()
+        .expect("does not untap during Start Phase is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
+            .expect("valid must-attack manifest")
+            .ensure_selfplay_supported()
+            .expect("must attack a unit if able is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "enemiesMustAttackThisIfAble",
+            json!(true),
+        )]))
+        .expect("valid forced-attack source manifest")
+        .ensure_selfplay_supported()
+        .expect("enemies must attack this if able is self-play safe");
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {
@@ -18278,6 +22351,54 @@ mod tests {
             .expect("valid Bury plus Lethal Artifact manifest")
             .ensure_selfplay_supported()
             .expect("Bury with Lethal Artifacts is self-play safe");
+
+        let nearby_must_attack_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_must_attack_artifact, false))
+            .expect("valid nearby-must-attack Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby-must-attack Artifacts are self-play safe");
+        let nearby_double_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_double_artifact, false))
+            .expect("valid nearby-double-strike Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby double-strike Artifacts are self-play safe");
+        let mask_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&mask_artifact, false))
+            .expect("valid composed Mask Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("composed nearby-must-attack and double-strike Artifacts are self-play safe");
+
+        let cave_in_with_artifact = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                    "cardType": "magic",
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["south-spell-1"] = power_artifact;
+        });
+        Game::from_manifest_json(&cave_in_with_artifact)
+            .expect("valid Cave-In plus Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Cave-In with power Artifacts is self-play safe");
     }
 
     #[test]
@@ -18350,8 +22471,12 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
@@ -18395,6 +22520,204 @@ mod tests {
         assert!(game.position.players[seat_index(Seat::North)].avatar.tapped);
     }
 
+    #[test]
+    fn end_turn_cleanup_should_reset_both_players_air_threshold_counts() {
+        let manifest = selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn = Some(3);
+        game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn = Some(2);
+        let mut events = Vec::new();
+        let mut outcomes = OutcomeLog::Record(&mut events);
+        game.finish_end_turn_cleanup(Seat::North, &mut outcomes)
+            .expect("end-turn cleanup");
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].air_thresholds_cast_this_turn,
+            Some(0)
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Fatality proof keeps Ward, Stealth, underground, healthy, and allied copies together"
+    )]
+    fn fatality_should_break_ward_and_ignore_healthy_stealthed_and_underground_copies() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "killTargetWoundedMinion": true,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            for ordinal in 1..=3 {
+                manifest["cards"][format!("south-spell-{ordinal}")]["defense"] = json!(40);
+                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
+            }
+            manifest["cards"]["south-spell-1"]["ward"] = json!(true);
+            manifest["cards"]["south-spell-2"]["stealth"] = json!(true);
+            manifest["cards"]["south-spell-3"]["burrowing"] = json!(true);
+            manifest["cards"]["north-spell-50"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 40,
+                "manaCost": 0,
+                "stealth": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Fatality filter game");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "fatality-filter-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        game.position.units.clear();
+        let mut identities = BTreeMap::new();
+        for (name, card, controller, region, stealthed, warded, damage) in [
+            (
+                "warded",
+                "south-spell-1",
+                Seat::South,
+                Region::Surface,
+                false,
+                true,
+                1,
+            ),
+            (
+                "hidden",
+                "south-spell-2",
+                Seat::South,
+                Region::Surface,
+                true,
+                false,
+                1,
+            ),
+            (
+                "underground",
+                "south-spell-3",
+                Seat::South,
+                Region::Underground,
+                false,
+                false,
+                1,
+            ),
+            (
+                "healthy",
+                "south-spell-3",
+                Seat::South,
+                Region::Surface,
+                false,
+                false,
+                0,
+            ),
+            (
+                "ally",
+                "north-spell-50",
+                Seat::North,
+                Region::Surface,
+                true,
+                false,
+                1,
+            ),
+        ] {
+            let instance_id = identity_hash(&json!({ "fixture": name, "kind": "fatality-filter" }))
+                .expect("fixture identity");
+            let mut unit = test_minion(card_id(card), instance_id.as_str(), controller, c4, None);
+            unit.damage = damage;
+            unit.region = region;
+            unit.stealthed = stealthed;
+            unit.tapped = false;
+            unit.warded = warded;
+            identities.insert(name, instance_id);
+            game.position.units.push(unit);
+        }
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+        north.mana = 1;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let fatality_targets: BTreeSet<_> = game
+            .legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::CastMagic {
+                    target: Some(UnitTarget::Minion { instance_id, .. }),
+                    ..
+                } => Some(instance_id),
+                _ => None,
+            })
+            .collect();
+        let expected = [identities["warded"].clone(), identities["ally"].clone()];
+        assert_eq!(fatality_targets.len(), 2);
+        assert!(expected.iter().all(|id| fatality_targets.contains(id)));
+        assert!(!fatality_targets.contains(&identities["hidden"]));
+        assert!(!fatality_targets.contains(&identities["underground"]));
+        assert!(!fatality_targets.contains(&identities["healthy"]));
+
+        let warded_id = identities["warded"].clone();
+        let warded_cast = game
+            .legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target: Some(UnitTarget::Minion { instance_id, .. }),
+                        ..
+                    } if *instance_id == warded_id
+                )
+            })
+            .expect("Ward Fatality");
+        let (events, random_draws) = game
+            .apply_action_recorded(&warded_cast)
+            .expect("Fatality Ward cast");
+        assert!(random_draws.is_empty());
+        assert_eq!(
+            events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["magic-cast", "ward-broken", "magic-resolved"]
+        );
+        let surviving = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == warded_id)
+            .expect("warded target");
+        assert_eq!((surviving.damage, surviving.warded), (1, false));
+    }
+
     fn test_minion(
         card_id: CardId,
         instance_id: &str,
@@ -18424,8 +22747,12 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: true,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
             warded: false,
         }
     }
@@ -18457,6 +22784,12 @@ mod tests {
             }
             manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
             manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
+            manifest["cards"]["south-spell-3"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
         });
         let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
         let card_id = |name: &str| {
@@ -18517,12 +22850,28 @@ mod tests {
         base.position.sites[c4.index()] = Some(protected.clone());
         let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let artifact_id = IdentityHash::parse(
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .expect("artifact identity");
         let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
         drowned.region = Region::Underwater;
         let mut survivor =
             test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
         survivor.region = Region::Underwater;
         base.position.units = vec![drowned, survivor];
+        base.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("south-spell-3"),
+                instance_id: artifact_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underwater,
+            },
+        }];
         base.position.active_seat = Seat::North;
         base.position.decision_seat = Seat::North;
         base.position.phase = Phase::Main;
@@ -18689,6 +23038,19 @@ mod tests {
                 .expect("Burrowing survivor")
                 .region,
             Region::Underground
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == artifact_id)
+                .expect("loose Artifact")
+                .placement,
+            ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underground,
+            }
         );
         let south_cemetery = &destroyed.position.players[seat_index(Seat::South)].cemetery;
         assert_eq!(south_cemetery[0].instance_id.as_str(), drowned_id);
@@ -19276,8 +23638,12 @@ mod tests {
                 stealthed,
                 summoning_sickness: false,
                 tapped: false,
+                temporary_airborne_sources: Vec::new(),
                 temporary_charge_sources: Vec::new(),
+                temporary_first_strike_sources: Vec::new(),
+                temporary_lethal_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
+                temporary_ranged_sources: Vec::new(),
                 warded: false,
             };
         game.position.units = vec![
@@ -19334,6 +23700,51 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn disabled_scent_hound_should_not_strip_nearby_enemy_stealth() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
+            manifest["cards"]["south-spell-1"]["stealth"] = json!(true);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid disabled Hound manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let mut hound = test_minion(
+            card_id("north-spell-1"),
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            Seat::North,
+            Cell::parse("C3").expect("C3"),
+            None,
+        );
+        hound.disabled_until_damaged = true;
+        hound.tapped = false;
+        let mut target = test_minion(
+            card_id("south-spell-1"),
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            Seat::South,
+            Cell::parse("C2").expect("C2"),
+            None,
+        );
+        target.stealthed = true;
+        target.tapped = false;
+        game.position.units = vec![hound, target];
+        let mut outcomes = Vec::new();
+        game.settle_nearby_enemy_stealth(&mut OutcomeLog::Record(&mut outcomes));
+        assert!(outcomes.is_empty());
+        assert!(game.position.units[1].stealthed);
+        assert!(game.minion_is_disabled(&game.position.units[0]));
     }
 
     /// One crater board: a Water target at C2, both Avatars inside the grid, and one South minion
@@ -20085,5 +24496,817 @@ mod tests {
         assert_eq!(repeated_events, placed_events);
         assert!(repeated_random.is_empty());
         assert_eq!(repeated.position, placed.position);
+    }
+
+    fn discard_damage_activations(game: &Game, source: &IdentityHash) -> Vec<IssuedAction> {
+        game.legal_actions()
+            .expect("discard-damage actions")
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateDiscardRandomDamage {
+                        source_instance_id,
+                        ..
+                    } if source_instance_id == source
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one board keeps disabled, removed, and oversized discard-damage candidates together"
+    )]
+    fn discard_damage_should_ignore_disabled_or_removed_sources_and_count_oversized_once() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["discardSpellToDamageRandomOtherUnitHere"] =
+                json!(3);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+            manifest["cards"]["north-spell-2"]["stealth"] = json!(true);
+            manifest["cards"]["north-spell-2"]["manaCost"] = json!(0);
+            manifest["cards"]["south-spell-1"]["occupiesSquareArea"] = json!(2);
+            manifest["cards"]["south-spell-1"]["manaCost"] = json!(0);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid discard-damage fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mulligan_complete = true;
+        game.position.players[seat_index(Seat::South)].mulligan_complete = true;
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "nimbus-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        let source_id = identity_hash(&json!({ "fixture": "nimbus-source" })).expect("source");
+        let ally_id = identity_hash(&json!({ "fixture": "nimbus-ally" })).expect("ally");
+        let enemy_id = identity_hash(&json!({ "fixture": "nimbus-enemy" })).expect("enemy");
+        let mut source = test_minion(
+            card_id("north-spell-1"),
+            source_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        source.tapped = false;
+        let mut ally = test_minion(
+            card_id("north-spell-2"),
+            ally_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        ally.stealthed = true;
+        ally.tapped = false;
+        let mut enemy = test_minion(
+            card_id("south-spell-1"),
+            enemy_id.as_str(),
+            Seat::South,
+            c4,
+            Some(Cell::SQUARE_AREAS[5]),
+        );
+        enemy.tapped = false;
+        game.position.units = vec![source, ally, enemy];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        assert!(!discard_damage_activations(&game, &source_id).is_empty());
+        let mut disabled = game.clone();
+        disabled.position.units[0].disabled_until_damaged = true;
+        assert!(discard_damage_activations(&disabled, &source_id).is_empty());
+        let mut removed = game.clone();
+        removed
+            .position
+            .units
+            .retain(|unit| unit.card.instance_id != source_id);
+        assert!(
+            removed
+                .legal_actions()
+                .expect("removed-source actions")
+                .iter()
+                .all(|action| {
+                    !matches!(
+                        action.descriptor,
+                        ActionDescriptor::ActivateDiscardRandomDamage { .. }
+                    )
+                })
+        );
+
+        let activation = discard_damage_activations(&game, &source_id)
+            .into_iter()
+            .next()
+            .expect("engine-issued discard-damage");
+        let (_, random_draws) = game
+            .apply_action_recorded(&activation)
+            .expect("accepted oversized discard-damage");
+        assert_eq!(random_draws.len(), 1);
+        assert_eq!(random_draws[0].domain.kind, "unit_index_candidate");
+        assert_eq!(random_draws[0].domain.exclusive_maximum, 3);
+        assert!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == ally_id)
+                .expect("ally")
+                .stealthed
+        );
+    }
+
+    #[test]
+    fn granary_rats_should_ignore_void_and_keep_suppressing_while_any_copy_is_enabled() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-site-1"]["elements"] = json!(["earth", "fire"]);
+            manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Granary Rats fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "dual-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mulligan_complete = true;
+        north.mana = 0;
+        game.position.players[seat_index(Seat::South)].mulligan_complete = true;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+
+        let ally_id = identity_hash(&json!({ "fixture": "rats-ally" })).expect("ally rats");
+        let enemy_id = identity_hash(&json!({ "fixture": "rats-enemy" })).expect("enemy rats");
+        let mut underground = test_minion(
+            card_id("north-spell-1"),
+            ally_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        underground.region = Region::Underground;
+        underground.tapped = false;
+        let mut underwater = test_minion(
+            card_id("north-spell-1"),
+            enemy_id.as_str(),
+            Seat::South,
+            c4,
+            None,
+        );
+        underwater.region = Region::Underwater;
+        underwater.tapped = false;
+        game.position.units = vec![underground, underwater];
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+
+        let mut voided = game.clone();
+        voided.position.units[0].region = Region::Void;
+        voided.position.units.truncate(1);
+        assert_eq!(voided.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+
+        let mut one_disabled = game.clone();
+        one_disabled.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::North,
+                source_instance_id: ally_id.clone(),
+            });
+        assert_eq!(one_disabled.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+        one_disabled.position.units[1]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::North,
+                source_instance_id: enemy_id,
+            });
+        assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn tower_should_grant_derived_stats_regardless_of_site_controller() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-site-1"]["isTower"] = json!(true);
+            manifest["cards"]["north-spell-1"]["gainsPowerRangedAndSpellcasterAtopTower"] =
+                json!(2);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid foreign Tower fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "tower-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        let occupant_id = identity_hash(&json!({ "fixture": "tower-occupant" })).expect("occupant");
+        let mut occupant = test_minion(
+            card_id("north-spell-1"),
+            occupant_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        occupant.tapped = false;
+        occupant.summoning_sickness = false;
+        game.position.units = vec![occupant];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let (owned_power, _) = game
+            .combatant_attack_and_lethal(UnitKind::Minion, Seat::North, &occupant_id)
+            .expect("owned Tower power");
+        assert_eq!(owned_power, 3);
+        game.position.sites[c4.index()]
+            .as_mut()
+            .expect("Tower")
+            .controller = Seat::South;
+        let (foreign_power, _) = game
+            .combatant_attack_and_lethal(UnitKind::Minion, Seat::North, &occupant_id)
+            .expect("foreign Tower power");
+        assert_eq!(foreign_power, 3);
+        assert!(game.minion_atop_tower(&game.position.units[0]));
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one oversized bearer board keeps the foreign site cell, Disable, and charge together"
+    )]
+    fn carried_artifact_life_loss_should_follow_an_oversized_bearer_cell() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["occupiesSquareArea"] = json!(2);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+            manifest["cards"]["north-spell-2"] = json!({
+                "atEndOfEachTurnSiteControllerLosesLife": 1,
+                "cardType": "artifact",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized Egg fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let b1 = Cell::parse("B1").expect("B1");
+        let b2 = Cell::parse("B2").expect("B2");
+        let c1 = Cell::parse("C1").expect("C1");
+        let c2 = Cell::parse("C2").expect("C2");
+        let c4 = Cell::parse("C4").expect("C4");
+        let south_site_id =
+            identity_hash(&json!({ "fixture": "egg-south-site" })).expect("south site");
+        for (cell, fixture) in [
+            (b1, "egg-b1"),
+            (b2, "egg-b2"),
+            (c1, "egg-c1"),
+            (c2, "egg-c2"),
+        ] {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: CardInstance {
+                    card_id: card_id("south-site-1"),
+                    instance_id: if cell == c1 {
+                        south_site_id.clone()
+                    } else {
+                        identity_hash(&json!({ "cell": cell.to_string(), "fixture": fixture }))
+                            .expect("south site identity")
+                    },
+                    owner: Seat::South,
+                    source: CardSource::Atlas,
+                },
+                controller: Seat::South,
+                last_flight_turn: None,
+            });
+        }
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "egg-north-site" }))
+                    .expect("north site"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+        });
+        let bearer_id = identity_hash(&json!({ "fixture": "egg-bearer" })).expect("bearer");
+        let egg_id = identity_hash(&json!({ "fixture": "egg-artifact" })).expect("egg");
+        let mut bearer = test_minion(
+            card_id("north-spell-1"),
+            bearer_id.as_str(),
+            Seat::North,
+            b1,
+            Some(Cell::SQUARE_AREAS[3]),
+        );
+        bearer.disable_effects.push(DisableEffect {
+            expires_at_seat: Seat::South,
+            source_instance_id: bearer_id.clone(),
+        });
+        game.position.units = vec![bearer];
+        game.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("north-spell-2"),
+                instance_id: egg_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Carried {
+                bearer: UnitTarget::Minion {
+                    instance_id: bearer_id.clone(),
+                    seat: Seat::North,
+                },
+                cell: Some(c1),
+            },
+        }];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.turn_number = 1;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.avatar.life = 20;
+        game.position.players[seat_index(Seat::South)].avatar.life = 20;
+
+        let end_turn = game
+            .legal_actions()
+            .expect("end-turn")
+            .into_iter()
+            .find(|action| matches!(action.descriptor, ActionDescriptor::EndTurn))
+            .expect("engine-issued end-turn");
+        let (events, _) = game
+            .apply_action_recorded(&end_turn)
+            .expect("accepted end-turn");
+        assert_eq!(
+            events
+                .iter()
+                .take(2)
+                .map(|(event_type, payload)| (event_type.as_str(), payload.clone()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "end-turn-site-life-loss-triggered",
+                    json!({
+                        "amount": 1,
+                        "seat": "south",
+                        "siteInstanceId": south_site_id,
+                        "sourceInstanceId": egg_id,
+                    }),
+                ),
+                (
+                    "avatar-life-lost",
+                    json!({
+                        "amount": 1,
+                        "life": 19,
+                        "seat": "south",
+                        "sourceInstanceId": egg_id,
+                    }),
+                ),
+            ]
+        );
+        assert!(
+            game.position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == bearer_id)
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].avatar.life,
+            20
+        );
+        assert_eq!(
+            game.position.players[seat_index(Seat::South)].avatar.life,
+            19
+        );
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
+    )]
+    fn pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+            manifest["cards"]["north-spell-2"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Pick Up fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        for (cell, fixture) in [(c3, "pickup-c3"), (c4, "pickup-c4")] {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: CardInstance {
+                    card_id: card_id("north-site-1"),
+                    instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site"),
+                    owner: Seat::North,
+                    source: CardSource::Atlas,
+                },
+                controller: Seat::North,
+                last_flight_turn: None,
+            });
+        }
+        let bearer_id = identity_hash(&json!({ "fixture": "pickup-bearer" })).expect("bearer");
+        let local_south =
+            identity_hash(&json!({ "fixture": "pickup-south" })).expect("south-owned");
+        let local_north =
+            identity_hash(&json!({ "fixture": "pickup-north" })).expect("north-owned");
+        let remote_id = identity_hash(&json!({ "fixture": "pickup-remote" })).expect("remote");
+        let underwater_id =
+            identity_hash(&json!({ "fixture": "pickup-underwater" })).expect("underwater");
+        let carried_id = identity_hash(&json!({ "fixture": "pickup-carried" })).expect("carried");
+        let mut bearer = test_minion(
+            card_id("north-spell-1"),
+            bearer_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        bearer.tapped = true;
+        game.position.units = vec![bearer];
+        let artifact = |instance_id: IdentityHash, owner: Seat, placement| ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("north-spell-2"),
+                instance_id,
+                owner,
+                source: CardSource::Spellbook,
+            },
+            placement,
+        };
+        let avatar = UnitTarget::Avatar {
+            instance_id: game.position.players[seat_index(Seat::North)]
+                .avatar
+                .card
+                .instance_id
+                .clone(),
+            seat: Seat::North,
+        };
+        game.position.artifacts = vec![
+            artifact(
+                local_south.clone(),
+                Seat::South,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                local_north.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                remote_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c3,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                underwater_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Underwater,
+                },
+            ),
+            artifact(
+                carried_id,
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar.clone(),
+                    cell: None,
+                },
+            ),
+        ];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.turn_number = 1;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+
+        let local_ids = {
+            let mut ids = [local_south.clone(), local_north.clone()];
+            ids.sort();
+            ids
+        };
+        let expected = {
+            let mut keys = vec![
+                local_ids[0].as_str().to_owned(),
+                local_ids[1].as_str().to_owned(),
+                format!("{},{}", local_ids[0], local_ids[1]),
+            ];
+            keys.sort();
+            keys
+        };
+        let subset_keys = |actions: &[IssuedAction], kind: &str| {
+            let mut keys: Vec<String> = actions
+                .iter()
+                .filter_map(|action| match &action.descriptor {
+                    ActionDescriptor::PickUpArtifacts {
+                        artifact_instance_ids,
+                        unit,
+                        ..
+                    }
+                    | ActionDescriptor::DropArtifacts {
+                        artifact_instance_ids,
+                        unit,
+                    } if unit.kind() == kind => Some(
+                        artifact_instance_ids
+                            .iter()
+                            .map(IdentityHash::as_str)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    ),
+                    _ => None,
+                })
+                .collect();
+            keys.sort();
+            keys
+        };
+        let pickups = game.legal_actions().expect("Pick Up actions");
+        let pickups: Vec<_> = pickups
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
+            .collect();
+        assert_eq!(pickups.len(), 6);
+        assert_eq!(subset_keys(&pickups, "avatar"), expected);
+        assert_eq!(subset_keys(&pickups, "minion"), expected);
+        assert!(pickups.iter().all(|action| {
+            match &action.descriptor {
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids,
+                    ..
+                } => artifact_instance_ids
+                    .iter()
+                    .all(|instance_id| local_ids.contains(instance_id)),
+                _ => false,
+            }
+        }));
+
+        let mut enemy_owned = game.clone();
+        let enemy_pick = only_action(&pickups, |descriptor| {
+            matches!(
+                descriptor,
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids,
+                    unit: UnitTarget::Minion { .. },
+                    ..
+                } if artifact_instance_ids.as_slice() == [local_south.clone()]
+            )
+        })
+        .clone();
+        let (events, random_draws) = enemy_owned
+            .apply_action_recorded(&enemy_pick)
+            .expect("enemy-owned Pick Up");
+        assert!(random_draws.is_empty());
+        assert_eq!(event_types(&events), ["artifacts-picked-up"]);
+        assert_eq!(
+            enemy_owned
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == local_south)
+                .expect("south-owned Artifact")
+                .card
+                .owner,
+            Seat::South
+        );
+        assert!(enemy_owned.position.units[0].tapped);
+
+        let minion = UnitTarget::Minion {
+            instance_id: bearer_id.clone(),
+            seat: Seat::North,
+        };
+        let mut drop_ready = game.clone();
+        drop_ready.position.players[seat_index(Seat::North)]
+            .avatar
+            .last_interacted_turn = None;
+        drop_ready.position.artifacts = vec![
+            artifact(
+                local_south.clone(),
+                Seat::South,
+                ArtifactPlacement::Carried {
+                    bearer: minion.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                local_north.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: minion.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                remote_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                underwater_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar,
+                    cell: None,
+                },
+            ),
+        ];
+        let drops = drop_ready.legal_actions().expect("Drop actions");
+        let drops: Vec<_> = drops
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::DropArtifacts { .. }))
+            .collect();
+        assert_eq!(drops.len(), 6);
+        assert_eq!(subset_keys(&drops, "minion"), expected);
+        let mut avatar_keys = vec![
+            remote_id.as_str().to_owned(),
+            underwater_id.as_str().to_owned(),
+            {
+                let mut pair = [remote_id.as_str(), underwater_id.as_str()];
+                pair.sort_unstable();
+                format!("{},{}", pair[0], pair[1])
+            },
+        ];
+        avatar_keys.sort();
+        assert_eq!(subset_keys(&drops, "avatar"), avatar_keys);
+
+        let mut dropped_once = drop_ready.clone();
+        let one_drop = only_action(&drops, |descriptor| {
+            matches!(
+                descriptor,
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids,
+                    unit: UnitTarget::Minion { .. },
+                } if artifact_instance_ids.as_slice() == [local_south.clone()]
+            )
+        })
+        .clone();
+        dropped_once
+            .apply_action_recorded(&one_drop)
+            .expect("one Drop");
+        assert!(
+            !dropped_once
+                .legal_actions()
+                .expect("after Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
+
+        let mut disabled = game.clone();
+        disabled.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::South,
+                source_instance_id: bearer_id.clone(),
+            });
+        let disabled_pickups: Vec<_> = disabled
+            .legal_actions()
+            .expect("disabled Pick Up")
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
+            .collect();
+        assert_eq!(
+            disabled_pickups
+                .iter()
+                .map(|action| match &action.descriptor {
+                    ActionDescriptor::PickUpArtifacts { unit, .. } => unit.kind(),
+                    _ => unreachable!("filtered Pick Up"),
+                })
+                .collect::<Vec<_>>(),
+            ["avatar", "avatar", "avatar"]
+        );
+
+        let mut disabled_drop = drop_ready.clone();
+        disabled_drop.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::South,
+                source_instance_id: bearer_id.clone(),
+            });
+        assert!(
+            !disabled_drop
+                .legal_actions()
+                .expect("disabled Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
+
+        drop_ready.position.units[0].last_interacted_turn = Some(1);
+        assert!(
+            !drop_ready
+                .legal_actions()
+                .expect("interacted Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
     }
 }

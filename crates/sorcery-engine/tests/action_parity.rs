@@ -55,6 +55,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::Draw { .. } => "draw",
         ActionDescriptor::DrawSite => "draw-site",
         ActionDescriptor::DrawSpell => "draw-spell",
+        ActionDescriptor::DiscardCard { .. } => "discard-card",
         ActionDescriptor::PlaySite { .. } => "play-site",
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => {
             "replace-rubble-with-top-atlas-site"

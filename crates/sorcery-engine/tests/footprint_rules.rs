@@ -22,6 +22,53 @@ fn site(blocks_ground_entry: bool) -> Value {
     value
 }
 
+fn special_north_site(giant_extra: &Value) -> Option<(&'static str, Value)> {
+    if giant_extra.get("waterbound").and_then(Value::as_bool) == Some(true) {
+        Some((
+            "north-water",
+            json!({ "cardType": "site", "elements": ["water"] }),
+        ))
+    } else if giant_extra
+        .get("gainsPowerRangedAndSpellcasterAtopTower")
+        .is_some()
+    {
+        Some((
+            "north-tower",
+            json!({ "cardType": "site", "elements": ["earth"], "isTower": true }),
+        ))
+    } else if giant_extra.get("ordinary").and_then(Value::as_bool) == Some(true) {
+        Some((
+            "north-hamlet",
+            json!({
+                "cardType": "site",
+                "elements": ["earth"],
+                "ordinaryMinionManaDiscount": 1,
+            }),
+        ))
+    } else if giant_extra
+        .get("mustBeCastToWaterSite")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        Some((
+            "north-water",
+            json!({ "cardType": "site", "elements": ["water"] }),
+        ))
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NorthAtlasPlan {
+    FromGiantExtra,
+    AllWater,
+}
+
+fn water_site() -> Value {
+    json!({ "cardType": "site", "elements": ["water"] })
+}
+
 fn minion(extra: &Value) -> Value {
     let mut value = json!({
         "attack": 1,
@@ -179,6 +226,14 @@ fn keep(session: &mut Session) {
 fn play_site(session: &mut Session, cell: &str) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn play_named_site(session: &mut Session, card_id: &str, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == cell
     });
 }
 
@@ -556,4 +611,1672 @@ fn oversized_ground_movement_should_check_every_new_terrain_cell() {
                         ])
             })
     );
+}
+
+fn freeze() -> Value {
+    json!({
+        "cardType": "magic",
+        "disableTargetNearbyMinionUntilNextTurn": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn zap() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageTargetUnit": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn composition_manifest(
+    seed: u32,
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    atlas_plan: NorthAtlasPlan,
+) -> String {
+    let mut giant = minion(&json!({ "occupiesSquareArea": 2 }));
+    giant
+        .as_object_mut()
+        .expect("giant facts")
+        .extend(giant_extra.as_object().expect("extra giant facts").clone());
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-giant": giant,
+        "south-avatar": avatar(),
+        "south-site": site(false),
+    });
+    if !matches!(atlas_plan, NorthAtlasPlan::AllWater) {
+        cards["north-site"] = site(false);
+    }
+    if north_spells.contains(&"north-freeze") {
+        cards["north-freeze"] = freeze();
+    }
+    if south_spells.contains(&"south-zap") {
+        cards["south-zap"] = zap();
+    }
+    if south_spells.contains(&"south-minion") {
+        let mut south = minion(&json!({}));
+        south
+            .as_object_mut()
+            .expect("south minion facts")
+            .extend(south_extra.as_object().expect("extra south facts").clone());
+        cards["south-minion"] = south;
+    }
+    if north_spells.contains(&"north-fodder") {
+        cards["north-fodder"] = minion(&json!({}));
+    }
+    if north_spells.contains(&"north-ally") {
+        cards["north-ally"] = minion(&json!({ "defense": 1 }));
+    }
+    if let Some((card_id, definition)) = special_north_site(giant_extra) {
+        cards[card_id] = definition;
+    }
+    let north_atlas = match atlas_plan {
+        NorthAtlasPlan::AllWater => {
+            cards["north-water"] = water_site();
+            vec!["north-water"; 9]
+        }
+        NorthAtlasPlan::FromGiantExtra => {
+            if let Some((card_id, _)) = special_north_site(giant_extra) {
+                let mut atlas = vec!["north-site"; 8];
+                atlas.insert(0, card_id);
+                atlas
+            } else {
+                vec!["north-site"; 9]
+            }
+        }
+    };
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "footprint-composition-rules" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-footprint-composition-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": north_atlas,
+                "avatar": "north-avatar",
+                "spellbook": north_spells,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": south_spells,
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical manifest")
+}
+
+fn composition_session(
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+) -> Session {
+    composition_session_with_atlas(
+        giant_extra,
+        south_extra,
+        north_spells,
+        south_spells,
+        required_north,
+        NorthAtlasPlan::FromGiantExtra,
+    )
+}
+
+fn composition_session_all_water(
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+) -> Session {
+    composition_session_with_atlas(
+        giant_extra,
+        south_extra,
+        north_spells,
+        south_spells,
+        required_north,
+        NorthAtlasPlan::AllWater,
+    )
+}
+
+fn composition_session_with_atlas(
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+    atlas_plan: NorthAtlasPlan,
+) -> Session {
+    let manifest = (1u32..=512)
+        .map(|seed| {
+            composition_manifest(
+                seed,
+                giant_extra,
+                south_extra,
+                north_spells,
+                south_spells,
+                atlas_plan,
+            )
+        })
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("candidate session");
+            let preview_state = state(&preview);
+            let hand = preview_state["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("north Spellbook hand");
+            let atlas = preview_state["players"]["north"]["hand"]["atlas"]
+                .as_array()
+                .expect("north Atlas hand");
+            let required_atlas = special_north_site(giant_extra).map(|(card_id, _)| card_id);
+            required_north
+                .iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
+                && required_atlas
+                    .is_none_or(|card_id| atlas.iter().any(|card| card["cardId"] == card_id))
+        })
+        .expect("opening hand with the required north spells");
+    Session::new(&manifest).expect("composition session")
+}
+
+fn play_first_domains(session: &mut Session) {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+}
+
+fn establish_north_square(session: &mut Session) {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+}
+
+fn establish_north_square_named_at_c4(session: &mut Session, first_site: &str) {
+    keep(session);
+    keep(session);
+    play_named_site(session, first_site, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    play_named_site(session, "north-site", "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_named_site(session, "north-site", "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_named_site(session, "north-site", "B3");
+}
+
+fn establish_north_square_water_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-water");
+}
+
+fn establish_north_square_tower_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-tower");
+}
+
+fn establish_north_square_hamlet_at_c4(session: &mut Session) {
+    establish_north_square_named_at_c4(session, "north-hamlet");
+}
+
+fn establish_north_square_all_named(session: &mut Session, site: &str) {
+    keep(session);
+    keep(session);
+    play_named_site(session, site, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    play_named_site(session, site, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_named_site(session, site, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_named_site(session, site, "B3");
+}
+
+fn offers_summon(session: &Session, card_id: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "summon-minion" && action.descriptor["cardId"] == card_id
+        })
+}
+
+fn establish_north_square_and_south_c2(session: &mut Session) -> String {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    play_site(session, "C2");
+    let (enemy, _) = summon_at(session, "south-minion", "C2");
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
+fn establish_north_square_and_south_c4(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    let (enemy, _) = summon_at(session, "south-minion", "C4");
+    end_and_draw(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
+fn establish_north_square_and_south_d2(session: &mut Session) -> String {
+    play_first_domains(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    play_site(session, "C2");
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    play_site(session, "D2");
+    let (enemy, _) = summon_at(session, "south-minion", "D2");
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    enemy
+}
+
+#[test]
+fn rule_catalog_0167_oversized_genesis_still_draws_after_summoning() {
+    let mut session = composition_session(
+        &json!({ "genesisDrawSpells": 1 }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let before = state(&session);
+    let drawn_id = before["players"]["north"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("top Spellbook identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(event_types(&receipt), ["minion-summoned", "spell-drawn"]);
+    assert!(
+        !serde_json::to_string(&receipt.events)
+            .expect("event JSON")
+            .contains(&drawn_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0168_oversized_spellcaster_originates_nearby_magic_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "spellcaster": true }),
+        &json!({}),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-freeze",
+            "north-freeze",
+            "north-freeze",
+            "north-freeze",
+        ],
+        &["south-minion"; 8],
+        &["north-giant", "north-freeze"],
+    );
+    let enemy = establish_north_square_and_south_d2(&mut session);
+    let (giant, summon) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        summon.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let actions = session
+        .legal_actions()
+        .expect("Freeze actions after the oversized summon");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-freeze"
+                && action.descriptor["casterInstanceId"] == avatar_id
+                && action.descriptor["target"]["instanceId"] == enemy
+        }),
+        "D2 is nearby only to a non-anchor footprint cell, not the C4 Avatar"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["casterInstanceId"] == giant
+            && descriptor["target"]["instanceId"] == enemy
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &enemy)["disableEffects"][0]["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0169_oversized_deathrite_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "deathriteDamageEachUnitHere": 1,
+            "defense": 0,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-zap"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    end_and_draw(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-zap"
+            && descriptor["target"]["instanceId"] == giant
+    });
+    let allocated: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "deathrite-damage-allocated")
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("Deathrite target")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(allocated, [avatar_id]);
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["life"],
+        19,
+        "the C4 Avatar shares the oversized footprint, not the B3 anchor"
+    );
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0170_oversized_genesis_here_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "genesisDamageEachOtherUnitHere": 1,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 1,
+            "sourceInstanceId": giant,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 19);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0171_oversized_genesis_strike_hits_enemies_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "attack": 2,
+            "defense": 10,
+            "genesisStrikeEachEnemyHere": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    let enemy = establish_north_square_and_south_c4(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    let struck: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 2);
+            assert_eq!(event.payload["strikerInstanceId"], giant.as_str());
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("struck identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(struck.as_slice(), [enemy.as_str()]);
+    assert!(!struck.contains(&avatar_id));
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0172_oversized_adjacent_genesis_reaches_units_bordering_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "genesisMayDamageTargetAdjacentUnit": 2,
+        }),
+        &json!({ "defense": 10 }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    let enemy = establish_north_square_and_south_c2(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["genesisDamageTarget"]["instanceId"] == enemy
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
+    assert_exact_replay(&session);
+}
+
+fn discard_here_candidate_count(receipt: &Receipt) -> usize {
+    let draws: Vec<_> = receipt
+        .random_draws
+        .iter()
+        .filter(|draw| draw["purpose"] == "discard_spell_random_other_unit_here")
+        .collect();
+    assert_eq!(draws.len(), 1, "one hidden random draw per activation");
+    assert_eq!(draws[0]["domain"]["kind"], "unit_index_candidate");
+    usize::try_from(
+        draws[0]["domain"]["exclusiveMaximum"]
+            .as_u64()
+            .expect("candidate count"),
+    )
+    .expect("candidate count fits")
+}
+
+#[test]
+fn rule_catalog_0173_oversized_discard_here_damages_units_sharing_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "defense": 10,
+            "discardSpellToDamageRandomOtherUnitHere": 1,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    assert_eq!(
+        unit(&before, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-discard-random-damage"
+            && descriptor["sourceInstanceId"] == giant
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "discard-random-damage-activated",
+            "discard-random-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost",
+        ]
+    );
+    assert_eq!(
+        discard_here_candidate_count(&receipt),
+        1,
+        "the C4 Avatar is the sole other unit on the oversized footprint"
+    );
+    assert_eq!(
+        receipt.events[1].payload["sourceLocation"]["cell"], "B3",
+        "the activation still records the canonical anchor"
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], avatar_id);
+    assert_eq!(receipt.events[1].payload["targetKind"], "avatar");
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["life"],
+        19,
+        "the C4 Avatar shares the oversized footprint, not the B3 anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0174_oversized_summon_to_any_site_uses_any_surface_cell_in_the_square() {
+    let mut session = composition_session(
+        &json!({}),
+        &json!({
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &[],
+    );
+    establish_north_square(&mut session);
+    end_and_draw(&mut session);
+    let (giant, receipt) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let realm = &state(&session)["realm"];
+    for cell in ["B3", "B4", "C3", "C4"] {
+        assert_eq!(
+            realm["sites"][cell]["controller"], "north",
+            "{cell} is a North site, so South needs summonToAnySite"
+        );
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0175_oversized_waterbound_uses_any_occupied_water_site() {
+    let mut session = composition_session(
+        &json!({ "charge": true, "waterbound": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_water_at_c4(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let current = state(&session);
+    assert_eq!(
+        unit(&current, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-water");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    assert!(
+        session
+            .legal_actions()
+            .expect("Waterbound actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "move-and-attack"
+                    && action.descriptor["unitInstanceId"] == giant
+            }),
+        "C4 Water shares the oversized footprint, so Waterbound stays enabled at the B3 land anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0176_oversized_threshold_suppression_covers_every_occupied_site() {
+    let mut session = composition_session(
+        &json!({
+            "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+        }),
+        &json!({
+            "occupiesSquareArea": 2,
+            "siteProvidesNoThreshold": true,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    assert!(
+        offers_summon(&session, "north-giant"),
+        "four Earth sites should meet the oversized minion's threshold before suppression"
+    );
+    end_and_draw(&mut session);
+    let (rats, _) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        unit(&state(&session), &rats)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    end_and_draw(&mut session);
+    assert!(
+        !offers_summon(&session, "north-giant"),
+        "enabled Rats must suppress every occupied Earth site, not only the B3 anchor"
+    );
+    assert_exact_replay(&session);
+}
+
+fn stage_south_on_north_cell(session: &mut Session, cell: &str) -> String {
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, cell);
+    end_and_draw(session);
+    let (enemy, _) = summon_at(session, "south-minion", cell);
+    end_and_draw(session);
+    enemy
+}
+
+fn stage_south_on_north_d3(session: &mut Session) -> String {
+    stage_south_on_north_cell(session, "D3")
+}
+
+fn stage_south_on_north_d4(session: &mut Session) -> String {
+    stage_south_on_north_cell(session, "D4")
+}
+
+fn stage_d3_and_south_on_north_d4(session: &mut Session) -> String {
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D4");
+    end_and_draw_zone(session, "atlas");
+    let (enemy, _) = summon_at(session, "south-minion", "D4");
+    end_and_draw(session);
+    enemy
+}
+
+fn stage_north_ally_on_d4(session: &mut Session) -> String {
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "D4");
+    let (ally, _) = summon_at(session, "north-ally", "D4");
+    ally
+}
+
+#[test]
+fn rule_catalog_0177_oversized_ranged_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "ranged": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d3(&mut session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let actions = session
+        .legal_actions()
+        .expect("Ranged actions after the oversized summon");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == avatar_id
+        }),
+        "the C4 Avatar is not Ranged"
+    );
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D3"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "D3", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0178_oversized_tower_bonus_uses_any_occupied_tower() {
+    let mut session = composition_session(
+        &json!({ "gainsPowerRangedAndSpellcasterAtopTower": 2 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_tower_at_c4(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-tower");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    let enemy = stage_south_on_north_d3(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "D3", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    assert_eq!(
+        receipt.events[1].payload["amount"], 3,
+        "the C4 Tower shares the oversized footprint, so derived power is 1+2"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0179_oversized_ordinary_uses_any_occupied_hamlet() {
+    let mut session = composition_session(
+        &json!({ "manaCost": 1, "ordinary": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_hamlet_at_c4(&mut session);
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-hamlet");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    let mut costs = session
+        .legal_actions()
+        .expect("Ordinary oversized summon actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-giant"
+                && action.descriptor["cell"] == "B3"
+        })
+        .map(|action| action.descriptor["manaCost"].as_u64().expect("summon cost"))
+        .collect::<Vec<_>>();
+    costs.sort_unstable();
+    costs.dedup();
+    assert_eq!(
+        costs,
+        [0],
+        "C4 Hamlet shares the oversized footprint, so the B3-anchor summon is free"
+    );
+    let (giant, receipt) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["manaPaid"],
+        0
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell() {
+    let mut session = composition_session(
+        &json!({
+            "manaCost": 6,
+            "sacrificeMinionAtSummoningLocationForManaDiscount": 2,
+        }),
+        &json!({}),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+        ],
+        &["south-minion"; 8],
+        &["north-giant", "north-fodder"],
+    );
+    establish_north_square(&mut session);
+    let (fodder, _) = summon_at(&mut session, "north-fodder", "C4");
+    assert_eq!(
+        unit(&state(&session), &fodder)["location"],
+        "C4",
+        "the sacrifice candidate stands on a non-anchor footprint cell"
+    );
+    let actions = session
+        .legal_actions()
+        .expect("sacrifice summon actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-giant"
+                && action.descriptor["cell"] == "B3"
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions.is_empty()
+            && actions.iter().all(|descriptor| {
+                descriptor["manaCost"] == 4
+                    && descriptor["sacrificedMinionInstanceIds"] == json!([fodder])
+            }),
+        "four mana cannot pay the printed six without sacrificing the C4 minion on the footprint"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["sacrificedMinionInstanceIds"] == json!([fodder])
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(
+        event_types(&receipt),
+        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == fodder)
+    );
+    assert!(
+        !after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|candidate| candidate["instanceId"] == fodder)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0181_oversized_water_site_cast_rejects_a_mixed_square() {
+    let mut session = composition_session(
+        &json!({ "mustBeCastToWaterSite": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_water_at_c4(&mut session);
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-water");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    assert!(
+        !offers_summon(&session, "north-giant"),
+        "a 2x2 water-site cast needs every occupied cell to be Water, not only C4"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square() {
+    let mut session = composition_session_all_water(
+        &json!({}),
+        &json!({
+            "mustBeCastToWaterSite": true,
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &[],
+    );
+    establish_north_square_all_named(&mut session, "north-water");
+    end_and_draw(&mut session);
+    let realm = &state(&session)["realm"];
+    for cell in ["B3", "B4", "C3", "C4"] {
+        assert_eq!(
+            realm["sites"][cell]["cardId"], "north-water",
+            "{cell} must be Water before the oversized water-site cast"
+        );
+        assert_eq!(realm["sites"][cell]["controller"], "north");
+    }
+    let (giant, receipt) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0183_oversized_activated_projectile_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "tapToShootProjectileDamage": 1 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("activated projectile actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "shoot-damage-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|descriptor| descriptor["path"][0]["cell"] == "B3"),
+        "an east ray from the B3 anchor reaches D3, not D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-damage-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "projectile-damage-allocated"]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 1);
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0184_oversized_drag_projectile_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "shootsDragProjectile": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("drag projectile actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "shoot-drag-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["fightOnArrival"] == false
+        })
+        .map(|action| action.descriptor)
+        .collect::<Vec<_>>();
+    assert!(
+        !actions
+            .iter()
+            .any(|descriptor| descriptor["path"][0]["cell"] == "B3"),
+        "an east ray from the B3 anchor reaches D3, not D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-drag-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["fightOnArrival"] == false
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(event_types(&receipt), ["projectile-shot", "unit-dragged"]);
+    assert_eq!(
+        receipt.events[1].payload["from"],
+        json!({ "cell": "D4", "region": "surface" })
+    );
+    assert_eq!(
+        receipt.events[1].payload["to"],
+        json!({ "cell": "C4", "region": "surface" }),
+        "the haul returns to the C4 origin, not the B3 anchor"
+    );
+    assert_eq!(unit(&state(&session), &enemy)["location"], "C4");
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+fn summon_regions_at(session: &Session, card_id: &str, cell: &str) -> Vec<String> {
+    let mut regions = session
+        .legal_actions()
+        .expect("summon regions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == card_id
+                && action.descriptor["cell"] == cell
+        })
+        .map(|action| {
+            action.descriptor["region"]
+                .as_str()
+                .unwrap_or("surface")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    regions.sort();
+    regions.dedup();
+    regions
+}
+
+#[test]
+fn rule_catalog_0185_oversized_burrowing_summons_underground_on_an_all_land_square() {
+    let mut session = composition_session(
+        &json!({ "burrowing": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["surface", "underground"],
+        "four land sites offer both surface and underground 2x2 placements"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underground"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underground");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0186_oversized_submerge_summons_underwater_on_an_all_water_square() {
+    let mut session = composition_session_all_water(
+        &json!({ "submerge": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_all_named(&mut session, "north-water");
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["surface", "underwater"],
+        "four Water sites offer both surface and underwater 2x2 placements"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underwater"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underwater");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0187_oversized_burrowed_only_cast_offers_only_underground() {
+    let mut session = composition_session(
+        &json!({
+            "burrowing": true,
+            "mustBeCastBurrowed": true,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["underground"],
+        "a burrowed-only 2x2 cannot use the surface of an all-land square"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underground"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underground");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0188_oversized_submerged_only_cast_offers_only_underwater() {
+    let mut session = composition_session_all_water(
+        &json!({
+            "mustBeCastSubmerged": true,
+            "submerge": true,
+        }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_all_named(&mut session, "north-water");
+    assert_eq!(
+        summon_regions_at(&session, "north-giant", "B3"),
+        ["underwater"],
+        "a submerged-only 2x2 cannot use the surface of an all-Water square"
+    );
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "B3"
+            && descriptor["region"] == "underwater"
+    });
+    let giant = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned instance")
+        .to_owned();
+    assert_eq!(event_types(&receipt), ["minion-summoned"]);
+    let after = state(&session);
+    let summoned = unit(&after, &giant);
+    assert_eq!(summoned["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
+    assert_eq!(summoned["region"], "underwater");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "tapToDamageEachUnitAtAdjacentLocation": 2 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("area-damage actions after the oversized summon");
+    assert!(
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "activate-area-damage"
+                && action.descriptor["sourceInstanceId"] == giant
+                && action.descriptor["targetLocation"]
+                    == json!({ "cell": "D4", "region": "surface" })
+        }),
+        "C4 borders D4, so the B3-anchored 2x2 must offer that adjacent blanket"
+    );
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "activate-area-damage"
+                && action.descriptor["sourceInstanceId"] == giant
+                && ["B3", "B4", "C3", "C4"].contains(
+                    &action.descriptor["targetLocation"]["cell"]
+                        .as_str()
+                        .unwrap_or(""),
+                )
+        }),
+        "occupied footprint cells are not adjacent targets"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-area-damage"
+            && descriptor["sourceInstanceId"] == giant
+            && descriptor["targetLocation"] == json!({ "cell": "D4", "region": "surface" })
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["area-damage-activated", "area-damage-allocated"]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0190_oversized_nearby_ally_aura_reaches_units_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "otherNearbyAlliesPowerBonus": 1 }),
+        &json!({}),
+        &[
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-giant",
+            "north-ally",
+            "north-ally",
+            "north-ally",
+            "north-ally",
+        ],
+        &["south-zap"; 8],
+        &["north-giant", "north-ally"],
+    );
+    establish_north_square(&mut session);
+    let ally = stage_north_ally_on_d4(&mut session);
+    assert_eq!(unit(&state(&session), &ally)["location"], "D4");
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    end_and_draw(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-zap"
+            && descriptor["target"]["instanceId"] == ally
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "magic-resolved"
+        ]
+    );
+    let after = state(&session);
+    assert_eq!(
+        unit(&after, &ally)["damage"],
+        1,
+        "C4 is nearby to D4, so the 1/1 ally is a 2/2 and survives one Zap"
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != ally)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0191_oversized_scent_hounds_strip_stealth_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "nearbyEnemiesPermanentlyLoseStealth": true }),
+        &json!({
+            "stealth": true,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let enemy = stage_south_on_north_d4(&mut session);
+    let after = state(&session);
+    assert_eq!(unit(&after, &enemy)["location"], "D4");
+    assert_eq!(
+        unit(&after, &enemy)["stealthed"],
+        false,
+        "C4 is nearby to D4, so the B3-anchored 2x2 must strip that Stealth"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0192_oversized_conditional_stealth_sees_enemies_near_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "gainsStealthAtEndOfTurnIfNoEnemiesNearby": true }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let enemy = stage_south_on_north_d4(&mut session);
+    assert_eq!(unit(&state(&session), &enemy)["location"], "D4");
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "stealth-gained"),
+        "C4 is nearby to D4, so the B3-anchored 2x2 must not gain conditional Stealth"
+    );
+    assert_eq!(unit(&state(&session), &giant)["stealthed"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0193_oversized_conditional_stealth_ignores_a_far_enemy_avatar() {
+    let mut session = composition_session(
+        &json!({ "gainsStealthAtEndOfTurnIfNoEnemiesNearby": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        state(&session)["players"]["south"]["avatar"]["location"],
+        "C1",
+        "the far South Avatar is not nearby the B3 square"
+    );
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&ended)[0..2],
+        ["stealth-gained", "turn-ended"],
+        "no nearby enemy means the 2x2 still gains conditional Stealth"
+    );
+    assert_eq!(
+        ended.events[0].payload,
+        json!({ "instanceId": giant, "seat": "north" })
+    );
+    assert_eq!(unit(&state(&session), &giant)["stealthed"], true);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0194_oversized_during_movement_ranged_originates_from_every_footprint_cell() {
+    let mut session = composition_session(
+        &json!({
+            "mayRangedStrikeOnceDuringBasicMovement": true,
+            "ranged": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_d3_and_south_on_north_d4(&mut session);
+    let staged = state(&session);
+    assert_eq!(
+        unit(&staged, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let (_, started) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == giant
+            && descriptor["path"]
+                == json!([
+                    { "cell": "B3", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                ])
+    });
+    assert_eq!(event_types(&started), ["basic-movement-started"]);
+    let after_start = state(&session);
+    assert_eq!(after_start["phase"], "movement");
+    assert_eq!(unit(&after_start, &giant)["location"], "B3");
+    assert_eq!(
+        unit(&after_start, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let actions = session
+        .legal_actions()
+        .expect("during-movement Ranged actions");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    let after_shot = state(&session);
+    assert_eq!(unit(&after_shot, &enemy)["damage"], 1);
+    assert_eq!(after_shot["phase"], "movement");
+    let (_, continued) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement" && descriptor["unitInstanceId"] == giant
+    });
+    assert_eq!(event_types(&continued), ["basic-movement-continued"]);
+    let after_step = state(&session);
+    assert_eq!(unit(&after_step, &giant)["location"], "C3");
+    assert_eq!(
+        unit(&after_step, &giant)["occupiedCells"],
+        json!(["C3", "C4", "D3", "D4"]),
+        "the east step needs D3 and D4, so the paused shot must happen before the square translates"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0195_oversized_post_ranged_step_translates_the_whole_footprint() {
+    let mut session = composition_session(
+        &json!({
+            "mayStepAfterRangedStrike": true,
+            "ranged": true,
+        }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_d3_and_south_on_north_d4(&mut session);
+    let staged = state(&session);
+    assert_eq!(
+        unit(&staged, &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let actions = session.legal_actions().expect("main-phase Ranged actions");
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "shoot-projectile"
+                && action.descriptor["shooterInstanceId"] == giant
+                && action.descriptor["hit"]["instanceId"] == enemy
+                && action.descriptor["path"][0]["cell"] == "B3"
+        }),
+        "one-step Ranged from the B3 anchor cannot reach D4"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == giant
+            && descriptor["hit"]["instanceId"] == enemy
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "D4", "region": "surface" },
+                ])
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["projectile-shot", "strike-damage-allocated"]
+    );
+    let after_shot = state(&session);
+    assert_eq!(unit(&after_shot, &enemy)["damage"], 1);
+    assert_eq!(after_shot["phase"], "ranged-step");
+    assert_eq!(after_shot["pendingRangedStep"]["sourceInstanceId"], giant);
+    let (_, stepped) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-ranged-step"
+            && descriptor["choice"] == "step"
+            && descriptor["to"] == json!({ "cell": "C3", "region": "surface" })
+    });
+    assert_eq!(event_types(&stepped), ["unit-stepped"]);
+    let after_step = state(&session);
+    assert_eq!(after_step["phase"], "main");
+    assert!(after_step["pendingRangedStep"].is_null());
+    assert_eq!(unit(&after_step, &giant)["location"], "C3");
+    assert_eq!(
+        unit(&after_step, &giant)["occupiedCells"],
+        json!(["C3", "C4", "D3", "D4"]),
+        "the post-shot step must translate every occupied cell, not only the B3 anchor"
+    );
+    assert_exact_replay(&session);
 }
