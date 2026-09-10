@@ -67,6 +67,7 @@ impl SessionJsonService {
             "step" => self.step(request.id, &request.params),
             "selectPolicyAction" => self.select_policy_action(request.id),
             "probeNovelty" => self.probe_novelty(request.id, &request.params),
+            "runNoveltyRollout" => self.run_novelty_rollout(request.id, &request.params),
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
@@ -194,6 +195,31 @@ impl SessionJsonService {
         };
         match session.probe_novelty(&committed_action_kinds, &committed_event_types) {
             Ok(step) => ok_response(id, novelty_step_value(&step)),
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn run_novelty_rollout(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
+            return error_response(id, "runNoveltyRollout requires maxActions");
+        };
+        let Ok(max_actions) = usize::try_from(max_actions) else {
+            return error_response(id, "runNoveltyRollout maxActions is out of range");
+        };
+        match session.run_novelty_rollout(max_actions) {
+            Ok(output) => match serde_json::to_value(output.emitted_checkpoints()) {
+                Ok(emitted_checkpoints) => ok_response(
+                    id,
+                    json!({
+                        "emittedCheckpoints": emitted_checkpoints,
+                        "result": output.result(),
+                    }),
+                ),
+                Err(error) => error_response(id, &error.to_string()),
+            },
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -583,6 +609,29 @@ mod tests {
                 .iter()
                 .any(|probe| probe["actionId"] == action["actionId"]
                     && probe["selectedByFallback"] == true)
+        );
+    }
+
+    #[test]
+    fn service_should_run_a_zero_horizon_novelty_rollout() {
+        let manifest = synthetic_demo_manifest_json(31).expect("manifest");
+        let mut service = SessionJsonService::new();
+        assert!(
+            service
+                .handle(&rpc(1, "new", json!({ "manifestJson": manifest })))
+                .error
+                .is_none()
+        );
+        let rollout = service.handle(&rpc(2, "runNoveltyRollout", json!({ "maxActions": 0 })));
+        let result = rollout.result.expect("rollout result");
+        assert_eq!(result["result"]["status"], "horizon");
+        assert_eq!(result["result"]["acceptedActionCount"], 0);
+        assert_eq!(
+            result["emittedCheckpoints"]
+                .as_array()
+                .expect("checkpoints")
+                .len(),
+            1
         );
     }
 
