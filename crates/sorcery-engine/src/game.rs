@@ -1188,26 +1188,6 @@ fn token_reference(facts: &CardFacts) -> Option<&str> {
     }
 }
 
-fn has_unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> bool {
-    unsupported_site_genesis_after_rubble_replacement(facts).is_some()
-}
-
-fn unsupported_site_genesis_after_rubble_replacement(facts: &SiteFacts) -> Option<&'static str> {
-    if facts.genesis_discard_top_spells {
-        Some("genesisDiscardTopSpells")
-    } else if facts.genesis_draw_spell_per_adjacent_same_card {
-        Some("genesisDrawSpellPerAdjacentSameCard")
-    } else if facts.genesis_enemies_lose_stealth {
-        Some("genesisEnemiesLoseStealth")
-    } else if facts.genesis_heal_nearby_avatars {
-        Some("genesisHealNearbyAvatars")
-    } else if facts.genesis_immobilize_nearby_until_next_turn {
-        Some("genesisImmobilizeNearbyUntilNextTurn")
-    } else {
-        None
-    }
-}
-
 fn unsupported_selfplay_fact(facts: &CardFacts) -> Option<&'static str> {
     match facts {
         CardFacts::Avatar(facts) => {
@@ -1264,20 +1244,6 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
             | ArtifactEffect::BearerControllerChoosesExtraRandomOutcome
     )
-}
-
-/// Facts that reach realm Artifacts through paths the engine does not implement yet.
-fn unsupported_alongside_artifacts(facts: &CardFacts) -> Option<&'static str> {
-    match facts {
-        CardFacts::Magic(facts) => match facts.effect {
-            MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
-                Some("burrowAllMinionsAndArtifactsAtTargetLandSite")
-            }
-            _ => None,
-        },
-        // An oversized bearer carries each Artifact at one exact cell of its footprint.
-        _ => None,
-    }
 }
 
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
@@ -1589,39 +1555,6 @@ impl Game {
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {
                 return Err(GameError::UnsupportedManifestFact(field.to_owned()));
-            }
-        }
-        if self
-            .rules
-            .cards
-            .iter()
-            .any(|card| matches!(card.facts, CardFacts::Artifact(_)))
-        {
-            for card in &self.rules.cards {
-                if let Some(field) = unsupported_alongside_artifacts(&card.facts) {
-                    return Err(GameError::UnsupportedManifestFact(format!(
-                        "{field} with cardType:artifact"
-                    )));
-                }
-            }
-        }
-        for player in &self.position.players {
-            let CardFacts::Avatar(avatar) =
-                &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-            else {
-                return Err(invalid("player avatar lacks avatar facts"));
-            };
-            if !avatar.replace_adjacent_rubble_with_top_atlas_site {
-                continue;
-            }
-            for card in player.atlas.iter().chain(&player.hand_atlas) {
-                let CardFacts::Site(site) = &self.rules.cards[usize::from(card.card_id.0)].facts
-                else {
-                    return Err(invalid("player Atlas card lacks site facts"));
-                };
-                if let Some(field) = unsupported_site_genesis_after_rubble_replacement(site) {
-                    return Err(GameError::UnsupportedManifestFact(field.to_owned()));
-                }
             }
         }
         Ok(())
@@ -10831,6 +10764,37 @@ impl Game {
         clippy::too_many_lines,
         reason = "site placement keeps ordered Genesis effects in one authoritative transition"
     )]
+    fn site_genesis_gain_and_draws(
+        &self,
+        seat: Seat,
+        cell: Cell,
+        card_id: CardId,
+        facts: &SiteFacts,
+    ) -> (Option<u8>, usize) {
+        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
+            (facts.genesis_gain_mana_if_only_controlled_copy
+                && !self
+                    .position
+                    .sites
+                    .iter()
+                    .flatten()
+                    .any(|site| site.controller == seat && site.card.card_id == card_id))
+            .then_some(1)
+        });
+        let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
+            cell.bordering(false)
+                .filter(|neighbor| {
+                    self.position.sites[neighbor.index()]
+                        .as_ref()
+                        .is_some_and(|site| site.card.card_id == card_id)
+                })
+                .count()
+        } else {
+            0
+        };
+        (genesis_gain_mana, genesis_spell_draw_count)
+    }
+
     fn apply_play_site_action(
         &mut self,
         action: &IssuedAction,
@@ -10906,27 +10870,8 @@ impl Game {
             | (None, None) => {}
             _ => return Err(GameError::IllegalAction),
         }
-        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
-            (facts.genesis_gain_mana_if_only_controlled_copy
-                && !self
-                    .position
-                    .sites
-                    .iter()
-                    .flatten()
-                    .any(|site| site.controller == seat && site.card.card_id == played_card_id))
-            .then_some(1)
-        });
-        let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
-            cell.bordering(false)
-                .filter(|neighbor| {
-                    self.position.sites[neighbor.index()]
-                        .as_ref()
-                        .is_some_and(|site| site.card.card_id == played_card_id)
-                })
-                .count()
-        } else {
-            0
-        };
+        let (genesis_gain_mana, genesis_spell_draw_count) =
+            self.site_genesis_gain_and_draws(seat, cell, played_card_id, facts);
         let replacing_rubble_with_water =
             self.position.rubble[cell.index()].is_some() && facts.elements.contains(Element::Water);
         let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
@@ -11284,22 +11229,11 @@ impl Game {
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
-        if has_unsupported_site_genesis_after_rubble_replacement(facts) {
-            return Err(GameError::UnsupportedManifestFact(
-                "site Genesis after Rubble replacement".to_owned(),
-            ));
-        }
         let replacing_with_water = facts.elements.contains(Element::Water);
         let defer_token = facts.genesis_pay_one_mana_to_summon_token.is_some();
         let compact_card_id = top.card_id;
-        let genesis_gain_mana =
-            facts.genesis_gain_mana.or_else(|| {
-                (facts.genesis_gain_mana_if_only_controlled_copy
-                    && !self.position.sites.iter().flatten().any(|site| {
-                        site.controller == seat && site.card.card_id == compact_card_id
-                    }))
-                .then_some(1)
-            });
+        let (genesis_gain_mana, genesis_spell_draw_count) =
+            self.site_genesis_gain_and_draws(seat, target_cell, compact_card_id, facts);
         let origin_state_version = self.position.state_version;
         let next_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
         let card = self.position.players[player_index].atlas.remove(0);
@@ -11340,7 +11274,7 @@ impl Game {
             defer_token,
             from_top_atlas: true,
             genesis_gain_mana,
-            genesis_spell_draw_count: 0,
+            genesis_spell_draw_count,
             genesis_token_choice: None,
             origin_state_version,
             seat,
@@ -18188,7 +18122,7 @@ mod tests {
     }
 
     #[test]
-    fn rubble_replacement_support_should_be_scoped_to_its_owners_atlas() {
+    fn rubble_replacement_should_admit_site_genesis_on_the_owners_atlas() {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
                 json!(true);
@@ -18204,12 +18138,10 @@ mod tests {
                 json!(true);
             manifest["cards"]["north-site-1"]["genesisHealNearbyAvatars"] = json!(3);
         });
-        assert!(matches!(
-            Game::from_manifest_json(&same_deck)
-                .expect("valid same-deck game")
-                .ensure_selfplay_supported(),
-            Err(GameError::UnsupportedManifestFact(field)) if field == "genesisHealNearbyAvatars"
-        ));
+        Game::from_manifest_json(&same_deck)
+            .expect("valid same-deck game")
+            .ensure_selfplay_supported()
+            .expect("Geomancer Atlas Genesis is self-play safe");
     }
 
     #[test]
@@ -18665,6 +18597,22 @@ mod tests {
             .expect("valid Bury plus Lethal Artifact manifest")
             .ensure_selfplay_supported()
             .expect("Bury with Lethal Artifacts is self-play safe");
+
+        let cave_in_with_artifact = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                    "cardType": "magic",
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["south-spell-1"] = power_artifact;
+        });
+        Game::from_manifest_json(&cave_in_with_artifact)
+            .expect("valid Cave-In plus Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Cave-In with power Artifacts is self-play safe");
     }
 
     #[test]

@@ -3271,6 +3271,28 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0162",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Geomancer Rubble replacement resumes the same adjacent same-card Spellbook draws as playing that site from hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "rubble"
+      ],
+      "actionHints": [
+        "replace-rubble"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws"
+      }
     }
   ]
 }

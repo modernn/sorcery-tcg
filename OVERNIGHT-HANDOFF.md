@@ -10,7 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **161 rust-supported / 0 typescript-supported** out of 161.
+`data/rules/catalog.json`: **162 rust-supported / 0 typescript-supported** out of 162.
+
+Latest catalog proof: Geomancer Rubble replacement resumes adjacent same-card Spellbook draws
+(`RULE-CATALOG-0162`). Cave-In plus Artifacts is self-play admitted.
 
 ## TypeScript legality cutover
 
