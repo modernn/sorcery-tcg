@@ -10,10 +10,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **299 rust-supported / 0 typescript-supported** out of 299.
+`data/rules/catalog.json`: **303 rust-supported / 0 typescript-supported** out of 303.
 
-Latest catalog proofs: heal-target-minion Magic (`RULE-CATALOG-0298`–`0299`) and Deathrite Spellbook draw (`RULE-CATALOG-0296`–`0297`).
-Heal-target-minion is exclusive targeted Magic. It removes marked minion damage, never offers Avatars, and does not break Ward. Healing a healthy minion is a paid no-op. End Phase clears leftover damage, so the wound and the heal must share a turn. Deathrite spell draw still decks out on an empty Spellbook; start-turn mill empty remains a no-op.
+Latest catalog proofs: Deathrite library mill (`RULE-CATALOG-0300`–`0303`) and heal-target-minion Magic (`RULE-CATALOG-0298`–`0299`).
+Deathrite mill reuses the shared mill helper and resolves before cemetery entry. An empty Atlas or Spellbook is a no-op, never a deck-out, completing the draw/mill matrix next to Deathrite draw. Heal-target-minion removes marked minion damage, never offers Avatars, and does not break Ward. Healing a healthy minion is a paid no-op. End Phase clears leftover damage, so the wound and the heal must share a turn.
 Grant-Airborne this turn remains `RULE-CATALOG-0274`–`0275`.
 Cemetery Aura return remains `RULE-CATALOG-0272`–`0273`.
 Destroy- and return-target Aura Magic remains `RULE-CATALOG-0270`–`0271`.
@@ -65,14 +65,14 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Gate status on this branch
 
-- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `cea375c`.
+- `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green on `1a8a978`.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — 259 engine + 1 catalog pass, including catalog 0167–0299.
+- `tests/engine` + catalog proofs — 260 engine + 1 catalog pass, including catalog 0167–0303.
 - Full `pnpm verify` in this checkout still has authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is Deathrite mill (`deathriteMillSpells` / `deathriteMillSites`; empty = no-op), leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly), or more official start/end-turn slices. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not break Ignited or end-turn Auras. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is leftover 2×2 fail-closed combinations (do not lift Voidwalk or tokens blindly) or more official start/end-turn slices. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not break Ignited or end-turn Auras. Atlantean Fate is a different flood that strips other abilities — do not conflate it with Flood. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
