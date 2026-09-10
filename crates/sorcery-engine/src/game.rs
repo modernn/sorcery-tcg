@@ -7191,8 +7191,7 @@ impl Game {
                     )
                 }),
             SiteWaterOverlay::Flooded | SiteWaterOverlay::Fate => true,
-            SiteWaterOverlay::Drought => false,
-            SiteWaterOverlay::None => false,
+            SiteWaterOverlay::Drought | SiteWaterOverlay::None => false,
         }
     }
 
@@ -14548,22 +14547,34 @@ impl Game {
                 "seat": seat,
             })
         });
-        if matches!(
+        self.settle_after_terrain_aura(effect, cells, &instance_id, outcomes)?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn settle_after_terrain_aura(
+        &mut self,
+        effect: AuraEffect,
+        cells: &[Cell],
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if !matches!(
             effect,
             AuraEffect::AffectedSitesAreFlooded
                 | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
                 | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
         ) {
-            if matches!(
-                effect,
-                AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
-            ) {
-                self.apply_atlantean_fate_genesis(cells, &instance_id, outcomes)?;
-            }
-            self.settle_region_occupancy(outcomes)?;
-            self.settle_nearby_enemy_stealth(outcomes);
+            return Ok(());
         }
-        self.position.state_version += 1;
+        if matches!(
+            effect,
+            AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+        ) {
+            self.apply_atlantean_fate_genesis(cells, source_instance_id, outcomes);
+        }
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
         Ok(())
     }
 
@@ -14573,17 +14584,26 @@ impl Game {
         cells: &[Cell],
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
-        let affected: Vec<Cell> = cells
+    ) {
+        let (minion_ids, artifact_ids) = self.atlantean_fate_surface_occupants(cells);
+        let mut submerged = self.submerge_fate_minions(minion_ids);
+        submerged.extend(self.submerge_fate_artifacts(artifact_ids));
+        Self::emit_fate_submerge_events(submerged, source_instance_id, outcomes);
+    }
+
+    fn atlantean_fate_surface_occupants(
+        &self,
+        cells: &[Cell],
+    ) -> (BTreeSet<IdentityHash>, BTreeSet<IdentityHash>) {
+        let mut minion_ids = BTreeSet::new();
+        let mut artifact_ids = BTreeSet::new();
+        for cell in cells
             .iter()
             .copied()
             .filter(|cell| self.site_abilities_lost(*cell))
-            .collect();
-        let mut minion_ids = BTreeSet::new();
-        let mut artifact_ids = BTreeSet::new();
-        for cell in &affected {
+        {
             for unit in &self.position.units {
-                if unit.region == Region::Surface && Self::unit_occupies_cell(unit, *cell) {
+                if unit.region == Region::Surface && Self::unit_occupies_cell(unit, cell) {
                     minion_ids.insert(unit.card.instance_id.clone());
                 }
             }
@@ -14592,13 +14612,20 @@ impl Game {
                     location,
                     region: Region::Surface,
                 } = artifact.placement
-                    && location == *cell
+                    && location == cell
                 {
                     artifact_ids.insert(artifact.card.instance_id.clone());
                 }
             }
         }
-        let mut submerged: Vec<(IdentityHash, FateSubmerge)> = Vec::new();
+        (minion_ids, artifact_ids)
+    }
+
+    fn submerge_fate_minions(
+        &mut self,
+        minion_ids: BTreeSet<IdentityHash>,
+    ) -> Vec<(IdentityHash, FateSubmerge)> {
+        let mut submerged = Vec::new();
         for instance_id in minion_ids {
             let Some(index) = self
                 .position
@@ -14628,6 +14655,14 @@ impl Game {
                 },
             ));
         }
+        submerged
+    }
+
+    fn submerge_fate_artifacts(
+        &mut self,
+        artifact_ids: BTreeSet<IdentityHash>,
+    ) -> Vec<(IdentityHash, FateSubmerge)> {
+        let mut submerged = Vec::new();
         for instance_id in artifact_ids {
             let Some(index) = self
                 .position
@@ -14661,6 +14696,14 @@ impl Game {
                 },
             ));
         }
+        submerged
+    }
+
+    fn emit_fate_submerge_events(
+        mut submerged: Vec<(IdentityHash, FateSubmerge)>,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
         submerged.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         for (_, outcome) in submerged {
             match outcome {
@@ -14690,7 +14733,6 @@ impl Game {
                 }),
             }
         }
-        Ok(())
     }
 
     fn lucky_charm_count(&self, seat: Seat) -> usize {

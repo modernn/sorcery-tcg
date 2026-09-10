@@ -267,16 +267,13 @@ fn rule_catalog_0311_fate_genesis_submerges_and_kills_a_minion_without_submerge(
     );
     let after = state(&session);
     assert!(
-        after["realm"]["units"]
-            .as_array()
-            .is_none_or(|units| units.is_empty()),
+        after["realm"]["units"].as_array().is_none_or(Vec::is_empty),
         "a minion without Submerge dies once Fate puts it underwater"
     );
     assert_eq!(
         after["players"]["north"]["cemetery"]
             .as_array()
-            .map(Vec::len)
-            .unwrap_or(0),
+            .map_or(0, Vec::len),
         1,
         "the drowned minion enters its owner's cemetery"
     );
