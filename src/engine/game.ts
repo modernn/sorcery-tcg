@@ -199,6 +199,7 @@ export type GameCardDefinition =
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyTargetArtifact?: true;
     destroyTargetSite?: true;
+    tapTargetMinion?: true;
     targetNearby?: boolean;
     targetPlayerGainsLife?: number;
     targetPlayerLosesLife?: number;
@@ -1020,7 +1021,7 @@ const SUPPORTED_CARD_FIELDS = {
     lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
-    targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
+    tapTargetMinion targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
@@ -1436,6 +1437,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
     }
+    if (card.tapTargetMinion !== undefined && card.tapTargetMinion !== true) {
+      throw new RangeError(`${path}.tapTargetMinion must be true when defined`);
+    }
     if (card.untapTargetMinion !== undefined && card.untapTargetMinion !== true) {
       throw new RangeError(`${path}.untapTargetMinion must be true when defined`);
     }
@@ -1514,6 +1518,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.targetPlayerGainsLife !== undefined)
       + Number(card.targetPlayerLosesLife !== undefined)
       + Number(card.teleportAllyToTargetSite === true)
+      + Number(card.tapTargetMinion === true)
       + Number(card.teleportNearbyAllyThenDrawCard === true)
       + Number(card.untapTargetMinion === true);
     if (effectCount !== 1) {
@@ -2242,6 +2247,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { targetPlayerGainsLife: card.targetPlayerGainsLife }
                         : card.targetPlayerLosesLife !== undefined
                           ? { targetPlayerLosesLife: card.targetPlayerLosesLife }
+                        : card.tapTargetMinion === true
+                          ? { tapTargetMinion: true as const }
                         : card.untapTargetMinion === true
                           ? { untapTargetMinion: true as const }
                         : card.teleportNearbyAllyThenDrawCard === true

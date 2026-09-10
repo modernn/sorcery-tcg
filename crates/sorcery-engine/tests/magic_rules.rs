@@ -8973,3 +8973,224 @@ fn rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped() 
     assert_eq!(charger["warded"], true);
     assert_exact_replay(&session);
 }
+
+fn tap_magic_manifest(seed: u32, ward: bool) -> String {
+    let mut charger = json!({ "charge": true });
+    if ward {
+        charger["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-tap": magic(("tapTargetMinion", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-charger": minion(charger),
+        "south-site": site(false),
+    });
+    manifest(seed, &cards, &["north-tap"; 6], &["south-charger"; 6])
+}
+
+fn tap_minion_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("tap actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-tap"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn stage_south_ready_charger(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-charger"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let charger_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("South Charge identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    charger_id
+}
+
+fn charger_may_activate(session: &Session, charger_id: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("activation actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == charger_id
+        })
+}
+
+#[test]
+fn rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion() {
+    let encoded = tap_magic_manifest(219, false);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], false);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert_eq!(
+        tap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+    assert!(
+        !tap_minion_targets(&session)
+            .iter()
+            .any(|(_, instance_id)| *instance_id == north_avatar || *instance_id == south_avatar)
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-tapped", "magic-resolved"]
+    );
+    let tapped = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-tapped")
+        .expect("tap event");
+    assert_eq!(tapped.payload["instanceId"], charger_id);
+    assert_eq!(tapped.payload["seat"], "south");
+    assert_eq!(
+        tapped.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken"
+                || event.event_type == "damage-dealt"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("exhausted charger");
+    assert_eq!(charger["tapped"], true);
+    assert_eq!(charger["warded"], false);
+
+    let (_, noop) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(event_types(&noop), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !noop
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-tapped")
+    );
+    let still = state(&session);
+    assert_eq!(
+        realm_unit(&still, &charger_id).expect("still exhausted")["tapped"],
+        true
+    );
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert!(!charger_may_activate(&session, &charger_id));
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("tap checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized tap");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed tap");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed tap session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward() {
+    let encoded = tap_magic_manifest(220, true);
+    let mut session = opening_main(&encoded);
+    let charger_id = stage_south_ready_charger(&mut session);
+    let before = state(&session);
+    let charger = realm_unit(&before, &charger_id).expect("warded charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], true);
+    assert_eq!(
+        tap_minion_targets(&session),
+        [("minion".to_owned(), charger_id.clone())]
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == charger_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorb");
+    assert_eq!(broken.payload["instanceId"], charger_id);
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-tapped")
+    );
+
+    let after = state(&session);
+    let charger = realm_unit(&after, &charger_id).expect("still-ready charger");
+    assert_eq!(charger["tapped"], false);
+    assert_eq!(charger["warded"], false);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert!(charger_may_activate(&session, &charger_id));
+    assert_exact_replay(&session);
+}

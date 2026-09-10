@@ -1279,6 +1279,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TargetPlayerGainsLife(_)
         | MagicEffect::TargetPlayerLosesLife(_)
+        | MagicEffect::TapTargetMinion
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard
         | MagicEffect::UntapTargetMinion => None,
@@ -5245,6 +5246,7 @@ impl Game {
             MagicEffect::SubmergeTargetMinion
             | MagicEffect::KillTargetMinion
             | MagicEffect::ReturnTargetMinionToOwnerHand
+            | MagicEffect::TapTargetMinion
             | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
@@ -14877,6 +14879,16 @@ impl Game {
             MagicEffect::HealController(amount) => {
                 self.heal_avatar(seat, u16::from(amount), card_instance_id, outcomes)?;
             }
+            MagicEffect::TapTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_tap_minion(instance_id, *target_seat, seat, card_instance_id, outcomes)?;
+            }
             MagicEffect::UntapTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -17064,6 +17076,41 @@ impl Game {
         Ok(())
     }
 
+    fn apply_tap_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.warded && seat != caster_seat {
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": seat }),
+            );
+            return Ok(());
+        }
+        if !unit.tapped {
+            unit.tapped = true;
+            outcomes.push("minion-tapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn apply_untap_minion(
         &mut self,
         instance_id: &IdentityHash,
@@ -18806,6 +18853,10 @@ mod tests {
             (
                 MagicEffect::TargetPlayerLosesLife(2),
                 json!({ "targetPlayerLosesLife": 2 }),
+            ),
+            (
+                MagicEffect::TapTargetMinion,
+                json!({ "tapTargetMinion": true }),
             ),
             (
                 MagicEffect::UntapTargetMinion,
