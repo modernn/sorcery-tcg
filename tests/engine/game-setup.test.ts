@@ -918,6 +918,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        returnTargetMinionToOwnerHand: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /returnTargetMinionToOwnerHand must be true/);
+  const bounced = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        returnTargetMinionToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(bounced.cards[firstSpell]?.cardType === 'magic'
+    && bounced.cards[firstSpell].returnTargetMinionToOwnerHand, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        returnMinionFromOwnCemetery: true,
+        returnTargetMinionToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         damageTargetUnit: 1,
         manaCost: 1,
         targetNearby: 'yes',
@@ -19193,6 +19232,133 @@ test('RULE-03 draw-site Magic draws hidden Atlas cards and redacts them from the
     const southAfter = ctx.observe('south');
     assert.equal(southAfter.players.north.hand.atlas, 4);
     assert.equal(southAfter.players.north.atlasCount, 1);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 bounce Magic returns a healthy minion to its owner hand and never offers an Avatar', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const north: GameDeckSpec = {
+    atlas: Array(4).fill('bounce-north-site'),
+    avatar: 'bounce-north-avatar',
+    spellbook: Array(4).fill('bounce'),
+  };
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('bounce-south-site'),
+    avatar: 'bounce-south-avatar',
+    spellbook: Array(4).fill('bounce-target'),
+  };
+  const cards: Record<string, GameCardDefinition> = {
+    bounce: {
+      cardType: 'magic',
+      manaCost: 1,
+      returnTargetMinionToOwnerHand: true,
+      thresholds,
+    },
+    'bounce-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'bounce-north-site': { cardType: 'site', elements: ['earth'] },
+    'bounce-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'bounce-south-site': { cardType: 'site', elements: ['earth'] },
+    'bounce-target': {
+      attack: 0,
+      cardType: 'minion',
+      defense: 3,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-bounce-v1',
+    },
+    cards,
+    decks: { north, south },
+    firstSeat: 'north' as const,
+    seed: 202,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards.bounce, cards.bounce);
+
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cardId === 'bounce-target' && descriptor.cell === 'C1');
+    const target = ctx.state.realm.units.find(({ cardId }) => cardId === 'bounce-target');
+    assert.ok(target);
+    const targetInstanceId = target.instanceId;
+    const targetCardId = target.cardId;
+    const northAvatarId = ctx.state.players.north.avatar.card.instanceId;
+    const southAvatarId = ctx.state.players.south.avatar.card.instanceId;
+    const southHandBefore = ctx.state.players.south.hand.spellbook.length;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'bounce');
+    assert.ok(spell);
+    const spellInstanceId = spell.instanceId;
+
+    const targetRefs = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spellInstanceId
+        && descriptor.target
+        ? [descriptor.target]
+        : []);
+    assert.equal(targetRefs.some(({ kind }) => kind === 'avatar'), false);
+    assert.equal(targetRefs.some(({ instanceId }) =>
+      instanceId === northAvatarId || instanceId === southAvatarId), false);
+    assert.deepEqual(targetRefs.map(({ instanceId }) => instanceId), [targetInstanceId]);
+
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.target?.instanceId === targetInstanceId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const bounced = await ctx.step(cast);
+    assert.equal(bounced.accepted, true);
+    if (!bounced.accepted) return;
+    assert.deepEqual(bounced.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'minion-returned-to-hand',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(bounced.receipt.events[1]?.payload, {
+      cardId: targetCardId,
+      instanceId: targetInstanceId,
+      owner: 'south',
+      seat: 'south',
+      sourceInstanceId,
+    });
+    assert.equal(bounced.receipt.events.some(({ type }) =>
+      type === 'minion-died' || type === 'minion-killed' || type === 'damage-dealt'), false);
+    assert.deepEqual(bounced.receipt.randomDraws, []);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) =>
+      instanceId === targetInstanceId), false);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === targetInstanceId), false);
+    assert.equal(ctx.state.players.south.hand.spellbook.some(({ instanceId }) =>
+      instanceId === targetInstanceId), true);
+    assert.equal(ctx.state.players.south.hand.spellbook.length, southHandBefore + 1);
+    assert.equal(ctx.observe('north').players.south.hand.spellbook, southHandBefore + 1);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

@@ -4205,6 +4205,55 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0202",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Bounce Magic pays its cost, offers every same-region minion including healthy copies, never offers an Avatar, and returns the chosen minion to its owner's hidden Spellbook hand without dying or entering a cemetery. The opponent sees only the new hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0202_bounce_returns_a_healthy_minion_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0203",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Bounce Magic that would return a Warded minion to hand breaks Ward instead, leaves the minion in play, and still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0203_bounce_ward_absorbs_the_return"
+      }
     }
   ]
 }

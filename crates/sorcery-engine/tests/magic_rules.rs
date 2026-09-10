@@ -7517,3 +7517,191 @@ fn rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library() {
         assert_exact_replay(&session);
     }
 }
+
+fn bounce_manifest(ward: bool) -> String {
+    let mut south_minion = minion(json!({ "defense": 3 }));
+    if ward {
+        south_minion["ward"] = json!(true);
+    }
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-bounce": magic(("returnTargetMinionToOwnerHand", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": south_minion,
+        "south-site": site(false),
+    });
+    manifest(202, &cards, &["north-bounce"; 6], &["south-minion"; 6])
+}
+
+fn bounce_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("bounce actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-bounce"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+#[test]
+fn rule_catalog_0202_bounce_returns_a_healthy_minion_to_its_owners_hand() {
+    let encoded = bounce_manifest(false);
+    let mut session = opening_main(&encoded);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    let before = state(&session);
+    let north_avatar = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let south_hand_before = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+    assert_eq!(bounce_targets(&session), [enemy_id.as_str()]);
+    assert!(!bounce_targets(&session).contains(&north_avatar));
+    assert!(!bounce_targets(&session).contains(&south_avatar));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-bounce"
+    });
+    assert_eq!(descriptor["target"]["instanceId"], enemy_id.as_str());
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-returned-to-hand")
+        .expect("bounce return event");
+    assert_eq!(returned.payload["cardId"], "south-minion");
+    assert_eq!(returned.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died"
+                || event.event_type == "minion-killed"
+                || event.event_type == "damage-dealt")
+    );
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert!(
+        finished["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_eq!(
+        finished["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        south_hand_before + 1
+    );
+    assert!(
+        !finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    let north_view = session
+        .public_view(Seat::North)
+        .expect("North public view after the bounce");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["spellbook"],
+        south_hand_before + 1,
+        "the opponent sees only the new Spellbook hand count"
+    );
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("bounce checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized bounce checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed bounce checkpoint");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed bounce session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0203_bounce_ward_absorbs_the_return() {
+    let encoded = bounce_manifest(true);
+    let mut session = opening_main(&encoded);
+    let enemy_id = stage_south_minion_at_c1(&mut session);
+    assert_eq!(bounce_targets(&session), [enemy_id.as_str()]);
+    assert_eq!(
+        realm_unit(&state(&session), &enemy_id).expect("warded enemy")["warded"],
+        true
+    );
+    let hand_before = state(&session)["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == enemy_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    let broken = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "ward-broken")
+        .expect("Ward absorption");
+    assert_eq!(broken.payload["instanceId"], enemy_id.as_str());
+    assert_eq!(broken.payload["seat"], "south");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "minion-banished"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
+    assert_eq!(survivor["warded"], false);
+    assert!(
+        !after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id.as_str())
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}

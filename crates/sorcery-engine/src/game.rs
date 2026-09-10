@@ -1270,6 +1270,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TeleportAllyToTargetSite
@@ -5146,7 +5147,9 @@ impl Game {
                 *target_nearby,
                 *untap_target_minion_after_damage,
             )?,
-            MagicEffect::SubmergeTargetMinion | MagicEffect::KillTargetMinion => {
+            MagicEffect::SubmergeTargetMinion
+            | MagicEffect::KillTargetMinion
+            | MagicEffect::ReturnTargetMinionToOwnerHand => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
             MagicEffect::BurrowTargetMinionOrArtifact => {
@@ -15102,6 +15105,73 @@ impl Game {
                     }
                 }
             }
+            MagicEffect::ReturnTargetMinionToOwnerHand => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let index = self
+                    .position
+                    .units
+                    .iter()
+                    .position(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?;
+                // A Ward absorbs the bounce outright, even when its own controller casts the Magic.
+                if self.position.units[index].warded {
+                    self.position.units[index].warded = false;
+                    outcomes.push(
+                        "ward-broken",
+                        || json!({ "instanceId": instance_id, "seat": target_seat }),
+                    );
+                } else {
+                    let unit = self.position.units.remove(index);
+                    let card_id = self.rules.cards[usize::from(unit.card.card_id.0)]
+                        .id
+                        .clone();
+                    let owner = unit.card.owner;
+                    let token = unit.card.source == CardSource::Token;
+                    let fell_at = Location {
+                        cell: unit.location,
+                        region: unit.region,
+                    };
+                    let controller = unit.controller;
+                    self.release_carried_artifacts(
+                        UnitKind::Minion,
+                        controller,
+                        instance_id,
+                        fell_at,
+                        outcomes,
+                    );
+                    if token {
+                        outcomes.push("minion-banished", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                            })
+                        });
+                    } else {
+                        self.position.players[seat_index(owner)]
+                            .hand_spellbook
+                            .push(unit.card);
+                        outcomes.push("minion-returned-to-hand", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                                "seat": owner,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                    }
+                    self.settle_static_power_deaths(outcomes)?;
+                }
+            }
             MagicEffect::KillTargetMinion | MagicEffect::KillTargetWoundedMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -18297,6 +18367,10 @@ mod tests {
             (
                 MagicEffect::KillTargetMinion,
                 json!({ "killTargetMinion": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetMinionToOwnerHand,
+                json!({ "returnTargetMinionToOwnerHand": true }),
             ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
