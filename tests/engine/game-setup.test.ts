@@ -43,6 +43,7 @@ type SpellFacts = Readonly<{
   connectsTopBottom?: boolean;
   deathriteDamageEachUnitHere?: number;
   deathriteDrawSite?: boolean;
+  deathriteDrawSpells?: boolean;
   deathriteHeal?: number;
   deathriteLoseLifePerNearbySiteControlled?: 1;
   defense?: number;
@@ -215,6 +216,7 @@ function cardsFor(
           ? { deathriteDamageEachUnitHere: facts.deathriteDamageEachUnitHere }
           : {}),
         deathriteDrawSite: facts.deathriteDrawSite ?? false,
+        ...(facts.deathriteDrawSpells === true ? { deathriteDrawSpells: true as const } : {}),
         ...(facts.deathriteHeal ? { deathriteHeal: facts.deathriteHeal } : {}),
         ...(facts.deathriteLoseLifePerNearbySiteControlled === 1
           ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }
@@ -2483,6 +2485,31 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /waterbound must be boolean/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteDrawSpells: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /deathriteDrawSpells must be boolean/);
+  const deathriteDrawSpellsManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        deathriteDrawSpells: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    deathriteDrawSpellsManifest.cards[firstSpell]?.cardType === 'minion'
+      && deathriteDrawSpellsManifest.cards[firstSpell].deathriteDrawSpells,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -26510,6 +26537,117 @@ test('RULE-03 start-turn mill puts a public library card in the cemetery or no-o
           false,
         );
         assert.equal(ctx.state.players.north.cemetery.length, cemeteryBefore);
+      }
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  };
+  await run(6, true);
+  await run(3, false);
+});
+
+test('RULE-03 Deathrite spell draw puts a hidden card in hand or decks out an empty library', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards = {
+    'deathrite-north-avatar': avatar,
+    'deathrite-north-site': site,
+    'deathrite-north-source': {
+      attack: 1,
+      cardType: 'minion' as const,
+      deathriteDrawSpells: true,
+      defense: 1,
+      diesAtEndOfControllerTurn: true as const,
+      manaCost: 0,
+      thresholds,
+    },
+    'deathrite-south-avatar': avatar,
+    'deathrite-south-dummy': {
+      attack: 1,
+      cardType: 'minion' as const,
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'deathrite-south-site': site,
+  } satisfies Record<string, GameCardDefinition>;
+  const run = async (spellbookCount: number, expectDraw: boolean) => {
+    await withSetup(createGameManifest({
+      authority: {
+        contentHash: SYNTHETIC_AUTHORITY_HASH,
+        mode: 'synthetic' as const,
+        revisionId: 'synthetic-deathrite-draw-spells-v1',
+      },
+      cards,
+      decks: {
+        north: {
+          atlas: Array(6).fill('deathrite-north-site'),
+          avatar: 'deathrite-north-avatar',
+          spellbook: Array(spellbookCount).fill('deathrite-north-source'),
+        } satisfies GameDeckSpec,
+        south: {
+          atlas: Array(6).fill('deathrite-south-site'),
+          avatar: 'deathrite-south-avatar',
+          spellbook: Array(6).fill('deathrite-south-dummy'),
+        } satisfies GameDeckSpec,
+      },
+      firstSeat: 'north' as const,
+      seed: 296,
+    }), async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardId === 'deathrite-north-source'
+          && descriptor.cell === 'C4');
+      const sourceId = ctx.state.realm.units.find((unit) =>
+        unit.cardId === 'deathrite-north-source')?.instanceId;
+      const drawnId = ctx.state.players.north.spellbook[0]?.instanceId;
+      const handBefore = ctx.state.players.north.hand.spellbook.length;
+      const libraryBefore = ctx.state.players.north.spellbook.length;
+      assert.equal(typeof sourceId, 'string');
+      const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'end-turn'));
+      assert.equal(ended.accepted, true);
+      if (!ended.accepted) {
+        return;
+      }
+      if (expectDraw) {
+        assert.equal(typeof drawnId, 'string');
+        const drawnAt = ended.receipt.events.findIndex(({ type }) => type === 'spell-drawn');
+        const diedAt = ended.receipt.events.findIndex(({ type }) => type === 'minion-died');
+        assert.equal(drawnAt >= 0 && diedAt > drawnAt, true);
+        assert.equal(ctx.state.phase === 'draw', true);
+        assert.equal(ctx.state.terminal.status === 'active', true);
+        assert.equal(ctx.state.players.north.hand.spellbook.length, handBefore + 1);
+        assert.equal(ctx.state.players.north.spellbook.length, libraryBefore - 1);
+        assert.equal(
+          ctx.state.players.north.hand.spellbook.some((card) => card.instanceId === drawnId),
+          true,
+        );
+        assert.equal(
+          ctx.state.players.north.cemetery.some((card) => card.instanceId === sourceId),
+          true,
+        );
+      } else {
+        assert.equal(libraryBefore, 0);
+        assert.equal(
+          ended.receipt.events.some(({ type }) => type === 'spell-drawn'),
+          false,
+        );
+        assert.equal(ctx.state.phase === 'terminal', true);
+        assert.equal(ctx.state.terminal.status, 'finished');
+        if (ctx.state.terminal.status === 'finished') {
+          assert.equal(ctx.state.terminal.reason, 'deck_empty');
+          assert.equal(ctx.state.terminal.loser, 'north');
+        }
       }
       assert.equal(await ctx.verifyReplay(), true);
     });

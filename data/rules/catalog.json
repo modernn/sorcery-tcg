@@ -6363,6 +6363,51 @@
         "file": "crates/sorcery-engine/tests/start_turn_mill_rules.rs",
         "testName": "rule_catalog_0295_start_turn_mill_sites_is_a_no_op_on_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0296",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion dies, Deathrite can draw a hidden Spellbook card for its controller before the corpse enters the cemetery. The opponent sees only the hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_draw_spells_rules.rs",
+        "testName": "rule_catalog_0296_deathrite_draw_spells_draws_a_hidden_spell_before_cemetery_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0297",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Deathrite Spellbook draw from an empty library is a deck-out. The corpse still dies, the game ends, and no card is drawn. Deathrite site draws keep the same empty-library loss.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSpells"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_draw_spells_rules.rs",
+        "testName": "rule_catalog_0297_deathrite_draw_spells_decks_out_on_an_empty_library"
+      }
     }
   ]
 }

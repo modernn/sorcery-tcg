@@ -359,6 +359,7 @@ export type GameCardDefinition =
     deathriteDamageEachUnitHere?: number;
     deathriteHeal?: number;
     deathriteDrawSite?: boolean;
+    deathriteDrawSpells?: boolean;
     deathriteLoseLifePerNearbySiteControlled?: 1;
     defense: number;
     discardSpellToDamageRandomOtherUnitHere?: number;
@@ -1213,7 +1214,7 @@ const SUPPORTED_CARD_FIELDS = {
   minion: new Set(`
     airborne atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
-    charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
+    charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
@@ -1946,6 +1947,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.deathriteDrawSite !== undefined && typeof card.deathriteDrawSite !== 'boolean') {
     throw new RangeError(`${path}.deathriteDrawSite must be boolean`);
+  }
+  if (card.deathriteDrawSpells !== undefined && typeof card.deathriteDrawSpells !== 'boolean') {
+    throw new RangeError(`${path}.deathriteDrawSpells must be boolean`);
   }
   if (card.deathriteDamageEachUnitHere !== undefined
     && (!Number.isSafeInteger(card.deathriteDamageEachUnitHere)
@@ -2833,6 +2837,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { deathriteDamageEachUnitHere: card.deathriteDamageEachUnitHere }
               : {}),
             ...(card.deathriteDrawSite === true ? { deathriteDrawSite: true } : {}),
+            ...(card.deathriteDrawSpells === true ? { deathriteDrawSpells: true } : {}),
             ...(card.deathriteHeal ? { deathriteHeal: card.deathriteHeal } : {}),
             ...(card.deathriteLoseLifePerNearbySiteControlled === 1
               ? { deathriteLoseLifePerNearbySiteControlled: 1 as const }

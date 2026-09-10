@@ -1471,6 +1471,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         damage_prevention: _,
         deathrite_damage_each_unit_here: _,
         deathrite_draw_site: _,
+        deathrite_draw_spells: _,
         deathrite_heal: _,
         deathrite_lose_life_per_nearby_site_controlled: _,
         defense: _,
@@ -10919,6 +10920,7 @@ impl Game {
                 };
                 let has_deathrite = facts.deathrite_damage_each_unit_here.is_some()
                     || facts.deathrite_draw_site
+                    || facts.deathrite_draw_spells
                     || facts.deathrite_heal.is_some()
                     || facts.deathrite_lose_life_per_nearby_site_controlled;
                 if has_deathrite && !self.minion_is_disabled(unit) {
@@ -11415,6 +11417,18 @@ impl Game {
         if facts.deathrite_draw_site {
             if self.draw_private_card(source.controller, DeckZone::Atlas) {
                 outcomes.push("site-drawn", || {
+                    json!({
+                        "seat": source.controller,
+                        "sourceInstanceId": source.instance_id,
+                    })
+                });
+            } else if !pending.deck_losers.contains(&source.controller) {
+                pending.deck_losers.push(source.controller);
+            }
+        }
+        if facts.deathrite_draw_spells {
+            if self.draw_private_card(source.controller, DeckZone::Spellbook) {
+                outcomes.push("spell-drawn", || {
                     json!({
                         "seat": source.controller,
                         "sourceInstanceId": source.instance_id,
@@ -21813,6 +21827,13 @@ mod tests {
         .expect("valid start-turn Atlas mill manifest")
         .ensure_selfplay_supported()
         .expect("start-turn mill sites is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "deathriteDrawSpells",
+            json!(true),
+        )]))
+        .expect("valid Deathrite spell-draw manifest")
+        .ensure_selfplay_supported()
+        .expect("Deathrite spell draw is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
             .expect("valid must-attack manifest")
             .ensure_selfplay_supported()

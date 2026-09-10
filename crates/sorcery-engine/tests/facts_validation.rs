@@ -906,6 +906,11 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             ),
             "must be true",
         ),
+        (
+            "Deathrite spell-draw flag",
+            with(minion(), "deathriteDrawSpells", json!(1)),
+            "must be boolean",
+        ),
     ];
 
     for (name, definition, expected_error) in invalid {
@@ -985,6 +990,14 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert_eq!(facts.at_start_of_controller_turn_mill_sites, Some(2));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "deathrite-draw-spells",
+        &with(minion(), "deathriteDrawSpells", json!(true)),
+    )
+    .expect("valid Deathrite spell-draw minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.deathrite_draw_spells);
     let CardFacts::Minion(facts) = parse_card_definition(
         "start-turn-lure",
         &with(
