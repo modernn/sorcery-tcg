@@ -1,0 +1,371 @@
+//! Immutable per-game artifacts for a finished authoritative session.
+
+use std::collections::BTreeSet;
+use std::error::Error;
+use std::fmt;
+
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::batch::{BatchClassification, FinishedTerminal, MAX_GAME_ACTIONS};
+use crate::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
+use crate::contract::{ActionRequest, Event, Receipt};
+use crate::game::Game;
+use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
+use crate::session::{Session, SessionError, StepResult};
+use crate::simulator::{SimulatorError, replay_selected, run_game};
+use crate::synthetic::synthetic_demo_manifest_json;
+
+/// Coverage evidence collected from one finished transcript.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameCoverage {
+    /// Action kinds committed, in first-seen order.
+    pub committed_action_kinds: Vec<String>,
+    /// Event types emitted, in first-seen order.
+    pub committed_event_types: Vec<String>,
+    /// Action kinds offered by the engine, in first-seen order.
+    pub offered_action_kinds: Vec<String>,
+}
+
+/// Immutable SIM-03 artifacts for one finished game.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameRecord {
+    /// Number of accepted actions.
+    pub accepted_action_count: usize,
+    /// Ranked/public result classification.
+    pub classification: BatchClassification,
+    /// Action and event kinds exercised by this game.
+    pub coverage: GameCoverage,
+    /// Canonical JSONL of every transcript event, one object per line.
+    pub event_jsonl: String,
+    /// Identity of the flattened event list.
+    pub events_hash: IdentityHash,
+    /// Number of fights started.
+    pub fight_count: usize,
+    /// Final authoritative state identity.
+    pub final_state_hash: IdentityHash,
+    /// Immutable bound manifest.
+    pub manifest: Value,
+    /// Canonical manifest identity.
+    pub manifest_id: IdentityHash,
+    /// Whether authoritative replay reproduced the transcript.
+    pub replay_verified: bool,
+    /// Record schema.
+    pub schema_version: u8,
+    /// Exact finished public terminal.
+    pub terminal: FinishedTerminal,
+    /// Accepted-action receipts.
+    pub transcript: Vec<Receipt>,
+    /// Identity of the accepted-action transcript.
+    pub transcript_hash: IdentityHash,
+    /// Final turn number.
+    pub turn_count: u64,
+}
+
+/// Building a per-game record failed.
+#[derive(Debug)]
+pub enum GameRecordError {
+    /// The compact rollout or authoritative replay failed.
+    Simulator(SimulatorError),
+    /// The session finished with a disagreeing outcome and reason.
+    Invalid(&'static str),
+    /// The session or rollout is still active.
+    NonTerminal,
+}
+
+impl fmt::Display for GameRecordError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Simulator(error) => error.fmt(formatter),
+            Self::Invalid(message) => formatter.write_str(message),
+            Self::NonTerminal => formatter.write_str("game record requires a finished session"),
+        }
+    }
+}
+
+impl Error for GameRecordError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Simulator(error) => Some(error),
+            Self::Invalid(_) | Self::NonTerminal => None,
+        }
+    }
+}
+
+impl From<SimulatorError> for GameRecordError {
+    fn from(error: SimulatorError) -> Self {
+        Self::Simulator(error)
+    }
+}
+
+impl From<SessionError> for GameRecordError {
+    fn from(error: SessionError) -> Self {
+        Self::Simulator(SimulatorError::from(error))
+    }
+}
+
+impl From<CanonicalError> for GameRecordError {
+    fn from(error: CanonicalError) -> Self {
+        Self::Simulator(SimulatorError::from(SessionError::from(error)))
+    }
+}
+
+impl From<serde_json::Error> for GameRecordError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Simulator(SimulatorError::from(SessionError::from(error)))
+    }
+}
+
+/// Builds the SIM-03 record from one finished authoritative session.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] when the session is unfinished, replay diverges,
+/// or canonicalization fails.
+pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRecordError> {
+    let (Some(outcome), Some(reason)) = (session.outcome(), session.terminal_reason()) else {
+        return Err(GameRecordError::NonTerminal);
+    };
+    let Some(terminal) = FinishedTerminal::from_game(outcome, reason) else {
+        return Err(GameRecordError::Invalid(
+            "game terminal outcome and reason disagree",
+        ));
+    };
+    let coverage = coverage_from_session(session)?;
+    let events = flatten_events(session.transcript());
+    Ok(GameRecord {
+        accepted_action_count: session.transcript().len(),
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        coverage,
+        event_jsonl: event_jsonl(&events)?,
+        events_hash: identity_hash(&serde_json::to_value(&events)?)?,
+        fight_count: events
+            .iter()
+            .filter(|event| event.event_type == "fight-started")
+            .count(),
+        final_state_hash: session.state_hash()?,
+        manifest: serde_json::from_str(session.manifest_json())?,
+        manifest_id: session.manifest_id().clone(),
+        replay_verified: true,
+        schema_version: 1,
+        terminal,
+        transcript: session.transcript().to_vec(),
+        transcript_hash: session.transcript_hash()?,
+        turn_count: session.turn_number(),
+    })
+}
+
+/// Runs one policy-controlled game and writes its SIM-03 record.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] when policy binding, rollout, replay, or
+/// record construction fails.
+pub fn record_policy_game(
+    manifest_json: &str,
+    north_deck_id: &IdentityHash,
+    north_policy: &PolicySnapshot,
+    south_deck_id: &IdentityHash,
+    south_policy: &PolicySnapshot,
+    max_actions: usize,
+) -> Result<GameRecord, GameRecordError> {
+    let game = Game::from_manifest_json(manifest_json).map_err(SimulatorError::from)?;
+    for (policy, deck_id) in [(north_policy, north_deck_id), (south_policy, south_deck_id)] {
+        policy
+            .validate_binding(
+                game.rules().authority_hash(),
+                deck_id,
+                game.rules().engine_version(),
+            )
+            .map_err(SimulatorError::from)?;
+    }
+    let rollout = run_game(game, north_policy, south_policy, max_actions)?;
+    if rollout.outcome().is_none() {
+        return Err(GameRecordError::NonTerminal);
+    }
+    game_record_from_session(&replay_selected(manifest_json, &rollout)?)
+}
+
+/// Records the public synthetic demo for one seed.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] under the same conditions as [`record_policy_game`].
+pub fn record_synthetic_demo(seed: u32) -> Result<GameRecord, GameRecordError> {
+    let manifest_json = synthetic_demo_manifest_json(seed)?;
+    let game = Game::from_manifest_json(&manifest_json).map_err(SimulatorError::from)?;
+    let policy =
+        baseline_policy_snapshot(game.rules().authority_hash(), game.rules().engine_version())
+            .map_err(SimulatorError::from)?;
+    let deck_id = IdentityHash::parse(BASELINE_POLICY_DECK_ID)
+        .map_err(|_| GameRecordError::Invalid("baseline policy deckId is invalid"))?;
+    record_policy_game(
+        &manifest_json,
+        &deck_id,
+        &policy,
+        &deck_id,
+        &policy,
+        MAX_GAME_ACTIONS,
+    )
+}
+
+/// Formats flattened events as canonical JSONL with a trailing newline.
+///
+/// # Errors
+///
+/// Returns [`CanonicalError`] when an event cannot be canonicalized.
+pub fn event_jsonl(events: &[Event]) -> Result<String, CanonicalError> {
+    let mut lines = Vec::with_capacity(events.len());
+    for event in events {
+        let value = serde_json::to_value(event).map_err(CanonicalError::StringSerialization)?;
+        lines.push(canonical_json(&value)?);
+    }
+    if lines.is_empty() {
+        return Ok(String::new());
+    }
+    lines.push(String::new());
+    Ok(lines.join("\n"))
+}
+
+fn flatten_events(transcript: &[Receipt]) -> Vec<Event> {
+    transcript
+        .iter()
+        .flat_map(|receipt| receipt.events.iter().cloned())
+        .collect()
+}
+
+fn coverage_from_session(session: &Session) -> Result<GameCoverage, GameRecordError> {
+    let mut offered_action_kinds = Vec::new();
+    let mut seen_offered = BTreeSet::new();
+    let mut committed_action_kinds = Vec::new();
+    let mut seen_committed = BTreeSet::new();
+    let mut committed_event_types = Vec::new();
+    let mut seen_events = BTreeSet::new();
+    let mut replay = Session::new(session.manifest_json())?;
+    for receipt in session.transcript() {
+        let mut found = false;
+        for action in replay.legal_actions()? {
+            let kind = descriptor_kind(&action.descriptor)?;
+            if seen_offered.insert(kind.clone()) {
+                offered_action_kinds.push(kind.clone());
+            }
+            if action.action_id == receipt.action_id {
+                found = true;
+                if seen_committed.insert(kind.clone()) {
+                    committed_action_kinds.push(kind);
+                }
+            }
+        }
+        if !found {
+            return Err(SimulatorError::ReplayDiverged.into());
+        }
+        match replay.step(ActionRequest {
+            action_id: receipt.action_id.to_string(),
+            seat: replay.decision_seat(),
+            state_version: replay.state_version(),
+        })? {
+            StepResult::Accepted(stepped) if stepped.receipt_id == receipt.receipt_id => {}
+            StepResult::Accepted(_) | StepResult::Rejected(_) => {
+                return Err(SimulatorError::ReplayDiverged.into());
+            }
+        }
+        for event in &receipt.events {
+            if seen_events.insert(event.event_type.clone()) {
+                committed_event_types.push(event.event_type.clone());
+            }
+        }
+    }
+    if replay.state_hash()? != session.state_hash()? {
+        return Err(SimulatorError::ReplayDiverged.into());
+    }
+    Ok(GameCoverage {
+        committed_action_kinds,
+        committed_event_types,
+        offered_action_kinds,
+    })
+}
+
+fn descriptor_kind(descriptor: &Value) -> Result<String, GameRecordError> {
+    match descriptor.get("kind") {
+        Some(Value::String(kind)) => Ok(kind.clone()),
+        _ => Err(SimulatorError::ReplayDiverged.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{event_jsonl, game_record_from_session, record_synthetic_demo};
+    use crate::synthetic::synthetic_demo_session;
+
+    #[test]
+    fn opening_session_is_not_a_game_record() {
+        let session = synthetic_demo_session(31);
+        assert!(game_record_from_session(&session).is_err());
+    }
+
+    #[test]
+    fn seed_31_record_writes_the_six_sim03_artifacts() {
+        let record = record_synthetic_demo(31).expect("seed-31 record");
+        let events: Vec<serde_json::Value> = record
+            .event_jsonl
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("event line"))
+            .collect();
+        let rebuilt = event_jsonl(
+            &record
+                .transcript
+                .iter()
+                .flat_map(|receipt| receipt.events.iter().cloned())
+                .collect::<Vec<_>>(),
+        )
+        .expect("rebuilt JSONL");
+
+        assert_eq!(record.schema_version, 1);
+        assert!(record.replay_verified);
+        assert_eq!(record.accepted_action_count, 230);
+        assert_eq!(record.fight_count, 6);
+        assert_eq!(record.turn_count, 27);
+        assert_eq!(
+            record.final_state_hash.as_str(),
+            "sha256:be86c59b046db97838faec73c34ccc8dd8b9d56587c04a3cd335be6c588ccc65"
+        );
+        assert_eq!(
+            record.transcript_hash.as_str(),
+            "sha256:fbdad70e092de2166ee9d853bae9300d45e9921c33a88865cb94147f4cd2ad47"
+        );
+        assert_eq!(
+            record.manifest["manifestId"],
+            serde_json::Value::String(record.manifest_id.as_str().to_owned())
+        );
+        assert_eq!(record.transcript.len(), 230);
+        assert_eq!(
+            events.len(),
+            record
+                .transcript
+                .iter()
+                .map(|receipt| receipt.events.len())
+                .sum::<usize>()
+        );
+        assert_eq!(record.event_jsonl, rebuilt);
+        assert!(
+            record
+                .coverage
+                .committed_action_kinds
+                .contains(&"summon-minion".to_owned())
+        );
+        assert!(
+            record
+                .coverage
+                .committed_event_types
+                .contains(&"fight-started".to_owned())
+        );
+        assert!(
+            record
+                .coverage
+                .offered_action_kinds
+                .contains(&"end-turn".to_owned())
+        );
+    }
+}

@@ -11,7 +11,7 @@ import {
 } from '../authority/canonical-json.ts';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const MAX_OUTPUT_BYTES = 1_048_576;
+const MAX_OUTPUT_BYTES = 16 * 1_048_576;
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const DEFAULT_TARGET_DIR = fileURLToPath(new URL('../../target', import.meta.url));
 
@@ -43,6 +43,28 @@ export type RustDeterministicGameReport = Readonly<{
     status: 'finished';
     winner: 'north' | 'south';
   }>;
+  transcriptHash: Sha256Hash;
+  turnCount: number;
+}>;
+
+export type RustGameRecord = Readonly<{
+  acceptedActionCount: number;
+  classification: 'unranked_partial_rules_unverified_authority';
+  coverage: Readonly<{
+    committedActionKinds: readonly string[];
+    committedEventTypes: readonly string[];
+    offeredActionKinds: readonly string[];
+  }>;
+  eventJsonl: string;
+  eventsHash: Sha256Hash;
+  fightCount: number;
+  finalStateHash: Sha256Hash;
+  manifest: JsonValue;
+  manifestId: Sha256Hash;
+  replayVerified: boolean;
+  schemaVersion: 1;
+  terminal: RustDeterministicGameReport['terminal'];
+  transcript: readonly JsonValue[];
   transcriptHash: Sha256Hash;
   turnCount: number;
 }>;
@@ -229,6 +251,69 @@ export function runRustSyntheticDemo(seed: number): RustDeterministicGameReport 
     throw new RangeError('seed must be a safe integer between 0 and 4294967295');
   }
   return parseRustReport(runRustEngineCommand(['demo', String(seed)]));
+}
+
+function parseRustRecord(value: unknown): RustGameRecord {
+  if (!isRecord(value)
+    || value.classification !== 'unranked_partial_rules_unverified_authority'
+    || value.replayVerified !== true
+    || value.schemaVersion !== 1
+    || typeof value.eventJsonl !== 'string'
+    || !Array.isArray(value.transcript)
+    || !isRecord(value.coverage)
+    || !Array.isArray(value.coverage.committedActionKinds)
+    || !Array.isArray(value.coverage.committedEventTypes)
+    || !Array.isArray(value.coverage.offeredActionKinds)
+    || !Number.isSafeInteger(value.acceptedActionCount)
+    || !Number.isSafeInteger(value.fightCount)
+    || !Number.isSafeInteger(value.turnCount)
+    || !isRecord(value.terminal)
+    || value.terminal.status !== 'finished'
+    || (value.terminal.winner !== 'north' && value.terminal.winner !== 'south')
+    || (value.terminal.loser !== 'north' && value.terminal.loser !== 'south')
+    || typeof value.terminal.reason !== 'string') {
+    throw new Error('Rust engine record did not match the expected contract');
+  }
+  return Object.freeze({
+    acceptedActionCount: value.acceptedActionCount as number,
+    classification: 'unranked_partial_rules_unverified_authority',
+    coverage: Object.freeze({
+      committedActionKinds: Object.freeze(
+        [...value.coverage.committedActionKinds] as string[],
+      ),
+      committedEventTypes: Object.freeze(
+        [...value.coverage.committedEventTypes] as string[],
+      ),
+      offeredActionKinds: Object.freeze(
+        [...value.coverage.offeredActionKinds] as string[],
+      ),
+    }),
+    eventJsonl: value.eventJsonl,
+    eventsHash: requireHash(value.eventsHash, 'eventsHash'),
+    fightCount: value.fightCount as number,
+    finalStateHash: requireHash(value.finalStateHash, 'finalStateHash'),
+    manifest: value.manifest as JsonValue,
+    manifestId: requireHash(value.manifestId, 'manifestId'),
+    replayVerified: true,
+    schemaVersion: 1,
+    terminal: Object.freeze({
+      loser: value.terminal.loser,
+      reason: value.terminal.reason,
+      status: 'finished' as const,
+      winner: value.terminal.winner,
+    }),
+    transcript: Object.freeze([...(value.transcript as JsonValue[])]),
+    transcriptHash: requireHash(value.transcriptHash, 'transcriptHash'),
+    turnCount: value.turnCount as number,
+  });
+}
+
+/** Runs the authoritative synthetic demo and writes its SIM-03 record. */
+export function runRustSyntheticRecord(seed: number): RustGameRecord {
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
+    throw new RangeError('seed must be a safe integer between 0 and 4294967295');
+  }
+  return parseRustRecord(runRustEngineCommand(['record', String(seed)]));
 }
 
 type PendingRpc = {
@@ -450,6 +535,10 @@ export class RustSessionClient {
   async exportSession(): Promise<JsonValue> {
     const result = await this.call('exportSession', {});
     return result as JsonValue;
+  }
+
+  async exportGameRecord(): Promise<RustGameRecord> {
+    return parseRustRecord(await this.call('exportGameRecord', {}));
   }
 
   async checkpoint(): Promise<JsonValue> {

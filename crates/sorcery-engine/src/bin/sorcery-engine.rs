@@ -15,6 +15,7 @@ use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
     validate_deck,
 };
+use sorcery_engine::game_record::record_synthetic_demo;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -26,6 +27,7 @@ type CliResult<T> = Result<T, Box<dyn Error>>;
 
 enum Command {
     Demo { seed: u32 },
+    Record { seed: u32 },
     Batch { workers: usize, seeds: Vec<u32> },
     BatchJson,
 }
@@ -99,6 +101,7 @@ fn run() -> CliResult<()> {
                 .report;
             write_canonical_json(&report)
         }
+        Command::Record { seed } => write_canonical_json(&record_synthetic_demo(seed)?),
         Command::Batch { workers, seeds } => {
             write_canonical_json(&run_synthetic_batch(&seeds, workers)?)
         }
@@ -118,6 +121,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
                 return Err(io::Error::other("usage: sorcery-engine demo [seed]").into());
             }
             Ok(Command::Demo { seed })
+        }
+        Some("record") => {
+            let seed = args.next().map_or(Ok(1), |value| parse_seed(&value))?;
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine record [seed]").into());
+            }
+            Ok(Command::Record { seed })
         }
         Some("batch") => {
             let workers = args.next().map_or_else(
@@ -142,7 +152,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] | record [seed] | batch [workers] [seeds...] | batch-json",
         )
         .into()),
     }
@@ -341,6 +351,16 @@ mod tests {
         Command, MAX_BATCH_JSON_BYTES, manifest_deck_ids, parse_args, policy_for_deck,
         run_batch_json, validate_batch_json_size,
     };
+
+    #[test]
+    fn parse_args_should_default_record_seed() {
+        let command = parse_args(["record".to_owned()].into_iter()).expect("valid record");
+        let Command::Record { seed } = command else {
+            panic!("expected record command");
+        };
+
+        assert_eq!(seed, 1);
+    }
 
     #[test]
     fn parse_args_should_apply_batch_defaults() {

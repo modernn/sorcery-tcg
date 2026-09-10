@@ -108,7 +108,7 @@ pub enum FinishedTerminal {
 }
 
 impl FinishedTerminal {
-    fn from_game(outcome: GameOutcome, reason: GameEndReason) -> Option<Self> {
+    pub(crate) fn from_game(outcome: GameOutcome, reason: GameEndReason) -> Option<Self> {
         match (outcome, reason) {
             (GameOutcome::Draw, GameEndReason::SimultaneousAvatarDefeat) => Some(Self::Draw {
                 reason: DrawReason::SimultaneousAvatarDefeat,

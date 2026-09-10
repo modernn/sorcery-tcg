@@ -82,6 +82,7 @@ impl SessionJsonService {
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
             "exportSession" => self.export_session(request.id),
+            "exportGameRecord" => self.export_game_record(request.id),
             "checkpoint" => self.checkpoint(request.id),
             "resume" => self.resume(request.id, &request.params),
             _ => error_response(request.id, "session-json method is unsupported"),
@@ -347,6 +348,19 @@ impl SessionJsonService {
         };
         match session.verify_replay() {
             Ok(verified) => ok_response(id, json!({ "verified": verified })),
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn export_game_record(&self, id: u64) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return no_session(id);
+        };
+        match crate::game_record::game_record_from_session(session) {
+            Ok(record) => match serde_json::to_value(&record) {
+                Ok(value) => ok_response(id, value),
+                Err(error) => error_response(id, &error.to_string()),
+            },
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -666,6 +680,9 @@ mod tests {
         let selected = service.handle(&rpc(2, "selectPolicyAction", json!({})));
         let result = selected.result.expect("selected action");
         let action = result["action"].as_object().expect("action object");
+        let unfinished = service.handle(&rpc(3, "exportGameRecord", json!({})));
+        let message = unfinished.error.expect("unfinished record").message;
+        assert_eq!(message, "game record requires a finished session");
         assert_eq!(action["descriptor"]["kind"], "mulligan");
         assert_eq!(action["descriptor"]["atlasOrder"], json!([]));
         assert_eq!(action["descriptor"]["spellbookOrder"], json!([]));
