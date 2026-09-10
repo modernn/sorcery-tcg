@@ -10,11 +10,11 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **180 rust-supported / 0 typescript-supported** out of 180.
+`data/rules/catalog.json`: **182 rust-supported / 0 typescript-supported** out of 182.
 
-Latest catalog proofs: oversized 2×2 Ordinary/Hamlet destination cost and
-sacrifice-location (`RULE-CATALOG-0179`–`0180`). Ranged origin and Tower
-remain `RULE-CATALOG-0177`–`0178`.
+Latest catalog proofs: oversized 2×2 water-site casts require an all-Water
+square (`RULE-CATALOG-0181`–`0182`). Ordinary/Hamlet and sacrifice remain
+`RULE-CATALOG-0179`–`0180`.
 
 ## TypeScript legality cutover
 
@@ -35,7 +35,7 @@ Still TypeScript (not a second legality or observation engine):
 
 - `cargo fmt` / `clippy -D warnings` / `cargo test --workspace --all-features --locked` — green.
 - `pnpm typecheck` / `pnpm lint` — green.
-- `tests/engine` + catalog proofs — RULE-03 oversized and catalog 0167–0180 pass.
+- `tests/engine` + catalog proofs — RULE-03 oversized and catalog 0167–0182 pass.
 - Full `pnpm test` in this checkout: 374 pass, 31 authority-collector / DATA-01 failures (`pwsh` missing, no private authority bundle). Those are environment gaps, not the cutover.
 
 ## Next exact step

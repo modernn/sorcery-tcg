@@ -6547,7 +6547,16 @@ impl Game {
             Cell::SQUARE_AREAS
                 .into_iter()
                 .filter_map(|cells| {
-                    let mana_cost = cells.into_iter().filter_map(summon_cell).min()?;
+                    let mana_cost = if minion.must_be_cast_to_water_site {
+                        cells
+                            .into_iter()
+                            .map(summon_cell)
+                            .collect::<Option<Vec<_>>>()?
+                            .into_iter()
+                            .min()?
+                    } else {
+                        cells.into_iter().filter_map(summon_cell).min()?
+                    };
                     cells
                         .into_iter()
                         .all(|cell| self.surface_location_exists(cell))

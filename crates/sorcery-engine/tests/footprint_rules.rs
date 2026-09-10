@@ -45,9 +45,28 @@ fn special_north_site(giant_extra: &Value) -> Option<(&'static str, Value)> {
                 "ordinaryMinionManaDiscount": 1,
             }),
         ))
+    } else if giant_extra
+        .get("mustBeCastToWaterSite")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        Some((
+            "north-water",
+            json!({ "cardType": "site", "elements": ["water"] }),
+        ))
     } else {
         None
     }
+}
+
+#[derive(Clone, Copy)]
+enum NorthAtlasPlan {
+    FromGiantExtra,
+    AllWater,
+}
+
+fn water_site() -> Value {
+    json!({ "cardType": "site", "elements": ["water"] })
 }
 
 fn minion(extra: &Value) -> Value {
@@ -618,6 +637,7 @@ fn composition_manifest(
     south_extra: &Value,
     north_spells: &[&str],
     south_spells: &[&str],
+    atlas_plan: NorthAtlasPlan,
 ) -> String {
     let mut giant = minion(&json!({ "occupiesSquareArea": 2 }));
     giant
@@ -627,10 +647,12 @@ fn composition_manifest(
     let mut cards = json!({
         "north-avatar": avatar(),
         "north-giant": giant,
-        "north-site": site(false),
         "south-avatar": avatar(),
         "south-site": site(false),
     });
+    if !matches!(atlas_plan, NorthAtlasPlan::AllWater) {
+        cards["north-site"] = site(false);
+    }
     if north_spells.contains(&"north-freeze") {
         cards["north-freeze"] = freeze();
     }
@@ -651,12 +673,20 @@ fn composition_manifest(
     if let Some((card_id, definition)) = special_north_site(giant_extra) {
         cards[card_id] = definition;
     }
-    let north_atlas = if let Some((card_id, _)) = special_north_site(giant_extra) {
-        let mut atlas = vec!["north-site"; 8];
-        atlas.insert(0, card_id);
-        atlas
-    } else {
-        vec!["north-site"; 9]
+    let north_atlas = match atlas_plan {
+        NorthAtlasPlan::AllWater => {
+            cards["north-water"] = water_site();
+            vec!["north-water"; 9]
+        }
+        NorthAtlasPlan::FromGiantExtra => {
+            if let Some((card_id, _)) = special_north_site(giant_extra) {
+                let mut atlas = vec!["north-site"; 8];
+                atlas.insert(0, card_id);
+                atlas
+            } else {
+                vec!["north-site"; 9]
+            }
+        }
     };
     let mut value = json!({
         "authority": {
@@ -694,9 +724,51 @@ fn composition_session(
     south_spells: &[&str],
     required_north: &[&str],
 ) -> Session {
+    composition_session_with_atlas(
+        giant_extra,
+        south_extra,
+        north_spells,
+        south_spells,
+        required_north,
+        NorthAtlasPlan::FromGiantExtra,
+    )
+}
+
+fn composition_session_all_water(
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+) -> Session {
+    composition_session_with_atlas(
+        giant_extra,
+        south_extra,
+        north_spells,
+        south_spells,
+        required_north,
+        NorthAtlasPlan::AllWater,
+    )
+}
+
+fn composition_session_with_atlas(
+    giant_extra: &Value,
+    south_extra: &Value,
+    north_spells: &[&str],
+    south_spells: &[&str],
+    required_north: &[&str],
+    atlas_plan: NorthAtlasPlan,
+) -> Session {
     let manifest = (1u32..=512)
         .map(|seed| {
-            composition_manifest(seed, giant_extra, south_extra, north_spells, south_spells)
+            composition_manifest(
+                seed,
+                giant_extra,
+                south_extra,
+                north_spells,
+                south_spells,
+                atlas_plan,
+            )
         })
         .find(|candidate| {
             let preview = Session::new(candidate).expect("candidate session");
@@ -764,6 +836,22 @@ fn establish_north_square_tower_at_c4(session: &mut Session) {
 
 fn establish_north_square_hamlet_at_c4(session: &mut Session) {
     establish_north_square_named_at_c4(session, "north-hamlet");
+}
+
+fn establish_north_square_all_named(session: &mut Session, site: &str) {
+    keep(session);
+    keep(session);
+    play_named_site(session, site, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    play_named_site(session, site, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_named_site(session, site, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_named_site(session, site, "B3");
 }
 
 fn offers_summon(session: &Session, card_id: &str) -> bool {
@@ -1468,6 +1556,61 @@ fn rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell() {
             .expect("realm units")
             .iter()
             .any(|candidate| candidate["instanceId"] == fodder)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0181_oversized_water_site_cast_rejects_a_mixed_square() {
+    let mut session = composition_session(
+        &json!({ "mustBeCastToWaterSite": true }),
+        &json!({}),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square_water_at_c4(&mut session);
+    let current = state(&session);
+    assert_eq!(current["realm"]["sites"]["C4"]["cardId"], "north-water");
+    assert_eq!(current["realm"]["sites"]["B3"]["cardId"], "north-site");
+    assert!(
+        !offers_summon(&session, "north-giant"),
+        "a 2x2 water-site cast needs every occupied cell to be Water, not only C4"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square() {
+    let mut session = composition_session_all_water(
+        &json!({}),
+        &json!({
+            "mustBeCastToWaterSite": true,
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &[],
+    );
+    establish_north_square_all_named(&mut session, "north-water");
+    end_and_draw(&mut session);
+    let realm = &state(&session)["realm"];
+    for cell in ["B3", "B4", "C3", "C4"] {
+        assert_eq!(
+            realm["sites"][cell]["cardId"], "north-water",
+            "{cell} must be Water before the oversized water-site cast"
+        );
+        assert_eq!(realm["sites"][cell]["controller"], "north");
+    }
+    let (giant, receipt) = summon_at(&mut session, "south-minion", "B3");
+    assert_eq!(
+        receipt.events.first().expect("summon event").payload["cells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
     );
     assert_exact_replay(&session);
 }

@@ -3699,6 +3699,49 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0180_oversized_sacrifice_uses_every_occupied_summoning_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0181",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 water-site cast is illegal when any occupied cell is land, even if another occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0181_oversized_water_site_cast_rejects_a_mixed_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0182",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A 2x2 water-site cast may occupy an enemy all-Water square when every occupied cell is Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "mustBeCastToWaterSite",
+        "summonToAnySite"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0182_oversized_water_site_cast_occupies_an_all_water_square"
+      }
     }
   ]
 }

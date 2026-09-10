@@ -10006,6 +10006,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { gainsPowerRangedAndSpellcasterAtopTower: 2 as const },
     { ordinary: true as const },
     { sacrificeMinionAtSummoningLocationForManaDiscount: 2 as const },
+    { mustBeCastToWaterSite: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,

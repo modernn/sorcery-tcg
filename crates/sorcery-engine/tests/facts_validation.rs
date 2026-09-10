@@ -848,3 +848,39 @@ fn oversized_ordinary_and_sacrifice_should_parse() {
         Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
     );
 }
+
+#[test]
+fn oversized_water_site_cast_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-water-cast",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "mustBeCastToWaterSite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized water-site cast minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_water_site);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-water-cast-any-site",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "mustBeCastToWaterSite",
+                json!(true),
+            ),
+            "summonToAnySite",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized water-site any-site minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_water_site);
+    assert!(facts.summon_to_any_site);
+}
