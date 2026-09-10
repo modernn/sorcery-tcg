@@ -51,6 +51,7 @@ export type GameCardDefinition =
     grantsBearerPower: 2;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -64,6 +65,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -77,6 +79,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -90,6 +93,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps: true;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -103,6 +107,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4;
@@ -116,6 +121,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -129,6 +135,7 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -142,6 +149,21 @@ export type GameCardDefinition =
     grantsBearerPower?: never;
     manaCost: number;
     nearbyMinionsMustAttackIfAble: true;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: true;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage: true;
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
@@ -1045,6 +1067,7 @@ const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
     atEndOfEachTurnSiteControllerLosesLife bearerControllerChoosesExtraRandomOutcome cardType
     grantsBearerLethal grantsBearerPower manaCost nearbyMinionsMustAttackIfAble
+    nearbyStrikesAgainstUnitsDealDoubleDamage
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
@@ -1327,6 +1350,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.nearbyMinionsMustAttackIfAble !== true) {
       throw new RangeError(`${path}.nearbyMinionsMustAttackIfAble must be true`);
     }
+    if (card.nearbyStrikesAgainstUnitsDealDoubleDamage !== undefined
+      && card.nearbyStrikesAgainstUnitsDealDoubleDamage !== true) {
+      throw new RangeError(`${path}.nearbyStrikesAgainstUnitsDealDoubleDamage must be true`);
+    }
     if (card.bearerControllerChoosesExtraRandomOutcome !== undefined
       && card.bearerControllerChoosesExtraRandomOutcome !== true) {
       throw new RangeError(
@@ -1355,17 +1382,20 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4`,
       );
     }
-    if (Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
+    const exclusiveArtifactEffects = Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
       + Number(card.bearerControllerChoosesExtraRandomOutcome === true)
       + Number(card.grantsBearerPower === 2)
       + Number(card.grantsBearerLethal === true)
-      + Number(card.nearbyMinionsMustAttackIfAble === true)
       + Number(card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3)
       + Number(card
         .tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
           === true)
-      + Number(card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath === 4)
-        !== 1) {
+      + Number(card.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath === 4);
+    const maskArtifactEffects = Number(card.nearbyMinionsMustAttackIfAble === true)
+      + Number(card.nearbyStrikesAgainstUnitsDealDoubleDamage === true);
+    if (exclusiveArtifactEffects > 1
+      || (exclusiveArtifactEffects === 1 && maskArtifactEffects > 0)
+      || (exclusiveArtifactEffects === 0 && maskArtifactEffects === 0)) {
       throw new RangeError(`${path} must define exactly one supported Artifact effect`);
     }
     if (!Number.isSafeInteger(card.manaCost) || card.manaCost < 0) {
@@ -2218,7 +2248,14 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : card.grantsBearerLethal === true
                 ? { grantsBearerLethal: true as const }
               : card.nearbyMinionsMustAttackIfAble === true
-                ? { nearbyMinionsMustAttackIfAble: true as const }
+                ? {
+                  nearbyMinionsMustAttackIfAble: true as const,
+                  ...(card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
+                    ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
+                    : {}),
+                }
+              : card.nearbyStrikesAgainstUnitsDealDoubleDamage === true
+                ? { nearbyStrikesAgainstUnitsDealDoubleDamage: true as const }
                 : card.tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps === 3
                   ? {
                     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3 as const,

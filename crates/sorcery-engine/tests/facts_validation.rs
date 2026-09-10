@@ -9,8 +9,8 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 mod facts;
 
 use facts::{
-    CardFacts, Element, EndTurnStealth, MagicEffect, MinionGenesis, RequiredCastRegion, Thresholds,
-    parse_card_definition,
+    ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, MinionGenesis,
+    RequiredCastRegion, Thresholds, parse_card_definition,
 };
 
 fn thresholds() -> Value {
@@ -160,6 +160,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("grantsBearerLethal", json!(true)),
         ("grantsBearerPower", json!(2)),
         ("nearbyMinionsMustAttackIfAble", json!(true)),
+        ("nearbyStrikesAgainstUnitsDealDoubleDamage", json!(true)),
         (
             "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
             json!(true),
@@ -179,6 +180,18 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             "Artifact effect {field}"
         );
     }
+    let composed_mask = with(
+        spell("artifact", ("nearbyMinionsMustAttackIfAble", json!(true))),
+        "nearbyStrikesAgainstUnitsDealDoubleDamage",
+        json!(true),
+    );
+    let CardFacts::Artifact(facts) =
+        parse_card_definition("composed-mask", &composed_mask).expect("composed Mask")
+    else {
+        panic!("expected Artifact facts");
+    };
+    assert_eq!(facts.effect, ArtifactEffect::NearbyMinionsMustAttackIfAble);
+    assert!(facts.nearby_strikes_against_units_deal_double_damage);
 
     let aura_effects = [
         (
@@ -427,6 +440,23 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
             "nearby-must-attack flag",
             spell("artifact", ("nearbyMinionsMustAttackIfAble", json!(false))),
             "must be true",
+        ),
+        (
+            "nearby-double-strike flag",
+            spell(
+                "artifact",
+                ("nearbyStrikesAgainstUnitsDealDoubleDamage", json!(false)),
+            ),
+            "must be true",
+        ),
+        (
+            "mask plus exclusive",
+            with(
+                spell("artifact", ("grantsBearerLethal", json!(true))),
+                "nearbyStrikesAgainstUnitsDealDoubleDamage",
+                json!(true),
+            ),
+            "competing artifact",
         ),
         (
             "aura two effects",

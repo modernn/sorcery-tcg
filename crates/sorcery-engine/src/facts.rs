@@ -153,6 +153,7 @@ pub enum ArtifactEffect {
     GrantsBearerLethal,
     GrantsBearerPowerTwo,
     NearbyMinionsMustAttackIfAble,
+    NearbyStrikesAgainstUnitsDealDoubleDamage,
     TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
     TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
     TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
@@ -163,6 +164,7 @@ pub enum ArtifactEffect {
 pub struct ArtifactFacts {
     pub effect: ArtifactEffect,
     pub mana_cost: u64,
+    pub nearby_strikes_against_units_deal_double_damage: bool,
     pub thresholds: Thresholds,
 }
 
@@ -689,6 +691,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "grantsBearerPower",
     "manaCost",
     "nearbyMinionsMustAttackIfAble",
+    "nearbyStrikesAgainstUnitsDealDoubleDamage",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
     "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
     "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
@@ -1031,61 +1034,84 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
 
 fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFacts, FactError> {
     reject_unknown(object, ARTIFACT_FIELDS, path)?;
-    let life_loss = optional_bounded_integer(
-        object,
-        "atEndOfEachTurnSiteControllerLosesLife",
-        1,
-        MAX_COMBAT_STAT,
-        path,
-    )?
-    .map(|value| ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(compact_u8(value)));
-    let effect = one_effect(
-        [
-            life_loss,
-            true_only(
-                object,
-                "bearerControllerChoosesExtraRandomOutcome",
-                path,
-            )?
-            .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
-            true_only(object, "grantsBearerLethal", path)?
-                .then_some(ArtifactEffect::GrantsBearerLethal),
-            fixed_integer(object, "grantsBearerPower", 2, path)?
-                .then_some(ArtifactEffect::GrantsBearerPowerTwo),
-            true_only(object, "nearbyMinionsMustAttackIfAble", path)?
-                .then_some(ArtifactEffect::NearbyMinionsMustAttackIfAble),
-            true_only(
-                object,
-                "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
-            ),
-            fixed_integer(
-                object,
-                "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
-                3,
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
-            ),
-            fixed_integer(
-                object,
-                "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
-                4,
-                path,
-            )?
-            .then_some(
-                ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
-            ),
-        ],
-        path,
-    )?;
+    let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
+    let nearby_double = true_only(object, "nearbyStrikesAgainstUnitsDealDoubleDamage", path)?;
+    let exclusive = [
+        optional_bounded_integer(
+            object,
+            "atEndOfEachTurnSiteControllerLosesLife",
+            1,
+            MAX_COMBAT_STAT,
+            path,
+        )?
+        .map(|value| ArtifactEffect::AtEndOfEachTurnSiteControllerLosesLife(compact_u8(value))),
+        true_only(
+            object,
+            "bearerControllerChoosesExtraRandomOutcome",
+            path,
+        )?
+        .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
+        true_only(object, "grantsBearerLethal", path)?
+            .then_some(ArtifactEffect::GrantsBearerLethal),
+        fixed_integer(object, "grantsBearerPower", 2, path)?
+            .then_some(ArtifactEffect::GrantsBearerPowerTwo),
+        true_only(
+            object,
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
+        ),
+        fixed_integer(
+            object,
+            "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+            3,
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
+        ),
+        fixed_integer(
+            object,
+            "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
+            4,
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
+        ),
+    ];
+    let exclusive_count = exclusive.iter().filter(|effect| effect.is_some()).count();
+    if exclusive_count > 1 {
+        return Err(FactError::new(
+            path,
+            "must define exactly one supported effect",
+        ));
+    }
+    if exclusive_count == 1 && (nearby_must_attack || nearby_double) {
+        return Err(FactError::new(
+            path,
+            "competing artifact effects are unsupported",
+        ));
+    }
+    if exclusive_count == 0 && !nearby_must_attack && !nearby_double {
+        return Err(FactError::new(
+            path,
+            "must define exactly one supported effect",
+        ));
+    }
+    let effect = if let Some(effect) = exclusive.into_iter().flatten().next() {
+        effect
+    } else if nearby_must_attack {
+        ArtifactEffect::NearbyMinionsMustAttackIfAble
+    } else {
+        ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+    };
     Ok(ArtifactFacts {
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
+        nearby_strikes_against_units_deal_double_damage: nearby_double,
         thresholds: parse_thresholds(object, path)?,
     })
 }

@@ -5308,6 +5308,69 @@
         "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
         "testName": "rule_catalog_0248_nearby_must_attack_does_not_constrain_when_not_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0249",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion forced by a nearby-must-attack artifact may choose a Move and Attack path that leaves nearby. After it is no longer nearby, Declare Attack is optional and Decline Attack is legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "decline-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0249_nearby_must_attack_may_decline_after_leaving_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0250",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby strikes against units deal double damage. The multiplier uses the struck unit's location, composes with nearby-must-attack on the same Artifact, and stacks by doubling once per nearby source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0250_nearby_strikes_against_units_deal_double_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0251",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a strike whose struck unit is not nearby the source. A 1-power undoubled strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_must_attack_rules.rs",
+        "testName": "rule_catalog_0251_nearby_double_damage_does_not_apply_when_the_struck_unit_is_not_nearby"
+      }
     }
   ]
 }

@@ -1276,6 +1276,7 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         | ArtifactEffect::GrantsBearerLethal
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::NearbyMinionsMustAttackIfAble
+        | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
         | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -1291,6 +1292,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
             | ArtifactEffect::GrantsBearerLethal
             | ArtifactEffect::GrantsBearerPowerTwo
             | ArtifactEffect::NearbyMinionsMustAttackIfAble
+            | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -3673,6 +3675,51 @@ impl Game {
             location.region == unit.region
                 && Self::footprints_nearby(unit_cells, std::slice::from_ref(&location.cell))
         })
+    }
+
+    fn artifact_doubles_nearby_unit_strikes(&self, artifact: &ArtifactPosition) -> bool {
+        let Ok(facts) = self.artifact_facts(artifact) else {
+            return false;
+        };
+        facts.nearby_strikes_against_units_deal_double_damage
+            || facts.effect == ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+    }
+
+    fn nearby_unit_strike_multiplier(
+        &self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u16, GameError> {
+        let region = self.combatant_region(kind, seat, instance_id)?;
+        let cells = self.combatant_occupied_cells(kind, seat, instance_id)?;
+        let doubles = self
+            .position
+            .artifacts
+            .iter()
+            .filter(|artifact| {
+                self.artifact_doubles_nearby_unit_strikes(artifact)
+                    && self.artifact_location(artifact).is_ok_and(|location| {
+                        location.region == region
+                            && Self::footprints_nearby(cells, std::slice::from_ref(&location.cell))
+                    })
+            })
+            .count();
+        1_u16
+            .checked_shl(u32::try_from(doubles).map_err(|_| GameError::IllegalAction)?)
+            .ok_or(GameError::IllegalAction)
+    }
+
+    fn nearby_unit_strike_amount(
+        &self,
+        amount: u16,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<u16, GameError> {
+        amount
+            .checked_mul(self.nearby_unit_strike_multiplier(kind, seat, instance_id)?)
+            .ok_or(GameError::IllegalAction)
     }
 
     fn minion_would_have_any_attack_target(
@@ -10110,15 +10157,20 @@ impl Game {
         let return_damage_sources = return_sources
             .iter()
             .map(|(_, _, strike)| {
-                (
-                    strike.amount,
+                Ok((
+                    self.nearby_unit_strike_amount(
+                        strike.amount,
+                        attacker_kind,
+                        attacking_seat,
+                        &attacker_id,
+                    )?,
                     UnitDamageSource {
                         current_power: strike.current_power,
                         lethal: strike.lethal,
                     },
-                )
+                ))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, GameError>>()?;
         let attacker_damage = if return_damage_sources.is_empty() {
             DamageResult {
                 minion_died: false,
@@ -10149,7 +10201,12 @@ impl Game {
                     kind,
                     target.seat(),
                     target.instance_id(),
-                    allocation.amount,
+                    self.nearby_unit_strike_amount(
+                        allocation.amount,
+                        kind,
+                        target.seat(),
+                        target.instance_id(),
+                    )?,
                     UnitDamageSource {
                         current_power: attacker.current_power,
                         lethal: attacker.lethal,
@@ -20244,6 +20301,27 @@ mod tests {
             .expect("valid nearby-must-attack Artifact manifest")
             .ensure_selfplay_supported()
             .expect("nearby-must-attack Artifacts are self-play safe");
+        let nearby_double_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_double_artifact, false))
+            .expect("valid nearby-double-strike Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby double-strike Artifacts are self-play safe");
+        let mask_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&mask_artifact, false))
+            .expect("valid composed Mask Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("composed nearby-must-attack and double-strike Artifacts are self-play safe");
 
         let cave_in_with_artifact = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {
