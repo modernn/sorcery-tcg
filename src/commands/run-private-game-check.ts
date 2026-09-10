@@ -11676,30 +11676,31 @@ async function runFireHamlet(
   });
 }
 
-function runEarthOverpower(
+async function runEarthOverpower(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthOverpower'] {
+): Promise<PrivateGameCheck['earthOverpower']> {
   const opening = findEarthOverpowerOpening(input);
-  let session = keep(opening.session);
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+  let session = await rustKeep(handle);
+  session = await rustKeep(handle);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await rustAccept(handle, await rustAction(handle, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.elthamTownsfolkInstanceId
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
@@ -11708,7 +11709,7 @@ function runEarthOverpower(
   const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   if (!before || !observedBefore) throw new Error('private Overpower setup lacks Eltham Townsfolk');
-  const allyActions = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const allyActions = (await handle.legalActions()).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.overpowerInstanceId);
   const selected = allyActions.find(({ descriptor }) => descriptor.kind === 'cast-magic'
@@ -11731,7 +11732,7 @@ function runEarthOverpower(
       && descriptor.temptedEnemy === undefined
       && descriptor.temptedDestination === undefined);
   const manaBefore = session.state.players.north.mana;
-  session = accept(session, selected);
+  session = await rustAccept(handle, selected);
   const manaAfterCast = session.state.players.north.mana;
 
   const afterGrant = session.state.realm.units.find(({ instanceId }) =>
@@ -11765,7 +11766,7 @@ function runEarthOverpower(
     && afterGrant.tapped === before.tapped
     && afterGrant.warded === before.warded;
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   const observedAfterExpiry = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
@@ -11813,48 +11814,50 @@ function runEarthOverpower(
       && observedAfterExpiry.attack === input.elthamTownsfolk.attack
       && observedAfterExpiry.defense === input.elthamTownsfolk.defense
       && afterExpiry.damage === 0,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await handle.verifyReplay(),
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.overpowerInstanceId)
       && session.state.players.north.cemetery
         .some(({ instanceId }) => instanceId === opening.overpowerInstanceId),
     unitStatePreservedOnGrant,
   });
+  });
 }
 
-function runEarthBurrowing(
+async function runEarthBurrowing(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthBurrowing'] {
+): Promise<PrivateGameCheck['earthBurrowing']> {
   const opening = findEarthBurrowingOpening(input);
-  let session = keep(opening.session);
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+  let session = await rustKeep(handle);
+  session = await rustKeep(handle);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await rustAccept(handle, await rustAction(handle, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[2]
     && descriptor.cell === 'B3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await handle.legalActions();
   const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -11876,38 +11879,38 @@ function runEarthBurrowing(
     && !summonSiteDefinition.elements.includes('water')
     && attackSiteDefinition?.cardType === 'site'
     && !attackSiteDefinition.elements.includes('water');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.featuredInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === 'underground');
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
       === 'C3/underground,C2/underground');
   const movedUnderground = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C2' && region === 'underground');
-  const siteTargetUnavailableUnderground = !legalGameActions(session.state, 'north')
+  const siteTargetUnavailableUnderground = !(await handle.legalActions())
     .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.featuredInstanceId
     && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
       === 'C2/underground,C2/surface');
   const surfaced = session.state.realm.units.some(({ instanceId, location, region }) =>
     instanceId === opening.featuredInstanceId && location === 'C2' && region === 'surface');
-  const siteTargetAvailableAfterSurfacing = legalGameActions(session.state, 'north')
+  const siteTargetAvailableAfterSurfacing = (await handle.legalActions())
     .some(({ descriptor }) => descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -11916,7 +11919,7 @@ function runEarthBurrowing(
     movedUnderground,
     nonBurrowingSurfaceAvailable,
     nonBurrowingUndergroundUnavailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await handle.verifyReplay(),
     seed: opening.seed,
     siteTargetAvailableAfterSurfacing,
     siteTargetUnavailableUnderground,
@@ -11925,33 +11928,35 @@ function runEarthBurrowing(
     targetIsLandSite,
     undergroundSummonAvailable,
   });
+  });
 }
 
-function runEarthEntombed(
+async function runEarthEntombed(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthEntombed'] {
+): Promise<PrivateGameCheck['earthEntombed']> {
   const opening = findEarthEntombedOpening(input);
-  let session = keep(opening.session);
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+  let session = await rustKeep(handle);
+  session = await rustKeep(handle);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await rustAccept(handle, await rustAction(handle, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceId
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
 
-  const summons = legalGameActions(session.state, 'north');
+  const summons = await handle.legalActions();
   const matches = (cardInstanceId: string, region: 'surface' | 'underground'): boolean =>
     summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === cardInstanceId
@@ -11961,7 +11966,7 @@ function runEarthEntombed(
   const entombedUndergroundAvailable = matches(opening.entombedInstanceId, 'underground');
   const boskTrollSurfaceAvailable = matches(opening.boskTrollInstanceId, 'surface');
   const boskTrollUndergroundUnavailable = !matches(opening.boskTrollInstanceId, 'underground');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.entombedInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === 'underground');
@@ -11979,54 +11984,56 @@ function runEarthEntombed(
     entombed: opening.names.get(input.entombed.stableId) ?? input.entombed.stableId,
     entombedSurfaceUnavailable,
     entombedUndergroundAvailable,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await handle.verifyReplay(),
     seed: opening.seed,
     summonedUnderground,
   });
+  });
 }
 
-function runEarthForwardMovement(
+async function runEarthForwardMovement(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
-): PrivateGameCheck['earthForwardMovement'] {
+): Promise<PrivateGameCheck['earthForwardMovement']> {
   const opening = findEarthForwardOpening(input);
-  let session = keep(opening.session);
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
+  return withPrivateRustSession(opening.manifest, async (handle) => {
+  let session = await rustKeep(handle);
+  session = await rustKeep(handle);
+  const take = async (predicate: (candidate: GameLegalAction) => boolean): Promise<void> => {
+    session = await rustAccept(handle, await rustAction(handle, predicate));
   };
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[0]
     && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[0]
     && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.southSiteInstanceIds[1]
     && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'play-site'
     && descriptor.cardInstanceId === opening.ghostTownSiteInstanceId
     && descriptor.cell === 'B3');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
+  await take(({ descriptor }) => descriptor.kind === 'summon-minion'
     && descriptor.cardInstanceId === opening.phalanxInstanceId
     && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+  await take(({ descriptor }) => descriptor.kind === 'end-turn');
+  await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const moves = legalGameActions(session.state, 'north').filter(({ descriptor }) =>
+  const moves = (await handle.legalActions()).filter(({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.phalanxInstanceId);
   const hasPath = (cells: string): boolean => moves.some(({ descriptor }) =>
@@ -12038,14 +12045,14 @@ function runEarthForwardMovement(
     && !hasPath('C3,C4');
   const sidewaysPathUnavailable = session.state.realm.sites.B3 !== undefined
     && !hasPath('C3,B3');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+  await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === opening.phalanxInstanceId
     && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
-  const siteTargetAvailable = legalGameActions(session.state, 'north').some(({ descriptor }) =>
+  const siteTargetAvailable = (await handle.legalActions()).some(({ descriptor }) =>
     descriptor.kind === 'declare-attack'
       && descriptor.target.kind === 'site'
       && descriptor.target.instanceId === session.state.realm.sites.C2?.instanceId);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
+  await take(({ descriptor }) => descriptor.kind === 'decline-attack');
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
@@ -12054,10 +12061,11 @@ function runEarthForwardMovement(
     forwardPathAvailable,
     phalanx:
       opening.names.get(input.dalceanPhalanx.stableId) ?? input.dalceanPhalanx.stableId,
-    replayVerified: verifyGameReplay(session),
+    replayVerified: await handle.verifyReplay(),
     seed: opening.seed,
     sidewaysPathUnavailable,
     siteTargetAvailable,
+  });
   });
 }
 
@@ -24399,7 +24407,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const airVoidArtifact = runAirVoidArtifact(input);
   const airVoidwalk = runAirVoidwalk(input);
   const airZap = runAirZap(input);
-  const earthBurrowing = runEarthBurrowing(input);
+  const earthBurrowing = await runEarthBurrowing(input);
   const earthStarter = await runStarter(
     input,
     'earth-starter',
@@ -24407,7 +24415,7 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
     input.humbleVillage,
     input.wildBoars,
   );
-  const earthOverpower = runEarthOverpower(input);
+  const earthOverpower = await runEarthOverpower(input);
   const earthBury = runEarthBury(input);
   const earthQuagmire = runEarthQuagmire(input);
   const earthEntangleTerrain = runEarthEntangleTerrain(input);
@@ -24433,9 +24441,9 @@ export async function runPrivateGameCheck(path = DEFAULT_SCENARIO): Promise<Priv
   const earthGrainSparrow = runEarthGrainSparrow(input);
   const earthShallowGrave = runEarthShallowGrave(input);
   const earthSinkhole = runEarthSinkhole(input);
-  const earthEntombed = runEarthEntombed(input);
+  const earthEntombed = await runEarthEntombed(input);
   const earthFirstStrike = runEarthFirstStrike(input);
-  const earthForwardMovement = runEarthForwardMovement(input);
+  const earthForwardMovement = await runEarthForwardMovement(input);
   const earthImmobile = runEarthImmobile(input);
   const earthRamp = runEarthRamp(input);
   const earthMalakhim = runEarthMalakhim(input);
