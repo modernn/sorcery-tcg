@@ -555,7 +555,7 @@ mod tests {
         );
         let selected = service.handle(&rpc(2, "selectPolicyAction", json!({})));
         let action = selected.result.expect("selected action")["action"].clone();
-        let probed = service.handle(&rpc(
+        let novelty = service.handle(&rpc(
             3,
             "probeNovelty",
             json!({
@@ -563,11 +563,13 @@ mod tests {
                 "committedEventTypes": [],
             }),
         ));
-        let result = probed.result.expect("novelty result");
+        let result = novelty.result.expect("novelty result");
         let probes = result["probes"].as_array().expect("probes");
         assert!(!probes.is_empty());
         assert_eq!(result["tooWide"], false);
-        let selected_index = result["selectedIndex"].as_u64().expect("selectedIndex") as usize;
+        let selected_index =
+            usize::try_from(result["selectedIndex"].as_u64().expect("selectedIndex"))
+                .expect("selectedIndex fits usize");
         assert!(selected_index < probes.len());
         assert_eq!(
             probes
