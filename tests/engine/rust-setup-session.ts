@@ -165,13 +165,13 @@ export async function withPreview(
 }
 
 /** Runs one callback against a fork of the current live history. */
-export async function withFork(
+export async function withFork<T>(
   ctx: SetupCtx,
-  run: (forked: SetupCtx) => Promise<void>,
-): Promise<void> {
+  run: (forked: SetupCtx) => Promise<T>,
+): Promise<T> {
   const forked = await ctx.fork();
   try {
-    await run(forked);
+    return await run(forked);
   } finally {
     await forked.close();
   }
