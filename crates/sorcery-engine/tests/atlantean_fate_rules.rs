@@ -255,7 +255,7 @@ fn rule_catalog_0311_fate_genesis_submerges_and_kills_a_minion_without_submerge(
     let types: Vec<_> = receipt
         .events
         .iter()
-        .map(|event| event["type"].as_str().expect("event type"))
+        .map(|event| event.event_type.as_str())
         .collect();
     assert!(
         types.contains(&"aura-conjured"),
