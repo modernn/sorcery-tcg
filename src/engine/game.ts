@@ -379,6 +379,7 @@ export type GameCardDefinition =
     lethal?: boolean;
     manaCost: number;
     atStartOfControllerTurnControllerGainsLife?: number;
+    atStartOfControllerTurnControllerGainsMana?: number;
     atStartOfControllerTurnControllerLosesLife?: number;
     atStartOfControllerTurnDamageEachOtherUnitHere?: number;
     atStartOfControllerTurnDrawSites?: number;
@@ -1205,7 +1206,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -2126,6 +2127,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnControllerGainsLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
     );
   }
+  if (card.atStartOfControllerTurnControllerGainsMana !== undefined
+    && (!Number.isSafeInteger(card.atStartOfControllerTurnControllerGainsMana)
+      || card.atStartOfControllerTurnControllerGainsMana < 1
+      || card.atStartOfControllerTurnControllerGainsMana > MAX_COMBAT_STAT)) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnControllerGainsMana must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
+    );
+  }
   if (card.atStartOfControllerTurnControllerLosesLife !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnControllerLosesLife)
       || card.atStartOfControllerTurnControllerLosesLife < 1
@@ -2168,6 +2177,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   const startTurnTriggerCount = [
     card.atStartOfControllerTurnControllerGainsLife !== undefined,
+    card.atStartOfControllerTurnControllerGainsMana !== undefined,
     card.atStartOfControllerTurnControllerLosesLife !== undefined,
     card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined,
     card.atStartOfControllerTurnDrawSites !== undefined,
@@ -2710,6 +2720,12 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? {
                 atStartOfControllerTurnControllerGainsLife:
                   card.atStartOfControllerTurnControllerGainsLife,
+              }
+              : {}),
+            ...(card.atStartOfControllerTurnControllerGainsMana !== undefined
+              ? {
+                atStartOfControllerTurnControllerGainsMana:
+                  card.atStartOfControllerTurnControllerGainsMana,
               }
               : {}),
             ...(card.atStartOfControllerTurnControllerLosesLife !== undefined

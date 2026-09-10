@@ -832,6 +832,24 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "competing start-turn",
         ),
         (
+            "competing start-turn mana gain",
+            with(
+                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                "atStartOfControllerTurnControllerGainsMana",
+                json!(1),
+            ),
+            "competing start-turn",
+        ),
+        (
+            "start-turn mana gain range",
+            with(
+                minion(),
+                "atStartOfControllerTurnControllerGainsMana",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
             "competing start-turn here damage",
             with(
                 with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
@@ -962,6 +980,21 @@ fn typed_effects_should_retain_only_normalized_values() {
     assert_eq!(
         facts.at_start_of_controller_turn_controller_gains_life,
         Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-mana-gain",
+        &with(
+            minion(),
+            "atStartOfControllerTurnControllerGainsMana",
+            json!(1),
+        ),
+    )
+    .expect("valid start-turn mana-gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_gains_mana,
+        Some(1)
     );
     let CardFacts::Minion(facts) = parse_card_definition(
         "start-turn-here-damage",

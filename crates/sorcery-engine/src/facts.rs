@@ -328,6 +328,7 @@ pub struct MinionFacts {
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
     pub at_start_of_controller_turn_controller_gains_life: Option<u8>,
+    pub at_start_of_controller_turn_controller_gains_mana: Option<u8>,
     pub at_start_of_controller_turn_controller_loses_life: Option<u8>,
     pub at_start_of_controller_turn_damage_each_other_unit_here: Option<u8>,
     pub at_start_of_controller_turn_draw_sites: Option<u8>,
@@ -804,6 +805,7 @@ const MAGIC_FIELDS: &[&str] = &[
 const MINION_FIELDS: &[&str] = &[
     "airborne",
     "atStartOfControllerTurnControllerGainsLife",
+    "atStartOfControllerTurnControllerGainsMana",
     "atStartOfControllerTurnControllerLosesLife",
     "atStartOfControllerTurnDamageEachOtherUnitHere",
     "atStartOfControllerTurnDrawSites",
@@ -1612,6 +1614,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         path,
     )?
     .map(compact_u8);
+    let at_start_of_controller_turn_controller_gains_mana = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnControllerGainsMana",
+        1,
+        MAX_COMBAT_STAT,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_controller_loses_life = optional_bounded_integer(
         object,
         "atStartOfControllerTurnControllerLosesLife",
@@ -1727,6 +1737,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     }
     let start_turn_trigger_count =
         usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
+            + usize::from(at_start_of_controller_turn_controller_gains_mana.is_some())
             + usize::from(at_start_of_controller_turn_controller_loses_life.is_some())
             + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
             + usize::from(at_start_of_controller_turn_draw_sites.is_some())
@@ -1775,6 +1786,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         airborne,
         alternative_summon_payment,
         at_start_of_controller_turn_controller_gains_life,
+        at_start_of_controller_turn_controller_gains_mana,
         at_start_of_controller_turn_controller_loses_life,
         at_start_of_controller_turn_damage_each_other_unit_here,
         at_start_of_controller_turn_draw_sites,

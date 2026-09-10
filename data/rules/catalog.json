@@ -6100,6 +6100,52 @@
         "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
         "testName": "rule_catalog_0283_granted_first_strike_kills_before_return_damage"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0284",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "At the start of its controller's turn, a minion can add mana to the site-produced pool already present in the Start Phase. The trigger is mandatory and then the turn proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsMana"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mana_gain_rules.rs",
+        "testName": "rule_catalog_0284_start_turn_mana_gain_adds_to_site_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0285",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-of-turn controller mana gain can pay a two-mana spell that one site alone cannot. After Draw, the gained mana is spent and the pool returns to empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsMana"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "magic-cast"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_mana_gain_rules.rs",
+        "testName": "rule_catalog_0285_start_turn_mana_gain_pays_a_two_mana_spell"
+      }
     }
   ]
 }

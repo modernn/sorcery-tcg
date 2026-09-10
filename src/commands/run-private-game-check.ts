@@ -4612,6 +4612,7 @@ function gameDefinition(
   grantLethalToAllyThisTurn = false,
   atStartOfControllerTurnDamageEachOtherUnitHere: 0 | 1 = 0,
   grantFirstStrikeToAllyThisTurn = false,
+  atStartOfControllerTurnControllerGainsMana: 0 | 1 = 0,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4846,6 +4847,9 @@ function gameDefinition(
       airborne,
       ...(atStartOfControllerTurnControllerGainsLife
         ? { atStartOfControllerTurnControllerGainsLife }
+        : {}),
+      ...(atStartOfControllerTurnControllerGainsMana
+        ? { atStartOfControllerTurnControllerGainsMana }
         : {}),
       ...(atStartOfControllerTurnControllerLosesLife
         ? { atStartOfControllerTurnControllerLosesLife }

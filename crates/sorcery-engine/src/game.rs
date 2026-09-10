@@ -1448,6 +1448,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         airborne: _,
         alternative_summon_payment: _,
         at_start_of_controller_turn_controller_gains_life: _,
+        at_start_of_controller_turn_controller_gains_mana: _,
         at_start_of_controller_turn_controller_loses_life: _,
         at_start_of_controller_turn_damage_each_other_unit_here: _,
         at_start_of_controller_turn_draw_sites: _,
@@ -15152,6 +15153,34 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        let mana_gain = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_controller_gains_mana
+        };
+        if let Some(amount) = mana_gain {
+            let player = &mut self.position.players[seat_index(action.seat)];
+            player.mana = player
+                .mana
+                .checked_add(u16::from(amount))
+                .ok_or(GameError::IllegalAction)?;
+            outcomes.push("mana-gained", || {
+                json!({
+                    "amount": amount,
+                    "seat": action.seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let here_damage = {
             let unit = self
                 .start_turn_trigger_unit(action.seat, source_instance_id)
@@ -15393,6 +15422,9 @@ impl Game {
         (facts
             .at_start_of_controller_turn_controller_gains_life
             .is_some()
+            || facts
+                .at_start_of_controller_turn_controller_gains_mana
+                .is_some()
             || facts
                 .at_start_of_controller_turn_controller_loses_life
                 .is_some()

@@ -25925,6 +25925,115 @@ test('RULE-04 start-turn here-area damage hits other units here and can destroy 
   await run(1, false);
 });
 
+test('RULE-04 start-turn controller mana gain adds to site mana and pays a two-mana spell', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const cards: Record<string, GameCardDefinition> = {
+    'mana-north-avatar': avatar,
+    'mana-north-site': site,
+    'mana-north-source': {
+      atStartOfControllerTurnControllerGainsMana: 1,
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'mana-north-spend': {
+      cardType: 'magic',
+      drawSpells: 1,
+      manaCost: 2,
+      thresholds,
+    },
+    'mana-south-avatar': avatar,
+    'mana-south-dummy': {
+      cardType: 'magic',
+      drawSpells: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'mana-south-site': site,
+  };
+  await withSetup(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-start-turn-mana-gain-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('mana-north-site'),
+        avatar: 'mana-north-avatar',
+        spellbook: ['mana-north-source', 'mana-north-spend', 'mana-north-spend'],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('mana-south-site'),
+        avatar: 'mana-south-avatar',
+        spellbook: Array(6).fill('mana-south-dummy'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'mana-north-source'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'mana-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.phase === 'start-turn', true);
+    assert.equal(ctx.state.players.north.mana, 1);
+    const sourceId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'mana-north-source')?.instanceId;
+    assert.equal(typeof sourceId, 'string');
+    if (typeof sourceId !== 'string') {
+      return;
+    }
+    const resolved = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId));
+    assert.equal(resolved.accepted, true);
+    if (!resolved.accepted) {
+      return;
+    }
+    assert.equal(
+      resolved.receipt.events.some((event) =>
+        event.type === 'mana-gained'
+          && (event.payload as { amount?: number; sourceInstanceId?: string }).amount === 1
+          && (event.payload as { sourceInstanceId?: string }).sourceInstanceId === sourceId),
+      true,
+    );
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal(ctx.state.players.north.mana, 2);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    assert.equal(ctx.state.phase === 'main', true);
+    const spent = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'mana-north-spend'));
+    assert.equal(spent.accepted, true);
+    if (!spent.accepted) {
+      return;
+    }
+    assert.equal(ctx.state.players.north.mana, 0);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {
