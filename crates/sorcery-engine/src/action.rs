@@ -381,7 +381,7 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sacrificed_minion_instance_ids: Option<Vec<IdentityHash>>,
     },
-    /// Conjure one Aura across a canonical two-by-two realm area.
+    /// Conjure one Aura across its engine-issued cells.
     CastAura {
         /// Stable rules card identity.
         card_id: String,
@@ -389,8 +389,8 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Authoritative caster instance identity.
         caster_instance_id: IdentityHash,
-        /// Exact canonical two-by-two area the Aura covers.
-        cells: SquareArea,
+        /// Covered cells: a canonical two-by-two area, or one Ordinary or Exceptional site.
+        cells: Vec<Cell>,
     },
     /// Cast one supported Magic card from the player's hand.
     CastMagic {
@@ -805,14 +805,18 @@ impl ActionDescriptor {
                 };
                 Some(format!("Cast {card_id} {destination} ({mana_cost} mana)"))
             }
-            Self::CastAura { card_id, cells, .. } => Some(format!(
-                "Conjure {card_id} across {}",
-                cells
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
+            Self::CastAura { card_id, cells, .. } => Some(if let [cell] = cells.as_slice() {
+                format!("Conjure {card_id} atop {cell}")
+            } else {
+                format!(
+                    "Conjure {card_id} across {}",
+                    cells
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }),
             Self::DropArtifacts {
                 artifact_instance_ids,
                 unit,
@@ -1349,6 +1353,23 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
             | (ActionDescriptor::CastArtifact { .. }, ActionDescriptor::CastAura { .. }) => {
                 compare_card_prefix(left, right).then(Ordering::Less)
             }
+            (
+                ActionDescriptor::CastAura {
+                    card_id: left_card,
+                    card_instance_id: left_instance,
+                    caster_instance_id: left_caster,
+                    cells: left_cells,
+                },
+                ActionDescriptor::CastAura {
+                    card_id: right_card,
+                    card_instance_id: right_instance,
+                    caster_instance_id: right_caster,
+                    cells: right_cells,
+                },
+            ) => compare_json_strings(left_card, right_card)
+                .then_with(|| left_instance.cmp(right_instance))
+                .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| compare_json_array(left_cells, right_cells, Cell::cmp)),
             (ActionDescriptor::CastMagic { .. }, ActionDescriptor::BeginChainMagic { .. })
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::BeginChainMagic { .. })
             | (ActionDescriptor::PlaySite { .. }, ActionDescriptor::CastMagic { .. })

@@ -4596,6 +4596,8 @@ function gameDefinition(
   flyToNearbyVoidOncePerTurnAtAirThreshold = false,
   siteGenesisReorderNextSpells = false,
   minionsHereGainVoidwalkUntilLeavingVoid = false,
+  atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf = false,
+  uniqueOrLegendary = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4695,16 +4697,20 @@ function gameDefinition(
         : {}),
       ...(genesisHealNearbyAvatars ? { genesisHealNearbyAvatars } : {}),
       ...(isTower ? { isTower: true as const } : {}),
+      ...(uniqueOrLegendary ? { uniqueOrLegendary: true as const } : {}),
     };
   }
   if (card.cardType === 'aura'
     && card.manaCost !== null
     && Number(immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns)
-      + Number(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3) === 1) {
+      + Number(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
+      + Number(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf) === 1) {
     return {
-      ...(atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
-        ? { atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep }
-        : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
+      ...(atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf
+        ? { atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true as const }
+        : atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+          ? { atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep }
+          : { immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true as const }),
       cardType: 'aura',
       manaCost: card.manaCost,
       thresholds: card.thresholds,

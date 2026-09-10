@@ -193,9 +193,11 @@ export type GameCardDefinition =
     preventsUnitsWithPowerAtLeastFromEntering?: number;
     rangedUnitsHereRangeBonus?: 1;
     sacrificeToDestroyNearbySite?: true;
+    uniqueOrLegendary?: true;
   }>
   | Readonly<{
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns: true;
     manaCost: number;
@@ -203,6 +205,15 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep: 3;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf?: never;
+    cardType: 'aura';
+    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
+    manaCost: number;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep?: never;
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true;
     cardType: 'aura';
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns?: never;
     manaCost: number;
@@ -375,7 +386,7 @@ type SiteInstance = Readonly<CardInstance & {
 }>;
 
 type AuraInstance = Readonly<CardInstance & {
-  cells: TwoByTwoArea;
+  cells: readonly RealmCell[];
   controller: GameSeat;
   turnCounters: number;
 }>;
@@ -744,7 +755,7 @@ export type GameObservation = Readonly<{
     }>[];
     auras?: readonly Readonly<{
       cardId: string;
-      cells: TwoByTwoArea;
+      cells: readonly RealmCell[];
       controller: GameSeat;
       instanceId: StateHash;
       owner: GameSeat;
@@ -865,7 +876,7 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: string;
     casterInstanceId: StateHash;
-    cells: TwoByTwoArea;
+    cells: readonly RealmCell[];
     kind: 'cast-aura';
   }>
   | Readonly<{
@@ -1076,7 +1087,8 @@ const SUPPORTED_CARD_FIELDS = {
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds
   `.trim().split(/\s+/)),
   aura: new Set(`
-    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep cardType
+    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep
+    atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf cardType
     immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns manaCost thresholds
   `.trim().split(/\s+/)),
   avatar: new Set(`
@@ -1131,7 +1143,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisReorderNextSpells
     isTower ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
     minionsHereGainVoidwalkUntilLeavingVoid
-    preventsUnitsWithPowerAtLeastFromEntering
+    preventsUnitsWithPowerAtLeastFromEntering uniqueOrLegendary
   `.trim().split(/\s+/)),
 } satisfies Readonly<Record<GameCardDefinition['cardType'], ReadonlySet<string>>>;
 
@@ -1332,6 +1344,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.rangedUnitsHereRangeBonus !== 1) {
       throw new RangeError(`${path}.rangedUnitsHereRangeBonus must be 1`);
     }
+    if (card.uniqueOrLegendary !== undefined && card.uniqueOrLegendary !== true) {
+      throw new RangeError(`${path}.uniqueOrLegendary must be true when defined`);
+    }
     return;
   }
   if (card.cardType === 'artifact') {
@@ -1426,8 +1441,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep must be 3`,
       );
     }
+    if (card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf !== undefined
+      && card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf !== true) {
+      throw new RangeError(
+        `${path}.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf must be true`,
+      );
+    }
     if (Number(card.immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns === true)
       + Number(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3)
+      + Number(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true)
         !== 1) {
       throw new RangeError(`${path} must define exactly one supported Aura effect`);
     }
@@ -2345,18 +2367,25 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.sacrificeToDestroyNearbySite === true
               ? { sacrificeToDestroyNearbySite: true as const }
               : {}),
+            ...(card.uniqueOrLegendary === true
+              ? { uniqueOrLegendary: true as const }
+              : {}),
           }
           : card.cardType === 'aura'
             ? {
-              ...(card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+              ...(card.atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf === true
                 ? {
-                  atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep:
-                    3 as const,
+                  atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true as const,
                 }
-                : {
-                  immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
-                    true as const,
-                }),
+                : card.atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep === 3
+                  ? {
+                    atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep:
+                      3 as const,
+                  }
+                  : {
+                    immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns:
+                      true as const,
+                  }),
               cardType: 'aura' as const,
               manaCost: card.manaCost,
               thresholds: { ...card.thresholds },

@@ -23945,6 +23945,169 @@ test('RULE-04 start-turn lure forces a nearby enemy one step closer and no-ops w
   });
 });
 
+test('RULE-04 start-turn Aura destroys the occupied site, minions atop it, and itself', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'ablaze-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ablaze-north-aura': {
+      atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf: true,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'ablaze-north-site': { cardType: 'site', elements: ['earth'] },
+    'ablaze-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'ablaze-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      summonToAnySite: true,
+      thresholds,
+    },
+    'ablaze-south-site': { cardType: 'site', elements: ['earth'] },
+    'ablaze-south-unique': {
+      cardType: 'site',
+      elements: ['earth'],
+      uniqueOrLegendary: true,
+    },
+  };
+  const ordinaryManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-start-turn-site-destroy-aura-v1',
+    },
+    cards: {
+      'ablaze-north-avatar': cards['ablaze-north-avatar']!,
+      'ablaze-north-aura': cards['ablaze-north-aura']!,
+      'ablaze-north-site': cards['ablaze-north-site']!,
+      'ablaze-south-avatar': cards['ablaze-south-avatar']!,
+      'ablaze-south-minion': cards['ablaze-south-minion']!,
+      'ablaze-south-site': cards['ablaze-south-site']!,
+    },
+    decks: {
+      north: {
+        atlas: Array(6).fill('ablaze-north-site'),
+        avatar: 'ablaze-north-avatar',
+        spellbook: Array(6).fill('ablaze-north-aura'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('ablaze-south-site'),
+        avatar: 'ablaze-south-avatar',
+        spellbook: Array(6).fill('ablaze-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  const uniqueManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-start-turn-site-destroy-aura-v1',
+    },
+    cards: {
+      'ablaze-north-avatar': cards['ablaze-north-avatar']!,
+      'ablaze-north-aura': cards['ablaze-north-aura']!,
+      'ablaze-north-site': cards['ablaze-north-site']!,
+      'ablaze-south-avatar': cards['ablaze-south-avatar']!,
+      'ablaze-south-minion': cards['ablaze-south-minion']!,
+      'ablaze-south-site': cards['ablaze-south-unique']!,
+    },
+    decks: {
+      north: {
+        atlas: Array(6).fill('ablaze-north-site'),
+        avatar: 'ablaze-north-avatar',
+        spellbook: Array(6).fill('ablaze-north-aura'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('ablaze-south-site'),
+        avatar: 'ablaze-south-avatar',
+        spellbook: Array(6).fill('ablaze-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  const afterAuraOnC4 = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'ablaze-north-aura'
+        && descriptor.cells[0] === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+
+  await withSetup(ordinaryManifest, async (ctx) => {
+    await afterAuraOnC4(ctx);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ablaze-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'ablaze-south-minion'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    const targetId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'ablaze-south-minion')?.instanceId;
+    assert.ok(targetId);
+    assert.equal(ctx.state.phase === 'start-turn', true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal('rubble' in (ctx.state.realm.sites.C4 ?? {}), true);
+    assert.equal(ctx.state.realm.auras, undefined);
+    assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === targetId), false);
+    assert.equal(ctx.state.players.north.avatar.location, 'C4');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(uniqueManifest, async (ctx) => {
+    await afterAuraOnC4(ctx);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ablaze-south-site'
+        && descriptor.cell === 'D1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    assert.equal(ctx.state.phase === 'start-turn', true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'resolve-start-turn-trigger');
+    assert.equal(ctx.state.phase === 'draw', true);
+    assert.equal('rubble' in (ctx.state.realm.sites.C4 ?? {}), true);
+    assert.equal(ctx.state.players.north.avatar.location, 'C4');
+    assert.equal(ctx.state.realm.auras, undefined);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'ablaze-north-site'
+        && descriptor.cell === 'C3');
+    const legalCells = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) =>
+        descriptor.kind === 'cast-aura' && descriptor.cardId === 'ablaze-north-aura')
+      .map(({ descriptor }) => descriptor.kind === 'cast-aura' ? descriptor.cells : []);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C3' && cells.length === 1), true);
+    assert.equal(legalCells.some((cells) => cells[0] === 'D1'), false);
+    assert.equal(legalCells.some((cells) => cells[0] === 'C4'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-03 target-player discard lets the targeted player choose then no-ops with an empty hand', async () => {
   const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
   const cards: Record<string, GameCardDefinition> = {

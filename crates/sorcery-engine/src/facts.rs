@@ -143,6 +143,7 @@ pub struct SiteFacts {
     pub prevents_units_with_power_at_least_from_entering: Option<u8>,
     pub ranged_units_here_range_bonus: bool,
     pub sacrifice_to_destroy_nearby_site: bool,
+    pub unique_or_legendary: bool,
 }
 
 /// The single supported effect carried by an Artifact.
@@ -172,6 +173,7 @@ pub struct ArtifactFacts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuraEffect {
     AtEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStepThree,
+    AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf,
     ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns,
 }
 
@@ -682,6 +684,7 @@ const SITE_FIELDS: &[&str] = &[
     "preventsUnitsWithPowerAtLeastFromEntering",
     "rangedUnitsHereRangeBonus",
     "sacrificeToDestroyNearbySite",
+    "uniqueOrLegendary",
 ];
 
 const ARTIFACT_FIELDS: &[&str] = &[
@@ -701,6 +704,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
 
 const AURA_FIELDS: &[&str] = &[
     "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep",
+    "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
     "cardType",
     "immobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns",
     "manaCost",
@@ -1031,6 +1035,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         .map(compact_u8),
         ranged_units_here_range_bonus: fixed_integer(object, "rangedUnitsHereRangeBonus", 1, path)?,
         sacrifice_to_destroy_nearby_site: true_only(object, "sacrificeToDestroyNearbySite", path)?,
+        unique_or_legendary: true_only(object, "uniqueOrLegendary", path)?,
     })
 }
 
@@ -1139,6 +1144,12 @@ fn parse_aura(object: &Map<String, Value>, path: &str) -> Result<AuraFacts, Fact
             .then_some(
                 AuraEffect::ImmobilizeAndGroundMinionsAtAffectedSitesForThreeControllerTurns,
             ),
+            true_only(
+                object,
+                "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+                path,
+            )?
+            .then_some(AuraEffect::AtStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf),
         ],
         path,
     )?;

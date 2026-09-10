@@ -5505,6 +5505,57 @@
         "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
         "testName": "rule_catalog_0257_start_turn_lure_no_ops_when_no_enemy_is_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0258",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Aura on an Ordinary or Exceptional site destroys that site, the minions standing atop it, and itself. Avatars are not minions and survive on the resulting rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble-created",
+        "minion-died",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
+        "testName": "rule_catalog_0258_start_turn_aura_destroys_the_occupied_site_and_minions_atop_it"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0259",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-of-controller-turn Aura still destroys an empty Ordinary site and itself, without killing the Avatar. Unique or Legendary sites are not legal conjure targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDestroyOccupiedSiteMinionsAndSelf",
+        "uniqueOrLegendary"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "aura-dispelled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_site_destroy_aura_rules.rs",
+        "testName": "rule_catalog_0259_unique_sites_are_illegal_and_empty_sites_still_burn"
+      }
     }
   ]
 }
