@@ -197,6 +197,7 @@ export type GameCardDefinition =
     returnTargetMagicFromOwnCemetery?: true;
     returnTargetArtifactToOwnerHand?: true;
     returnTargetMinionToOwnerHand?: true;
+    returnTargetSiteFromOwnCemetery?: true;
     returnTargetSiteToOwnerHand?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
@@ -1026,7 +1027,8 @@ const SUPPORTED_CARD_FIELDS = {
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetMagicFromOwnCemetery returnTargetArtifactToOwnerHand
-    returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
+    returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
+    submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
@@ -1401,6 +1403,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnTargetArtifactToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetArtifactToOwnerHand must be true when defined`);
     }
+    if (card.returnTargetSiteFromOwnCemetery !== undefined
+      && card.returnTargetSiteFromOwnCemetery !== true) {
+      throw new RangeError(`${path}.returnTargetSiteFromOwnCemetery must be true when defined`);
+    }
     if (card.returnTargetSiteToOwnerHand !== undefined
       && card.returnTargetSiteToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetSiteToOwnerHand must be true when defined`);
@@ -1540,6 +1546,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.returnTargetMagicFromOwnCemetery === true)
       + Number(card.returnTargetArtifactToOwnerHand === true)
       + Number(card.returnTargetMinionToOwnerHand === true)
+      + Number(card.returnTargetSiteFromOwnCemetery === true)
       + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
@@ -2276,6 +2283,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                       ? { returnTargetArtifactToOwnerHand: true as const }
                     : card.returnTargetSiteToOwnerHand === true
                       ? { returnTargetSiteToOwnerHand: true as const }
+                    : card.returnTargetSiteFromOwnCemetery === true
+                      ? { returnTargetSiteFromOwnCemetery: true as const }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
                     : card.returnTargetArtifactFromOwnCemetery === true

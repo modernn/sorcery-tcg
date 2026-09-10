@@ -218,6 +218,7 @@ pub enum MagicEffect {
     ReturnTargetMagicFromOwnCemetery,
     ReturnTargetArtifactToOwnerHand,
     ReturnTargetMinionToOwnerHand,
+    ReturnTargetSiteFromOwnCemetery,
     ReturnTargetSiteToOwnerHand,
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
@@ -729,6 +730,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "returnTargetMagicFromOwnCemetery",
     "returnTargetArtifactToOwnerHand",
     "returnTargetMinionToOwnerHand",
+    "returnTargetSiteFromOwnCemetery",
     "returnTargetSiteToOwnerHand",
     "submergeTargetMinion",
     "summonRandomMinionFromAnyCemetery",
@@ -1259,6 +1261,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::ReturnTargetArtifactToOwnerHand),
             true_only(object, "returnTargetMinionToOwnerHand", path)?
                 .then_some(MagicEffect::ReturnTargetMinionToOwnerHand),
+            true_only(object, "returnTargetSiteFromOwnCemetery", path)?
+                .then_some(MagicEffect::ReturnTargetSiteFromOwnCemetery),
             true_only(object, "returnTargetSiteToOwnerHand", path)?
                 .then_some(MagicEffect::ReturnTargetSiteToOwnerHand),
             true_only(object, "submergeTargetMinion", path)?

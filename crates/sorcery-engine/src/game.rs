@@ -519,6 +519,42 @@ struct AuraPosition {
     turn_counters: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnCemeteryReturn {
+    Artifact,
+    Magic,
+    Minion,
+    Site,
+}
+
+impl OwnCemeteryReturn {
+    const fn event(self) -> &'static str {
+        match self {
+            Self::Artifact => "artifact-returned-to-hand",
+            Self::Magic => "magic-returned-to-hand",
+            Self::Minion => "minion-returned-to-hand",
+            Self::Site => "site-returned-to-hand",
+        }
+    }
+
+    const fn matches(self, facts: &CardFacts) -> bool {
+        matches!(
+            (self, facts),
+            (Self::Artifact, CardFacts::Artifact(_))
+                | (Self::Magic, CardFacts::Magic(_))
+                | (Self::Minion, CardFacts::Minion(_))
+                | (Self::Site, CardFacts::Site(_))
+        )
+    }
+
+    const fn zone(self) -> DeckZone {
+        match self {
+            Self::Site => DeckZone::Atlas,
+            Self::Artifact | Self::Magic | Self::Minion => DeckZone::Spellbook,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MagicChoice {
     ally: Option<UnitTarget>,
@@ -1258,6 +1294,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::ReturnTargetArtifactFromOwnCemetery
         | MagicEffect::ReturnTargetMagicFromOwnCemetery
+        | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyTargetArtifact
         | MagicEffect::DestroyTargetSite
@@ -5033,15 +5070,11 @@ impl Game {
             .collect())
     }
 
-    fn own_cemetery_type_choices(
-        &self,
-        seat: Seat,
-        is_eligible: impl Fn(&CardFacts) -> bool,
-    ) -> Vec<MagicChoice> {
+    fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
         let choices: Vec<_> = self.position.players[seat_index(seat)]
             .cemetery
             .iter()
-            .filter(|card| is_eligible(&self.rules.cards[usize::from(card.card_id.0)].facts))
+            .filter(|card| kind.matches(&self.rules.cards[usize::from(card.card_id.0)].facts))
             .map(|card| MagicChoice {
                 cemetery_minion_instance_id: Some(card.instance_id.clone()),
                 ..MagicChoice::default()
@@ -5054,13 +5087,12 @@ impl Game {
         }
     }
 
-    fn return_own_cemetery_card_to_spellbook(
+    fn return_own_cemetery_card(
         &mut self,
         seat: Seat,
         selected_id: &IdentityHash,
         source_instance_id: &IdentityHash,
-        is_eligible: impl Fn(&CardFacts) -> bool,
-        event_type: &'static str,
+        kind: OwnCemeteryReturn,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let player = &mut self.position.players[seat_index(seat)];
@@ -5071,13 +5103,16 @@ impl Game {
             .ok_or(GameError::IllegalAction)?;
         let selected = player.cemetery.remove(selected_index);
         let definition = &self.rules.cards[usize::from(selected.card_id.0)];
-        if !is_eligible(&definition.facts) {
+        if !kind.matches(&definition.facts) {
             return Err(GameError::IllegalAction);
         }
         let selected_card_id = definition.id.clone();
         let selected_owner = selected.owner;
-        player.hand_spellbook.push(selected);
-        outcomes.push(event_type, || {
+        match kind.zone() {
+            DeckZone::Atlas => player.hand_atlas.push(selected),
+            DeckZone::Spellbook => player.hand_spellbook.push(selected),
+        }
+        outcomes.push(kind.event(), || {
             json!({
                 "cardId": selected_card_id,
                 "instanceId": selected_id,
@@ -5275,12 +5310,16 @@ impl Game {
                     .collect()
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
-                self.own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Minion(_)))
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Minion)
             }
-            MagicEffect::ReturnTargetArtifactFromOwnCemetery => self
-                .own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Artifact(_))),
+            MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Artifact)
+            }
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
-                self.own_cemetery_type_choices(seat, |facts| matches!(facts, CardFacts::Magic(_)))
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Magic)
+            }
+            MagicEffect::ReturnTargetSiteFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Site)
             }
             MagicEffect::DamageTargetUnit {
                 target_nearby,
@@ -15023,36 +15062,44 @@ impl Game {
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
-                    self.return_own_cemetery_card_to_spellbook(
+                    self.return_own_cemetery_card(
                         seat,
                         selected_id,
                         card_instance_id,
-                        |facts| matches!(facts, CardFacts::Minion(_)),
-                        "minion-returned-to-hand",
+                        OwnCemeteryReturn::Minion,
                         outcomes,
                     )?;
                 }
             }
             MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
-                    self.return_own_cemetery_card_to_spellbook(
+                    self.return_own_cemetery_card(
                         seat,
                         selected_id,
                         card_instance_id,
-                        |facts| matches!(facts, CardFacts::Artifact(_)),
-                        "artifact-returned-to-hand",
+                        OwnCemeteryReturn::Artifact,
                         outcomes,
                     )?;
                 }
             }
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
-                    self.return_own_cemetery_card_to_spellbook(
+                    self.return_own_cemetery_card(
                         seat,
                         selected_id,
                         card_instance_id,
-                        |facts| matches!(facts, CardFacts::Magic(_)),
-                        "magic-returned-to-hand",
+                        OwnCemeteryReturn::Magic,
+                        outcomes,
+                    )?;
+                }
+            }
+            MagicEffect::ReturnTargetSiteFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Site,
                         outcomes,
                     )?;
                 }
@@ -19041,6 +19088,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetMinionToOwnerHand,
                 json!({ "returnTargetMinionToOwnerHand": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetSiteFromOwnCemetery,
+                json!({ "returnTargetSiteFromOwnCemetery": true }),
             ),
             (
                 MagicEffect::ReturnTargetSiteToOwnerHand,

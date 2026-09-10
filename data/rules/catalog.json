@@ -4945,6 +4945,53 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0232_cemetery_artifact_return_is_a_paid_noop_without_cemetery_artifact"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0233",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Site return is the Rescue sibling for Sites: it offers only Sites in the caster's own cemetery, never Magic already there, and returns the unchanged instance to the hidden Atlas hand rather than the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0233_cemetery_site_return_restores_own_cemetery_site_to_hidden_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0234",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Site return that finds no Site in the caster's own cemetery is a paid no-choice resolution, even when the cemetery holds Magic. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0234_cemetery_site_return_is_a_paid_noop_without_cemetery_site"
+      }
     }
   ]
 }
