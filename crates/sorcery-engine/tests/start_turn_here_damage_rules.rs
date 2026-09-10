@@ -116,7 +116,7 @@ fn state(session: &Session) -> Value {
     session.replay_value().expect("session value")["state"].clone()
 }
 
-fn unit(state: &Value, card_id: &str) -> &Value {
+fn unit<'a>(state: &'a Value, card_id: &str) -> &'a Value {
     state["realm"]["units"]
         .as_array()
         .expect("units")
