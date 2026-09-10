@@ -119,17 +119,19 @@ function parseNoveltyProbe(value: unknown): RustNoveltyProbe {
 function parseNoveltyStep(value: unknown): RustNoveltyStep {
   if (!isRecord(value)
     || !Array.isArray(value.probes)
+    || typeof value.selectedIndex !== 'number'
     || !Number.isSafeInteger(value.selectedIndex)
     || typeof value.tooWide !== 'boolean') {
     throw new Error('Rust session probeNovelty result was invalid');
   }
   const probes = value.probes.map((probe) => parseNoveltyProbe(probe));
-  if (value.selectedIndex < 0 || value.selectedIndex >= probes.length) {
+  const selectedIndex = value.selectedIndex;
+  if (selectedIndex < 0 || selectedIndex >= probes.length) {
     throw new Error('Rust session probeNovelty selectedIndex was out of range');
   }
   return Object.freeze({
     probes: Object.freeze(probes),
-    selectedIndex: value.selectedIndex as number,
+    selectedIndex,
     tooWide: value.tooWide,
   });
 }

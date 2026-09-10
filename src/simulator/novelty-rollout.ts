@@ -15,10 +15,7 @@ import {
   type GameTerminal,
 } from '../engine/game.ts';
 import type { RustNoveltyStep } from '../engine/rust-engine.ts';
-import {
-  withRustSession,
-  type RustGameSessionHandle,
-} from '../engine/rust-session-helpers.ts';
+import { withRustSession } from '../engine/rust-session-helpers.ts';
 
 export const NOVELTY_ROLLOUT_ACTION_LIMIT = 500;
 export const NOVELTY_ROLLOUT_WIDTH_LIMIT = 128;
@@ -66,7 +63,7 @@ export type NoveltyRolloutFailure =
   }>
   | Readonly<{
     checkpointId: StateHash;
-    phase: 'legal-actions' | 'selector';
+    phase: 'legal-actions' | 'probe' | 'selector';
     kind: 'exception';
   }>
   | Readonly<{
