@@ -14522,17 +14522,10 @@ impl Game {
                 .start_turn_site_artifact_life_loss_and_mana(pending.seat, source_instance_id)
                 .is_some()
             {
-                self.push_action(
+                self.push_simple_start_turn_trigger(
                     actions,
-                    ActionDescriptor::ResolveStartTurnTrigger {
-                        lure_destination: None,
-                        lure_target_instance_id: None,
-                        source_instance_id: source_instance_id.clone(),
-                    },
-                    format!(
-                        "Resolve start-turn site life loss for {}…",
-                        &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
-                    ),
+                    source_instance_id,
+                    "Resolve start-turn site life loss",
                 );
                 continue;
             }
@@ -14540,17 +14533,10 @@ impl Game {
                 .start_turn_destroy_aura(pending.seat, source_instance_id)
                 .is_some()
             {
-                self.push_action(
+                self.push_simple_start_turn_trigger(
                     actions,
-                    ActionDescriptor::ResolveStartTurnTrigger {
-                        lure_destination: None,
-                        lure_target_instance_id: None,
-                        source_instance_id: source_instance_id.clone(),
-                    },
-                    format!(
-                        "Resolve start-turn site destruction for {}…",
-                        &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
-                    ),
+                    source_instance_id,
+                    "Resolve start-turn site destruction",
                 );
                 continue;
             }
@@ -14565,18 +14551,10 @@ impl Game {
             if facts.at_start_of_controller_turn_lure_nearby_enemy_minion {
                 let choices = self.start_turn_lure_choices(unit)?;
                 if choices.is_empty() {
-                    self.push_action(
+                    self.push_simple_start_turn_trigger(
                         actions,
-                        ActionDescriptor::ResolveStartTurnTrigger {
-                            lure_destination: None,
-                            lure_target_instance_id: None,
-                            source_instance_id: source_instance_id.clone(),
-                        },
-                        format!(
-                            "Resolve start-turn lure for {}…",
-                            &source_instance_id.as_str()
-                                [..15.min(source_instance_id.as_str().len())]
-                        ),
+                        source_instance_id,
+                        "Resolve start-turn lure",
                     );
                 } else {
                     for (target_instance_id, destination) in choices {
@@ -14599,20 +14577,33 @@ impl Game {
                 }
                 continue;
             }
-            self.push_action(
+            self.push_simple_start_turn_trigger(
                 actions,
-                ActionDescriptor::ResolveStartTurnTrigger {
-                    lure_destination: None,
-                    lure_target_instance_id: None,
-                    source_instance_id: source_instance_id.clone(),
-                },
-                format!(
-                    "Resolve start-turn trigger for {}…",
-                    &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
-                ),
+                source_instance_id,
+                "Resolve start-turn trigger",
             );
         }
         Ok(())
+    }
+
+    fn push_simple_start_turn_trigger(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        source_instance_id: &IdentityHash,
+        label: &str,
+    ) {
+        self.push_action(
+            actions,
+            ActionDescriptor::ResolveStartTurnTrigger {
+                lure_destination: None,
+                lure_target_instance_id: None,
+                source_instance_id: source_instance_id.clone(),
+            },
+            format!(
+                "{label} for {}…",
+                &source_instance_id.as_str()[..15.min(source_instance_id.as_str().len())]
+            ),
+        );
     }
 
     fn append_end_turn_aura_actions(
