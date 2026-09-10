@@ -14645,7 +14645,7 @@ impl Game {
                     facts.effect,
                     AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
                 ) {
-                    for cell in self.wildfire_unvisited_adjacent(aura) {
+                    for cell in Self::wildfire_unvisited_adjacent(aura) {
                         self.push_action(
                             actions,
                             ActionDescriptor::ResolveEndTurnAuraMove {
@@ -15334,7 +15334,12 @@ impl Game {
             facts.effect,
             AuraEffect::AtEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacentThree
         ) {
-            return self.begin_wildfire_end_turn(seat, aura, remaining_aura_instance_ids, outcomes);
+            return self.begin_wildfire_end_turn(
+                seat,
+                &aura,
+                &remaining_aura_instance_ids,
+                outcomes,
+            );
         }
         outcomes.push("aura-end-turn-triggered", || {
             json!({
@@ -15553,8 +15558,7 @@ impl Game {
         );
         let legal_move = if is_wildfire {
             cells.as_ref().is_some_and(|destination| {
-                matches!(destination.as_slice(), [cell] if self
-                    .wildfire_unvisited_adjacent(&aura)
+                matches!(destination.as_slice(), [cell] if Self::wildfire_unvisited_adjacent(&aura)
                     .contains(cell))
             })
         } else {
@@ -15576,12 +15580,10 @@ impl Game {
                 .iter_mut()
                 .find(|aura| aura.card.instance_id == *aura_instance_id)
             {
-                if is_wildfire {
-                    if let Some(cell) = destination.first() {
-                        aura.visited_cells.insert(*cell);
-                    }
+                if is_wildfire && let Some(cell) = destination.first() {
+                    aura.visited_cells.insert(*cell);
                 }
-                aura.cells = destination.clone();
+                aura.cells.clone_from(destination);
             }
             if let Some(area) = self
                 .position
@@ -15637,7 +15639,7 @@ impl Game {
             .collect()
     }
 
-    fn wildfire_unvisited_adjacent(&self, aura: &AuraPosition) -> Vec<Cell> {
+    fn wildfire_unvisited_adjacent(aura: &AuraPosition) -> Vec<Cell> {
         let Some(current) = aura.cells.first().copied() else {
             return Vec::new();
         };
@@ -15650,8 +15652,8 @@ impl Game {
     fn begin_wildfire_end_turn(
         &mut self,
         ending_seat: Seat,
-        aura: AuraPosition,
-        remaining_aura_instance_ids: Vec<IdentityHash>,
+        aura: &AuraPosition,
+        remaining_aura_instance_ids: &[IdentityHash],
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let aura_instance_id = aura.card.instance_id.clone();
@@ -15667,13 +15669,13 @@ impl Game {
         let Some(cell) = aura.cells.first().copied() else {
             return Err(GameError::IllegalAction);
         };
-        let destinations = self.wildfire_unvisited_adjacent(&aura);
+        let destinations = Self::wildfire_unvisited_adjacent(aura);
         if !destinations.is_empty() {
             self.position.pending_end_turn_aura = Some(PendingEndTurnAura {
                 aura_instance_id: aura_instance_id.clone(),
                 ending_seat,
                 outcome_instance_ids: None,
-                remaining_aura_instance_ids: remaining_aura_instance_ids.clone(),
+                remaining_aura_instance_ids: remaining_aura_instance_ids.to_vec(),
                 seat: controller,
                 stage: EndTurnAuraStage::Move,
             });
@@ -15690,7 +15692,7 @@ impl Game {
             self.dispel_aura(&aura_instance_id, outcomes)?;
             return self.begin_end_turn_aura(
                 ending_seat,
-                &remaining_aura_instance_ids,
+                remaining_aura_instance_ids,
                 outcomes,
                 None,
             );
