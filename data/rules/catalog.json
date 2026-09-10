@@ -3884,6 +3884,30 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0188_oversized_submerged_only_cast_offers_only_underwater"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0189",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 area-damage minion can blanket a location adjacent to any occupied footprint cell and never targets its own square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "tapToDamageEachUnitAtAdjacentLocation"
+      ],
+      "actionHints": [
+        "activate-area-damage"
+      ],
+      "eventHints": [
+        "area-damage-activated",
+        "area-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footprint_cell"
+      }
     }
   ]
 }

@@ -1893,3 +1893,56 @@ fn rule_catalog_0188_oversized_submerged_only_cast_offers_only_underwater() {
     assert_eq!(summoned["region"], "underwater");
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0189_oversized_area_damage_reaches_cells_adjacent_to_any_footprint_cell() {
+    let mut session = composition_session(
+        &json!({ "tapToDamageEachUnitAtAdjacentLocation": 2 }),
+        &json!({
+            "defense": 10,
+            "summonToAnySite": true,
+        }),
+        &["north-giant"; 8],
+        &["south-minion"; 8],
+        &["north-giant"],
+    );
+    establish_north_square(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let enemy = stage_south_on_north_d4(&mut session);
+    let actions = session
+        .legal_actions()
+        .expect("area-damage actions after the oversized summon");
+    assert!(
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "activate-area-damage"
+                && action.descriptor["sourceInstanceId"] == giant
+                && action.descriptor["targetLocation"]
+                    == json!({ "cell": "D4", "region": "surface" })
+        }),
+        "C4 borders D4, so the B3-anchored 2x2 must offer that adjacent blanket"
+    );
+    assert!(
+        !actions.iter().any(|action| {
+            action.descriptor["kind"] == "activate-area-damage"
+                && action.descriptor["sourceInstanceId"] == giant
+                && ["B3", "B4", "C3", "C4"].contains(
+                    &action.descriptor["targetLocation"]["cell"]
+                        .as_str()
+                        .unwrap_or(""),
+                )
+        }),
+        "occupied footprint cells are not adjacent targets"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-area-damage"
+            && descriptor["sourceInstanceId"] == giant
+            && descriptor["targetLocation"] == json!({ "cell": "D4", "region": "surface" })
+    });
+    assert_eq!(
+        event_types(&receipt)[0..2],
+        ["area-damage-activated", "area-damage-allocated"]
+    );
+    assert_eq!(unit(&state(&session), &enemy)["damage"], 2);
+    assert_eq!(unit(&state(&session), &giant)["tapped"], true);
+    assert_exact_replay(&session);
+}

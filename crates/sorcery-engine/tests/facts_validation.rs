@@ -996,3 +996,20 @@ fn oversized_required_cast_regions_should_parse() {
         Some(RequiredCastRegion::Underwater)
     );
 }
+
+#[test]
+fn oversized_area_damage_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-area-damage",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "tapToDamageEachUnitAtAdjacentLocation",
+            json!(2),
+        ),
+    )
+    .expect("valid oversized area-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.tap_to_damage_each_unit_at_adjacent_location);
+}
