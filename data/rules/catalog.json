@@ -6796,6 +6796,52 @@
         "file": "crates/sorcery-engine/tests/monument_rules.rs",
         "testName": "rule_catalog_0315_a_carryable_artifact_on_the_same_square_can_still_be_picked_up"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0316",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Voidwalk minion can be summoned only onto an all-void square. A mixed surface/void square and a covered site are not void destinations.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "voidwalk"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0316_oversized_voidwalk_summons_only_onto_an_all_void_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0317",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Voidwalk minion can step from one all-void square to another. Existing whole-footprint and one-step helpers do not offer a step onto surface, because those squares overlap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "voidwalk"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surface"
+      }
     }
   ]
 }

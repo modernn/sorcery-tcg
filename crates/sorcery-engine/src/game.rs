@@ -7829,6 +7829,12 @@ impl Game {
         summon_cell: impl Fn(Cell) -> Option<u64>,
         anywhere: bool,
     ) -> Vec<SummonDestination> {
+        if cells
+            .into_iter()
+            .all(|cell| !self.surface_location_exists(cell))
+        {
+            return Self::square_area_void_destination(minion, cells, anywhere);
+        }
         let Some(mana_cost) = (if minion.must_be_cast_to_water_site {
             cells
                 .into_iter()
@@ -7872,6 +7878,31 @@ impl Game {
             destinations.push(destination(Some(LowerRegion::Underwater)));
         }
         destinations
+    }
+
+    /// One all-void 2x2, offered only to a Voidwalk minion.
+    ///
+    /// The whole footprint must be uncovered, the same way underground and underwater 2x2
+    /// summons require every cell to exist in that layer. Mixed surface/void squares stay
+    /// illegal. The void belongs to no site, so it charges the printed cost and ignores site
+    /// control. A free placement ignores printed casting restrictions, so `anywhere` keeps
+    /// every all-void square.
+    fn square_area_void_destination(
+        minion: &MinionFacts,
+        cells: SquareArea,
+        anywhere: bool,
+    ) -> Vec<SummonDestination> {
+        let restricted_elsewhere =
+            minion.required_cast_region.is_some() || minion.must_be_cast_to_water_site;
+        if !minion.voidwalk || (!anywhere && restricted_elsewhere) {
+            return Vec::new();
+        }
+        vec![SummonDestination {
+            cell: cells[0],
+            cells: Some(cells),
+            mana_cost: if anywhere { 0 } else { minion.mana_cost },
+            region: Some(LowerRegion::Void),
+        }]
     }
 
     /// The void beside every cell no site or rubble covers, offered only to a Voidwalk minion.
