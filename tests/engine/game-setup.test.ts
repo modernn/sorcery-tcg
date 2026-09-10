@@ -13701,8 +13701,8 @@ test('RULE-04 Airborne moves diagonally and restricts attacks and Intercept', as
   });
 });
 
-test('RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants', () => {
-  let session = keep(createGameSession(manifest(136, {
+test('RULE-02 Cloud City flies once per turn at three Air affinity and carries normal occupants', async () => {
+  await withSetup(manifest(136, {
     northSpell: {
       attack: 2,
       defense: 2,
@@ -13713,52 +13713,50 @@ test('RULE-02 Cloud City flies once per turn at three Air affinity and carries n
       elements: ['air'],
       flyToNearbyVoidOncePerTurnAtAirThreshold: 3,
     },
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): GameReceipt => {
-    const result = stepGame(session, action(session, predicate));
-    assert.equal(result.accepted, true);
-    session = result.session;
-    return result.receipt;
-  };
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+    const sourceSiteId = ctx.state.realm.sites.C4?.instanceId;
+    const minionId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(sourceSiteId);
+    assert.ok(minionId);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'fly-site'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
-  const sourceSiteId = session.state.realm.sites.C4?.instanceId;
-  const minionId = session.state.realm.units[0]?.instanceId;
-  assert.ok(sourceSiteId);
-  assert.ok(minionId);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'fly-site'), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B3');
-
-  const manaBefore = session.state.players.north.mana;
-  const receipt = take(({ descriptor }) => descriptor.kind === 'fly-site'
-    && descriptor.sourceSiteInstanceId === sourceSiteId
-    && descriptor.targetCell === 'D4');
-  assert.equal(session.state.realm.sites.C4, undefined);
-  assert.equal(session.state.realm.sites.D4?.instanceId, sourceSiteId);
-  assert.equal(session.state.players.north.avatar.location, 'D4');
-  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === minionId)?.location, 'D4');
-  assert.equal(session.state.players.north.mana, manaBefore);
-  assert.equal(receipt.events.some(({ type }) => type === 'site-flown'), true);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'fly-site' && descriptor.sourceSiteInstanceId === sourceSiteId), false);
-  assert.equal(verifyGameReplay(session), true);
+    const manaBefore = ctx.state.players.north.mana;
+    const flown = await ctx.step(await ctx.action(({ descriptor }) => descriptor.kind === 'fly-site'
+      && descriptor.sourceSiteInstanceId === sourceSiteId
+      && descriptor.targetCell === 'D4'));
+    assert.equal(flown.accepted, true);
+    if (!flown.accepted) return;
+    const receipt = flown.receipt;
+    assert.equal(ctx.state.realm.sites.C4, undefined);
+    assert.equal(ctx.state.realm.sites.D4?.instanceId, sourceSiteId);
+    assert.equal(ctx.state.players.north.avatar.location, 'D4');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) => instanceId === minionId)?.location, 'D4');
+    assert.equal(ctx.state.players.north.mana, manaBefore);
+    assert.equal(receipt.events.some(({ type }) => type === 'site-flown'), true);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'fly-site' && descriptor.sourceSiteInstanceId === sourceSiteId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Updraft Ridge gives only Airborne minions a free departure to move or Defend', () => {
+test('RULE-04 Updraft Ridge gives only Airborne minions a free departure to move or Defend', async () => {
   const base = manifest(162, {
     spell: {
       attack: 2,
@@ -13767,107 +13765,112 @@ test('RULE-04 Updraft Ridge gives only Airborne minions a free departure to move
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
   });
-  const preview = createGameSession(base);
-  const updraftId = preview.state.players.north.hand.atlas[0]?.cardId;
-  const airborneId = preview.state.players.north.hand.spellbook[0]?.cardId;
-  const groundId = preview.state.players.north.hand.spellbook[1]?.cardId;
-  assert.ok(updraftId);
-  assert.ok(airborneId);
-  assert.ok(groundId);
-  const gameManifest = createGameManifest({
-    authority: base.authority,
-    cards: {
-      ...base.cards,
-      [airborneId]: { ...base.cards[airborneId], airborne: true } as GameCardDefinition,
-      [updraftId]: {
-        ...base.cards[updraftId],
-        airborneMinionsAtopMoveFreelyAway: true,
-      } as GameCardDefinition,
-    },
-    decks: base.decks,
-    firstSeat: base.firstSeat,
-    seed: base.seed,
+  await withPreview(base, async (preview) => {
+    const updraftId = preview.state.players.north.hand.atlas[0]?.cardId;
+    const airborneId = preview.state.players.north.hand.spellbook[0]?.cardId;
+    const groundId = preview.state.players.north.hand.spellbook[1]?.cardId;
+    assert.ok(updraftId);
+    assert.ok(airborneId);
+    assert.ok(groundId);
+    const gameManifest = createGameManifest({
+      authority: base.authority,
+      cards: {
+        ...base.cards,
+        [airborneId]: { ...base.cards[airborneId], airborne: true } as GameCardDefinition,
+        [updraftId]: {
+          ...base.cards[updraftId],
+          airborneMinionsAtopMoveFreelyAway: true,
+        } as GameCardDefinition,
+      },
+      decks: base.decks,
+      firstSeat: base.firstSeat,
+      seed: base.seed,
+    });
+    assert.throws(() => createGameManifest({
+      authority: gameManifest.authority,
+      cards: {
+        ...gameManifest.cards,
+        [updraftId]: {
+          ...gameManifest.cards[updraftId],
+          airborneMinionsAtopMoveFreelyAway: false,
+        } as unknown as GameCardDefinition,
+      },
+      decks: gameManifest.decks,
+      firstSeat: gameManifest.firstSeat,
+      seed: gameManifest.seed,
+    }), /airborneMinionsAtopMoveFreelyAway must be true when defined/);
+
+    await withSetup(gameManifest, async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cardId === updraftId && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardId === airborneId);
+      const airborneInstanceId = ctx.state.realm.units.at(-1)?.instanceId;
+      assert.ok(airborneInstanceId);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardId === groundId);
+      const groundInstanceId = ctx.state.realm.units.at(-1)?.instanceId;
+      assert.ok(groundInstanceId);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cell === 'C1');
+      const attackerInstanceId = ctx.state.realm.units.at(-1)?.instanceId;
+      assert.ok(attackerInstanceId);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+      const hasPath = async (unitInstanceId: string): Promise<boolean> =>
+        (await ctx.legalActions('north'))
+          .some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+            && descriptor.unitInstanceId === unitInstanceId
+            && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+      assert.equal(await hasPath(airborneInstanceId), true);
+      assert.equal(await hasPath(groundInstanceId), false);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === attackerInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site');
+      assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+        descriptor.kind === 'defend'
+          && descriptor.unitInstanceId === groundInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2'), false);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'defend'
+          && descriptor.unitInstanceId === airborneInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
+      assert.equal(ctx.state.realm.units
+        .find(({ instanceId }) => instanceId === airborneInstanceId)?.location, 'C2');
+      assert.equal(await ctx.verifyReplay(), true);
+    });
   });
-  assert.throws(() => createGameManifest({
-    authority: gameManifest.authority,
-    cards: {
-      ...gameManifest.cards,
-      [updraftId]: {
-        ...gameManifest.cards[updraftId],
-        airborneMinionsAtopMoveFreelyAway: false,
-      } as unknown as GameCardDefinition,
-    },
-    decks: gameManifest.decks,
-    firstSeat: gameManifest.firstSeat,
-    seed: gameManifest.seed,
-  }), /airborneMinionsAtopMoveFreelyAway must be true when defined/);
-
-  let session = keep(keep(createGameSession(gameManifest)));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cardId === updraftId && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardId === airborneId));
-  const airborneInstanceId = session.state.realm.units.at(-1)?.instanceId;
-  assert.ok(airborneInstanceId);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardId === groundId));
-  const groundInstanceId = session.state.realm.units.at(-1)?.instanceId;
-  assert.ok(groundInstanceId);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
-  const attackerInstanceId = session.state.realm.units.at(-1)?.instanceId;
-  assert.ok(attackerInstanceId);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
-  const hasPath = (unitInstanceId: string): boolean => legalGameActions(session.state, 'north')
-    .some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === unitInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2');
-  assert.equal(hasPath(airborneInstanceId), true);
-  assert.equal(hasPath(groundInstanceId), false);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === attackerInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C1,C2'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'));
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'defend'
-      && descriptor.unitInstanceId === groundInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2'), false);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'defend'
-      && descriptor.unitInstanceId === airborneInstanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3,C2'));
-  assert.equal(session.state.realm.units
-    .find(({ instanceId }) => instanceId === airborneInstanceId)?.location, 'C2');
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 Mountain Pass blocks only occupied ground-minion entry', () => {
+test('RULE-04 Mountain Pass blocks only occupied ground-minion entry', async () => {
   const base = manifest(161, {
     site: { blocksGroundMinionEntryWhileMinionAtop: true },
     spell: {
@@ -13877,130 +13880,138 @@ test('RULE-04 Mountain Pass blocks only occupied ground-minion entry', () => {
       thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
     },
   });
-  const preview = createGameSession(base);
-  const northGroundCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
-  const northAirborneCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
-  const southGroundCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
-  const southAirborneCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
-  assert.ok(northGroundCardId);
-  assert.ok(northAirborneCardId);
-  assert.ok(southGroundCardId);
-  assert.ok(southAirborneCardId);
-  const siteCardId = base.decks.north.atlas[0]!;
-  assert.throws(() => createGameManifest({
-    authority: base.authority,
-    cards: {
-      ...base.cards,
-      [siteCardId]: {
-        ...base.cards[siteCardId],
-        blocksGroundMinionEntryWhileMinionAtop: false,
-      } as unknown as GameCardDefinition,
-    },
-    decks: base.decks,
-    firstSeat: base.firstSeat,
-    seed: base.seed,
-  }), /blocksGroundMinionEntryWhileMinionAtop must be true when defined/);
-  const airborne = (cardId: string): GameCardDefinition => ({
-    ...base.cards[cardId],
-    airborne: true,
-  } as GameCardDefinition);
-  const gameManifest = createGameManifest({
-    authority: base.authority,
-    cards: {
-      ...base.cards,
-      [northAirborneCardId]: airborne(northAirborneCardId),
-      [southAirborneCardId]: airborne(southAirborneCardId),
-    },
-    decks: base.decks,
-    firstSeat: base.firstSeat,
-    seed: base.seed,
+  await withPreview(base, async (preview) => {
+    const northGroundCardId = preview.state.players.north.hand.spellbook[0]?.cardId;
+    const northAirborneCardId = preview.state.players.north.hand.spellbook[1]?.cardId;
+    const southGroundCardId = preview.state.players.south.hand.spellbook[0]?.cardId;
+    const southAirborneCardId = preview.state.players.south.hand.spellbook[1]?.cardId;
+    assert.ok(northGroundCardId);
+    assert.ok(northAirborneCardId);
+    assert.ok(southGroundCardId);
+    assert.ok(southAirborneCardId);
+    const siteCardId = base.decks.north.atlas[0]!;
+    assert.throws(() => createGameManifest({
+      authority: base.authority,
+      cards: {
+        ...base.cards,
+        [siteCardId]: {
+          ...base.cards[siteCardId],
+          blocksGroundMinionEntryWhileMinionAtop: false,
+        } as unknown as GameCardDefinition,
+      },
+      decks: base.decks,
+      firstSeat: base.firstSeat,
+      seed: base.seed,
+    }), /blocksGroundMinionEntryWhileMinionAtop must be true when defined/);
+    const airborne = (cardId: string): GameCardDefinition => ({
+      ...base.cards[cardId],
+      airborne: true,
+    } as GameCardDefinition);
+    const gameManifest = createGameManifest({
+      authority: base.authority,
+      cards: {
+        ...base.cards,
+        [northAirborneCardId]: airborne(northAirborneCardId),
+        [southAirborneCardId]: airborne(southAirborneCardId),
+      },
+      decks: base.decks,
+      firstSeat: base.firstSeat,
+      seed: base.seed,
+    });
+    assert.equal(gameManifest.cards[siteCardId]?.cardType === 'site'
+      && gameManifest.cards[siteCardId].blocksGroundMinionEntryWhileMinionAtop, true);
+
+    await withSetup(gameManifest, async (ctx) => {
+      await ctx.keep();
+      await ctx.keep();
+      const northGround = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === northGroundCardId);
+      const northAirborne = ctx.state.players.north.hand.spellbook
+        .find(({ cardId }) => cardId === northAirborneCardId);
+      assert.ok(northGround);
+      assert.ok(northAirborne);
+      const northGroundInstanceId = northGround.instanceId;
+      const northAirborneInstanceId = northAirborne.instanceId;
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northGroundInstanceId);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northAirborneInstanceId);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      const southGround = ctx.state.players.south.hand.spellbook
+        .find(({ cardId }) => cardId === southGroundCardId);
+      assert.ok(southGround);
+      const southGroundInstanceId = southGround.instanceId;
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === southGroundInstanceId);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === northGroundInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === northAirborneInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      const southAirborne = ctx.state.players.south.hand.spellbook
+        .find(({ cardId }) => cardId === southAirborneCardId);
+      assert.ok(southAirborne);
+      const southAirborneInstanceId = southAirborne.instanceId;
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'summon-minion'
+          && descriptor.cardInstanceId === southAirborneInstanceId
+          && descriptor.cell === 'C2');
+      assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+        descriptor.kind === 'summon-minion' && descriptor.cell === 'C2'), true);
+      await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+      const moves = await ctx.legalActions('north');
+      const entersC2 = (instanceId: string): boolean => moves.some(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === instanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
+      assert.equal(entersC2(northGroundInstanceId), false);
+      assert.equal(entersC2(northAirborneInstanceId), true);
+      assert.equal(moves.some(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === ctx.state.players.north.avatar.card.instanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'), true);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'move-and-attack'
+          && descriptor.unitInstanceId === northAirborneInstanceId
+          && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'declare-attack'
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === southAirborneInstanceId);
+      assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+        descriptor.kind === 'defend' && descriptor.unitInstanceId === southGroundInstanceId), false);
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
+      assert.equal(await ctx.verifyReplay(), true);
+    });
   });
-  assert.equal(gameManifest.cards[siteCardId]?.cardType === 'site'
-    && gameManifest.cards[siteCardId].blocksGroundMinionEntryWhileMinionAtop, true);
-
-  let session = keep(keep(createGameSession(gameManifest)));
-  const northGround = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === northGroundCardId);
-  const northAirborne = session.state.players.north.hand.spellbook
-    .find(({ cardId }) => cardId === northAirborneCardId);
-  assert.ok(northGround);
-  assert.ok(northAirborne);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C4'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northGround.instanceId));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === northAirborne.instanceId));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const southGround = session.state.players.south.hand.spellbook
-    .find(({ cardId }) => cardId === southGroundCardId);
-  assert.ok(southGround);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C1'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cardInstanceId === southGround.instanceId));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northGround.instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northAirborne.instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const southAirborne = session.state.players.south.hand.spellbook
-    .find(({ cardId }) => cardId === southAirborneCardId);
-  assert.ok(southAirborne);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion'
-      && descriptor.cardInstanceId === southAirborne.instanceId
-      && descriptor.cell === 'C2'));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C2'), true);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const moves = legalGameActions(session.state, 'north');
-  const entersC2 = (instanceId: string): boolean => moves.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2');
-  assert.equal(entersC2(northGround.instanceId), false);
-  assert.equal(entersC2(northAirborne.instanceId), true);
-  assert.equal(moves.some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === session.state.players.north.avatar.card.instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3'), true);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northAirborne.instanceId
-      && descriptor.path.map(({ cell }) => cell).join(',') === 'C3,C2'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === southAirborne.instanceId));
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'defend' && descriptor.unitInstanceId === southGround.instanceId), false);
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-  assert.equal(verifyGameReplay(session), true);
 });
 
 test('RULE-04 Stealth blocks attacks, Defend, Intercept, and projectiles until interaction', async () => {
