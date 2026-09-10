@@ -700,6 +700,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /returnMinionFromOwnCemetery/);
+  const cemeteryMagicManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        returnTargetMagicFromOwnCemetery: true,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(cemeteryMagicManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 3,
+    returnTargetMagicFromOwnCemetery: true,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        returnTargetMagicFromOwnCemetery: false,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /returnTargetMagicFromOwnCemetery/);
   const freezeManifest = createGameManifest({
     ...input,
     cards: {
@@ -21522,6 +21552,146 @@ test('RULE-03 mill Magic puts opponent library cards in the cemetery without dec
       'magic-cast',
       'magic-resolved',
     ]);
+    assert.equal(ctx.state.terminal.status, 'active');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 cemetery Magic return restores own cemetery Magic or resolves with none', async () => {
+  const thresholds = { air: 0, earth: 1, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'return-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'return-north-site': { cardType: 'site', elements: ['earth'] },
+    'return-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'return-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'return-south-site': { cardType: 'site', elements: ['earth'] },
+    'return-spell': {
+      cardType: 'magic',
+      manaCost: 0,
+      returnTargetMagicFromOwnCemetery: true,
+      thresholds,
+    },
+  };
+  const input = (seed: number) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-cemetery-magic-return-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('return-north-site'),
+        avatar: 'return-north-avatar',
+        spellbook: Array(6).fill('return-spell'),
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('return-south-site'),
+        avatar: 'return-south-avatar',
+        spellbook: Array(6).fill('return-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const successManifest = createGameManifest(input(229));
+  assert.equal(successManifest.cards['return-spell']?.cardType === 'magic'
+    && successManifest.cards['return-spell'].returnTargetMagicFromOwnCemetery, true);
+
+  await withSetup(successManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const emptyChoices = (await ctx.legalActions('north')).filter(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'return-spell');
+    assert.equal(emptyChoices.length > 0, true);
+    assert.equal(emptyChoices.every(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+      && descriptor.cemeteryMinionInstanceId === undefined), true);
+    const seedCast = emptyChoices[0]!;
+    const seedId = seedCast.descriptor.kind === 'cast-magic'
+      ? seedCast.descriptor.cardInstanceId
+      : '';
+    const seeded = await ctx.step(seedCast);
+    assert.equal(seeded.accepted, true);
+    if (!seeded.accepted) return;
+    assert.deepEqual(seeded.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === seedId), true);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'return-spell'
+        && descriptor.cemeteryMinionInstanceId
+        ? [descriptor.cemeteryMinionInstanceId]
+        : []);
+    assert.equal(targets.length > 0, true);
+    assert.equal(targets.every((instanceId) => instanceId === seedId), true);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'return-spell'
+        && descriptor.cemeteryMinionInstanceId === seedId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const returned = await ctx.step(cast);
+    assert.equal(returned.accepted, true);
+    if (!returned.accepted) return;
+    assert.deepEqual(returned.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-returned-to-hand',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(returned.receipt.events[1]?.payload, {
+      cardId: 'return-spell',
+      instanceId: seedId,
+      owner: 'north',
+      seat: 'north',
+      sourceInstanceId,
+    });
+    assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) =>
+      instanceId === seedId), true);
+    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+      instanceId === seedId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(230)), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic' && descriptor.cardId === 'return-spell');
+    assert.equal(cast.descriptor.kind === 'cast-magic'
+      && cast.descriptor.cemeteryMinionInstanceId, undefined);
+    const noop = await ctx.step(cast);
+    assert.equal(noop.accepted, true);
+    if (!noop.accepted) return;
+    assert.deepEqual(noop.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'magic-resolved',
+    ]);
+    assert.equal(ctx.state.players.north.cemetery.length, 1);
     assert.equal(ctx.state.terminal.status, 'active');
     assert.equal(await ctx.verifyReplay(), true);
   });

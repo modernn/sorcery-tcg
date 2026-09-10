@@ -4851,6 +4851,53 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0229",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Magic return is the Rescue sibling for Magic cards: it offers only Magic in the caster's own cemetery, never a minion, site, artifact, or an opponent's cemetery card, and returns the unchanged instance to the hidden Spellbook hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0229_cemetery_magic_return_restores_own_cemetery_magic_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0230",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Magic return that finds no Magic in the caster's own cemetery is a paid no-choice resolution. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0230_cemetery_magic_return_is_a_paid_noop_without_cemetery_magic"
+      }
     }
   ]
 }

@@ -9731,3 +9731,176 @@ fn rule_catalog_0228_mill_sites_is_a_paid_noop_on_an_empty_atlas() {
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
+
+fn cemetery_magic_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-return": magic(("returnTargetMagicFromOwnCemetery", json!(true)), 0),
+        "north-site": site(false),
+        "south-avatar": avatar(20),
+        "south-minion": minion(json!({})),
+        "south-site": site(false),
+    });
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-rules-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-return"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn cemetery_magic_cast_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("cemetery Magic actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return"
+        })
+        .filter_map(|action| {
+            action.descriptor["cemeteryMinionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0229_cemetery_magic_return_restores_own_cemetery_magic_to_hidden_hand() {
+    let encoded = cemetery_magic_manifest(229);
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_magic_cast_ids(&session), Vec::<String>::new());
+    let (seed_descriptor, seed_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert_eq!(event_types(&seed_receipt), ["magic-cast", "magic-resolved"]);
+    let seed_id = seed_descriptor["cardInstanceId"]
+        .as_str()
+        .expect("seed Magic identity")
+        .to_owned();
+    let before = state(&session);
+    assert!(
+        before["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == seed_id)
+    );
+    let cemetery_targets = cemetery_magic_cast_ids(&session);
+    assert!(!cemetery_targets.is_empty());
+    assert!(cemetery_targets.iter().all(|id| id == &seed_id));
+    let before_hand_count = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == seed_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-returned-to-hand", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["cardId"], "north-return");
+    assert_eq!(receipt.events[1].payload["instanceId"], seed_id);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand"
+                || event.event_type == "ward-broken")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        before_hand_count
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == seed_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != seed_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_view["players"]["north"]["hand"]["spellbook"], 2);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("cemetery-magic checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized cemetery-magic");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed cemetery-magic");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed cemetery-magic session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0230_cemetery_magic_return_is_a_paid_noop_without_cemetery_magic() {
+    let encoded = cemetery_magic_manifest(230);
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_magic_cast_ids(&session), Vec::<String>::new());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "magic-returned-to-hand"
+                || event.event_type == "minion-returned-to-hand")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        1
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
