@@ -22083,9 +22083,12 @@ test('RULE-03 target-player Spellbook draw puts a card in hand or decks out an e
     await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
     assert.equal(ctx.state.players.south.spellbook.length, 3);
     assert.equal(ctx.state.players.south.hand.spellbook.length, 3);
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'draw-spell');
+    assert.ok(spell);
     const seats = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
-        && descriptor.cardId === 'draw-spell'
+        && descriptor.cardInstanceId === spell.instanceId
         && descriptor.target
         ? [[descriptor.target.kind, descriptor.target.seat] as const]
         : []).sort((left, right) => left[1].localeCompare(right[1]));
@@ -22141,19 +22144,12 @@ test('RULE-03 target-player Spellbook draw puts a card in hand or decks out an e
       'magic-resolved',
       'game-ended',
     ]);
-    assert.equal(ctx.state.terminal.status, 'finished');
-    assert.equal(
-      ctx.state.terminal.status === 'finished' && ctx.state.terminal.reason,
-      'deck_empty',
-    );
-    assert.equal(
-      ctx.state.terminal.status === 'finished' && ctx.state.terminal.loser,
-      'south',
-    );
-    assert.equal(
-      ctx.state.terminal.status === 'finished' && ctx.state.terminal.winner,
-      'north',
-    );
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'south',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'north',
+    });
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
