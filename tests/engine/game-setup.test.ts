@@ -598,6 +598,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantChargeToAllyThisTurn/);
+  const airborneGrantManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantAirborneToAllyThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(airborneGrantManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantAirborneToAllyThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantAirborneToAllyThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantAirborneToAllyThisTurn/);
   const lureManifest = createGameManifest({
     ...input,
     cards: {
@@ -24762,6 +24792,243 @@ test('RULE-04 cemetery Aura return restores only an Aura to the hidden hand', as
       true,
     );
     assert.equal(ctx.observe('south').players.north.hand.spellbook, southHand);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an Airborne enemy', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const avatar = {
+    attack: 1,
+    cardType: 'avatar' as const,
+    defense: 1,
+    drawSpell: false,
+    life: 20,
+  };
+  const grounded = {
+    attack: 1,
+    cardType: 'minion' as const,
+    defense: 2,
+    manaCost: 0,
+    thresholds,
+  };
+  const grant = {
+    cardType: 'magic' as const,
+    grantAirborneToAllyThisTurn: true as const,
+    manaCost: 0,
+    thresholds,
+  };
+  const site = { cardType: 'site' as const, elements: ['earth'] as const };
+  const canStrike = async (
+    ctx: SetupCtx,
+    attackerId: string,
+    enemyId: string,
+  ): Promise<boolean> => withFork(ctx, async (fork) => {
+    const activation = (await fork.legalActions('north')).find(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === attackerId
+        && descriptor.to.cell === 'C4');
+    if (activation === undefined) {
+      return false;
+    }
+    await fork.accept(activation);
+    return (await fork.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === enemyId);
+  });
+
+  await withSetup(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-grant-airborne-v1',
+    },
+    cards: {
+      'grant-air-north-ally': grounded,
+      'grant-air-north-avatar': avatar,
+      'grant-air-north-grant': grant,
+      'grant-air-north-site': site,
+      'grant-air-south-avatar': avatar,
+      'grant-air-south-minion': grounded,
+      'grant-air-south-site': site,
+    },
+    decks: {
+      north: {
+        atlas: Array(3).fill('grant-air-north-site'),
+        avatar: 'grant-air-north-avatar',
+        spellbook: ['grant-air-north-ally', 'grant-air-north-grant', 'grant-air-north-grant'],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(3).fill('grant-air-south-site'),
+        avatar: 'grant-air-south-avatar',
+        spellbook: Array(3).fill('grant-air-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-air-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-air-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
+      undefined,
+    );
+    assert.equal(
+      ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
+      false,
+    );
+    const grantAction = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-air-north-grant'
+        && descriptor.ally?.instanceId === allyId);
+    assert.equal(grantAction.descriptor.kind === 'cast-magic', true);
+    if (grantAction.descriptor.kind !== 'cast-magic') {
+      return;
+    }
+    const granted = await ctx.step(grantAction);
+    assert.equal(granted.accepted, true);
+    if (!granted.accepted) {
+      return;
+    }
+    assert.deepEqual(granted.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'airborne-granted',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
+      [grantAction.descriptor.cardInstanceId],
+    );
+    assert.equal(
+      ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
+      true,
+    );
+    const ended = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'end-turn'));
+    assert.equal(ended.accepted, true);
+    if (!ended.accepted) {
+      return;
+    }
+    assert.equal(
+      ended.receipt.events.some(({ payload, type }) =>
+        type === 'airborne-expired'
+          && typeof payload === 'object'
+          && payload !== null
+          && 'instanceId' in payload
+          && payload.instanceId === allyId),
+      true,
+    );
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
+      undefined,
+    );
+    assert.equal(
+      ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
+      false,
+    );
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic',
+      revisionId: 'synthetic-grant-airborne-v1',
+    },
+    cards: {
+      'grant-air-north-ally': grounded,
+      'grant-air-north-avatar': avatar,
+      'grant-air-north-grant': grant,
+      'grant-air-north-site': site,
+      'grant-air-south-airborne': {
+        airborne: true,
+        attack: 1,
+        cardType: 'minion',
+        defense: 2,
+        manaCost: 0,
+        summonToAnySite: true,
+        thresholds,
+      },
+      'grant-air-south-avatar': avatar,
+      'grant-air-south-site': site,
+    },
+    decks: {
+      north: {
+        atlas: Array(3).fill('grant-air-north-site'),
+        avatar: 'grant-air-north-avatar',
+        spellbook: ['grant-air-north-ally', 'grant-air-north-grant', 'grant-air-north-grant'],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(3).fill('grant-air-south-site'),
+        avatar: 'grant-air-south-avatar',
+        spellbook: Array(3).fill('grant-air-south-airborne'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north',
+    seed: 1,
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-air-north-ally'
+        && descriptor.cell === 'C4');
+    const allyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-air-north-ally')?.instanceId;
+    assert.equal(typeof allyId, 'string');
+    if (typeof allyId !== 'string') {
+      return;
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'grant-air-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'grant-air-south-airborne'
+        && descriptor.cell === 'C4');
+    const enemyId = ctx.state.realm.units.find((unit) =>
+      unit.cardId === 'grant-air-south-airborne')?.instanceId;
+    assert.equal(typeof enemyId, 'string');
+    if (typeof enemyId !== 'string') {
+      return;
+    }
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw');
+    assert.equal(
+      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.summoningSickness,
+      false,
+    );
+    assert.equal(
+      ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
+      false,
+    );
+    assert.equal(await canStrike(ctx, allyId, enemyId), false);
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'grant-air-north-grant'
+        && descriptor.ally?.instanceId === allyId);
+    assert.equal(
+      ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
+      true,
+    );
+    assert.equal(await canStrike(ctx, allyId, enemyId), true);
+    assert.equal(ctx.observe('north').players.south.hand.spellbook, 2);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

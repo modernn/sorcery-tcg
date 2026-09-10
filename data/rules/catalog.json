@@ -5867,6 +5867,54 @@
         "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
         "testName": "rule_catalog_0273_cemetery_aura_return_is_a_paid_noop_without_cemetery_aura"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0274",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can grant Airborne to a controlled ally for the current turn. The grant is recorded on minions as a temporary source, public observations show the minion as Airborne, and the shared End Phase cleanup expires the source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0274_grant_airborne_makes_a_grounded_minion_airborne_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0275",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A grounded minion cannot strike an Airborne enemy. After grant-Airborne Magic, the same minion can declare that strike. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0275_granted_airborne_is_required_to_strike_an_airborne_enemy"
+      }
     }
   ]
 }

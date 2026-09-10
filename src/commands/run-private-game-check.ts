@@ -4607,6 +4607,7 @@ function gameDefinition(
   destroyTargetAura = false,
   returnTargetAuraToOwnerHand = false,
   returnTargetAuraFromOwnCemetery = false,
+  grantAirborneToAllyThisTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4764,7 +4765,8 @@ function gameDefinition(
     + Number(Boolean(summonTokenToEachControlledSiteBorderingEnemySite))
     + Number(destroyTargetAura)
     + Number(returnTargetAuraToOwnerHand)
-    + Number(returnTargetAuraFromOwnCemetery);
+    + Number(returnTargetAuraFromOwnCemetery)
+    + Number(grantAirborneToAllyThisTurn);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -4787,6 +4789,7 @@ function gameDefinition(
       ...(returnTargetAuraFromOwnCemetery
         ? { returnTargetAuraFromOwnCemetery: true as const }
         : {}),
+      ...(grantAirborneToAllyThisTurn ? { grantAirborneToAllyThisTurn: true as const } : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),

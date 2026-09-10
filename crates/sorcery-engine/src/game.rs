@@ -377,6 +377,7 @@ struct UnitPosition {
     stealthed: bool,
     summoning_sickness: bool,
     tapped: bool,
+    temporary_airborne_sources: Vec<IdentityHash>,
     temporary_charge_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     warded: bool,
@@ -413,6 +414,7 @@ impl SummonPlacement {
             stealthed: self.stealthed,
             summoning_sickness: true,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             warded: self.warded,
@@ -1335,6 +1337,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
+        | MagicEffect::GrantAirborneToAllyThisTurn
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantStealthToTargetMinion
@@ -3238,8 +3241,21 @@ impl Game {
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy,
                     };
-                    let label = (if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn)
+                    let label = (if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn)
                     {
+                        let ActionDescriptor::CastMagic {
+                            ally: Some(ally), ..
+                        } = &descriptor
+                        else {
+                            return Err(invalid("Airborne grant action requires an ally"));
+                        };
+                        format!(
+                            "Cast {} to grant Airborne to {} {}…",
+                            definition.id,
+                            ally.kind(),
+                            &ally.instance_id().as_str()[..15]
+                        )
+                    } else if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn) {
                         let ActionDescriptor::CastMagic {
                             ally: Some(ally), ..
                         } = &descriptor
@@ -4915,7 +4931,7 @@ impl Game {
     /// Printed Airborne is lost while the minion is disabled or while a conjured area grounds any
     /// cell of its footprint.
     fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        facts.airborne
+        (facts.airborne || !unit.temporary_airborne_sources.is_empty())
             && !self.minion_is_disabled(unit)
             && !Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.location_suppresses_airborne(Location {
@@ -5830,15 +5846,16 @@ impl Game {
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
             }
-            MagicEffect::GrantChargeToAllyThisTurn | MagicEffect::GrantPowerTwoToAllyThisTurn => {
-                self.controlled_allies(seat)
-                    .into_iter()
-                    .map(|ally| MagicChoice {
-                        ally: Some(ally),
-                        ..MagicChoice::default()
-                    })
-                    .collect()
-            }
+            MagicEffect::GrantAirborneToAllyThisTurn
+            | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantPowerTwoToAllyThisTurn => self
+                .controlled_allies(seat)
+                .into_iter()
+                .map(|ally| MagicChoice {
+                    ally: Some(ally),
+                    ..MagicChoice::default()
+                })
+                .collect(),
             MagicEffect::LeapAttackAlly => self.leap_attack_choices(seat)?,
             MagicEffect::TeleportAllyToTargetSite => {
                 self.teleport_ally_to_site_choices(seat, caster_instance_id)?
@@ -12289,6 +12306,7 @@ impl Game {
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
@@ -16795,6 +16813,31 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::GrantAirborneToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_airborne_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("airborne-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantChargeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -19421,6 +19464,20 @@ impl Game {
                     })
             })
             .collect();
+        let expired_airborne_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_airborne_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let expired_charge_sources: Vec<_> = self
             .position
             .units
@@ -19472,6 +19529,7 @@ impl Game {
         }
         for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
+            unit.temporary_airborne_sources.clear();
             unit.temporary_charge_sources.clear();
             unit.temporary_power_sources.clear();
             if unit.controller == seat {
@@ -19516,6 +19574,15 @@ impl Game {
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
+        for (instance_id, controller, source_instance_id) in expired_airborne_sources {
+            outcomes.push("airborne-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
                 json!({
@@ -20178,6 +20245,12 @@ impl Game {
             object.insert(
                 "carriedLanceCount".to_owned(),
                 json!(unit.carried_lance_count),
+            );
+        }
+        if !unit.temporary_airborne_sources.is_empty() {
+            object.insert(
+                "temporaryAirborneSources".to_owned(),
+                json!(unit.temporary_airborne_sources),
             );
         }
         if !unit.temporary_charge_sources.is_empty() {
@@ -21430,6 +21503,7 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: false,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             warded: false,
@@ -21702,6 +21776,7 @@ mod tests {
             stealthed: false,
             summoning_sickness: false,
             tapped: true,
+            temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             warded: false,
@@ -22589,6 +22664,7 @@ mod tests {
                 stealthed,
                 summoning_sickness: false,
                 tapped: false,
+                temporary_airborne_sources: Vec::new(),
                 temporary_charge_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 warded: false,
