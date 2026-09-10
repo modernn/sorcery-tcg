@@ -435,3 +435,102 @@ fn site_genesis_should_resume_after_ordered_terrain_replacement_deathrites() {
     }));
     assert_exact_replay(&immediate);
 }
+
+fn terminal_manifest_with_seed(seed: u32) -> String {
+    let mut value: Value = serde_json::from_str(&manifest_with_seed(seed)).expect("manifest JSON");
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    value["decks"]["north"]["atlas"] =
+        json!(["north-site", "north-site", "north-site", "water-site",]);
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical terminal terrain manifest identity"));
+    canonical_json(&value).expect("canonical terminal terrain manifest")
+}
+
+fn setup_if_water_is_last(session: &mut Session) -> Option<(Value, Vec<Value>, u64)> {
+    keep(session);
+    keep(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+            && descriptor["cardId"] == "deathrite-1"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-site-destruction" && descriptor["targetCell"] == "C3"
+    });
+    let before = state(session);
+    let atlas = before["players"]["north"]["atlas"].as_array()?;
+    if atlas.len() != 1 || atlas[0]["cardId"] != "water-site" {
+        return None;
+    }
+    let deathrites = before["realm"]["units"]
+        .as_array()?
+        .iter()
+        .filter(|unit| unit["cardId"] == "deathrite-1")
+        .cloned()
+        .collect::<Vec<_>>();
+    if deathrites.len() != 1 {
+        return None;
+    }
+    Some((
+        atlas[0].clone(),
+        deathrites,
+        before["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+    ))
+}
+
+#[test]
+fn terrain_replacement_deathrite_should_end_the_game_when_the_atlas_is_empty() {
+    let (mut session, mana_before) = (244..1024)
+        .map(terminal_manifest_with_seed)
+        .find_map(|manifest| {
+            let mut session = Session::new(&manifest).ok()?;
+            let (_, _, mana_before) = setup_if_water_is_last(&mut session)?;
+            Some((session, mana_before))
+        })
+        .expect("bounded seed with water-site as the last Atlas card");
+    let (_, terminal) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&terminal),
+        [
+            "rubble-replaced",
+            "site-played",
+            "minion-died",
+            "game-ended",
+        ]
+    );
+    assert!(!event_types(&terminal).contains(&"mana-gained"));
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after empty Atlas Deathrite"),
+        mana_before + 1
+    );
+    assert_eq!(state(&session)["phase"], "terminal");
+    assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    assert_exact_replay(&session);
+}
