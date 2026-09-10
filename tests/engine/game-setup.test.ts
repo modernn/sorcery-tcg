@@ -1827,6 +1827,45 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     }), /genesisDrawSpells must be a safe integer between 1 and 200/);
   }
+  for (const atStartOfControllerTurnDrawSpells of [0, 1.5, 201]) {
+    assert.throws(() => createGameManifest({
+      ...input,
+      cards: {
+        ...cards,
+        [firstSpell]: {
+          ...cards[firstSpell]!,
+          atStartOfControllerTurnDrawSpells,
+        } as unknown as GameCardDefinition,
+      },
+    }), /atStartOfControllerTurnDrawSpells must be a safe integer between 1 and 200/);
+  }
+  const startTurnDrawManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnDrawManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells,
+    2,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 1,
+        atStartOfControllerTurnTeleportToRandomSiteOrVoid: true,
+        voidwalk: true,
+      } as GameCardDefinition,
+    },
+  }), /competing start-turn triggers are unsupported/);
   for (const discardSpellToDamageRandomOtherUnitHere of [0, 1.5, 101]) {
     assert.throws(() => createGameManifest({
       ...input,
@@ -22275,6 +22314,138 @@ test('RULE-03 chosen discard cost pays another hand card then resolves the compa
     assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
       instanceId === siteId), true);
     assert.equal(ctx.state.players.north.hand.atlas.length, atlasBefore);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 start-turn draw spells draws a hidden spell then decks out on an empty library', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'draw-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-north-site': { cardType: 'site', elements: ['earth'] },
+    'draw-north-source': {
+      attack: 1,
+      atStartOfControllerTurnDrawSpells: 1,
+      cardType: 'minion',
+      defense: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'draw-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'draw-south-minion': {
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'draw-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const input = (seed: number, northSpellbook: readonly string[]) => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-start-turn-draw-spells-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('draw-north-site'),
+        avatar: 'draw-north-avatar',
+        spellbook: [...northSpellbook],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(6).fill('draw-south-site'),
+        avatar: 'draw-south-avatar',
+        spellbook: Array(6).fill('draw-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const successManifest = createGameManifest(input(237, Array(6).fill('draw-north-source')));
+  assert.equal(successManifest.cards['draw-north-source']?.cardType === 'minion'
+    && successManifest.cards['draw-north-source'].atStartOfControllerTurnDrawSpells, 1);
+
+  const reachStartTurn = async (ctx: SetupCtx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'summon-minion'
+        && descriptor.cardId === 'draw-north-source'
+        && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'play-site'
+        && descriptor.cardId === 'draw-south-site'
+        && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+  };
+
+  await withSetup(successManifest, async (ctx) => {
+    await reachStartTurn(ctx);
+    assert.equal(ctx.state.phase, 'start-turn');
+    const sourceId = ctx.state.realm.units.find(({ cardId }) =>
+      cardId === 'draw-north-source')?.instanceId;
+    const drawnId = ctx.state.players.north.spellbook[0]?.instanceId;
+    assert.ok(sourceId);
+    assert.ok(drawnId);
+    const handBefore = ctx.state.players.north.hand.spellbook.length;
+    const paid = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'
+        && descriptor.sourceInstanceId === sourceId));
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), ['spell-drawn']);
+    assert.deepEqual(paid.receipt.events[0]?.payload, {
+      seat: 'north',
+      sourceInstanceId: sourceId,
+    });
+    assert.equal(ctx.state.phase, 'draw');
+    assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) =>
+      instanceId === drawnId), true);
+    assert.equal(ctx.state.players.north.hand.spellbook.length, handBefore + 1);
+    assert.equal(ctx.observe('south').players.north.hand.spellbook, handBefore + 1);
+    assert.equal(
+      canonicalJson(ctx.observe('south')).includes(drawnId),
+      false,
+    );
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'draw'), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(238, Array(3).fill('draw-north-source'))), async (ctx) => {
+    await reachStartTurn(ctx);
+    assert.equal(ctx.state.phase, 'start-turn');
+    assert.equal(ctx.state.players.north.spellbook.length, 0);
+    const paid = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'resolve-start-turn-trigger'));
+    assert.equal(paid.accepted, true);
+    if (!paid.accepted) return;
+    assert.deepEqual(paid.receipt.events.map(({ type }) => type), ['game-ended']);
+    assert.equal((paid.receipt.events[0]?.payload as { reason?: string }).reason, 'deck_empty');
+    assert.equal(ctx.state.phase, 'terminal');
+    assert.deepEqual(ctx.state.terminal, {
+      loser: 'north',
+      reason: 'deck_empty',
+      status: 'finished',
+      winner: 'south',
+    });
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

@@ -298,6 +298,7 @@ pub enum DamagePrevention {
 pub struct MinionFacts {
     pub airborne: bool,
     pub alternative_summon_payment: Option<AlternativeSummonPayment>,
+    pub at_start_of_controller_turn_draw_spells: Option<u8>,
     pub at_start_of_controller_turn_teleport_to_random_site_or_void: bool,
     pub attack: u8,
     pub burrowing: bool,
@@ -750,6 +751,7 @@ const MAGIC_FIELDS: &[&str] = &[
 
 const MINION_FIELDS: &[&str] = &[
     "airborne",
+    "atStartOfControllerTurnDrawSpells",
     "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
     "attack",
     "burrowing",
@@ -1469,6 +1471,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     reject_unknown(object, MINION_FIELDS, path)?;
     let airborne = optional_bool(object, "airborne", path)?;
     let alternative_summon_payment = parse_alternative_summon_payment(object, path)?;
+    let at_start_of_controller_turn_draw_spells = optional_bounded_integer(
+        object,
+        "atStartOfControllerTurnDrawSpells",
+        1,
+        MAX_DECK_CARDS,
+        path,
+    )?
+    .map(compact_u8);
     let at_start_of_controller_turn_teleport_to_random_site_or_void = true_only(
         object,
         "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
@@ -1547,6 +1557,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "oversized start-turn random teleport is unsupported",
         ));
     }
+    if at_start_of_controller_turn_draw_spells.is_some()
+        && at_start_of_controller_turn_teleport_to_random_site_or_void
+    {
+        return Err(FactError::new(
+            path,
+            "competing start-turn triggers are unsupported",
+        ));
+    }
 
     let deathrite_damage_each_unit_here = optional_bounded_integer(
         object,
@@ -1582,6 +1600,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     Ok(MinionFacts {
         airborne,
         alternative_summon_payment,
+        at_start_of_controller_turn_draw_spells,
         at_start_of_controller_turn_teleport_to_random_site_or_void,
         attack: compact_u8(required_nonnegative_integer(
             object,

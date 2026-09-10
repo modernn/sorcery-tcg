@@ -5044,6 +5044,52 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0237",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A start-of-controller-turn Spellbook draw is a start-turn trigger. It draws the printed number of hidden spells through the shared private-draw helper before the Draw step, redacts those identities from the opponent, and leaves the ordinary Draw step pending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0237_start_turn_draw_spells_draws_a_hidden_spell_before_the_draw_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0238",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same start-turn Spellbook draw loses immediately when a required draw finds an empty library. That required empty draw is a deck-out, not a paid no-op, and the Draw step never begins.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0238_start_turn_draw_spells_decks_out_on_an_empty_library"
+      }
     }
   ]
 }

@@ -697,6 +697,24 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             ),
             "token Genesis",
         ),
+        (
+            "start-turn draw range",
+            with(minion(), "atStartOfControllerTurnDrawSpells", json!(0)),
+            "must be between",
+        ),
+        (
+            "competing start-turn triggers",
+            with(
+                with(
+                    with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                    "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                    json!(true),
+                ),
+                "voidwalk",
+                json!(true),
+            ),
+            "competing start-turn",
+        ),
     ];
 
     for (name, definition, expected_error) in invalid {
@@ -740,6 +758,14 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(2)));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-draw",
+        &with(minion(), "atStartOfControllerTurnDrawSpells", json!(2)),
+    )
+    .expect("valid start-turn draw minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(2));
     assert_eq!(facts.thresholds, Thresholds::default());
     assert_eq!(facts.provides, None::<Element>);
 

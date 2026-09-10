@@ -1403,6 +1403,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
     let MinionFacts {
         airborne: _,
         alternative_summon_payment: _,
+        at_start_of_controller_turn_draw_spells: _,
         at_start_of_controller_turn_teleport_to_random_site_or_void: _,
         attack: _,
         burrowing: _,
@@ -13960,11 +13961,28 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
-        if self
-            .start_turn_trigger_unit(action.seat, source_instance_id)
-            .is_none()
-        {
-            return Err(GameError::IllegalAction);
+        let draw_spells = {
+            let unit = self
+                .start_turn_trigger_unit(action.seat, source_instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            facts.at_start_of_controller_turn_draw_spells
+        };
+        if let Some(count) = draw_spells {
+            self.apply_genesis_draws(
+                action.seat,
+                source_instance_id,
+                DeckZone::Spellbook,
+                count,
+                outcomes,
+            );
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
         }
         let unit_snapshot = self
             .position
@@ -14085,9 +14103,9 @@ impl Game {
         else {
             return None;
         };
-        facts
-            .at_start_of_controller_turn_teleport_to_random_site_or_void
-            .then_some(unit)
+        (facts.at_start_of_controller_turn_teleport_to_random_site_or_void
+            || facts.at_start_of_controller_turn_draw_spells.is_some())
+        .then_some(unit)
     }
 
     fn start_turn_trigger_instance_ids(&self, seat: Seat) -> Vec<IdentityHash> {
@@ -19588,6 +19606,13 @@ mod tests {
         .expect("valid random teleport manifest")
         .ensure_selfplay_supported()
         .expect("start-turn random teleport is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[(
+            "atStartOfControllerTurnDrawSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw spells is self-play safe");
 
         let cave_in = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {

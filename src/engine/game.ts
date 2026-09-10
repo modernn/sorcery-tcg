@@ -250,6 +250,7 @@ export type GameCardDefinition =
     lanceCount?: 1 | 2 | 3;
     lethal?: boolean;
     manaCost: number;
+    atStartOfControllerTurnDrawSpells?: number;
     atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
@@ -1037,7 +1038,7 @@ const SUPPORTED_CARD_FIELDS = {
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
-    airborne atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
+    airborne atStartOfControllerTurnDrawSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
     cannotAttackSites cannotDefend cannotDefendOrIntercept
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteHeal
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
@@ -1842,6 +1843,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.mayStepAfterRangedStrike === true) {
     throw new RangeError(`${path} simultaneous during-movement and post-Ranged movement is unsupported`);
   }
+  if (card.atStartOfControllerTurnDrawSpells !== undefined
+    && (!Number.isSafeInteger(card.atStartOfControllerTurnDrawSpells)
+      || card.atStartOfControllerTurnDrawSpells < 1
+      || card.atStartOfControllerTurnDrawSpells > MAX_DECK_CARDS)) {
+    throw new RangeError(
+      `${path}.atStartOfControllerTurnDrawSpells must be a safe integer between 1 and ${MAX_DECK_CARDS}`,
+    );
+  }
   if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== undefined
     && card.atStartOfControllerTurnTeleportToRandomSiteOrVoid !== true) {
     throw new RangeError(
@@ -1859,6 +1868,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(
       `${path} oversized start-turn random teleport is unsupported`,
     );
+  }
+  if (card.atStartOfControllerTurnDrawSpells !== undefined
+    && card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true) {
+    throw new RangeError(`${path} competing start-turn triggers are unsupported`);
   }
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
@@ -2335,6 +2348,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             }
           : {
             ...(card.airborne === true ? { airborne: true } : {}),
+            ...(card.atStartOfControllerTurnDrawSpells !== undefined
+              ? { atStartOfControllerTurnDrawSpells: card.atStartOfControllerTurnDrawSpells }
+              : {}),
             ...(card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
               ? { atStartOfControllerTurnTeleportToRandomSiteOrVoid: true as const }
               : {}),
