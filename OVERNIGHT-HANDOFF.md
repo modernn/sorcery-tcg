@@ -53,9 +53,9 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Next exact step
 
-1. Continue on this branch only. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
-2. Retire this handoff and fast-forward `master` only after that private-check run is green.
-3. Phase 4+ product surfaces stay out of scope until that private verification lands.
+1. Continue on this branch only. Highest-value next official-rules slice is **target-player discard as a Magic effect**: the targeted player chooses after the cast (new pending Storyline + decision-seat transfer). Distinct from `discardCardAsAdditionalCost`. Do not invent random discard for official “discard a card.”
+2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
+3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
 ## Do not
 
