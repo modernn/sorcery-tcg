@@ -4606,6 +4606,7 @@ function gameDefinition(
   atStartOfControllerTurnControllerGainsLife: 0 | 2 = 0,
   destroyTargetAura = false,
   returnTargetAuraToOwnerHand = false,
+  returnTargetAuraFromOwnCemetery = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4762,7 +4763,8 @@ function gameDefinition(
     + Number(leapAttackAlly)
     + Number(Boolean(summonTokenToEachControlledSiteBorderingEnemySite))
     + Number(destroyTargetAura)
-    + Number(returnTargetAuraToOwnerHand);
+    + Number(returnTargetAuraToOwnerHand)
+    + Number(returnTargetAuraFromOwnCemetery);
   if (card.cardType === 'magic'
     && card.manaCost !== null
     && supportedMagicEffects === 1) {
@@ -4782,6 +4784,9 @@ function gameDefinition(
       ...(submergeTargetMinion ? { submergeTargetMinion: true } : {}),
       ...(destroyTargetAura ? { destroyTargetAura: true as const } : {}),
       ...(returnTargetAuraToOwnerHand ? { returnTargetAuraToOwnerHand: true as const } : {}),
+      ...(returnTargetAuraFromOwnCemetery
+        ? { returnTargetAuraFromOwnCemetery: true as const }
+        : {}),
       ...(summonTokenToEachControlledSiteBorderingEnemySite
         ? { summonTokenToEachControlledSiteBorderingEnemySite }
         : {}),

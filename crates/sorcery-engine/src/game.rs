@@ -524,6 +524,7 @@ struct AuraPosition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OwnCemeteryReturn {
     Artifact,
+    Aura,
     Magic,
     Minion,
     Site,
@@ -533,6 +534,7 @@ impl OwnCemeteryReturn {
     const fn event(self) -> &'static str {
         match self {
             Self::Artifact => "artifact-returned-to-hand",
+            Self::Aura => "aura-returned-to-hand",
             Self::Magic => "magic-returned-to-hand",
             Self::Minion => "minion-returned-to-hand",
             Self::Site => "site-returned-to-hand",
@@ -543,6 +545,7 @@ impl OwnCemeteryReturn {
         matches!(
             (self, facts),
             (Self::Artifact, CardFacts::Artifact(_))
+                | (Self::Aura, CardFacts::Aura(_))
                 | (Self::Magic, CardFacts::Magic(_))
                 | (Self::Minion, CardFacts::Minion(_))
                 | (Self::Site, CardFacts::Site(_))
@@ -552,7 +555,7 @@ impl OwnCemeteryReturn {
     const fn zone(self) -> DeckZone {
         match self {
             Self::Site => DeckZone::Atlas,
-            Self::Artifact | Self::Magic | Self::Minion => DeckZone::Spellbook,
+            Self::Artifact | Self::Aura | Self::Magic | Self::Minion => DeckZone::Spellbook,
         }
     }
 }
@@ -1318,6 +1321,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::ReturnTargetArtifactFromOwnCemetery
+        | MagicEffect::ReturnTargetAuraFromOwnCemetery
         | MagicEffect::ReturnTargetMagicFromOwnCemetery
         | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
@@ -5997,6 +6001,9 @@ impl Game {
             }
             MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Artifact)
+            }
+            MagicEffect::ReturnTargetAuraFromOwnCemetery => {
+                self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Aura)
             }
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Magic)
@@ -16755,6 +16762,17 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::ReturnTargetAuraFromOwnCemetery => {
+                if let Some(selected_id) = cemetery_minion_instance_id {
+                    self.return_own_cemetery_card(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        OwnCemeteryReturn::Aura,
+                        outcomes,
+                    )?;
+                }
+            }
             MagicEffect::ReturnTargetMagicFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
                     self.return_own_cemetery_card(
@@ -20789,6 +20807,10 @@ mod tests {
             (
                 MagicEffect::ReturnTargetArtifactFromOwnCemetery,
                 json!({ "returnTargetArtifactFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetAuraFromOwnCemetery,
+                json!({ "returnTargetAuraFromOwnCemetery": true }),
             ),
             (
                 MagicEffect::ReturnTargetMagicFromOwnCemetery,

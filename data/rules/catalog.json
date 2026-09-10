@@ -5826,6 +5826,47 @@
         "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
         "testName": "rule_catalog_0271_return_target_aura_returns_flood_to_its_owners_hand"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0272",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can return an Aura from its caster's own cemetery to the hidden Spellbook hand. Only Aura cards are offered, so a destroy Magic already in that cemetery is not a legal choice, and the opponent sees only the updated hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0272_cemetery_aura_return_restores_own_cemetery_aura_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0273",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The same cemetery Aura return still pays and resolves when the caster's cemetery has no Aura. The spell enters the cemetery, no Aura returns, and a later Magic card there is not offered as a substitute target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0273_cemetery_aura_return_is_a_paid_noop_without_cemetery_aura"
+      }
     }
   ]
 }

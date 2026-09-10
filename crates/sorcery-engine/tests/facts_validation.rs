@@ -256,6 +256,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("millSpells", json!(2)),
         ("returnMinionFromOwnCemetery", json!(true)),
         ("returnTargetArtifactFromOwnCemetery", json!(true)),
+        ("returnTargetAuraFromOwnCemetery", json!(true)),
         ("returnTargetMagicFromOwnCemetery", json!(true)),
         ("returnTargetArtifactToOwnerHand", json!(true)),
         ("returnTargetAuraToOwnerHand", json!(true)),

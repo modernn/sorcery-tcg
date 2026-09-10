@@ -24630,6 +24630,142 @@ test('RULE-04 Magic can destroy or return a Flood Aura', async () => {
   await play('returnTargetAuraToOwnerHand');
 });
 
+test('RULE-04 cemetery Aura return restores only an Aura to the hidden hand', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const cards: Record<string, GameCardDefinition> = {
+    'cemetery-aura-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cemetery-aura-north-destroy': {
+      cardType: 'magic',
+      destroyTargetAura: true,
+      manaCost: 0,
+      thresholds,
+    },
+    'cemetery-aura-north-flood': {
+      affectedSitesAreFlooded: true,
+      cardType: 'aura',
+      manaCost: 0,
+      thresholds,
+    },
+    'cemetery-aura-north-return': {
+      cardType: 'magic',
+      manaCost: 0,
+      returnTargetAuraFromOwnCemetery: true,
+      thresholds,
+    },
+    'cemetery-aura-north-site': { cardType: 'site', elements: ['earth'] },
+    'cemetery-aura-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'cemetery-aura-south-minion': {
+      airborne: false,
+      attack: 1,
+      cardType: 'minion',
+      defense: 1,
+      manaCost: 0,
+      thresholds,
+    },
+    'cemetery-aura-south-site': { cardType: 'site', elements: ['earth'] },
+  };
+  const gameManifest = createGameManifest({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-aura-magic-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(3).fill('cemetery-aura-north-site'),
+        avatar: 'cemetery-aura-north-avatar',
+        spellbook: [
+          'cemetery-aura-north-flood',
+          'cemetery-aura-north-destroy',
+          'cemetery-aura-north-return',
+        ],
+      } satisfies GameDeckSpec,
+      south: {
+        atlas: Array(3).fill('cemetery-aura-south-site'),
+        avatar: 'cemetery-aura-south-avatar',
+        spellbook: Array(3).fill('cemetery-aura-south-minion'),
+      } satisfies GameDeckSpec,
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  });
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    assert.equal(
+      (await ctx.legalActions('north')).some(({ descriptor }) =>
+        descriptor.kind === 'cast-magic'
+          && descriptor.cardId === 'cemetery-aura-north-return'
+          && descriptor.cemeteryMinionInstanceId !== undefined),
+      false,
+    );
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-aura'
+        && descriptor.cardId === 'cemetery-aura-north-flood'
+        && descriptor.cells.includes('C4'));
+    const auraId = ctx.state.realm.auras?.[0]?.instanceId;
+    assert.equal(typeof auraId, 'string');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'cemetery-aura-north-destroy'
+        && descriptor.targetAuraInstanceId === auraId);
+    const destroyId = ctx.state.players.north.cemetery.find((card) =>
+      card.cardId === 'cemetery-aura-north-destroy')?.instanceId;
+    assert.equal(typeof destroyId, 'string');
+    const cemeteryTargets = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) =>
+        descriptor.kind === 'cast-magic'
+          && descriptor.cardId === 'cemetery-aura-north-return'
+          && descriptor.cemeteryMinionInstanceId !== undefined)
+      .map(({ descriptor }) =>
+        descriptor.kind === 'cast-magic' ? descriptor.cemeteryMinionInstanceId : undefined);
+    assert.equal(cemeteryTargets.every((id) => id === auraId), true);
+    assert.equal(cemeteryTargets.includes(destroyId), false);
+    const southHand = ctx.observe('south').players.north.hand.spellbook;
+    const returned = await ctx.step(await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardId === 'cemetery-aura-north-return'
+        && descriptor.cemeteryMinionInstanceId === auraId));
+    assert.equal(returned.accepted, true);
+    if (!returned.accepted) {
+      return;
+    }
+    assert.deepEqual(returned.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'aura-returned-to-hand',
+      'magic-resolved',
+    ]);
+    assert.equal(
+      ctx.state.players.north.hand.spellbook.some((card) => card.instanceId === auraId),
+      true,
+    );
+    assert.equal(
+      ctx.state.players.north.cemetery.some((card) => card.instanceId === auraId),
+      false,
+    );
+    assert.equal(
+      ctx.state.players.north.cemetery.some((card) => card.instanceId === destroyId),
+      true,
+    );
+    assert.equal(ctx.observe('south').players.north.hand.spellbook, southHand);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
 test('RULE-04 start-turn controller life gain heals and cannot leave Death\'s Door', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const cardsFor = (life: number): Record<string, GameCardDefinition> => ({

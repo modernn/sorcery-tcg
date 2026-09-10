@@ -421,3 +421,234 @@ fn destroy_target_aura_lifts_matching_immobile_area() {
     assert_eq!(aura_magic_targets(&session), Vec::<String>::new());
     assert_exact_replay(&session);
 }
+
+fn filler_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn cemetery_aura_manifest(include_setup: bool) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-return": magic("returnTargetAuraFromOwnCemetery"),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-minion": filler_minion(),
+        "south-site": site(),
+    });
+    if include_setup {
+        cards["north-destroy"] = magic("destroyTargetAura");
+        cards["north-flood"] = flood();
+    }
+    let north_spellbook = if include_setup {
+        vec!["north-flood", "north-destroy", "north-return"]
+    } else {
+        vec!["north-return"; 3]
+    };
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "aura-magic" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-aura-magic-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 3],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 3],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 3],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    }))
+}
+
+fn cemetery_aura_cast_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("cemetery Aura actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return"
+        })
+        .filter_map(|action| {
+            action.descriptor["cemeteryMinionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn opening_main(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("cemetery Aura Magic");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct proof keeps mixed cemetery filtering, hidden-hand, and replay together"
+)]
+fn rule_catalog_0272_cemetery_aura_return_restores_own_cemetery_aura_to_hidden_hand() {
+    let mut session = opening_main(&cemetery_aura_manifest(true));
+    assert_eq!(cemetery_aura_cast_ids(&session), Vec::<String>::new());
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-flood"
+            && cells_include(descriptor, "C4")
+    });
+    let aura_id = state(&session)["realm"]["auras"][0]["instanceId"]
+        .as_str()
+        .expect("Flood identity")
+        .to_owned();
+    let (_, destroyed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        destroyed
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-destroyed")
+    );
+    let before = state(&session);
+    let destroy_id = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("North cemetery")
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")
+        .expect("destroy Magic in cemetery")["instanceId"]
+        .as_str()
+        .expect("destroy identity")
+        .to_owned();
+    assert_ne!(destroy_id, aura_id);
+    let cemetery_targets = cemetery_aura_cast_ids(&session);
+    assert!(!cemetery_targets.is_empty());
+    assert!(cemetery_targets.iter().all(|id| id == &aura_id));
+    assert!(!cemetery_targets.iter().any(|id| id == &destroy_id));
+    let before_hand_count = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook hand")
+        .len();
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == aura_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "aura-returned-to-hand", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["cardId"], "north-flood");
+    assert_eq!(receipt.events[1].payload["instanceId"], aura_id);
+    assert_eq!(receipt.events[1].payload["owner"], "north");
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "magic-returned-to-hand"
+                || event.event_type == "minion-returned-to-hand"
+                || event.event_type == "aura-destroyed"
+                || event.event_type == "aura-dispelled")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North Spellbook hand")
+            .len(),
+        before_hand_count
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == aura_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .all(|card| card["instanceId"] != aura_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == destroy_id)
+    );
+    assert_eq!(session.observe(Seat::South), south_observation);
+    let south_view = session.public_view(Seat::South).expect("South public view");
+    assert_eq!(south_view["players"]["north"]["hand"]["spellbook"], 1);
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("cemetery-aura checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized cemetery-aura");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed cemetery-aura");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed cemetery-aura session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0273_cemetery_aura_return_is_a_paid_noop_without_cemetery_aura() {
+    let mut session = opening_main(&cemetery_aura_manifest(false));
+    assert_eq!(cemetery_aura_cast_ids(&session), Vec::<String>::new());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-returned-to-hand"
+                || event.event_type == "magic-returned-to-hand")
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("North cemetery")
+            .len(),
+        1
+    );
+    assert_eq!(cemetery_aura_cast_ids(&session), Vec::<String>::new());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
