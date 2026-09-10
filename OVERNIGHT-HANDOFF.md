@@ -64,7 +64,7 @@ Still TypeScript (not a second legality or observation engine):
 
 ## Next exact step
 
-1. Continue on this branch only. Next high-value official-rules work is terrain beyond Water↔Rubble and Geomancer, leftover 2×2 fail-closed combinations, or other start/main/end triggers such as start-turn damage. Do not invent MTG keywords.
+1. Continue on this branch only. Next high-value official-rules work is Black Obelisk (site-granted start-turn life loss plus mana), leftover 2×2 fail-closed combinations, or terrain beyond Water↔Rubble and Geomancer. Do not invent MTG keywords.
 2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
 3. Retire this handoff and fast-forward `master` only after that private-check run is green.
 
