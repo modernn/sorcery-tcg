@@ -346,6 +346,7 @@ fn observation_value(observation: &crate::game::SeatObservation) -> Value {
             "cell": enemy_avatar.cell.to_string(),
             "region": enemy_avatar.region,
         },
+        "poweredUnitInstanceIds": observation.powered_unit_instance_ids(),
         "seat": match observation.seat() {
             Seat::North => "north",
             Seat::South => "south",
