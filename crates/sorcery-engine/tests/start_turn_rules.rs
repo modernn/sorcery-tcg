@@ -365,7 +365,7 @@ fn rule_catalog_0158_start_turn_random_teleports_resolve_through_lucky_charm() {
     assert!(blocked.verify_replay().expect("verified replay"));
 }
 
-fn draw_spells_manifest(seed: u32, north_spellbook: Vec<&str>) -> String {
+fn draw_spells_manifest(seed: u32, north_spellbook: &[&str]) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-spells" }))
@@ -404,7 +404,7 @@ fn draw_spells_manifest(seed: u32, north_spellbook: Vec<&str>) -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn draw_spells_start_turn(seed: u32, north_spellbook: Vec<&str>) -> Session {
+fn draw_spells_start_turn(seed: u32, north_spellbook: &[&str]) -> Session {
     let mut session =
         Session::new(&draw_spells_manifest(seed, north_spellbook)).expect("valid session");
     keep(&mut session);
@@ -455,7 +455,7 @@ fn assert_exact_replay(session: &Session) {
 
 #[test]
 fn rule_catalog_0237_start_turn_draw_spells_draws_a_hidden_spell_before_the_draw_step() {
-    let mut session = draw_spells_start_turn(237, vec!["north-source"; 6]);
+    let mut session = draw_spells_start_turn(237, &["north-source"; 6]);
     assert_eq!(state(&session)["phase"], "start-turn");
     let before = state(&session);
     let source_id = before["realm"]["units"]
@@ -559,7 +559,7 @@ fn rule_catalog_0237_start_turn_draw_spells_draws_a_hidden_spell_before_the_draw
 
 #[test]
 fn rule_catalog_0238_start_turn_draw_spells_decks_out_on_an_empty_library() {
-    let mut session = draw_spells_start_turn(238, vec!["north-source"; 3]);
+    let mut session = draw_spells_start_turn(238, &["north-source"; 3]);
     assert_eq!(state(&session)["phase"], "start-turn");
     assert_eq!(state(&session)["players"]["north"]["spellbook"], json!([]));
     let source_id = state(&session)["realm"]["units"]
