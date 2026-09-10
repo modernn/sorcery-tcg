@@ -742,6 +742,10 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one function retains every normalized start-turn draw fact"
+)]
 fn typed_effects_should_retain_only_normalized_values() {
     let definition = with(
         with(
