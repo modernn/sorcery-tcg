@@ -21440,7 +21440,7 @@ test('RULE-03 mill Magic puts opponent library cards in the cemetery without dec
         && descriptor.cardInstanceId === spell.instanceId
         && descriptor.target
         ? [[descriptor.target.kind, descriptor.target.seat] as const]
-        : []);
+        : []).sort((left, right) => left[1].localeCompare(right[1]));
     assert.deepEqual(seats, [['avatar', 'north'], ['avatar', 'south']]);
     const milled = await ctx.step(await ctx.action(({ descriptor }) =>
       descriptor.kind === 'cast-magic'
