@@ -1670,7 +1670,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
-  const drawnSites = createGameManifest({
+  const targetedSiteDraw = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -1682,8 +1682,8 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   });
-  assert.equal(drawnSites.cards[firstSpell]?.cardType === 'magic'
-    && drawnSites.cards[firstSpell].targetPlayerDrawsSites, 1);
+  assert.equal(targetedSiteDraw.cards[firstSpell]?.cardType === 'magic'
+    && targetedSiteDraw.cards[firstSpell].targetPlayerDrawsSites, 1);
   for (const targetPlayerDiscardsCards of [0, 1.5, 201]) {
     assert.throws(() => createGameManifest({
       ...input,
