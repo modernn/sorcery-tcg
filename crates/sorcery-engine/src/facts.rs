@@ -194,6 +194,7 @@ pub enum MagicEffect {
         target_nearby: bool,
         untap_target_minion_after_damage: bool,
     },
+    DestroyTargetArtifact,
     DestroyTargetSite,
     DestroyTargetSiteWithDamageGrid([u8; 5]),
     DisableTargetNearbyMinionUntilNextTurn,
@@ -209,6 +210,7 @@ pub enum MagicEffect {
     LeapAttackAlly,
     LureEnemyMinionOneStepCloser,
     ReturnMinionFromOwnCemetery,
+    ReturnTargetArtifactToOwnerHand,
     ReturnTargetMinionToOwnerHand,
     ReturnTargetSiteToOwnerHand,
     SubmergeTargetMinion,
@@ -692,6 +694,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "damageRandomUnitAtLocation",
     "damageTargetUnit",
     "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+    "destroyTargetArtifact",
     "destroyTargetSite",
     "disableTargetNearbyMinionUntilNextTurn",
     "drawSites",
@@ -708,6 +711,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "lureEnemyMinionOneStepCloser",
     "manaCost",
     "returnMinionFromOwnCemetery",
+    "returnTargetArtifactToOwnerHand",
     "returnTargetMinionToOwnerHand",
     "returnTargetSiteToOwnerHand",
     "submergeTargetMinion",
@@ -1191,6 +1195,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 target_nearby,
                 untap_target_minion_after_damage,
             }),
+            true_only(object, "destroyTargetArtifact", path)?
+                .then_some(MagicEffect::DestroyTargetArtifact),
             (destroy_site && damage_grid.is_none()).then_some(MagicEffect::DestroyTargetSite),
             damage_grid.map(MagicEffect::DestroyTargetSiteWithDamageGrid),
             true_only(object, "disableTargetNearbyMinionUntilNextTurn", path)?
@@ -1217,6 +1223,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::LureEnemyMinionOneStepCloser),
             true_only(object, "returnMinionFromOwnCemetery", path)?
                 .then_some(MagicEffect::ReturnMinionFromOwnCemetery),
+            true_only(object, "returnTargetArtifactToOwnerHand", path)?
+                .then_some(MagicEffect::ReturnTargetArtifactToOwnerHand),
             true_only(object, "returnTargetMinionToOwnerHand", path)?
                 .then_some(MagicEffect::ReturnTargetMinionToOwnerHand),
             true_only(object, "returnTargetSiteToOwnerHand", path)?

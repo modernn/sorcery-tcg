@@ -972,6 +972,71 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSpell]: {
         cardType: 'magic',
+        destroyTargetArtifact: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /destroyTargetArtifact must be true/);
+  const destroyedArtifact = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyTargetArtifact: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(destroyedArtifact.cards[firstSpell]?.cardType === 'magic'
+    && destroyedArtifact.cards[firstSpell].destroyTargetArtifact, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        returnTargetArtifactToOwnerHand: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /returnTargetArtifactToOwnerHand must be true/);
+  const bouncedArtifact = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        returnTargetArtifactToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(bouncedArtifact.cards[firstSpell]?.cardType === 'magic'
+    && bouncedArtifact.cards[firstSpell].returnTargetArtifactToOwnerHand, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyTargetArtifact: true,
+        returnTargetArtifactToOwnerHand: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
         destroyTargetSite: true,
         returnTargetSiteToOwnerHand: true,
         manaCost: 1,
@@ -19881,6 +19946,163 @@ test('RULE-03 return-site Magic returns a site to its owner Atlas and banishes s
       instanceId === southSiteId), false);
     assert.equal(ctx.state.players.south.hand.atlas.some(({ instanceId }) =>
       instanceId === southSiteId), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+});
+
+test('RULE-03 artifact Magic destroys a loose artifact and returns a carried one to hand', async () => {
+  const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
+  const south: GameDeckSpec = {
+    atlas: Array(4).fill('artifact-south-site'),
+    avatar: 'artifact-south-avatar',
+    spellbook: Array(4).fill('artifact-south-relic'),
+  };
+  const cards = (effect: 'destroy' | 'return'): Record<string, GameCardDefinition> => ({
+    'artifact-north-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'artifact-north-site': { cardType: 'site', elements: ['earth'] },
+    'artifact-south-avatar': {
+      attack: 1,
+      cardType: 'avatar',
+      defense: 1,
+      drawSpell: false,
+      life: 20,
+    },
+    'artifact-south-relic': {
+      cardType: 'artifact',
+      grantsBearerPower: 2,
+      manaCost: 0,
+      thresholds,
+    },
+    'artifact-south-site': { cardType: 'site', elements: ['earth'] },
+    'artifact-spell': {
+      cardType: 'magic',
+      manaCost: 1,
+      ...(effect === 'destroy'
+        ? { destroyTargetArtifact: true as const }
+        : { returnTargetArtifactToOwnerHand: true as const }),
+      thresholds,
+    },
+  });
+  const input = (seed: number, effect: 'destroy' | 'return') => ({
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-artifact-magic-v1',
+    },
+    cards: cards(effect),
+    decks: {
+      north: {
+        atlas: Array(4).fill('artifact-north-site'),
+        avatar: 'artifact-north-avatar',
+        spellbook: Array(4).fill('artifact-spell'),
+      } satisfies GameDeckSpec,
+      south,
+    },
+    firstSeat: 'north' as const,
+    seed,
+  });
+  const destroyManifest = createGameManifest(input(211, 'destroy'));
+  assert.equal(destroyManifest.cards['artifact-spell']?.cardType === 'magic'
+    && destroyManifest.cards['artifact-spell'].destroyTargetArtifact, true);
+
+  await withSetup(destroyManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === 'artifact-south-relic'
+        && descriptor.bearer == null
+        && descriptor.cell === 'C1');
+    const artifactId = ctx.state.realm.artifacts?.[0]?.instanceId;
+    assert.ok(artifactId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'artifact-spell');
+    assert.ok(spell);
+    const targets = (await ctx.legalActions('north')).flatMap(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.targetArtifactInstanceId
+        ? [descriptor.targetArtifactInstanceId]
+        : []);
+    assert.deepEqual(targets, [artifactId]);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.targetArtifactInstanceId === artifactId);
+    const sourceInstanceId = cast.descriptor.kind === 'cast-magic'
+      ? cast.descriptor.cardInstanceId
+      : '';
+    const destroyed = await ctx.step(cast);
+    assert.equal(destroyed.accepted, true);
+    if (!destroyed.accepted) return;
+    assert.deepEqual(destroyed.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'artifact-destroyed',
+      'magic-resolved',
+    ]);
+    assert.deepEqual(destroyed.receipt.events[1]?.payload, {
+      cardId: 'artifact-south-relic',
+      instanceId: artifactId,
+      owner: 'south',
+      sourceInstanceId,
+    });
+    assert.equal((ctx.state.realm.artifacts ?? []).some(({ instanceId }) =>
+      instanceId === artifactId), false);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === artifactId), true);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
+
+  await withSetup(createGameManifest(input(212, 'return')), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'cast-artifact'
+        && descriptor.cardId === 'artifact-south-relic'
+        && descriptor.bearer?.kind === 'avatar');
+    const artifactId = ctx.state.realm.artifacts?.[0]?.instanceId;
+    assert.ok(artifactId);
+    const southHandBefore = ctx.state.players.south.hand.spellbook.length;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const spell = ctx.state.players.north.hand.spellbook
+      .find(({ cardId }) => cardId === 'artifact-spell');
+    assert.ok(spell);
+    const cast = await ctx.action(({ descriptor }) =>
+      descriptor.kind === 'cast-magic'
+        && descriptor.cardInstanceId === spell.instanceId
+        && descriptor.targetArtifactInstanceId === artifactId);
+    const returned = await ctx.step(cast);
+    assert.equal(returned.accepted, true);
+    if (!returned.accepted) return;
+    assert.deepEqual(returned.receipt.events.map(({ type }) => type), [
+      'magic-cast',
+      'artifact-returned-to-hand',
+      'magic-resolved',
+    ]);
+    assert.equal((ctx.state.realm.artifacts ?? []).some(({ instanceId }) =>
+      instanceId === artifactId), false);
+    assert.equal(ctx.state.players.south.hand.spellbook.some(({ instanceId }) =>
+      instanceId === artifactId), true);
+    assert.equal(ctx.state.players.south.hand.spellbook.length, southHandBefore + 1);
+    assert.equal(ctx.observe('north').players.south.hand.spellbook, southHandBefore + 1);
+    assert.equal(ctx.state.players.south.cemetery.some(({ instanceId }) =>
+      instanceId === artifactId), false);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

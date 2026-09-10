@@ -8156,3 +8156,227 @@ fn rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site() {
     );
     assert_exact_replay(&session);
 }
+
+fn artifact_magic_manifest(seed: u32, effect: &str) -> String {
+    let cards = json!({
+        "north-avatar": avatar(20),
+        "north-artifact-magic": magic((effect, json!(true)), 0),
+        "north-site": site(false),
+        "south-artifact": {
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "south-avatar": avatar(20),
+        "south-site": site(false),
+    });
+    manifest(
+        seed,
+        &cards,
+        &["north-artifact-magic"; 6],
+        &["south-artifact"; 6],
+    )
+}
+
+fn stage_south_artifact(session: &mut Session, carried: bool) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-artifact"
+            && if carried {
+                descriptor["bearer"]["kind"] == "avatar"
+            } else {
+                descriptor["bearer"].is_null() && descriptor["cell"] == "C1"
+            }
+    });
+    let artifact_id = state(session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()
+        .expect("artifact identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    artifact_id
+}
+
+fn artifact_magic_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("artifact-magic actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-artifact-magic"
+        })
+        .filter_map(|action| {
+            action.descriptor["targetArtifactInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn realm_has_artifact(value: &Value, instance_id: &str) -> bool {
+    value["realm"]
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .is_some_and(|artifacts| {
+            artifacts
+                .iter()
+                .any(|artifact| artifact["instanceId"] == instance_id)
+        })
+}
+
+#[test]
+fn rule_catalog_0211_destroy_target_artifact_moves_a_loose_artifact_to_its_owners_cemetery() {
+    let encoded = artifact_magic_manifest(211, "destroyTargetArtifact");
+    let mut session = opening_main(&encoded);
+    let artifact_id = stage_south_artifact(&mut session, false);
+    assert_eq!(artifact_magic_targets(&session), [artifact_id.clone()]);
+    assert!(realm_has_artifact(&state(&session), &artifact_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-artifact-magic"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-destroyed", "magic-resolved"]
+    );
+    let destroyed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "artifact-destroyed")
+        .expect("artifact destruction");
+    assert_eq!(destroyed.payload["cardId"], "south-artifact");
+    assert_eq!(destroyed.payload["instanceId"], artifact_id);
+    assert_eq!(destroyed.payload["owner"], "south");
+    assert_eq!(
+        destroyed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-returned-to-hand"
+                || event.event_type == "artifact-banished"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    assert!(!realm_has_artifact(&after, &artifact_id));
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert!(
+        !after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert_eq!(artifact_magic_targets(&session), Vec::<String>::new());
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("destroy-artifact checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized destroy-artifact");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed destroy-artifact");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed destroy-artifact session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand() {
+    let encoded = artifact_magic_manifest(212, "returnTargetArtifactToOwnerHand");
+    let mut session = opening_main(&encoded);
+    let artifact_id = stage_south_artifact(&mut session, true);
+    let before = state(&session);
+    let south_hand_before = before["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook hand")
+        .len();
+    assert_eq!(artifact_magic_targets(&session), [artifact_id.clone()]);
+    assert!(realm_has_artifact(&before, &artifact_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-artifact-magic"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    let returned = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "artifact-returned-to-hand")
+        .expect("artifact return");
+    assert_eq!(returned.payload["cardId"], "south-artifact");
+    assert_eq!(returned.payload["instanceId"], artifact_id);
+    assert_eq!(returned.payload["owner"], "south");
+    assert_eq!(returned.payload["seat"], "south");
+    assert_eq!(
+        returned.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-destroyed"
+                || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    assert!(!realm_has_artifact(&after, &artifact_id));
+    assert!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .len(),
+        south_hand_before + 1
+    );
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id)
+    );
+    let north_view = session.public_view(Seat::North).expect("North public view");
+    assert_eq!(
+        north_view["players"]["south"]["hand"]["spellbook"],
+        json!(south_hand_before + 1)
+    );
+    assert_eq!(artifact_magic_targets(&session), Vec::<String>::new());
+    assert_exact_replay(&session);
+}

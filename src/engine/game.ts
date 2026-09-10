@@ -191,11 +191,13 @@ export type GameCardDefinition =
     lureEnemyMinionOneStepCloser?: true;
     manaCost: number;
     returnMinionFromOwnCemetery?: true;
+    returnTargetArtifactToOwnerHand?: true;
     returnTargetMinionToOwnerHand?: true;
     returnTargetSiteToOwnerHand?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
+    destroyTargetArtifact?: true;
     destroyTargetSite?: true;
     targetNearby?: boolean;
     teleportAllyToTargetSite?: true;
@@ -1009,11 +1011,11 @@ const SUPPORTED_CARD_FIELDS = {
     damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
     damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardSiteAsAdditionalCost
-    destroyTargetSite
+    destroyTargetArtifact destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantChargeToAllyThisTurn
     grantPowerToAllyThisTurn healController killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
-    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetMinionToOwnerHand
-    returnTargetSiteToOwnerHand submergeTargetMinion
+    lureEnemyMinionOneStepCloser manaCost returnMinionFromOwnCemetery returnTargetArtifactToOwnerHand
+    returnTargetMinionToOwnerHand returnTargetSiteToOwnerHand submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
     targetNearby teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinionAfterDamage
@@ -1376,6 +1378,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnTargetMinionToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetMinionToOwnerHand must be true when defined`);
     }
+    if (card.returnTargetArtifactToOwnerHand !== undefined
+      && card.returnTargetArtifactToOwnerHand !== true) {
+      throw new RangeError(`${path}.returnTargetArtifactToOwnerHand must be true when defined`);
+    }
     if (card.returnTargetSiteToOwnerHand !== undefined
       && card.returnTargetSiteToOwnerHand !== true) {
       throw new RangeError(`${path}.returnTargetSiteToOwnerHand must be true when defined`);
@@ -1438,6 +1444,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.discardSiteAsAdditionalCost !== true) {
       throw new RangeError(`${path}.discardSiteAsAdditionalCost must be true when defined`);
     }
+    if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
+      throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
+    }
     if (card.destroyTargetSite !== undefined && card.destroyTargetSite !== true) {
       throw new RangeError(`${path}.destroyTargetSite must be true when defined`);
     }
@@ -1473,6 +1482,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.damageTargetUnit !== undefined)
       + Number(targetSiteEffectFacts === 3)
       + Number(simpleDestroyTargetSite)
+      + Number(card.destroyTargetArtifact === true)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
@@ -1486,6 +1496,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
       + Number(card.returnMinionFromOwnCemetery === true)
+      + Number(card.returnTargetArtifactToOwnerHand === true)
       + Number(card.returnTargetMinionToOwnerHand === true)
       + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
@@ -2153,6 +2164,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   }
                 : card.destroyTargetSite === true
                   ? { destroyTargetSite: true as const }
+                : card.destroyTargetArtifact === true
+                  ? { destroyTargetArtifact: true as const }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.submergeTargetMinion === true
@@ -2193,6 +2206,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { drawSpells: card.drawSpells }
                     : card.returnTargetMinionToOwnerHand === true
                       ? { returnTargetMinionToOwnerHand: true as const }
+                    : card.returnTargetArtifactToOwnerHand === true
+                      ? { returnTargetArtifactToOwnerHand: true as const }
                     : card.returnTargetSiteToOwnerHand === true
                       ? { returnTargetSiteToOwnerHand: true as const }
                     : card.returnMinionFromOwnCemetery === true

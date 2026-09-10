@@ -4427,6 +4427,54 @@
         "file": "crates/sorcery-engine/tests/magic_rules.rs",
         "testName": "rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0211",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-artifact Magic pays its cost, offers every Artifact in the caster region whether loose or carried, moves a real Artifact into its owner's cemetery, and leaves no later Artifact target once the realm is empty of them.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-destroyed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0211_destroy_target_artifact_moves_a_loose_artifact_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0212",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-artifact Magic detaches a carried Artifact and returns it to its owner's Spellbook hand. The opponent sees only the resulting hand count, and the Artifact does not enter a cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_rules.rs",
+        "testName": "rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
+      }
     }
   ]
 }

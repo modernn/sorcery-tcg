@@ -1257,6 +1257,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageRandomUnitAtLocation(_)
         | MagicEffect::ReturnMinionFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
+        | MagicEffect::DestroyTargetArtifact
         | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
@@ -1271,6 +1272,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::ReturnTargetArtifactToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::SubmergeTargetMinion
@@ -4965,6 +4967,26 @@ impl Game {
             .collect())
     }
 
+    fn artifact_target_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        Ok(self
+            .position
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
+                let location = self.artifact_location(artifact).ok()?;
+                (location.region == caster_location.region).then_some(MagicChoice {
+                    target_artifact_instance_id: Some(artifact.card.instance_id.clone()),
+                    ..MagicChoice::default()
+                })
+            })
+            .collect())
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one closed match keeps every supported Magic choice shape explicit"
@@ -5245,6 +5267,9 @@ impl Game {
             }
             MagicEffect::DestroyTargetSite | MagicEffect::ReturnTargetSiteToOwnerHand => {
                 self.destroy_target_site_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::DestroyTargetArtifact | MagicEffect::ReturnTargetArtifactToOwnerHand => {
+                self.artifact_target_choices(seat, caster_instance_id)?
             }
             MagicEffect::DestroyTargetSiteWithDamageGrid(_) => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
@@ -11812,6 +11837,92 @@ impl Game {
         Ok(())
     }
 
+    fn take_targeted_artifact(
+        &mut self,
+        instance_id: &IdentityHash,
+    ) -> Result<ArtifactPosition, GameError> {
+        let index = self
+            .position
+            .artifacts
+            .iter()
+            .position(|artifact| artifact.card.instance_id == *instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        Ok(self.position.artifacts.remove(index))
+    }
+
+    fn apply_destroy_target_artifact(
+        &mut self,
+        target_artifact_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self.take_targeted_artifact(target_artifact_instance_id)?;
+        let owner = artifact.card.owner;
+        let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
+            .id
+            .clone();
+        if artifact.card.source == CardSource::Token {
+            outcomes.push("artifact-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(artifact.card);
+            outcomes.push("artifact-destroyed", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
+    fn apply_return_target_artifact_to_owner_hand(
+        &mut self,
+        target_artifact_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self.take_targeted_artifact(target_artifact_instance_id)?;
+        let owner = artifact.card.owner;
+        let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
+            .id
+            .clone();
+        if artifact.card.source == CardSource::Token {
+            outcomes.push("artifact-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .hand_spellbook
+                .push(artifact.card);
+            outcomes.push("artifact-returned-to-hand", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": target_artifact_instance_id,
+                    "owner": owner,
+                    "seat": owner,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -15650,6 +15761,26 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::DestroyTargetArtifact => {
+                let target_artifact_instance_id = target_artifact_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_target_artifact(
+                    target_artifact_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::ReturnTargetArtifactToOwnerHand => {
+                let target_artifact_instance_id = target_artifact_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_return_target_artifact_to_owner_hand(
+                    target_artifact_instance_id,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DestroyTargetSiteWithDamageGrid(grid) => {
                 let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
                 let target_site_instance_id = target_site_instance_id
@@ -18534,6 +18665,10 @@ mod tests {
                 json!({ "damageEachUnitAtLocationWithinTwoSteps": 3 }),
             ),
             (
+                MagicEffect::DestroyTargetArtifact,
+                json!({ "destroyTargetArtifact": true }),
+            ),
+            (
                 MagicEffect::DestroyTargetSite,
                 json!({ "destroyTargetSite": true }),
             ),
@@ -18558,6 +18693,10 @@ mod tests {
             (
                 MagicEffect::KillTargetMinion,
                 json!({ "killTargetMinion": true }),
+            ),
+            (
+                MagicEffect::ReturnTargetArtifactToOwnerHand,
+                json!({ "returnTargetArtifactToOwnerHand": true }),
             ),
             (
                 MagicEffect::ReturnTargetMinionToOwnerHand,
