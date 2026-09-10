@@ -6053,6 +6053,53 @@
         "file": "crates/sorcery-engine/tests/start_turn_here_damage_rules.rs",
         "testName": "rule_catalog_0281_start_turn_here_damage_destroys_a_wounded_visitor"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0282",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can grant First Strike to a controlled ally for the current turn. The grant is recorded as a temporary source and the shared End Phase cleanup expires it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "first-strike-granted",
+        "first-strike-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0283",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Equal 3/3 combat without First Strike is simultaneous. After grant-First-Strike Magic, the same attacker kills before taking return damage. The opponent still sees only the updated Spellbook hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "first-strike-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_0283_granted_first_strike_kills_before_return_damage"
+      }
     }
   ]
 }

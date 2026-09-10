@@ -379,6 +379,7 @@ struct UnitPosition {
     tapped: bool,
     temporary_airborne_sources: Vec<IdentityHash>,
     temporary_charge_sources: Vec<IdentityHash>,
+    temporary_first_strike_sources: Vec<IdentityHash>,
     temporary_lethal_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     temporary_ranged_sources: Vec<IdentityHash>,
@@ -418,6 +419,7 @@ impl SummonPlacement {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -1343,6 +1345,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantAirborneToAllyThisTurn
         | MagicEffect::GrantChargeToAllyThisTurn
+        | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantRangedToAllyThisTurn
@@ -3248,88 +3251,104 @@ impl Game {
                         tempted_destination: choice.tempted_destination,
                         tempted_enemy: choice.tempted_enemy,
                     };
-                    let label = (if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Lethal grant action requires an ally"));
-                        };
-                        format!(
-                            "Cast {} to grant Lethal to {} {}…",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15]
-                        )
-                    } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Ranged grant action requires an ally"));
-                        };
-                        format!(
-                            "Cast {} to grant Ranged to {} {}…",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15]
-                        )
-                    } else if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Airborne grant action requires an ally"));
-                        };
-                        format!(
-                            "Cast {} to grant Airborne to {} {}…",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15]
-                        )
-                    } else if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally), ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Overpower action requires an ally"));
-                        };
-                        format!(
-                            "Cast {} to grant +2 power to {} {}…",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15]
-                        )
-                    } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
-                        let ActionDescriptor::CastMagic {
-                            ally: Some(ally),
-                            ally_destination: Some(destination),
-                            ally_strike_location,
-                            ..
-                        } = &descriptor
-                        else {
-                            return Err(invalid("Leap Attack action requires an ally destination"));
-                        };
-                        let from = self.unit_target_location(ally)?;
-                        let stays = from == *destination;
-                        let strike = ally_strike_location.unwrap_or(*destination);
-                        format!(
-                            "Cast {}: {} {}… {} and strikes enemies at {}",
-                            definition.id,
-                            ally.kind(),
-                            &ally.instance_id().as_str()[..15],
-                            if stays {
-                                "stays".to_owned()
-                            } else {
-                                format!("steps to {}", destination.cell)
-                            },
-                            strike.cell
-                        )
-                    } else {
-                        descriptor
-                            .state_independent_label()
-                            .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                    }) + &self.minion_caster_suffix(seat, caster_instance_id);
+                    let label =
+                        (if matches!(facts.effect, MagicEffect::GrantFirstStrikeToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("First Strike grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant First Strike to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Lethal grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Lethal to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Ranged grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Ranged to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Airborne grant action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant Airborne to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally), ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid("Overpower action requires an ally"));
+                            };
+                            format!(
+                                "Cast {} to grant +2 power to {} {}…",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15]
+                            )
+                        } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
+                            let ActionDescriptor::CastMagic {
+                                ally: Some(ally),
+                                ally_destination: Some(destination),
+                                ally_strike_location,
+                                ..
+                            } = &descriptor
+                            else {
+                                return Err(invalid(
+                                    "Leap Attack action requires an ally destination",
+                                ));
+                            };
+                            let from = self.unit_target_location(ally)?;
+                            let stays = from == *destination;
+                            let strike = ally_strike_location.unwrap_or(*destination);
+                            format!(
+                                "Cast {}: {} {}… {} and strikes enemies at {}",
+                                definition.id,
+                                ally.kind(),
+                                &ally.instance_id().as_str()[..15],
+                                if stays {
+                                    "stays".to_owned()
+                                } else {
+                                    format!("steps to {}", destination.cell)
+                                },
+                                strike.cell
+                            )
+                        } else {
+                            descriptor
+                                .state_independent_label()
+                                .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                        }) + &self.minion_caster_suffix(seat, caster_instance_id);
                     self.push_action(actions, descriptor, label);
                 }
             }
@@ -5881,6 +5900,7 @@ impl Game {
             }
             MagicEffect::GrantAirborneToAllyThisTurn
             | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantLethalToAllyThisTurn
             | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantRangedToAllyThisTurn => self
@@ -9997,10 +10017,11 @@ impl Game {
             .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
             .ok_or(GameError::IllegalAction)?;
-        Ok(matches!(
-            &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-            CardFacts::Minion(facts) if facts.strikes_first_while_attacking
-        ))
+        Ok(!unit.temporary_first_strike_sources.is_empty()
+            || matches!(
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                CardFacts::Minion(facts) if facts.strikes_first_while_attacking
+            ))
     }
 
     fn break_lance(
@@ -10207,6 +10228,7 @@ impl Game {
                     .filter(|unit| !self.minion_is_disabled(unit))
                     .and_then(|unit| {
                         let strikes_first = unit.carried_lance_count > 0
+                            || !unit.temporary_first_strike_sources.is_empty()
                             || matches!(
                                 &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
                                 CardFacts::Minion(facts) if facts.strikes_first_while_defending
@@ -12343,6 +12365,7 @@ impl Game {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -16900,6 +16923,31 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantFirstStrikeToAllyThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                if let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                {
+                    self.position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?
+                        .temporary_first_strike_sources
+                        .push(card_instance_id.clone());
+                }
+                outcomes.push("first-strike-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantLethalToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -19673,6 +19721,20 @@ impl Game {
                 })
             })
             .collect();
+        let expired_first_strike_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_first_strike_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let expired_lethal_sources: Vec<_> = self
             .position
             .units
@@ -19740,6 +19802,7 @@ impl Game {
             unit.damage = 0;
             unit.temporary_airborne_sources.clear();
             unit.temporary_charge_sources.clear();
+            unit.temporary_first_strike_sources.clear();
             unit.temporary_lethal_sources.clear();
             unit.temporary_power_sources.clear();
             unit.temporary_ranged_sources.clear();
@@ -19796,6 +19859,15 @@ impl Game {
         }
         for (instance_id, controller, source_instance_id) in expired_charge_sources {
             outcomes.push("charge-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_first_strike_sources {
+            outcomes.push("first-strike-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -20486,6 +20558,12 @@ impl Game {
             object.insert(
                 "temporaryChargeSources".to_owned(),
                 json!(unit.temporary_charge_sources),
+            );
+        }
+        if !unit.temporary_first_strike_sources.is_empty() {
+            object.insert(
+                "temporaryFirstStrikeSources".to_owned(),
+                json!(unit.temporary_first_strike_sources),
             );
         }
         if !unit.temporary_lethal_sources.is_empty() {
@@ -21746,6 +21824,7 @@ mod tests {
             tapped: false,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -22021,6 +22100,7 @@ mod tests {
             tapped: true,
             temporary_airborne_sources: Vec::new(),
             temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -22911,6 +22991,7 @@ mod tests {
                 tapped: false,
                 temporary_airborne_sources: Vec::new(),
                 temporary_charge_sources: Vec::new(),
+                temporary_first_strike_sources: Vec::new(),
                 temporary_lethal_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 temporary_ranged_sources: Vec::new(),
