@@ -14913,7 +14913,7 @@ test('RULE-02/04 a unit can move across connected top and bottom realm edges', a
   });
 });
 
-test('RULE-04 Submerge uses underwater summons, movement, and region-isolated combat', () => {
+test('RULE-04 Submerge uses underwater summons, movement, and region-isolated combat', async () => {
   const submerge = {
     attack: 2,
     defense: 2,
@@ -14922,111 +14922,113 @@ test('RULE-04 Submerge uses underwater summons, movement, and region-isolated co
     thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
   } as const;
   const ordinary = { ...submerge, submerge: false };
-  let session = keep(createGameSession(manifest(129, {
+  await withSetup(manifest(129, {
     northSpell: submerge,
     site: { elements: ['water'] },
     southSpell: ordinary,
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    const northSummons = await ctx.legalActions('north');
+    assert.equal(northSummons.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === undefined), true);
+    assert.equal(northSummons.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underwater');
+    const northUnitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(northUnitId);
+    assert.equal(ctx.observe('north').realm.units[0]?.region, 'underwater');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  const northSummons = legalGameActions(session.state, 'north');
-  assert.equal(northSummons.some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === undefined), true);
-  assert.equal(northSummons.some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underwater');
-  const northUnitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(northUnitId);
-  assert.equal(observeGame(session.state, 'north').realm.units[0]?.region, 'underwater');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion');
+    const southUnitId = ctx.state.realm.units.find(({ controller }) => controller === 'south')?.instanceId;
+    assert.ok(southUnitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion');
-  const southUnitId = session.state.realm.units.find(({ controller }) => controller === 'south')?.instanceId;
-  assert.ok(southUnitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    const underwaterMoves = await ctx.legalActions('north');
+    const surfaces = underwaterMoves.find(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === northUnitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'C4/underwater,C4/surface');
+    const swims = underwaterMoves.find(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === northUnitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'C4/underwater,C3/underwater');
+    assert.ok(surfaces);
+    assert.ok(swims);
+    await withFork(ctx, async (surfaced) => {
+      await surfaced.accept(surfaces);
+      await surfaced.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+      assert.equal(surfaced.state.realm.units.find(({ instanceId }) => instanceId === northUnitId)?.region, 'surface');
+      assert.equal(await surfaced.verifyReplay(), true);
+    });
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  const underwaterMoves = legalGameActions(session.state, 'north');
-  const surfaces = underwaterMoves.find(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northUnitId
-      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'C4/underwater,C4/surface');
-  const swims = underwaterMoves.find(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northUnitId
-      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'C4/underwater,C3/underwater');
-  assert.ok(surfaces);
-  assert.ok(swims);
-  let surfaced = accept(session, surfaces);
-  surfaced = accept(surfaced, action(surfaced, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  assert.equal(surfaced.state.realm.units.find(({ instanceId }) => instanceId === northUnitId)?.region, 'surface');
-  assert.equal(verifyGameReplay(surfaced), true);
+    await ctx.accept(swims);
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  session = accept(session, swims);
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), false);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === southUnitId
+        && descriptor.to.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === southUnitId
-      && descriptor.to.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === northUnitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'C3/underwater,C2/underwater');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === southUnitId), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.phase, 'main');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northUnitId
-      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'C3/underwater,C2/underwater');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === southUnitId), false);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(session.state.phase, 'main');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === northUnitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'C2/underwater,C2/surface');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack'
+        && descriptor.target.kind === 'minion'
+        && descriptor.target.instanceId === southUnitId), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'close-intercept');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northUnitId
-      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'C2/underwater,C2/surface');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack'
-      && descriptor.target.kind === 'minion'
-      && descriptor.target.instanceId === southUnitId), true);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'close-intercept');
-  assert.equal(verifyGameReplay(session), true);
-
-  let land = keep(createGameSession(manifest(130, { northSpell: submerge })));
-  land = keep(land);
-  land = accept(land, action(land, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(legalGameActions(land.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
-  assert.equal(verifyGameReplay(land), true);
+  await withSetup(manifest(130, { northSpell: submerge }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underwater'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Burrowing uses underground summons and movement only at land sites', () => {
+test('RULE-04 Burrowing uses underground summons and movement only at land sites', async () => {
   const burrowing = {
     attack: 2,
     burrowing: true,
@@ -15035,59 +15037,59 @@ test('RULE-04 Burrowing uses underground summons and movement only at land sites
     thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
   } as const;
   const ordinary = { ...burrowing, burrowing: false };
-  let session = keep(createGameSession(manifest(131, { northSpell: burrowing, southSpell: ordinary })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  await withSetup(manifest(131, { northSpell: burrowing, southSpell: ordinary }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    const northSummons = await ctx.legalActions('north');
+    assert.equal(northSummons.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === undefined), true);
+    assert.equal(northSummons.some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underground');
+    const northUnitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(northUnitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    const moves = await ctx.legalActions('north');
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underground,C3/underground'), true);
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underground,C4/surface'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === northUnitId
+      && descriptor.to.cell === 'C3'
+      && descriptor.to.region === 'underground');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  const northSummons = legalGameActions(session.state, 'north');
-  assert.equal(northSummons.some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === undefined), true);
-  assert.equal(northSummons.some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underground');
-  const northUnitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(northUnitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  const moves = legalGameActions(session.state, 'north');
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === northUnitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underground,C3/underground'), true);
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === northUnitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underground,C4/surface'), true);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === northUnitId
-    && descriptor.to.cell === 'C3'
-    && descriptor.to.region === 'underground');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'declare-attack' && descriptor.target.kind === 'site'), false);
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
-
-  let water = keep(createGameSession(manifest(132, {
+  await withSetup(manifest(132, {
     northSpell: burrowing,
     site: { elements: ['water'] },
-  })));
-  water = keep(water);
-  water = accept(water, action(water, ({ descriptor }) => descriptor.kind === 'play-site'));
-  assert.equal(legalGameActions(water.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
-  assert.equal(verifyGameReplay(water), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'underground'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Secret Tunnel connects burrowed allies only to the controller\'s other sites', () => {
+test('RULE-04 Secret Tunnel connects burrowed allies only to the controller\'s other sites', async () => {
   const decks = { north: deck('tunnel-north', 3), south: deck('tunnel-south', 3) };
   const cards = cardsFor(decks, {
     attack: 3,
@@ -15118,70 +15120,72 @@ test('RULE-04 Secret Tunnel connects burrowed allies only to the controller\'s o
     firstSeat: 'north',
     seed: 143,
   });
-  let session = keep(createGameSession(tunnelManifest));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
-  const tunnel = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === tunnelCardId);
-  const land = session.state.players.north.hand.atlas.find(({ cardId }) =>
-    cardId !== tunnelCardId && cardId !== waterCardId);
-  const water = session.state.players.north.hand.atlas.find(({ cardId }) => cardId === waterCardId);
-  assert.ok(tunnel);
-  assert.ok(land);
-  assert.ok(water);
+  await withSetup(tunnelManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const tunnel = ctx.state.players.north.hand.atlas.find(({ cardId }) => cardId === tunnelCardId);
+    const land = ctx.state.players.north.hand.atlas.find(({ cardId }) =>
+      cardId !== tunnelCardId && cardId !== waterCardId);
+    const water = ctx.state.players.north.hand.atlas.find(({ cardId }) => cardId === waterCardId);
+    assert.ok(tunnel);
+    assert.ok(land);
+    assert.ok(water);
+    const tunnelInstanceId = tunnel.instanceId;
+    const landInstanceId = land.instanceId;
+    const waterInstanceId = water.instanceId;
 
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === tunnel.instanceId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === 'underground');
-  const unitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === land.instanceId && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === water.instanceId && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === tunnelInstanceId && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === 'underground');
+    const unitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(unitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === landInstanceId && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === waterInstanceId && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const pathFor = (candidate: GameLegalAction): string => candidate.descriptor.kind === 'move-and-attack'
-    ? candidate.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-    : '';
-  const moves = legalGameActions(session.state, 'north');
-  const unitPaths = moves
-    .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === unitId)
-    .map(pathFor);
-  assert.equal(unitPaths.filter((path) => path === 'C4/underground,C3/underground').length, 1);
-  assert.equal(unitPaths.includes('C4/underground,C2/underwater'), true);
-  assert.equal(unitPaths.includes('C4/underground,C1/underground'), false);
-  assert.equal(unitPaths.includes('C4/underground,C2/underwater,C4/underground'), false);
-  const avatarId = session.state.players.north.avatar.card.instanceId;
-  const avatarPaths = moves
-    .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === avatarId)
-    .map(pathFor);
-  assert.equal(avatarPaths.includes('C4/surface,C3/surface'), true);
-  assert.equal(avatarPaths.includes('C4/surface,C2/surface'), false);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underground,C2/underwater');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.deepEqual(session.state.realm.units[0]?.location, 'C2');
-  assert.deepEqual(session.state.realm.units[0]?.region, 'underwater');
-  assert.equal(verifyGameReplay(session), true);
+    const pathFor = (candidate: GameLegalAction): string => candidate.descriptor.kind === 'move-and-attack'
+      ? candidate.descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+      : '';
+    const moves = await ctx.legalActions('north');
+    const unitPaths = moves
+      .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === unitId)
+      .map(pathFor);
+    assert.equal(unitPaths.filter((path) => path === 'C4/underground,C3/underground').length, 1);
+    assert.equal(unitPaths.includes('C4/underground,C2/underwater'), true);
+    assert.equal(unitPaths.includes('C4/underground,C1/underground'), false);
+    assert.equal(unitPaths.includes('C4/underground,C2/underwater,C4/underground'), false);
+    const avatarId = ctx.state.players.north.avatar.card.instanceId;
+    const avatarPaths = moves
+      .filter(({ descriptor }) => descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === avatarId)
+      .map(pathFor);
+    assert.equal(avatarPaths.includes('C4/surface,C3/surface'), true);
+    assert.equal(avatarPaths.includes('C4/surface,C2/surface'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underground,C2/underwater');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.deepEqual(ctx.state.realm.units[0]?.location, 'C2');
+    assert.deepEqual(ctx.state.realm.units[0]?.region, 'underwater');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-03 a must-be-burrowed cast restriction suppresses only non-underground casts', async () => {
@@ -15225,7 +15229,7 @@ test('RULE-03 a must-be-burrowed cast restriction suppresses only non-undergroun
   });
 });
 
-test('RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts', () => {
+test('RULE-03 a must-be-submerged cast restriction suppresses only non-underwater casts', async () => {
   const decks = { north: deck('submerged-north'), south: deck('submerged-south') };
   const cards = cardsFor(decks, {
     attack: 3,
@@ -15254,63 +15258,63 @@ test('RULE-03 a must-be-submerged cast restriction suppresses only non-underwate
     firstSeat: 'north',
     seed: 0,
   });
-  let session = keep(createGameSession(submergedManifest));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
-
-  const water = session.state.players.north.hand.atlas.find(({ cardId }) => {
-    const definition = session.state.cards[cardId];
-    return definition?.cardType === 'site' && definition.elements.includes('water');
+  await withSetup(submergedManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const water = ctx.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = ctx.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    const land = ctx.state.players.north.hand.atlas.find(({ cardId }) => {
+      const definition = ctx.state.cards[cardId];
+      return definition?.cardType === 'site' && !definition.elements.includes('water');
+    });
+    assert.ok(water);
+    assert.ok(land);
+    const waterInstanceId = water.instanceId;
+    const landInstanceId = land.instanceId;
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === waterInstanceId && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === landInstanceId && descriptor.cell === 'C3');
+    const summons = await ctx.legalActions('north');
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.region === undefined), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C3' && descriptor.region === 'underground'), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.region === 'void'), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === 'underwater'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === 'underwater');
+    const unitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(unitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const moves = await ctx.legalActions('north');
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.to.cell === 'C3' && descriptor.to.region === 'underground'), true);
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId && descriptor.to.region === 'void'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underwater,C4/surface');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
   });
-  const land = session.state.players.north.hand.atlas.find(({ cardId }) => {
-    const definition = session.state.cards[cardId];
-    return definition?.cardType === 'site' && !definition.elements.includes('water');
-  });
-  assert.ok(water);
-  assert.ok(land);
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === water.instanceId && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === land.instanceId && descriptor.cell === 'C3');
-  const summons = legalGameActions(session.state, 'north');
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.region === undefined), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C3' && descriptor.region === 'underground'), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.region === 'void'), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === 'underwater'), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === 'underwater');
-  const unitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const moves = legalGameActions(session.state, 'north');
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.to.cell === 'C3' && descriptor.to.region === 'underground'), true);
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId && descriptor.to.region === 'void'), true);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underwater,C4/surface');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
 });
 
-test('RULE-04 combined region abilities permit eligible cross-region adjacency steps', () => {
+test('RULE-04 combined region abilities permit eligible cross-region adjacency steps', async () => {
   const decks = { north: deck('cross-north'), south: deck('cross-south') };
   const cards = cardsFor(decks, {
     burrowing: true,
@@ -15334,53 +15338,54 @@ test('RULE-04 combined region abilities permit eligible cross-region adjacency s
     firstSeat: 'north',
     seed: 133,
   });
-  let session = keep(createGameSession(crossManifest));
-  session = keep(session);
-  const north = session.state.players.north;
-  const land = north.hand.atlas.find(({ cardId }) => {
-    const definition = session.state.cards[cardId];
-    return definition?.cardType === 'site' && !definition.elements.includes('water');
-  });
-  const water = north.hand.atlas.find(({ cardId }) => {
-    const definition = session.state.cards[cardId];
-    return definition?.cardType === 'site' && definition.elements.includes('water');
-  });
-  assert.ok(land);
-  assert.ok(water);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  await withSetup(crossManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    const north = ctx.state.players.north;
+    const land = north.hand.atlas.find(({ cardId }) => {
+      const definition = ctx.state.cards[cardId];
+      return definition?.cardType === 'site' && !definition.elements.includes('water');
+    });
+    const water = north.hand.atlas.find(({ cardId }) => {
+      const definition = ctx.state.cards[cardId];
+      return definition?.cardType === 'site' && definition.elements.includes('water');
+    });
+    assert.ok(land);
+    assert.ok(water);
+    const landInstanceId = land.instanceId;
+    const waterInstanceId = water.instanceId;
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cardInstanceId === land.instanceId);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underground');
-  const unitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site'
-    && descriptor.cardInstanceId === water.instanceId
-    && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/underground,C3/underwater');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C3/underwater,C4/underground,B4/void');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cardInstanceId === landInstanceId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underground');
+    const unitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(unitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site'
+      && descriptor.cardInstanceId === waterInstanceId
+      && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C4/underground,C3/underwater');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'C3/underwater,C4/underground,B4/void');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Voidwalk summons to any void and moves between adjacent void and surface locations', () => {
+test('RULE-04 Voidwalk summons to any void and moves between adjacent void and surface locations', async () => {
   const voidwalk = {
     attack: 2,
     defense: 2,
@@ -15388,60 +15393,58 @@ test('RULE-04 Voidwalk summons to any void and moves between adjacent void and s
     thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
     voidwalk: true,
   } as const;
-  let session = keep(createGameSession(manifest(134, {
+  await withSetup(manifest(134, {
     northSpell: voidwalk,
     site: { elements: ['air'] },
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
-
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  const summons = legalGameActions(session.state, 'north');
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === undefined), true);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'B4' && descriptor.region === 'void'), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'B4' && descriptor.region === 'void');
-  const coveredUnitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(coveredUnitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  assert.equal(legalGameActions(session.state, 'south').some(({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.region === 'void'), false);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
-  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === coveredUnitId)?.region, 'surface');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'B3' && descriptor.region === 'void');
-  const unitId = session.state.realm.units.find(({ region }) => region === 'void')?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const moves = legalGameActions(session.state, 'north');
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'B3/void,A3/void'), true);
-  assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'B3/void,B4/surface'), true);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.to.cell === 'B4' && descriptor.to.region === 'surface');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    const summons = await ctx.legalActions('north');
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === undefined), true);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'B4' && descriptor.region === 'void'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'B4' && descriptor.region === 'void');
+    const coveredUnitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(coveredUnitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    assert.equal((await ctx.legalActions('south')).some(({ descriptor }) =>
+      descriptor.kind === 'summon-minion' && descriptor.region === 'void'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) => instanceId === coveredUnitId)?.region, 'surface');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'B3' && descriptor.region === 'void');
+    const unitId = ctx.state.realm.units.find(({ region }) => region === 'void')?.instanceId;
+    assert.ok(unitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    const moves = await ctx.legalActions('north');
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'B3/void,A3/void'), true);
+    assert.equal(moves.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'B3/void,B4/surface'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.to.cell === 'B4' && descriptor.to.region === 'surface');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-04 Planar Gate grants minions Voidwalk only until they leave the void', () => {
+test('RULE-04 Planar Gate grants minions Voidwalk only until they leave the void', async () => {
   const baseNorth = deck('gate-north');
   const north = { ...baseNorth, atlas: baseNorth.atlas.map(() => 'planar-gate') };
   const withGateEverywhere = manifest(162, {
@@ -15463,76 +15466,75 @@ test('RULE-04 Planar Gate grants minions Voidwalk only until they leave the void
     return [cardId, ordinarySite];
   })) as Record<string, GameCardDefinition>;
   const gameManifest = createGameManifest({ ...withGateEverywhere, cards });
-  let session = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  await withSetup(gameManifest, async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
+    const unitId = ctx.state.realm.units[0]?.instanceId;
+    assert.ok(unitId);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.cell === 'C4');
-  const unitId = session.state.realm.units[0]?.instanceId;
-  assert.ok(unitId);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'C4/surface,B4/void');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === unitId)
-    ?.planarGateVoidwalk, true);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === unitId
       && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'B4/void,B3/void'), true);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'B4/void,B3/void');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+        === 'C4/surface,B4/void');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) => instanceId === unitId)
+      ?.planarGateVoidwalk, true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C2');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
 
-  const exits = legalGameActions(session.state, 'north');
-  assert.equal(exits.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'B3/void,C3/surface,D3/void'), false);
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'B3/void,C3/surface');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(session.state.realm.units.find(({ instanceId }) => instanceId === unitId)
-    ?.planarGateVoidwalk, undefined);
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  assert.equal(legalGameActions(session.state, 'north').some(({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === unitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'B4/void,B3/void'), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === unitId
       && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-        === 'C3/surface,D3/void'), false);
-  assert.equal(verifyGameReplay(session), true);
+        === 'B4/void,B3/void');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C3');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+
+    const exits = await ctx.legalActions('north');
+    assert.equal(exits.some(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'B3/void,C3/surface,D3/void'), false);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'B3/void,C3/surface');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(ctx.state.realm.units.find(({ instanceId }) => instanceId === unitId)
+      ?.planarGateVoidwalk, undefined);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
+      descriptor.kind === 'move-and-attack'
+        && descriptor.unitInstanceId === unitId
+        && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+          === 'C3/surface,D3/void'), false);
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
-test('RULE-03 an outer-column cast restriction filters surface and Voidwalk summons, not movement', () => {
-  let session = keep(createGameSession(manifest(135, {
+test('RULE-03 an outer-column cast restriction filters surface and Voidwalk summons, not movement', async () => {
+  await withSetup(manifest(135, {
     northSpell: {
       attack: 3,
       defense: 3,
@@ -15542,54 +15544,52 @@ test('RULE-03 an outer-column cast restriction filters surface and Voidwalk summ
       voidwalk: true,
     },
     site: { elements: ['air'] },
-  })));
-  session = keep(session);
-  const take = (predicate: (candidate: GameLegalAction) => boolean): void => {
-    session = accept(session, action(session, predicate));
-  };
+  }), async (ctx) => {
+    await ctx.keep();
+    await ctx.keep();
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A4');
 
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C1');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'B4');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'A4');
+    const summons = (await ctx.legalActions('north'))
+      .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'A4' && descriptor.region === undefined), true);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'B4' && descriptor.region === undefined), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'C4' && descriptor.region === undefined), false);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'E2' && descriptor.region === 'void'), true);
+    assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'D2' && descriptor.region === 'void'), false);
+    assert.equal(summons.every(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && (descriptor.cell[0] === 'A' || descriptor.cell[0] === 'E')), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'summon-minion'
+      && descriptor.cell === 'E2' && descriptor.region === 'void');
+    const unitId = ctx.state.realm.units.find(({ location }) => location === 'E2')?.instanceId;
+    assert.ok(unitId);
 
-  const summons = legalGameActions(session.state, 'north')
-    .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'A4' && descriptor.region === undefined), true);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'B4' && descriptor.region === undefined), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'C4' && descriptor.region === undefined), false);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'E2' && descriptor.region === 'void'), true);
-  assert.equal(summons.some(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'D2' && descriptor.region === 'void'), false);
-  assert.equal(summons.every(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && (descriptor.cell[0] === 'A' || descriptor.cell[0] === 'E')), true);
-  take(({ descriptor }) => descriptor.kind === 'summon-minion'
-    && descriptor.cell === 'E2' && descriptor.region === 'void');
-  const unitId = session.state.realm.units.find(({ location }) => location === 'E2')?.instanceId;
-  assert.ok(unitId);
-
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'end-turn');
-  take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  take(({ descriptor }) => descriptor.kind === 'move-and-attack'
-    && descriptor.unitInstanceId === unitId
-    && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
-      === 'E2/void,D2/void');
-  take(({ descriptor }) => descriptor.kind === 'decline-attack');
-  assert.equal(verifyGameReplay(session), true);
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'end-turn');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'move-and-attack'
+      && descriptor.unitInstanceId === unitId
+      && descriptor.path.map(({ cell, region }) => `${cell}/${region}`).join(',')
+        === 'E2/void,D2/void');
+    await ctx.take(({ descriptor }) => descriptor.kind === 'decline-attack');
+    assert.equal(await ctx.verifyReplay(), true);
+  });
 });
 
 test('RULE-04 Movement +1 issues exact two-step and returning Move and Attack paths', async () => {
