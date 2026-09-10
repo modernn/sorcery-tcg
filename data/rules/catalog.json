@@ -6710,6 +6710,49 @@
         "file": "crates/sorcery-engine/tests/atlantean_fate_rules.rs",
         "testName": "rule_catalog_0311_fate_genesis_submerges_and_kills_a_minion_without_submerge"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0312",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Monument Artifact can untap all nearby allies at the end of its conjurer's turn. Nearby includes the Artifact's own square. Allies include the conjurer's Avatar and minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnUntapNearbyAllies"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-untapped",
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/belfry_rules.rs",
+        "testName": "rule_catalog_0312_belfry_untaps_nearby_allies_at_end_of_your_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0313",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "The same Monument does not untap nearby units at the end of the opponent's turn. A nearby enemy that taps during that turn stays tapped.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnUntapNearbyAllies"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/belfry_rules.rs",
+        "testName": "rule_catalog_0313_belfry_does_not_untap_on_the_opponents_turn"
+      }
     }
   ]
 }

@@ -44,6 +44,7 @@ export type GameCardDefinition =
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn?: true;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -59,6 +60,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -74,6 +76,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -89,6 +92,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -104,6 +108,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -119,6 +124,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife: number;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -134,6 +140,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome: true;
@@ -149,6 +156,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -164,6 +172,7 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
@@ -179,8 +188,25 @@ export type GameCardDefinition =
     thresholds: GameThresholds;
   }>
   | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn: number;
+    bearerControllerChoosesExtraRandomOutcome?: never;
+    cardType: 'artifact';
+    grantsBearerLethal?: never;
+    grantsBearerPower?: never;
+    manaCost: number;
+    nearbyMinionsMustAttackIfAble?: never;
+    nearbyStrikesAgainstUnitsDealDoubleDamage?: never;
+    tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps?: never;
+    tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
+    thresholds: GameThresholds;
+  }>
+  | Readonly<{
+    atEndOfControllerTurnUntapNearbyAllies: true;
+    atEndOfEachTurnSiteControllerLosesLife?: never;
+    atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn?: never;
     bearerControllerChoosesExtraRandomOutcome?: never;
     cardType: 'artifact';
     grantsBearerLethal?: never;
@@ -1194,6 +1220,7 @@ function requireCardId(value: string, path: string): void {
 
 const SUPPORTED_CARD_FIELDS = {
   artifact: new Set(`
+    atEndOfControllerTurnUntapNearbyAllies
     atEndOfEachTurnSiteControllerLosesLife
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn
     bearerControllerChoosesExtraRandomOutcome cardType
@@ -1477,6 +1504,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     return;
   }
   if (card.cardType === 'artifact') {
+    if (card.atEndOfControllerTurnUntapNearbyAllies !== undefined
+      && card.atEndOfControllerTurnUntapNearbyAllies !== true) {
+      throw new RangeError(`${path}.atEndOfControllerTurnUntapNearbyAllies must be true`);
+    }
     if (card.atEndOfEachTurnSiteControllerLosesLife !== undefined
       && (!Number.isSafeInteger(card.atEndOfEachTurnSiteControllerLosesLife)
         || card.atEndOfEachTurnSiteControllerLosesLife < 1
@@ -1535,7 +1566,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath must be 4`,
       );
     }
-    const exclusiveArtifactEffects = Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
+    const exclusiveArtifactEffects = Number(card.atEndOfControllerTurnUntapNearbyAllies === true)
+      + Number(card.atEndOfEachTurnSiteControllerLosesLife !== undefined)
       + Number(card.atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== undefined)
       + Number(card.bearerControllerChoosesExtraRandomOutcome === true)
       + Number(card.grantsBearerPower === 2)

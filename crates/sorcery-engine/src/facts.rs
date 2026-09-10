@@ -174,6 +174,7 @@ pub struct SiteFacts {
 /// The single supported effect carried by an Artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArtifactEffect {
+    AtEndOfControllerTurnUntapNearbyAllies,
     AtEndOfEachTurnSiteControllerLosesLife(u8),
     AtStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn(u8),
     BearerControllerChoosesExtraRandomOutcome,
@@ -742,6 +743,7 @@ const SITE_FIELDS: &[&str] = &[
 ];
 
 const ARTIFACT_FIELDS: &[&str] = &[
+    "atEndOfControllerTurnUntapNearbyAllies",
     "atEndOfEachTurnSiteControllerLosesLife",
     "atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn",
     "bearerControllerChoosesExtraRandomOutcome",
@@ -1127,6 +1129,8 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
     let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
     let nearby_double = true_only(object, "nearbyStrikesAgainstUnitsDealDoubleDamage", path)?;
     let exclusive = [
+        true_only(object, "atEndOfControllerTurnUntapNearbyAllies", path)?
+            .then_some(ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies),
         optional_bounded_integer(
             object,
             "atEndOfEachTurnSiteControllerLosesLife",
