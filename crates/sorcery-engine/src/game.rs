@@ -6817,7 +6817,8 @@ impl Game {
                     {
                         continue;
                     }
-                    let next_cost = cost + self.movement_step_cost(current, candidate, profile);
+                    let next_cost =
+                        cost + self.movement_step_cost(current, candidate, profile, &occupied);
                     if next_cost > maximum_cost {
                         continue;
                     }
@@ -7012,11 +7013,29 @@ impl Game {
         )
     }
 
+    /// Whether an Airborne minion occupying any of these cells leaves a Ridge for free.
+    ///
+    /// Occupancy, not the path anchor, decides "atop". A B3-anchored square covering a Ridge at
+    /// C4 still departs that Ridge at cost zero.
+    fn airborne_occupies_free_departure(&self, cells: &[Cell]) -> bool {
+        cells.iter().any(|cell| {
+            self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(facts) if facts.airborne_minions_atop_move_freely_away
+                    ) && !self.site_abilities_lost(*cell)
+                })
+        })
+    }
+
     fn movement_step_cost(
         &self,
         current: Location,
         candidate: Location,
         profile: MovementProfile,
+        occupied: &[Cell],
     ) -> usize {
         if profile.cause == MovementCause::CardEffect
             || !profile.airborne
@@ -7026,16 +7045,7 @@ impl Game {
         {
             return 1;
         }
-        let Some(site) = &self.position.sites[current.cell.index()] else {
-            return 1;
-        };
-        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-        else {
-            return 1;
-        };
-        usize::from(
-            !facts.airborne_minions_atop_move_freely_away || self.site_abilities_lost(current.cell),
-        )
+        usize::from(!self.airborne_occupies_free_departure(occupied))
     }
 
     fn avatar_entry_power(&self, seat: Seat) -> u8 {
