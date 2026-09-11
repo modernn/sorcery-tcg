@@ -318,7 +318,8 @@ fn realm_unit<'a>(current: &'a Value, instance_id: &str) -> &'a Value {
 #[test]
 fn rule_catalog_0335_fate_strips_tower_bonus_from_a_non_ordinary_site() {
     let (session, watcher_id) = watcher_atop_covered_tower(false);
-    let occupant = realm_unit(&state(&session), &watcher_id);
+    let current = state(&session);
+    let occupant = realm_unit(&current, &watcher_id);
     assert_eq!(
         occupant["attack"], 1,
         "Fate Lose strips the Tower power bonus"
@@ -335,7 +336,8 @@ fn rule_catalog_0335_fate_strips_tower_bonus_from_a_non_ordinary_site() {
 #[test]
 fn rule_catalog_0336_ordinary_tower_keeps_its_bonus_under_fate() {
     let (session, watcher_id) = watcher_atop_covered_tower(true);
-    let occupant = realm_unit(&state(&session), &watcher_id);
+    let current = state(&session);
+    let occupant = realm_unit(&current, &watcher_id);
     assert_eq!(
         occupant["attack"], 3,
         "an Ordinary Tower still grants +2 power"
