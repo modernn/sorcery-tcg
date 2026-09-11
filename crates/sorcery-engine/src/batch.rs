@@ -300,7 +300,7 @@ pub fn run_batch(
     jobs: &[BatchJob<'_>],
     requested_workers: usize,
 ) -> Result<Vec<BatchResult>, BatchError> {
-    run_batch_inner(jobs, requested_workers, None)
+    run_batch_inner(jobs, requested_workers, None, 0)
 }
 
 /// Runs a bounded batch and writes one SIM-03 artifact directory per job.
@@ -316,21 +316,46 @@ pub fn run_batch_to_dir(
     requested_workers: usize,
     artifacts_dir: &Path,
 ) -> Result<Vec<BatchResult>, BatchError> {
+    run_batch_to_dir_from(jobs, requested_workers, artifacts_dir, 0)
+}
+
+/// Runs a bounded batch and writes artifact directories starting at `job_index_base`.
+///
+/// Compact reports stay in input order. Job `i` writes into
+/// `{dir}/{job_index_base + i}/`.
+///
+/// # Errors
+///
+/// Returns [`BatchError`] under the same conditions as [`run_batch_to_dir`], or
+/// when `job_index_base + job index` overflows.
+pub fn run_batch_to_dir_from(
+    jobs: &[BatchJob<'_>],
+    requested_workers: usize,
+    artifacts_dir: &Path,
+    job_index_base: usize,
+) -> Result<Vec<BatchResult>, BatchError> {
     validate_artifacts_dir(artifacts_dir).map_err(|source| BatchError::Artifacts {
-        job_index: 0,
+        job_index: job_index_base,
         source,
     })?;
     std::fs::create_dir_all(artifacts_dir).map_err(|error| BatchError::Artifacts {
-        job_index: 0,
+        job_index: job_index_base,
         source: error.into(),
     })?;
-    run_batch_inner(jobs, requested_workers, Some(artifacts_dir))
+    if job_index_base
+        .checked_add(jobs.len().saturating_sub(1))
+        .is_none()
+    {
+        return Err(BatchError::Invalid("batch job index overflowed"));
+    }
+    run_batch_inner(jobs, requested_workers, Some(artifacts_dir), job_index_base)
 }
 
 fn run_batch_inner(
     jobs: &[BatchJob<'_>],
     requested_workers: usize,
     artifacts_dir: Option<&Path>,
+    job_index_base: usize,
 ) -> Result<Vec<BatchResult>, BatchError> {
     if jobs.is_empty() || jobs.len() > MAX_BATCH_JOBS {
         return Err(BatchError::Invalid("batch must contain 1-256 jobs"));
@@ -357,7 +382,12 @@ fn run_batch_inner(
                         .iter()
                         .enumerate()
                         .map(|(offset, job)| {
-                            finish_job(chunk_index * chunk_size + offset, job, artifacts_dir)
+                            finish_job(
+                                chunk_index * chunk_size + offset,
+                                job,
+                                artifacts_dir,
+                                job_index_base,
+                            )
                         })
                         .collect::<Vec<_>>()
                 })
@@ -413,13 +443,22 @@ fn finish_job(
     job_index: usize,
     job: &BatchJob<'_>,
     artifacts_dir: Option<&Path>,
+    job_index_base: usize,
 ) -> Result<BatchResult, BatchError> {
     let (result, session) = run_job(job_index, job)?;
     if let Some(dir) = artifacts_dir {
-        let record = game_record_from_session(&session)
-            .map_err(|source| BatchError::Artifacts { job_index, source })?;
-        write_game_artifacts(&dir.join(job_index.to_string()), &record)
-            .map_err(|source| BatchError::Artifacts { job_index, source })?;
+        let artifact_index = job_index_base + job_index;
+        let record =
+            game_record_from_session(&session).map_err(|source| BatchError::Artifacts {
+                job_index: artifact_index,
+                source,
+            })?;
+        write_game_artifacts(&dir.join(artifact_index.to_string()), &record).map_err(|source| {
+            BatchError::Artifacts {
+                job_index: artifact_index,
+                source,
+            }
+        })?;
     }
     Ok(result)
 }

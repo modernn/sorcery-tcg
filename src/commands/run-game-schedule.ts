@@ -198,7 +198,11 @@ function parseSchedule(value: unknown): SyntheticScheduleReport {
 }
 
 /** Runs one synthetic seat-swapped seed-block schedule. */
-export function runGameSchedule(seeds: readonly number[], workers = 1): SyntheticScheduleReport {
+export function runGameSchedule(
+  seeds: readonly number[],
+  workers = 1,
+  artifactsDir?: string,
+): SyntheticScheduleReport {
   if (seeds.length === 0 || seeds.length > 128) {
     throw new RangeError('schedule must contain 1-128 seeds');
   }
@@ -207,6 +211,7 @@ export function runGameSchedule(seeds: readonly number[], workers = 1): Syntheti
   }
   return parseSchedule(runRustEngineCommand([
     'schedule',
+    ...(artifactsDir === undefined ? [] : ['--out', artifactsDir]),
     String(workers),
     ...seeds.map(String),
   ]));

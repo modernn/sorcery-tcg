@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -11,7 +12,7 @@ use crate::batch::{BatchClassification, BatchJob};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::gauntlet::{
     DeckOutcomeCounts, GauntletError, GauntletGameResult, GauntletOrientation, GauntletPair,
-    GauntletReport, OutcomeCounts, SeatOutcomeCounts, run_gauntlet,
+    GauntletReport, OutcomeCounts, SeatOutcomeCounts, run_gauntlet, run_gauntlet_to_dir,
 };
 use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
 use crate::synthetic::synthetic_demo_manifest_json;
@@ -252,6 +253,7 @@ pub fn run_synthetic_schedule(
     max_pairs: usize,
     requested_workers: usize,
     failure_policy: FailurePolicy,
+    artifacts_dir: Option<&Path>,
 ) -> Result<ScheduleReport, ScheduleError> {
     let planned_seeds = expand_seed_blocks(blocks, max_pairs)?;
     let schedule_id = schedule_identity(blocks, max_pairs, failure_policy)?;
@@ -272,7 +274,13 @@ pub fn run_synthetic_schedule(
         .zip(owned.iter())
         .map(|(seed, (north, south))| synthetic_pair(seed, north, south, &policy, &deck_id))
         .collect::<Vec<_>>();
-    run_declared_pairs(&pairs, requested_workers, failure_policy, schedule_id)
+    run_declared_pairs(
+        &pairs,
+        requested_workers,
+        failure_policy,
+        schedule_id,
+        artifacts_dir,
+    )
 }
 
 /// Runs already-built seat-swapped pairs under the declared failure policy.
@@ -286,6 +294,7 @@ pub fn run_declared_pairs(
     requested_workers: usize,
     failure_policy: FailurePolicy,
     schedule_id: IdentityHash,
+    artifacts_dir: Option<&Path>,
 ) -> Result<ScheduleReport, ScheduleError> {
     if pairs.is_empty() || pairs.len() > MAX_SCHEDULE_PAIRS {
         return Err(ScheduleError::Invalid(
@@ -295,8 +304,15 @@ pub fn run_declared_pairs(
     let planned_seeds = pairs.iter().map(|pair| pair.seed).collect::<Vec<_>>();
     let mut completed = Vec::new();
     let mut failed_seed = None;
-    for pair in pairs {
-        match run_gauntlet(&[*pair], requested_workers) {
+    for (pair_index, pair) in pairs.iter().enumerate() {
+        let job_index_base = pair_index
+            .checked_mul(2)
+            .ok_or(ScheduleError::Invalid("schedule job index overflowed"))?;
+        let result = match artifacts_dir {
+            Some(dir) => run_gauntlet_to_dir(&[*pair], requested_workers, dir, job_index_base),
+            None => run_gauntlet(&[*pair], requested_workers),
+        };
+        match result {
             Ok(report) => completed.push(report),
             Err(error) => match failure_policy {
                 FailurePolicy::Abort => return Err(error.into()),
@@ -579,6 +595,7 @@ mod tests {
     };
     use crate::batch::BatchJob;
     use crate::canonical::IdentityHash;
+    use crate::game_record::GAME_ARTIFACT_FILES;
     use crate::gauntlet::{GauntletOrientation, GauntletPair};
     use crate::policy::{BASELINE_POLICY_DECK_ID, baseline_policy_snapshot};
     use crate::synthetic::synthetic_demo_manifest_json;
@@ -620,6 +637,7 @@ mod tests {
             1,
             2,
             FailurePolicy::Abort,
+            None,
         )
         .expect("seed-31 schedule");
         assert_eq!(report.status, ScheduleStatus::Completed);
@@ -660,6 +678,46 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_schedule_writes_flat_artifact_directories() {
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-schedule-artifacts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let report = run_synthetic_schedule(
+            &[SeedBlock {
+                id: "demo",
+                seeds: &[31],
+                weight: 1,
+                max_pairs: 1,
+            }],
+            1,
+            2,
+            FailurePolicy::Abort,
+            Some(&dir),
+        )
+        .expect("seed-31 schedule artifacts");
+        assert_eq!(report.summary.games, 2);
+        for (job_index, game) in report.gauntlet.games.iter().enumerate() {
+            let job_dir = dir.join(job_index.to_string());
+            for file in GAME_ARTIFACT_FILES {
+                assert!(job_dir.join(file).is_file(), "{job_index}/{file}");
+            }
+            let outcome: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(job_dir.join("outcome.json")).expect("outcome"),
+            )
+            .expect("outcome JSON");
+            assert_eq!(
+                outcome["finalStateHash"],
+                game.result.report.final_state_hash.as_str()
+            );
+            assert_eq!(
+                outcome["transcriptHash"],
+                game.result.report.transcript_hash.as_str()
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn stop_policy_keeps_the_finished_pair() {
         let north = synthetic_demo_manifest_json(31).expect("manifest");
         let south = super::swap_manifest_decks(&north).expect("swapped");
@@ -688,6 +746,7 @@ mod tests {
                 1,
                 FailurePolicy::Abort,
                 IdentityHash::parse(SCHEDULE_ID).expect("id"),
+                None,
             )
             .is_err()
         );
@@ -696,6 +755,7 @@ mod tests {
             2,
             FailurePolicy::StopAfterPairFailure,
             IdentityHash::parse(SCHEDULE_ID).expect("id"),
+            None,
         )
         .expect("stopped schedule");
         assert_eq!(stopped.status, ScheduleStatus::Stopped);

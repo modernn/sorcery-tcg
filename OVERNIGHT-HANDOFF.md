@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/schedule-summary-0005`. Stack this on current `master` (`0a6dff8`). Do not grow already-merged landings.
+Live line: `cursor/schedule-artifacts-0005`. Stack this on current `master` (`c4fd248`). Do not grow already-merged landings.
 
-This branch adds the integer-canonical SIM-05 schedule summary: W/D/L by seat and deck, half-point uncertainty, seat effect, length totals, replay reliability, and explicit unranked eligibility. Compact demo/batch stdout is unchanged. The skipped `gauntlet` field still holds the float mean and is not serialized.
+This branch writes opt-in SIM-03 artifact directories from seat-swapped schedules (`schedule --out dir`). Games use the same flat `{dir}/{jobIndex}/` layout as batch. Compact schedule stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
