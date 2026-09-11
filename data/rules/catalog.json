@@ -7048,6 +7048,54 @@
         "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
         "testName": "rule_catalog_0326_a_two_by_two_cannot_step_onto_a_new_threshold_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0327",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate is a Lose effect. A covered non-Ordinary site loses its printed power-threshold bar, so a unit that was too strong to step onto that site can enter after Fate covers it. Fate Genesis still submerges occupants of affected sites, so the unit must start off the covered site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "preventsUnitsWithPowerAtLeastFromEntering"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "move"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_threshold_rules.rs",
+        "testName": "rule_catalog_0327_fate_lifts_a_non_ordinary_power_threshold_for_movement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0328",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Teleport and free placement use the same Fate-aware power-threshold helper as movement. Fate lifts the bar on a covered non-Ordinary site. An Ordinary site in the same 2x2 keeps its printed threshold.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "ordinary",
+        "teleportAllyToTargetSite"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_threshold_rules.rs",
+        "testName": "rule_catalog_0328_fate_lifts_teleport_onto_a_non_ordinary_threshold_site"
+      }
     }
   ]
 }
