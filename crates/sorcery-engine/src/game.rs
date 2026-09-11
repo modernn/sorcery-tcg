@@ -12499,6 +12499,7 @@ impl Game {
             last_flight_turn: None,
         });
         self.settle_covered_layers(cell, replacing_rubble_with_water);
+        self.settle_overlay_layers(std::slice::from_ref(&cell));
         self.position.state_version += 1;
         if let Some(rubble_instance_id) = replaced_rubble {
             outcomes.push("rubble-replaced", || {
@@ -12853,6 +12854,7 @@ impl Game {
             last_flight_turn: None,
         });
         self.settle_covered_layers(target_cell, replacing_with_water);
+        self.settle_overlay_layers(std::slice::from_ref(&target_cell));
         self.position.state_version += 1;
         outcomes.push("rubble-replaced", || {
             json!({

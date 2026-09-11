@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/site-flight-relayer-0005`. Stack this on current `master` (`e301d7a`). Do not grow already-merged landings.
+Live line: `cursor/play-site-overlay-0005`. Stack this on current `master` (`3ce1fd4`). Do not grow already-merged landings.
 
-This branch relayers lower-layer occupants when a flying site lands on a cell whose water-ness differs from the origin. A Burrowing and Submerge unit Flood moved underwater survives underground after the site flies onto a dry void. The same unit stays in play underwater after the site flies onto a Flood-covered empty cell. Compact demo/batch stdout is unchanged.
+This branch relayers lower-layer occupants when a site is played onto overlay-covered rubble. Printed earth under Flood becomes Water, so a Burrowing and Submerge unit already underground there is relayered underwater. Printed Water under Drought becomes land, so the unit the Water play flooded is relayered underground. Geomancer rubble replacement uses the same conversion. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **342 rust-supported / 0 typescript-supported** out of 342.
+`data/rules/catalog.json`: **344 rust-supported / 0 typescript-supported** out of 344.
 
-Latest catalog proofs: site-flight layer conversion (`RULE-CATALOG-0341`–`0342`). Flight from a Flooded Air site onto a dry void relayers a dual-region minion underground. Flight onto a Flood-covered void relayers one underwater. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
+Latest catalog proofs: play-site overlay conversion (`RULE-CATALOG-0343`–`0344`). Playing earth onto Flood-covered rubble relayers a dual-region minion underwater. Playing Water onto Drought-covered rubble relayers one underground. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
