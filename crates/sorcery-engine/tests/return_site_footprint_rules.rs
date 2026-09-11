@@ -234,7 +234,8 @@ fn summon_b3_then_south_ready(session: &mut Session, region: &str) -> String {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-giant"
             && descriptor["cell"] == "B3"
-            && descriptor["region"] == region
+            && ((region == "surface" && descriptor["region"].is_null())
+                || descriptor["region"] == region)
     });
     let giant_id = summoned["cardInstanceId"]
         .as_str()
