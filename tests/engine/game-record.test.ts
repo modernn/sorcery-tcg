@@ -28,6 +28,9 @@ test('SIM-03 seed-31 record writes manifest, transcript, events, coverage, and o
   assert.equal(record.schemaVersion, 1);
   assert.equal(record.classification, 'unranked_partial_rules_unverified_authority');
   assert.equal(record.replayVerified, true);
+  assert.equal(record.eligibility.ranked, false);
+  assert.deepEqual(record.eligibility.reasons, ['partial-rules', 'unverified-authority']);
+  assert.equal(record.eligibility.gates.replay, true);
   assert.equal(record.acceptedActionCount, report.acceptedActionCount);
   assert.equal(record.fightCount, report.fightCount);
   assert.equal(record.turnCount, report.turnCount);
@@ -98,6 +101,8 @@ test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', ()
     assert.equal(matched.replayVerified, true);
     assert.equal(matched.classification, 'unranked_partial_rules_unverified_authority');
     assert.equal(matched.mismatch, undefined);
+    assert.equal(matched.eligibility.ranked, false);
+    assert.deepEqual(matched.eligibility.reasons, ['partial-rules', 'unverified-authority']);
 
     const manifestPath = join(dir, 'manifest.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
@@ -107,6 +112,8 @@ test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', ()
     assert.equal(engine.matched, false);
     assert.equal(engine.mismatch, 'engine-version');
     assert.equal(engine.replayVerified, false);
+    assert.equal(engine.eligibility.ranked, false);
+    assert.equal(engine.eligibility.gates.replay, false);
 
     runGameDemo(31, dir);
     const outcomePath = join(dir, 'outcome.json');

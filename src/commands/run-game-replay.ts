@@ -1,3 +1,4 @@
+import { parseEligibilityReport, type EligibilityReport } from '../engine/eligibility.ts';
 import { runRustEngineCommand } from '../engine/rust-engine.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -16,6 +17,7 @@ export type ReplayMismatch =
 
 export type ArtifactReplayReport = Readonly<{
   classification: 'unranked_partial_rules_unverified_authority';
+  eligibility: EligibilityReport;
   matched: boolean;
   mismatch?: ReplayMismatch;
   replayVerified: boolean;
@@ -47,6 +49,7 @@ function parseReplay(value: unknown): ArtifactReplayReport {
     }
     return Object.freeze({
       classification: 'unranked_partial_rules_unverified_authority',
+      eligibility: parseEligibilityReport(value.eligibility),
       matched: true,
       replayVerified: true,
       schemaVersion: 1,
@@ -58,6 +61,7 @@ function parseReplay(value: unknown): ArtifactReplayReport {
   }
   return Object.freeze({
     classification: 'unranked_partial_rules_unverified_authority',
+    eligibility: parseEligibilityReport(value.eligibility),
     matched: false,
     mismatch: value.mismatch as ReplayMismatch,
     replayVerified: false,

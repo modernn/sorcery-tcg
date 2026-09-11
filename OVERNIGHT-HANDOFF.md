@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/artifact-replay-0005`. Stack this on current `master` (`da01d0c`). Do not grow already-merged landings.
+Live line: `cursor/eligibility-gates-0005`. Stack this on current `master` (`e514e1a`). Do not grow already-merged landings.
 
-This branch adds SIM-06 artifact replay: `sorcery-engine replay dir` replays `manifest.json` + `transcript.json` and classifies engine, schema, authority, identity, transcript, event, and state mismatches. Compact demo/batch/schedule stdout is unchanged.
+This branch adds TEST-04 eligibility gates on game records, schedule summaries, and artifact replays. All seven gates can pass and the result still stays unranked while rules are partial and authority is unverified. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

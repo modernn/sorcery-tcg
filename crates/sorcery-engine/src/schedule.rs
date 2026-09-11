@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::batch::{BatchClassification, BatchJob};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
+use crate::eligibility::{EligibilityGates, EligibilityReason, evaluate_eligibility};
 use crate::gauntlet::{
     DeckOutcomeCounts, GauntletError, GauntletGameResult, GauntletOrientation, GauntletPair,
     GauntletReport, OutcomeCounts, SeatOutcomeCounts, run_gauntlet, run_gauntlet_to_dir,
@@ -99,12 +100,18 @@ pub struct ScheduleSummary {
     pub by_deck: BTreeMap<String, DeckOutcomeCounts>,
     /// First-player (north) and second-player (south) seat results.
     pub by_seat: SeatOutcomeCounts,
-    /// Public eligibility. Synthetic schedules stay unranked.
+    /// Public eligibility classification. Synthetic schedules stay unranked.
     pub eligibility: BatchClassification,
+    /// TEST-04 gates. All may pass and the schedule still stays unranked.
+    pub gates: EligibilityGates,
     /// Finished games.
     pub games: u64,
     /// Integer length totals.
     pub length: ScheduleLength,
+    /// True only when every TEST-04 gate passes and no blocking reason remains.
+    pub ranked: bool,
+    /// Stable TEST-04 blocking reasons.
+    pub reasons: Vec<EligibilityReason>,
     /// Replay verification counts.
     pub reliability: ScheduleReliability,
     /// First-player wins minus second-player wins.
@@ -490,21 +497,38 @@ fn schedule_summary(gauntlet: &GauntletReport) -> Result<ScheduleSummary, Schedu
         .map_err(|_| ScheduleError::Invalid("schedule seat effect overflowed"))?;
     let second_wins = i64::try_from(second.wins)
         .map_err(|_| ScheduleError::Invalid("schedule seat effect overflowed"))?;
+    let reliability = ScheduleReliability {
+        all_replay_verified: replay_failed_games == 0,
+        replay_failed_games,
+        replay_verified_games,
+    };
+    let eligibility = evaluate_eligibility(EligibilityGates {
+        coverage: games > 0,
+        design: gauntlet.by_deck.len() >= 2,
+        execution: games > 0,
+        legality: true,
+        pinned_input: !gauntlet.seeds.is_empty()
+            && gauntlet
+                .games
+                .iter()
+                .all(|game| !game.result.manifest_id.as_str().is_empty()),
+        replay: reliability.all_replay_verified,
+        reporting: true,
+    });
     Ok(ScheduleSummary {
         by_deck: gauntlet.by_deck.clone(),
         by_seat: gauntlet.by_seat,
-        eligibility: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        eligibility: eligibility.classification,
         games,
+        gates: eligibility.gates,
         length: ScheduleLength {
             total_actions,
             total_fights,
             total_turns,
         },
-        reliability: ScheduleReliability {
-            all_replay_verified: replay_failed_games == 0,
-            replay_failed_games,
-            replay_verified_games,
-        },
+        ranked: eligibility.ranked,
+        reasons: eligibility.reasons,
+        reliability,
         seat_effect: first_wins
             .checked_sub(second_wins)
             .ok_or(ScheduleError::Invalid("schedule seat effect overflowed"))?,
@@ -659,6 +683,15 @@ mod tests {
         assert_eq!(
             report.summary.eligibility,
             crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        );
+        assert!(!report.summary.ranked);
+        assert!(report.summary.gates.all_passed());
+        assert_eq!(
+            report.summary.reasons,
+            [
+                crate::eligibility::EligibilityReason::PartialRules,
+                crate::eligibility::EligibilityReason::UnverifiedAuthority
+            ]
         );
         assert_eq!(report.summary.by_seat.north.wins, 0);
         assert_eq!(report.summary.by_seat.north.draws, 0);
