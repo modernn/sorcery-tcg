@@ -1,5 +1,6 @@
 //! Predeclared seat-swapped seed-block schedules with caps and failure policy.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
@@ -55,6 +56,62 @@ pub enum ScheduleStatus {
     Stopped,
 }
 
+/// Integer game-length totals. Averages stay out of canonical JSON.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleLength {
+    /// Accepted actions across finished games.
+    pub total_actions: u64,
+    /// Fights started across finished games.
+    pub total_fights: u64,
+    /// Final turn numbers summed across finished games.
+    pub total_turns: u64,
+}
+
+/// Replay reliability of the finished games.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleReliability {
+    /// Every finished game replayed identically.
+    pub all_replay_verified: bool,
+    /// Finished games whose replay did not match.
+    pub replay_failed_games: u64,
+    /// Finished games whose replay matched.
+    pub replay_verified_games: u64,
+}
+
+/// Exact half-point scores instead of floating win rates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleUncertainty {
+    /// `2 * first-player wins + draws`.
+    pub first_player_score: u64,
+    /// `2 * finished games`.
+    pub score_denominator: u64,
+}
+
+/// Integer SIM-05 schedule summary. No floats, no ranked claim.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleSummary {
+    /// Opponent results keyed by the declared deck labels.
+    pub by_deck: BTreeMap<String, DeckOutcomeCounts>,
+    /// First-player (north) and second-player (south) seat results.
+    pub by_seat: SeatOutcomeCounts,
+    /// Public eligibility. Synthetic schedules stay unranked.
+    pub eligibility: BatchClassification,
+    /// Finished games.
+    pub games: u64,
+    /// Integer length totals.
+    pub length: ScheduleLength,
+    /// Replay verification counts.
+    pub reliability: ScheduleReliability,
+    /// First-player wins minus second-player wins.
+    pub seat_effect: i64,
+    /// Half-point first-player score over `2 * games`.
+    pub uncertainty: ScheduleUncertainty,
+}
+
 /// Immutable result of one expanded schedule.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +138,8 @@ pub struct ScheduleReport {
     pub schedule_id: IdentityHash,
     /// Finished or stopped after a later pair failed.
     pub status: ScheduleStatus,
+    /// Integer counts, W/D/L, seat effect, length, reliability, and eligibility.
+    pub summary: ScheduleSummary,
 }
 
 /// Expanding or running a schedule failed.
@@ -253,6 +312,8 @@ pub fn run_declared_pairs(
             "schedule completed no seat-swapped pairs",
         ));
     }
+    let gauntlet = merge_gauntlet_reports(&completed)?;
+    let summary = schedule_summary(&gauntlet)?;
     Ok(ScheduleReport {
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         completed_seeds: planned_seeds
@@ -263,7 +324,7 @@ pub fn run_declared_pairs(
         failed_seed,
         failure_policy,
         game_count: completed.iter().map(|report| report.game_count).sum(),
-        gauntlet: merge_gauntlet_reports(&completed)?,
+        gauntlet,
         planned_seeds,
         schema_version: 1,
         schedule_id,
@@ -272,6 +333,7 @@ pub fn run_declared_pairs(
         } else {
             ScheduleStatus::Stopped
         },
+        summary,
     })
 }
 
@@ -367,9 +429,79 @@ fn synthetic_pair<'a>(
     }
 }
 
+fn schedule_summary(gauntlet: &GauntletReport) -> Result<ScheduleSummary, ScheduleError> {
+    let mut total_actions = 0_u64;
+    let mut total_fights = 0_u64;
+    let mut total_turns = 0_u64;
+    let mut replay_verified_games = 0_u64;
+    for game in &gauntlet.games {
+        let report = &game.result.report;
+        let actions = u64::try_from(report.accepted_action_count)
+            .map_err(|_| ScheduleError::Invalid("schedule action total overflowed"))?;
+        let fights = u64::try_from(report.fight_count)
+            .map_err(|_| ScheduleError::Invalid("schedule fight total overflowed"))?;
+        total_actions = total_actions
+            .checked_add(actions)
+            .ok_or(ScheduleError::Invalid("schedule action total overflowed"))?;
+        total_fights = total_fights
+            .checked_add(fights)
+            .ok_or(ScheduleError::Invalid("schedule fight total overflowed"))?;
+        total_turns = total_turns
+            .checked_add(report.turn_count)
+            .ok_or(ScheduleError::Invalid("schedule turn total overflowed"))?;
+        if report.replay_verified {
+            replay_verified_games = replay_verified_games
+                .checked_add(1)
+                .ok_or(ScheduleError::Invalid("schedule replay count overflowed"))?;
+        }
+    }
+    let games = u64::try_from(gauntlet.game_count)
+        .map_err(|_| ScheduleError::Invalid("schedule game count overflowed"))?;
+    let replay_failed_games = games
+        .checked_sub(replay_verified_games)
+        .ok_or(ScheduleError::Invalid("schedule replay count overflowed"))?;
+    let first = gauntlet.by_seat.north;
+    let second = gauntlet.by_seat.south;
+    let first_player_score = first
+        .wins
+        .checked_mul(2)
+        .and_then(|wins| wins.checked_add(first.draws))
+        .ok_or(ScheduleError::Invalid("schedule score overflowed"))?;
+    let score_denominator = games
+        .checked_mul(2)
+        .ok_or(ScheduleError::Invalid("schedule score overflowed"))?;
+    let first_wins = i64::try_from(first.wins)
+        .map_err(|_| ScheduleError::Invalid("schedule seat effect overflowed"))?;
+    let second_wins = i64::try_from(second.wins)
+        .map_err(|_| ScheduleError::Invalid("schedule seat effect overflowed"))?;
+    Ok(ScheduleSummary {
+        by_deck: gauntlet.by_deck.clone(),
+        by_seat: gauntlet.by_seat,
+        eligibility: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        games,
+        length: ScheduleLength {
+            total_actions,
+            total_fights,
+            total_turns,
+        },
+        reliability: ScheduleReliability {
+            all_replay_verified: replay_failed_games == 0,
+            replay_failed_games,
+            replay_verified_games,
+        },
+        seat_effect: first_wins
+            .checked_sub(second_wins)
+            .ok_or(ScheduleError::Invalid("schedule seat effect overflowed"))?,
+        uncertainty: ScheduleUncertainty {
+            first_player_score,
+            score_denominator,
+        },
+    })
+}
+
 fn merge_gauntlet_reports(reports: &[GauntletReport]) -> Result<GauntletReport, ScheduleError> {
     let mut games = Vec::new();
-    let mut by_deck = std::collections::BTreeMap::<String, DeckOutcomeCounts>::new();
+    let mut by_deck = BTreeMap::<String, DeckOutcomeCounts>::new();
     let mut by_seat = SeatOutcomeCounts::default();
     let mut seeds = Vec::new();
     let mut job_index = 0_usize;
@@ -410,7 +542,7 @@ fn add_deck(total: &mut DeckOutcomeCounts, add: &DeckOutcomeCounts) {
 }
 
 fn average_report(
-    by_deck: std::collections::BTreeMap<String, DeckOutcomeCounts>,
+    by_deck: BTreeMap<String, DeckOutcomeCounts>,
     by_seat: SeatOutcomeCounts,
     games: Vec<GauntletGameResult>,
     seeds: Vec<u32>,
@@ -505,6 +637,26 @@ mod tests {
                 .iter()
                 .all(|game| game.result.report.replay_verified)
         );
+        assert_eq!(report.summary.games, 2);
+        assert_eq!(
+            report.summary.eligibility,
+            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        );
+        assert_eq!(report.summary.by_seat.north.wins, 0);
+        assert_eq!(report.summary.by_seat.north.draws, 0);
+        assert_eq!(report.summary.by_seat.north.losses, 2);
+        assert_eq!(report.summary.by_seat.south.wins, 2);
+        assert_eq!(report.summary.by_deck["north"].wins, 1);
+        assert_eq!(report.summary.by_deck["south"].wins, 1);
+        assert_eq!(report.summary.seat_effect, -2);
+        assert_eq!(report.summary.uncertainty.first_player_score, 0);
+        assert_eq!(report.summary.uncertainty.score_denominator, 4);
+        assert!(report.summary.reliability.all_replay_verified);
+        assert_eq!(report.summary.reliability.replay_verified_games, 2);
+        assert_eq!(report.summary.reliability.replay_failed_games, 0);
+        assert_eq!(report.summary.length.total_actions, 436);
+        assert_eq!(report.summary.length.total_fights, 11);
+        assert_eq!(report.summary.length.total_turns, 51);
     }
 
     #[test]
@@ -551,5 +703,7 @@ mod tests {
         assert_eq!(stopped.failed_seed, Some(23));
         assert_eq!(stopped.planned_seeds, [31, 23]);
         assert_eq!(stopped.gauntlet.game_count, 2);
+        assert_eq!(stopped.summary.games, 2);
+        assert!(stopped.summary.reliability.all_replay_verified);
     }
 }
