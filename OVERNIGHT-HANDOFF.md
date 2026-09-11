@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/tunnel-footprint-0005`. Stack this on current `master` (`aa15cd3`). Do not grow already-merged landings.
+Live line: `cursor/measured-range-footprint-0005`. Stack this on current `master` (`885c07d`). Do not grow already-merged landings.
 
-This branch makes Secret Tunnel treat a 2×2 as at the tunnel when any occupied cell is the controller's tunnel, not only when the anchor stands there. A B3-anchored underground square occupying C4 hops to far controlled land. The same square with no tunnel under it stays local. Targeted Bury/Drown and 2×2 Voidwalk stay unchanged. Compact demo/batch stdout is unchanged.
+This branch measures Minor Explosion range from every cell a 2×2 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C4 reaches D4. E3 stays three steps from every occupied cell. Targeted Bury/Drown, Secret Tunnel hops, and 2×2 Voidwalk stay unchanged. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **358 rust-supported / 0 typescript-supported** out of 358.
+`data/rules/catalog.json`: **360 rust-supported / 0 typescript-supported** out of 360.
 
-Latest catalog proofs: Secret Tunnel hops a 2×2 that occupies the controller's tunnel (`RULE-CATALOG-0357`–`0358`). A B3-anchored underground square occupying C4 hops to far controlled land. The same square with no tunnel under it cannot. Fate Genesis 2×2 occupants remain `RULE-CATALOG-0355`–`0356`. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
+Latest catalog proofs: measured-range Magic walks from every occupied caster cell (`RULE-CATALOG-0359`–`0360`). A B3-anchored 2×2 Spellcaster occupying C4 can Minor-Explosion D4 and cannot reach E3. Secret Tunnel 2×2 hops remain `RULE-CATALOG-0357`–`0358`. Fate Genesis 2×2 occupants remain `RULE-CATALOG-0355`–`0356`. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
