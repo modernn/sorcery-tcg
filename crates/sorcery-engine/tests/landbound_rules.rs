@@ -1,9 +1,10 @@
-//! Direct proofs for official Landbound (RULE-CATALOG-0318–0319).
+//! Direct proofs for official Landbound (RULE-CATALOG-0318–0322).
 //!
 //! Landbound is the land-site sibling of Waterbound. A minion is Disabled while
 //! it occupies no land location. The Landbound ability itself still applies
 //! while Disabled. A land site provides zero Water affinity, so mixed Water
-//! sites and Flood overlays are not land.
+//! sites and Flood overlays are not land. Drought is the inverse overlay: a
+//! printed Water site under Drought is land again.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -39,6 +40,15 @@ fn landbound() -> Value {
 fn flood() -> Value {
     json!({
         "affectedSitesAreFlooded": true,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drought() -> Value {
+    json!({
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold": true,
         "cardType": "aura",
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -131,6 +141,51 @@ fn flood_manifest(seed: u32) -> String {
                     "north-flood",
                     "north-flood",
                     "north-flood"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn drought_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "landbound-drought" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-landbound-drought-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-landbound": landbound(),
+            "north-water": site(&["water"]),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(&["earth"]),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-landbound",
+                    "north-landbound",
+                    "north-landbound",
+                    "north-drought",
+                    "north-drought",
+                    "north-drought"
                 ],
             },
             "south": {
@@ -274,6 +329,19 @@ fn flood_opening() -> Session {
         .expect("bounded seed opening with Landbound and Flood")
 }
 
+fn drought_opening() -> Session {
+    (1..=4096)
+        .map(drought_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Landbound Drought candidate");
+            let spells = opening_spell_ids(&session);
+            (spells.iter().any(|card| card == "north-landbound")
+                && spells.iter().any(|card| card == "north-drought"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Landbound and Drought")
+}
+
 fn activates_mana(bound_id: &str) -> impl Fn(&Value) -> bool + '_ {
     move |descriptor: &Value| {
         descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == bound_id
@@ -369,6 +437,39 @@ fn rule_catalog_0319_flood_overlay_disables_landbound_in_place() {
     assert_eq!(after["disabled"], true);
     assert_eq!(after["location"], "C4");
     assert!(!offers(&session, activates_mana(&bound_id)));
+    assert_eq!(units(&session).len(), 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0322_drought_overlay_enables_landbound_in_place() {
+    let mut session = drought_opening();
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C4"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-landbound"
+            && descriptor["cell"] == "C4"
+    });
+    let bound_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Landbound identity")
+        .to_owned();
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], true);
+    assert!(!offers(&session, activates_mana(&bound_id)));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && cells_include(descriptor, "C4")
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], false);
+    assert_eq!(after["location"], "C4");
     assert_eq!(units(&session).len(), 1);
     assert_exact_replay(&session);
 }
