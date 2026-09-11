@@ -1543,6 +1543,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis: _,
         immobile: _,
         lance_count: _,
+        landbound: _,
         lethal: _,
         mana_cost: _,
         may_ranged_strike_once_during_basic_movement: _,
@@ -5098,10 +5099,9 @@ impl Game {
         else {
             return true;
         };
-        facts.waterbound
-            && !Self::unit_occupied_cells(unit)
-                .iter()
-                .any(|cell| self.is_water_site(*cell))
+        let occupied = Self::unit_occupied_cells(unit);
+        (facts.waterbound && !occupied.iter().any(|cell| self.is_water_site(*cell)))
+            || (facts.landbound && !occupied.iter().any(|cell| self.is_land_site(*cell)))
     }
 
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
@@ -7248,6 +7248,12 @@ impl Game {
             SiteWaterOverlay::Flooded | SiteWaterOverlay::Fate => true,
             SiteWaterOverlay::Drought | SiteWaterOverlay::None => false,
         }
+    }
+
+    /// Official land sites provide zero Water affinity. Mixed Water sites are Water, not land.
+    /// Rubble is not a site, so it is not a land location.
+    fn is_land_site(&self, cell: Cell) -> bool {
+        self.position.sites[cell.index()].is_some() && !self.is_water_site(cell)
     }
 
     /// Later-timestamp terrain overlay on a played site, if any Aura covers the cell.
@@ -22377,6 +22383,10 @@ mod tests {
             .expect("valid Waterbound manifest")
             .ensure_selfplay_supported()
             .expect("Waterbound minion Bury is self-play safe");
+        Game::from_manifest_json(&bury_manifest(&[("landbound", json!(true))]))
+            .expect("valid Landbound manifest")
+            .ensure_selfplay_supported()
+            .expect("Landbound minion Bury is self-play safe");
         Game::from_manifest_json(&bury_manifest(&[("voidwalk", json!(true))]))
             .expect("valid Voidwalk manifest")
             .ensure_selfplay_supported()

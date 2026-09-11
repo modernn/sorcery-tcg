@@ -384,6 +384,7 @@ pub struct MinionFacts {
     pub genesis: Option<MinionGenesis>,
     pub immobile: bool,
     pub lance_count: Option<u8>,
+    pub landbound: bool,
     pub lethal: bool,
     pub mana_cost: u64,
     pub may_ranged_strike_once_during_basic_movement: bool,
@@ -886,6 +887,7 @@ const MINION_FIELDS: &[&str] = &[
     "genesisStrikeEachEnemyHere",
     "immobile",
     "lanceCount",
+    "landbound",
     "lethal",
     "manaCost",
     "mayRangedStrikeOnceDuringBasicMovement",
@@ -1797,7 +1799,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     .map(compact_u8);
     let token = true_only(object, "token", path)?;
     let voidwalk = optional_bool(object, "voidwalk", path)?;
+    let landbound = optional_bool(object, "landbound", path)?;
     let waterbound = optional_bool(object, "waterbound", path)?;
+    if landbound && waterbound {
+        return Err(FactError::new(
+            path,
+            "Landbound with Waterbound is unsupported",
+        ));
+    }
 
     if matches!(genesis, Some(MinionGenesis::DisableSelfUntilDamaged)) && stealth {
         return Err(FactError::new(
@@ -1961,6 +1970,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         genesis,
         immobile: optional_bool(object, "immobile", path)?,
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
+        landbound,
         lethal: optional_bool(object, "lethal", path)?,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
         may_ranged_strike_once_during_basic_movement,

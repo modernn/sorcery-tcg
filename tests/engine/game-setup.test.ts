@@ -94,6 +94,7 @@ type SpellFacts = Readonly<{
   doesNotUntapDuringControllersStartPhase?: true;
   untapsAtEndOfControllerTurn?: true;
   voidwalk?: boolean;
+  landbound?: boolean;
   waterbound?: boolean;
   ward?: boolean;
 }>;
@@ -312,6 +313,7 @@ function cardsFor(
           ? { untapsAtEndOfControllerTurn: true as const }
           : {}),
         voidwalk: facts.voidwalk ?? false,
+        landbound: facts.landbound ?? false,
         waterbound: facts.waterbound ?? false,
         ward: facts.ward ?? false,
       };
@@ -2659,6 +2661,42 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /waterbound must be boolean/);
+  const landboundManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        landbound: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    landboundManifest.cards[firstSpell]?.cardType === 'minion'
+      && landboundManifest.cards[firstSpell].landbound,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        landbound: 'yes',
+      } as unknown as GameCardDefinition,
+    },
+  }), /landbound must be boolean/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        landbound: true,
+        waterbound: true,
+      } as GameCardDefinition,
+    },
+  }), /Landbound with Waterbound is unsupported/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
