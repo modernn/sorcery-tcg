@@ -7242,6 +7242,57 @@
         "file": "crates/sorcery-engine/tests/fate_genesis_token_rules.rs",
         "testName": "rule_catalog_0334_ordinary_site_keeps_genesis_paid_token_under_fate"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0335",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate is a Lose effect. A covered non-Ordinary Tower loses its printed bonus, so a minion that would become 3 with Ranged and Spellcaster atop that Tower stays at printed power and gains neither ability. Fate can cover voids, so the Tower is played onto the covered cell without standing a minion there first.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "isTower",
+        "gainsPowerRangedAndSpellcasterAtopTower"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_tower_rules.rs",
+        "testName": "rule_catalog_0335_fate_strips_tower_bonus_from_a_non_ordinary_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0336",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "An Ordinary Tower in a Fate 2x2 keeps its printed abilities. A minion atop it still becomes 3 and is credited with Ranged and Spellcaster.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "ordinary",
+        "isTower",
+        "gainsPowerRangedAndSpellcasterAtopTower"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_tower_rules.rs",
+        "testName": "rule_catalog_0336_ordinary_tower_keeps_its_bonus_under_fate"
+      }
     }
   ]
 }

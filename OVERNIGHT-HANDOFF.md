@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/fate-threshold-entry-0005`. Stack this on current `master` (`0530284`). Do not grow already-merged landings.
+Live line: `cursor/fate-tower-lose-0005`. Stack this on current `master` (`a544e84`). Do not grow already-merged landings.
 
-This branch makes Fate Lose strip printed power-threshold site entry for teleport and free placement, matching movement and paid summons. Ordinary sites keep the bar. Compact demo/batch stdout is unchanged.
+This branch proves Fate Lose strips a covered non-Ordinary Tower's printed bonus. A watcher that would become 3 with Ranged and Spellcaster stays at printed power. An Ordinary Tower in the same 2×2 keeps the bonus. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **334 rust-supported / 0 typescript-supported** out of 334.
+`data/rules/catalog.json`: **336 rust-supported / 0 typescript-supported** out of 336.
 
-Latest catalog proofs: Fate Lose strips Genesis paid tokens on covered non-Ordinary sites (`RULE-CATALOG-0333`–`0334`). Pay is not offered. An Ordinary site in the same 2×2 keeps the paid-token choice. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
+Latest catalog proofs: Fate Lose strips a covered non-Ordinary Tower bonus (`RULE-CATALOG-0335`–`0336`). The occupant stays at printed power without Ranged or Spellcaster. An Ordinary Tower in the same 2×2 keeps the bonus. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
