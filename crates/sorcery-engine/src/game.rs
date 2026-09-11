@@ -6156,17 +6156,16 @@ impl Game {
                 }
                 choices
             }
-            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => self
-                .locations_within_measured_steps(
-                    self.spellcaster_location(seat, caster_instance_id)?,
-                    2,
-                )
-                .into_iter()
-                .map(|target_location| MagicChoice {
-                    target_location: Some(target_location),
-                    ..MagicChoice::default()
-                })
-                .collect(),
+            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+                let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+                self.locations_within_measured_steps_from_cells(cells, origin.region, 2)
+                    .into_iter()
+                    .map(|target_location| MagicChoice {
+                        target_location: Some(target_location),
+                        ..MagicChoice::default()
+                    })
+                    .collect()
+            }
             MagicEffect::DamageRandomUnitAtLocation(_) => {
                 let region = self.spellcaster_location(seat, caster_instance_id)?.region;
                 Cell::ALL
@@ -7543,6 +7542,36 @@ impl Game {
             Region::Underwater => self.is_water_site(cell),
             Region::Void => !self.surface_location_exists(cell),
         }
+    }
+
+    /// Every location a measured walk of at most `steps` cardinal steps reaches from any of `cells`
+    /// without leaving `region`.
+    ///
+    /// A 2×2 Spellcaster occupies four cells. Range is measured from every occupied cell, not only
+    /// the anchor, the same way Ranged origin and nearby Magic already use the whole footprint.
+    fn locations_within_measured_steps_from_cells(
+        &self,
+        cells: &[Cell],
+        region: Region,
+        steps: u8,
+    ) -> Vec<Location> {
+        let mut reachable = [false; Cell::ALL.len()];
+        for cell in cells {
+            for location in self.locations_within_measured_steps(
+                Location {
+                    cell: *cell,
+                    region,
+                },
+                steps,
+            ) {
+                reachable[location.cell.index()] = true;
+            }
+        }
+        Cell::ALL
+            .into_iter()
+            .filter(|cell| reachable[cell.index()])
+            .map(|cell| Location { cell, region })
+            .collect()
     }
 
     /// Every location a measured walk of at most `steps` cardinal steps reaches without leaving the

@@ -7875,6 +7875,57 @@
         "file": "crates/sorcery-engine/tests/secret_tunnel_footprint_rules.rs",
         "testName": "rule_catalog_0358_square_without_occupied_tunnel_does_not_hop_to_far_land"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0359",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Measured-range Magic walks from every cell a 2×2 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C3 can Minor-Explosion C1, which is two cardinal steps from C3 and three from B3.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps",
+        "occupiesSquareArea",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/measured_range_footprint_rules.rs",
+        "testName": "rule_catalog_0359_measured_range_reaches_from_occupied_non_anchor"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0360",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Measured-range Magic still stops at two cardinal steps. A B3-anchored 2×2 Spellcaster cannot Minor-Explosion D1, because that site is three steps from every occupied cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps",
+        "occupiesSquareArea",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/measured_range_footprint_rules.rs",
+        "testName": "rule_catalog_0360_measured_range_excludes_cells_beyond_every_occupied_cell"
+      }
     }
   ]
 }
