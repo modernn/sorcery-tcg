@@ -17,7 +17,7 @@ use sorcery_engine::deck::{
     validate_deck,
 };
 use sorcery_engine::game_record::{
-    record_synthetic_demo, replay_game_artifacts, write_game_artifacts,
+    record_synthetic_demo, replay_artifact_steps, replay_game_artifacts, write_game_artifacts,
 };
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
@@ -50,6 +50,9 @@ enum Command {
         artifacts_dir: Option<String>,
     },
     Replay {
+        artifacts_dir: String,
+    },
+    ReplaySteps {
         artifacts_dir: String,
     },
 }
@@ -175,6 +178,9 @@ fn run() -> CliResult<()> {
         Command::Replay { artifacts_dir } => {
             write_canonical_json(&replay_game_artifacts(Path::new(&artifacts_dir))?)
         }
+        Command::ReplaySteps { artifacts_dir } => {
+            write_canonical_json(&replay_artifact_steps(Path::new(&artifacts_dir))?)
+        }
     }
 }
 
@@ -214,6 +220,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             }
             Ok(Command::Replay { artifacts_dir })
         }
+        Some("replay-steps") => {
+            let artifacts_dir = args
+                .next()
+                .ok_or_else(|| io::Error::other("usage: sorcery-engine replay-steps dir"))?;
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine replay-steps dir").into());
+            }
+            Ok(Command::ReplaySteps { artifacts_dir })
+        }
         Some("batch-json") => {
             if args.next().is_some() {
                 return Err(io::Error::other("usage: sorcery-engine batch-json").into());
@@ -221,7 +236,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | replay dir | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | replay dir | replay-steps dir | batch-json",
         )
         .into()),
     }
@@ -527,6 +542,17 @@ mod tests {
         };
         assert_eq!(artifacts_dir, "games/31");
         assert!(parse_args(["replay".to_owned()].into_iter()).is_err());
+    }
+
+    #[test]
+    fn parse_args_should_require_replay_steps_dir() {
+        let command = parse_args(["replay-steps".to_owned(), "games/31".to_owned()].into_iter())
+            .expect("valid replay-steps");
+        let Command::ReplaySteps { artifacts_dir } = command else {
+            panic!("expected replay-steps command");
+        };
+        assert_eq!(artifacts_dir, "games/31");
+        assert!(parse_args(["replay-steps".to_owned()].into_iter()).is_err());
     }
 
     #[test]

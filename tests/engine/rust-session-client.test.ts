@@ -45,6 +45,11 @@ test('Rust session-json client creates, views, steps, and verifies a synthetic m
     });
     assert.equal(stepped.accepted, true);
     assert.equal(await client.verifyReplay(), true);
+    const steps = await client.replaySteps();
+    assert.equal(steps.stepCount, 1);
+    assert.equal(steps.chained, true);
+    assert.equal(steps.steps[0]?.index, 0);
+    assert.equal(steps.steps[0]?.seat, 'north');
   } finally {
     await client.close();
   }

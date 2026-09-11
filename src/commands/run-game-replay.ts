@@ -1,5 +1,9 @@
 import { parseEligibilityReport, type EligibilityReport } from '../engine/eligibility.ts';
-import { runRustEngineCommand } from '../engine/rust-engine.ts';
+import {
+  parseReplaySteps,
+  runRustEngineCommand,
+  type RustReplayStepsReport,
+} from '../engine/rust-engine.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -75,4 +79,12 @@ export function replayGameArtifacts(artifactsDir: string): ArtifactReplayReport 
     throw new RangeError('artifacts directory is empty');
   }
   return parseReplay(runRustEngineCommand(['replay', artifactsDir]));
+}
+
+/** Lists chained committed steps from one SIM-03 artifact directory. */
+export function replayGameArtifactSteps(artifactsDir: string): RustReplayStepsReport {
+  if (artifactsDir.trim() === '') {
+    throw new RangeError('artifacts directory is empty');
+  }
+  return parseReplaySteps(runRustEngineCommand(['replay-steps', artifactsDir]));
 }

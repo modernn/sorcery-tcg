@@ -91,6 +91,26 @@ export type RustStepResult = Readonly<{
   rejection?: JsonValue;
 }>;
 
+export type RustReplayStep = Readonly<{
+  actionId: Sha256Hash;
+  eventTypes: readonly string[];
+  index: number;
+  nextStateVersion: number;
+  postStateHash: Sha256Hash;
+  preStateHash: Sha256Hash;
+  seat: 'north' | 'south';
+  stateVersion: number;
+}>;
+
+export type RustReplayStepsReport = Readonly<{
+  chained: boolean;
+  classification: 'unranked_partial_rules_unverified_authority';
+  finalStateHash?: Sha256Hash;
+  schemaVersion: 1;
+  stepCount: number;
+  steps: readonly RustReplayStep[];
+}>;
+
 export type RustNoveltyProbe = Readonly<{
   actionId: string;
   actionKind: string;
@@ -174,6 +194,67 @@ function parseNoveltyStep(value: unknown): RustNoveltyStep {
     probes: Object.freeze(probes),
     selectedIndex,
     tooWide: value.tooWide,
+  });
+}
+
+function parseReplayStep(value: unknown, expectedIndex: number): RustReplayStep {
+  if (!isRecord(value)
+    || (value.seat !== 'north' && value.seat !== 'south')
+    || !Number.isSafeInteger(value.index)
+    || value.index !== expectedIndex
+    || !Number.isSafeInteger(value.stateVersion)
+    || !Number.isSafeInteger(value.nextStateVersion)
+    || !Array.isArray(value.eventTypes)
+    || !value.eventTypes.every((eventType) => typeof eventType === 'string')) {
+    throw new Error('Rust replay step did not match the expected contract');
+  }
+  return Object.freeze({
+    actionId: requireHash(value.actionId, 'actionId'),
+    eventTypes: Object.freeze((value.eventTypes as string[]).slice()),
+    index: value.index,
+    nextStateVersion: value.nextStateVersion as number,
+    postStateHash: requireHash(value.postStateHash, 'postStateHash'),
+    preStateHash: requireHash(value.preStateHash, 'preStateHash'),
+    seat: value.seat,
+    stateVersion: value.stateVersion as number,
+  });
+}
+
+export function parseReplaySteps(value: unknown): RustReplayStepsReport {
+  if (!isRecord(value)
+    || value.classification !== 'unranked_partial_rules_unverified_authority'
+    || value.schemaVersion !== 1
+    || typeof value.chained !== 'boolean'
+    || !Number.isSafeInteger(value.stepCount)
+    || value.stepCount < 0
+    || !Array.isArray(value.steps)
+    || value.stepCount !== value.steps.length) {
+    throw new Error('Rust replay steps report did not match the expected contract');
+  }
+  const steps = Object.freeze(value.steps.map((step, index) => parseReplayStep(step, index)));
+  if (value.stepCount === 0) {
+    if (value.finalStateHash !== undefined) {
+      throw new Error('empty replay steps must omit finalStateHash');
+    }
+    return Object.freeze({
+      chained: value.chained,
+      classification: 'unranked_partial_rules_unverified_authority',
+      schemaVersion: 1 as const,
+      stepCount: 0,
+      steps,
+    });
+  }
+  const finalStateHash = requireHash(value.finalStateHash, 'finalStateHash');
+  if (finalStateHash !== steps[steps.length - 1]?.postStateHash) {
+    throw new Error('replay steps finalStateHash must match the last postStateHash');
+  }
+  return Object.freeze({
+    chained: value.chained,
+    classification: 'unranked_partial_rules_unverified_authority',
+    finalStateHash,
+    schemaVersion: 1 as const,
+    stepCount: value.stepCount,
+    steps,
   });
 }
 
@@ -538,6 +619,10 @@ export class RustSessionClient {
       throw new Error('Rust session verifyReplay result was invalid');
     }
     return result.verified;
+  }
+
+  async replaySteps(): Promise<RustReplayStepsReport> {
+    return parseReplaySteps(await this.call('replaySteps', {}));
   }
 
   async exportSession(): Promise<JsonValue> {

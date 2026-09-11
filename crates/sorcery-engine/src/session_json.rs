@@ -81,6 +81,7 @@ impl SessionJsonService {
             "observe" => self.observe(request.id, &request.params),
             "publicView" => self.public_view(request.id, &request.params),
             "verifyReplay" => self.verify_replay(request.id),
+            "replaySteps" => self.replay_steps(request.id),
             "exportSession" => self.export_session(request.id),
             "exportGameRecord" => self.export_game_record(request.id),
             "checkpoint" => self.checkpoint(request.id),
@@ -348,6 +349,18 @@ impl SessionJsonService {
         };
         match session.verify_replay() {
             Ok(verified) => ok_response(id, json!({ "verified": verified })),
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn replay_steps(&self, id: u64) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return no_session(id);
+        };
+        match serde_json::to_value(crate::game_record::replay_steps_from_transcript(
+            session.transcript(),
+        )) {
+            Ok(value) => ok_response(id, value),
             Err(error) => error_response(id, &error.to_string()),
         }
     }
@@ -665,6 +678,14 @@ mod tests {
         assert!(view["view"]["players"]["north"]["hand"]["atlas"].is_array());
         assert!(view["view"]["players"]["south"]["hand"]["atlas"].is_number());
         assert!(view["stateHash"].as_str().is_some());
+        let steps = service
+            .handle(&rpc(6, "replaySteps", json!({})))
+            .result
+            .expect("replay steps");
+        assert_eq!(steps["stepCount"], 1);
+        assert_eq!(steps["chained"], true);
+        assert_eq!(steps["steps"][0]["index"], 0);
+        assert_eq!(steps["schemaVersion"], 1);
     }
 
     #[test]
