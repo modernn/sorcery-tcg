@@ -7096,6 +7096,54 @@
         "file": "crates/sorcery-engine/tests/fate_threshold_rules.rs",
         "testName": "rule_catalog_0328_fate_lifts_teleport_onto_a_non_ordinary_threshold_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0329",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery free placement uses the power the minion would have on that site, not printed attack. A printed-1 minion that would become 3 atop a Tower cannot Raise Dead onto a threshold-3 Tower. The same corpse can still land on an open site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "gainsPowerRangedAndSpellcasterAtopTower",
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/free_summon_power_rules.rs",
+        "testName": "rule_catalog_0329_free_placement_uses_prospective_power_on_a_tower"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0330",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Raise Dead uses the power the minion would have on the whole footprint. A Tower on one cell of the square raises that power, so a threshold site on another cell of the same square blocks occupancy. An all-open square remains legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "gainsPowerRangedAndSpellcasterAtopTower",
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/free_summon_power_rules.rs",
+        "testName": "rule_catalog_0330_free_two_by_two_uses_footprint_power"
+      }
     }
   ]
 }
