@@ -17981,16 +17981,15 @@ impl Game {
                 else {
                     return Err(GameError::IllegalAction);
                 };
+                // Every surface occupant of the land cell is burrowed. A 2x2 that also
+                // covers Water is still at this site; occupancy then kills the illegal
+                // underground footprint instead of leaving the minion unharmed.
                 let mut minions = self
                     .position
                     .units
                     .iter()
                     .filter(|unit| {
-                        unit.region == Region::Surface
-                            && Self::unit_occupies_cell(unit, *cell)
-                            && Self::unit_occupied_cells(unit)
-                                .iter()
-                                .all(|occupied| self.underground_location_exists(*occupied))
+                        unit.region == Region::Surface && Self::unit_occupies_cell(unit, *cell)
                     })
                     .map(|unit| (unit.card.instance_id.clone(), unit.controller))
                     .collect::<Vec<_>>();

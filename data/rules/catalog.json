@@ -7721,6 +7721,60 @@
         "file": "crates/sorcery-engine/tests/site_flight_void_rules.rs",
         "testName": "rule_catalog_0352_flight_onto_void_surfaces_void_artifact"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0353",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cave-In burrows every surface minion that occupies the target land site. A 2×2 square that occupies that cell and also covers Water is still hit. Occupancy then kills the illegal underground footprint. The minion does not stay on the surface unharmed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-burrowed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_footprint_rules.rs",
+        "testName": "rule_catalog_0353_cave_in_burrows_mixed_square_occupying_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0354",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cave-In burrows a 2×2 that occupies the target land cell even when its anchor is another cell. An all-land Burrowing square anchored at B3 that occupies C4 goes underground and stays in play when C4 is Cave-In'd.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "burrowing",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_footprint_rules.rs",
+        "testName": "rule_catalog_0354_cave_in_burrows_all_land_square_occupying_non_anchor"
+      }
     }
   ]
 }
