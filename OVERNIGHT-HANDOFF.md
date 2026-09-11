@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/eligibility-gates-0005`. Stack this on current `master` (`e514e1a`). Do not grow already-merged landings.
+Live line: `cursor/replay-steps-0005`. Stack this on current `master` (`cd7040b`). Do not grow already-merged landings.
 
-This branch adds TEST-04 eligibility gates on game records, schedule summaries, and artifact replays. All seven gates can pass and the result still stays unranked while rules are partial and authority is unverified. Compact demo/batch stdout is unchanged.
+This branch adds WEB-04 replay-step inspection. `sorcery-engine replay-steps dir` and session-json `replaySteps` list chained committed receipts. The playable-core browser loads those steps from `GET /api/replay/steps` and walks them with Previous/Next plus Left/Right. Compact demo/batch stdout and the existing SIM-06 `replay` report stay unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

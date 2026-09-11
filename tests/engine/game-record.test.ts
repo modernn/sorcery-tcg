@@ -8,7 +8,7 @@ import test from 'node:test';
 import { identityHash } from '../../src/authority/hash.ts';
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import { runGameDemo, runGameRecord } from '../../src/commands/run-game-demo.ts';
-import { replayGameArtifacts } from '../../src/commands/run-game-replay.ts';
+import { replayGameArtifactSteps, replayGameArtifacts } from '../../src/commands/run-game-replay.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 
@@ -123,6 +123,34 @@ test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', ()
     const state = replayGameArtifacts(dir);
     assert.equal(state.matched, false);
     assert.equal(state.mismatch, 'final-state-hash');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('WEB-04 seed-31 artifacts expose a chained 230-step replay', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sorcery-replay-steps-'));
+  try {
+    const compact = runGameDemo(31, dir);
+    const steps = replayGameArtifactSteps(dir);
+    assert.equal(steps.schemaVersion, 1);
+    assert.equal(steps.classification, 'unranked_partial_rules_unverified_authority');
+    assert.equal(steps.stepCount, 230);
+    assert.equal(steps.chained, true);
+    assert.equal(steps.finalStateHash, compact.finalStateHash);
+    assert.equal(steps.steps[0]?.index, 0);
+    assert.equal(steps.steps[229]?.index, 229);
+    assert.equal(steps.steps[0]?.preStateHash === steps.steps[1]?.preStateHash, false);
+    assert.equal(steps.steps[0]?.postStateHash, steps.steps[1]?.preStateHash);
+
+    const outcomePath = join(dir, 'outcome.json');
+    const outcome = JSON.parse(readFileSync(outcomePath, 'utf8')) as Record<string, unknown>;
+    outcome.finalStateHash = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    writeFileSync(outcomePath, `${canonicalJson(outcome as JsonValue)}\n`);
+    const unchained = replayGameArtifactSteps(dir);
+    assert.equal(unchained.stepCount, 230);
+    assert.equal(unchained.chained, false);
+    assert.equal(unchained.finalStateHash, compact.finalStateHash);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

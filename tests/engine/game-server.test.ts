@@ -149,6 +149,15 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /clearActionResult\(\);seat=result\.view\.decisionSeat/);
   assert.match(page, /clearActionResult\(\);seat=button\.dataset\.seat/);
   assert.match(page, /\/api\/replay[\s\S]*clearActionResult\(\)/);
+  assert.match(page, /id="replay-prev" disabled>Previous step/);
+  assert.match(page, /id="replay-next" disabled>Next step/);
+  assert.match(page, /id="replay-step" role="status" aria-live="polite"/);
+  assert.match(page, /id="replay-detail"/);
+  assert.match(page, /\/api\/replay\/steps/);
+  assert.match(page, /ArrowLeft/);
+  assert.match(page, /ArrowRight/);
+  assert.match(page, /Chain status is written in text/);
+  assert.match(page, /function shiftReplay/);
 });
 
 test('browser API keeps cast artifacts and auras visible without exposing the opponent hand', async () => {
@@ -433,6 +442,16 @@ test('browser API plays setup through the second-seat draw choice and verifies r
   assert.equal(replay.verified, true);
   assert.equal(replay.acceptedActionCount, 6);
   assert.equal(replay.finalStateHash, drawn.stateHash);
+  const steps = await json('/api/replay/steps');
+  assert.equal(steps.schemaVersion, 1);
+  assert.equal(steps.chained, true);
+  assert.equal(steps.stepCount, 6);
+  assert.equal(steps.finalStateHash, drawn.stateHash);
+  const stepList = steps.steps as JsonObject[];
+  assert.equal(stepList.length, 6);
+  assert.equal(stepList[0]?.index, 0);
+  assert.equal(stepList[5]?.index, 5);
+  assert.equal(stepList[0]?.postStateHash, stepList[1]?.preStateHash);
 });
 
 test('browser API rejects a stale action without exposing or mutating authority', async () => {

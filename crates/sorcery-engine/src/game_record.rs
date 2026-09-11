@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::batch::{BatchClassification, FinishedTerminal, MAX_GAME_ACTIONS};
 use crate::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
-use crate::contract::{ActionRequest, Event, Receipt};
+use crate::contract::{ActionRequest, Event, Receipt, Seat};
 use crate::eligibility::{EligibilityGates, EligibilityReport, evaluate_eligibility};
 use crate::game::{ENGINE_VERSION, Game};
 use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
@@ -116,6 +116,47 @@ pub struct ArtifactReplayReport {
     pub replay_verified: bool,
     /// Replay report schema.
     pub schema_version: u8,
+}
+
+/// One committed receipt in inspection order.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayStep {
+    /// Accepted action identity.
+    pub action_id: IdentityHash,
+    /// Event types emitted by this action, in order.
+    pub event_types: Vec<String>,
+    /// Zero-based committed index.
+    pub index: u64,
+    /// State version after the action.
+    pub next_state_version: u64,
+    /// Authoritative state after the action.
+    pub post_state_hash: IdentityHash,
+    /// Authoritative state before the action.
+    pub pre_state_hash: IdentityHash,
+    /// Acting seat.
+    pub seat: Seat,
+    /// State version before the action.
+    pub state_version: u64,
+}
+
+/// Integer-canonical step list for a recorded or live transcript.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayStepsReport {
+    /// Each step's post-state hash is the next step's pre-state hash.
+    pub chained: bool,
+    /// Ranked/public result classification.
+    pub classification: BatchClassification,
+    /// Hash after the last committed step, when any exist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_state_hash: Option<IdentityHash>,
+    /// Replay-steps schema.
+    pub schema_version: u8,
+    /// Number of committed steps.
+    pub step_count: usize,
+    /// Ordered committed steps.
+    pub steps: Vec<ReplayStep>,
 }
 
 /// Classified outcome and terminal identities for one finished game.
@@ -294,6 +335,60 @@ pub fn replay_game_artifacts(dir: &Path) -> Result<ArtifactReplayReport, GameRec
     };
     let record = game_record_from_session(&replayed)?;
     Ok(compare_replay(&record, &manifest, &outcome, &events_hash))
+}
+
+/// Builds an inspectable step list from one authoritative transcript.
+#[must_use]
+pub fn replay_steps_from_transcript(transcript: &[Receipt]) -> ReplayStepsReport {
+    let steps = transcript
+        .iter()
+        .map(|receipt| ReplayStep {
+            action_id: receipt.action_id.clone(),
+            event_types: receipt
+                .events
+                .iter()
+                .map(|event| event.event_type.clone())
+                .collect(),
+            index: receipt.receipt_sequence.saturating_sub(1),
+            next_state_version: receipt.next_state_version,
+            post_state_hash: receipt.post_state_hash.clone(),
+            pre_state_hash: receipt.pre_state_hash.clone(),
+            seat: receipt.seat,
+            state_version: receipt.state_version,
+        })
+        .collect::<Vec<_>>();
+    let chained = steps
+        .windows(2)
+        .all(|pair| pair[0].post_state_hash == pair[1].pre_state_hash);
+    ReplayStepsReport {
+        chained,
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        final_state_hash: steps.last().map(|step| step.post_state_hash.clone()),
+        schema_version: 1,
+        step_count: steps.len(),
+        steps,
+    }
+}
+
+/// Replays saved artifacts and returns the inspectable committed step list.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] when the directory escapes or a required file
+/// cannot be read.
+pub fn replay_artifact_steps(dir: &Path) -> Result<ReplayStepsReport, GameRecordError> {
+    validate_artifacts_dir(dir)?;
+    let transcript = read_transcript(dir)?;
+    let outcome = read_artifact_json(dir, "outcome.json")?;
+    let mut report = replay_steps_from_transcript(&transcript);
+    if let Some(expected) = outcome.get("finalStateHash").and_then(Value::as_str) {
+        report.chained = report.chained
+            && report
+                .final_state_hash
+                .as_ref()
+                .is_some_and(|hash| hash.as_str() == expected);
+    }
+    Ok(report)
 }
 
 fn mismatch_report(mismatch: ReplayMismatch) -> ArtifactReplayReport {
@@ -643,9 +738,10 @@ mod tests {
 
     use super::{
         GAME_ARTIFACT_FILES, ReplayMismatch, event_jsonl, game_record_from_session,
-        record_synthetic_demo, replay_game_artifacts, validate_artifacts_dir, write_game_artifacts,
+        record_synthetic_demo, replay_artifact_steps, replay_game_artifacts,
+        replay_steps_from_transcript, validate_artifacts_dir, write_game_artifacts,
     };
-    use crate::canonical::canonical_json;
+    use crate::canonical::{IdentityHash, canonical_json};
     use crate::synthetic::synthetic_demo_session;
 
     #[test]
@@ -833,6 +929,36 @@ mod tests {
         let state = replay_game_artifacts(&dir).expect("state mismatch");
         assert!(!state.matched);
         assert_eq!(state.mismatch, Some(ReplayMismatch::FinalStateHash));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_transcript_has_zero_chained_steps() {
+        let steps = replay_steps_from_transcript(&[]);
+        assert_eq!(steps.step_count, 0);
+        assert!(steps.chained);
+        assert_eq!(steps.final_state_hash, None);
+    }
+
+    #[test]
+    fn seed_31_replay_steps_chain_to_the_final_hash() {
+        let record = record_synthetic_demo(31).expect("seed-31 record");
+        let steps = replay_steps_from_transcript(&record.transcript);
+        assert_eq!(steps.step_count, 230);
+        assert!(steps.chained);
+        assert_eq!(
+            steps.final_state_hash.as_ref().map(IdentityHash::as_str),
+            Some(record.final_state_hash.as_str())
+        );
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-replay-steps-{}-31", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write_game_artifacts(&dir, &record).expect("write artifacts");
+        let from_dir = replay_artifact_steps(&dir).expect("artifact steps");
+        assert_eq!(from_dir.step_count, 230);
+        assert!(from_dir.chained);
+        assert_eq!(from_dir.steps[0].index, 0);
+        assert_eq!(from_dir.steps[229].index, 229);
         let _ = fs::remove_dir_all(&dir);
     }
 }
