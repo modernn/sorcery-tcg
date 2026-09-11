@@ -6509,19 +6509,8 @@ impl Game {
     }
 
     fn teleport_entry_allowed(&self, candidate: Location, power: u8) -> bool {
-        if candidate.region != Region::Surface {
-            return true;
-        }
-        let Some(site) = &self.position.sites[candidate.cell.index()] else {
-            return true;
-        };
-        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-        else {
-            return true;
-        };
-        facts
-            .prevents_units_with_power_at_least_from_entering
-            .is_none_or(|threshold| power < threshold)
+        candidate.region != Region::Surface
+            || !self.site_prevents_power_entry(candidate.cell, power)
     }
 
     fn unit_target_entry_power(&self, ally: &UnitTarget) -> Result<u8, GameError> {
