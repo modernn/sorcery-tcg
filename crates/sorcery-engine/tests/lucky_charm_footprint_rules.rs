@@ -338,7 +338,10 @@ fn rule_catalog_0369_lucky_charm_offers_unit_sharing_occupied_non_anchor_cell() 
         commit.random_draws[0]["domain"]["exclusiveMaximum"], 1,
         "only the B3 occupant shares the A3 square"
     );
-    assert_eq!(offered_random_outcomes(&session), [shared_id.clone()]);
+    assert_eq!(
+        offered_random_outcomes(&session).as_slice(),
+        std::slice::from_ref(&shared_id)
+    );
 
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "resolve-random-outcome"
@@ -372,7 +375,7 @@ fn rule_catalog_0370_lucky_charm_excludes_unit_outside_discard_source_footprint(
 
     assert_eq!(state(&session)["phase"], "random-choice");
     let offered = offered_random_outcomes(&session);
-    assert_eq!(offered, [shared_id.clone()]);
+    assert_eq!(offered.as_slice(), std::slice::from_ref(&shared_id));
     assert!(!offered.contains(&outsider_id));
     assert_eq!(unit_at(&state(&session), "C1"), outsider_id);
 

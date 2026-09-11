@@ -14364,7 +14364,7 @@ impl Game {
             .cloned()
             .ok_or(GameError::IllegalAction)?;
         let candidates = self.units_sharing_footprint(&source, false);
-        self.choose_forced_or_random_unit(candidates, purpose, random_draws, forced_random_outcome)
+        self.choose_forced_or_random_unit(&candidates, purpose, random_draws, forced_random_outcome)
     }
 
     /// Draws one hidden random unit sharing a location with an activated source, excluding it.
@@ -14378,13 +14378,13 @@ impl Game {
     ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
         let mut candidates = self.units_at_location(location);
         candidates.retain(|(instance_id, _, _)| instance_id != source_instance_id);
-        self.choose_forced_or_random_unit(candidates, purpose, random_draws, forced_random_outcome)
+        self.choose_forced_or_random_unit(&candidates, purpose, random_draws, forced_random_outcome)
     }
 
     /// Picks the Lucky Charm outcome when one was committed, otherwise one hidden random unit.
     fn choose_forced_or_random_unit(
         &mut self,
-        candidates: Vec<(IdentityHash, UnitKind, Seat)>,
+        candidates: &[(IdentityHash, UnitKind, Seat)],
         purpose: &str,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
         forced_random_outcome: Option<&IdentityHash>,
