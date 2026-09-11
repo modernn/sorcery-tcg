@@ -6938,6 +6938,30 @@
         "file": "crates/sorcery-engine/tests/pay_life_rules.rs",
         "testName": "rule_catalog_0321_deaths_door_cannot_pay_life"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0322",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Drought makes the occupied Water site a land location, so a Landbound minion becomes enabled in place. The minion stays in the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0322_drought_overlay_enables_landbound_in_place"
+      }
     }
   ]
 }
