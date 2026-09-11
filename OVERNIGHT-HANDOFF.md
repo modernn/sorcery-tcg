@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/site-power-entry-0005`. Stack this on current `master` (`d02c7ef`). Do not grow already-merged landings.
+Live line: `cursor/square-power-entry-0005`. Stack this on current `master` (`2e8ce67`). Do not grow already-merged landings.
 
-This branch binds official power-threshold site entry to current derived power. Summoning uses the power a minion would have on that cell. Avatars use current power, not only printed attack. Compact demo/batch stdout is unchanged.
+This branch closes 2×2 power-threshold occupancy. A square that includes a threshold site is illegal when the footprint's prospective power meets that threshold, even if another cell would be a legal 1×1 destination. Free 2×2 placements use the same whole-square gate. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **324 rust-supported / 0 typescript-supported** out of 324.
+`data/rules/catalog.json`: **326 rust-supported / 0 typescript-supported** out of 326.
 
-Latest catalog proofs: power-threshold site entry (`RULE-CATALOG-0323`–`0324`). A site can prevent units whose current power is at least a printed threshold from entering. A later power grant can close an otherwise legal step.
+Latest catalog proofs: 2×2 power-threshold occupancy (`RULE-CATALOG-0325`–`0326`). A 2×2 cannot summon onto a square or step onto a newly entered cell that includes a site whose power threshold it meets. A weaker 2×2 can still occupy that square. 1×1 current-power entry remains `RULE-CATALOG-0323`–`0324`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.

@@ -7038,7 +7038,12 @@ impl Game {
         }
     }
 
-    fn prospective_minion_entry_power(&self, seat: Seat, facts: &MinionFacts, cell: Cell) -> u8 {
+    fn prospective_minion_entry_power(
+        &self,
+        seat: Seat,
+        facts: &MinionFacts,
+        cells: &[Cell],
+    ) -> u8 {
         let mut bonus = 0_u16;
         for source in &self.position.units {
             if source.controller != seat || self.minion_is_disabled(source) {
@@ -7051,10 +7056,7 @@ impl Game {
             };
             if source_facts.other_nearby_allies_power_bonus
                 && source.region == Region::Surface
-                && Self::footprints_nearby(
-                    Self::unit_occupied_cells(source),
-                    std::slice::from_ref(&cell),
-                )
+                && Self::footprints_nearby(Self::unit_occupied_cells(source), cells)
             {
                 bonus = bonus.saturating_add(1);
             }
@@ -7063,18 +7065,42 @@ impl Game {
             }
         }
         if facts.gains_power_ranged_and_spellcaster_atop_tower
-            && self.position.sites[cell.index()]
-                .as_ref()
-                .is_some_and(|site| {
-                    matches!(
-                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                        CardFacts::Site(site_facts) if site_facts.is_tower
-                    ) && !self.site_abilities_lost(cell)
-                })
+            && cells.iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| {
+                        matches!(
+                            &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                            CardFacts::Site(site_facts) if site_facts.is_tower
+                        ) && !self.site_abilities_lost(*cell)
+                    })
+            })
         {
             bonus = bonus.saturating_add(2);
         }
         u8::try_from(u16::from(facts.attack).saturating_add(bonus)).unwrap_or(u8::MAX)
+    }
+
+    fn site_prevents_power_entry(&self, cell: Cell, entry_power: u8) -> bool {
+        if self.site_abilities_lost(cell) {
+            return false;
+        }
+        let Some(site) = &self.position.sites[cell.index()] else {
+            return false;
+        };
+        let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        facts
+            .prevents_units_with_power_at_least_from_entering
+            .is_some_and(|threshold| entry_power >= threshold)
+    }
+
+    fn square_allows_power_entry(&self, cells: SquareArea, entry_power: u8) -> bool {
+        !cells
+            .iter()
+            .any(|cell| self.site_prevents_power_entry(*cell, entry_power))
     }
 
     fn minion_entry_power(&self, unit: &UnitPosition) -> Result<u8, GameError> {
@@ -7089,19 +7115,9 @@ impl Game {
         profile: MovementProfile,
     ) -> bool {
         if candidate.region == Region::Surface
-            && let Some(site) = &self.position.sites[candidate.cell.index()]
+            && self.site_prevents_power_entry(candidate.cell, profile.power)
         {
-            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
-            else {
-                return true;
-            };
-            if !self.site_abilities_lost(candidate.cell)
-                && facts
-                    .prevents_units_with_power_at_least_from_entering
-                    .is_some_and(|threshold| profile.power >= threshold)
-            {
-                return false;
-            }
+            return false;
         }
         if !profile.moving_minion
             || profile.airborne
@@ -7829,13 +7845,10 @@ impl Game {
             if minion.must_be_cast_to_water_site && !self.is_water_site(cell) {
                 return None;
             }
-            if !self.site_abilities_lost(cell)
-                && site_facts
-                    .prevents_units_with_power_at_least_from_entering
-                    .is_some_and(|threshold| {
-                        self.prospective_minion_entry_power(seat, minion, cell) >= threshold
-                    })
-            {
+            if self.site_prevents_power_entry(
+                cell,
+                self.prospective_minion_entry_power(seat, minion, std::slice::from_ref(&cell)),
+            ) {
                 return None;
             }
             let discount = u64::from(
@@ -7848,6 +7861,12 @@ impl Game {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
+                .filter(|cells| {
+                    self.square_allows_power_entry(
+                        *cells,
+                        self.prospective_minion_entry_power(seat, minion, cells),
+                    )
+                })
                 .flat_map(|cells| {
                     self.square_area_summon_destinations(minion, cells, summon_cell, false)
                 })
@@ -8048,6 +8067,11 @@ impl Game {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
+                .filter(|cells| {
+                    cells
+                        .iter()
+                        .all(|cell| !self.surface_location_exists(*cell) || may_enter(*cell))
+                })
                 .flat_map(|cells| {
                     let summon_cell = |cell: Cell| may_enter(cell).then_some(0);
                     self.square_area_summon_destinations(minion, cells, summon_cell, true)
