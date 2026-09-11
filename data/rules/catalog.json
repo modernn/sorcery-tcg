@@ -7926,6 +7926,56 @@
         "file": "crates/sorcery-engine/tests/measured_range_footprint_rules.rs",
         "testName": "rule_catalog_0360_measured_range_excludes_cells_beyond_every_occupied_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0361",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Updraft Ridge frees the first departure of an Airborne minion that occupies the Ridge, not only one whose path anchor stands there. A B3-anchored 2×2 occupying a Ridge at C4 can take two surface steps to B1.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborneMinionsAtopMoveFreelyAway",
+        "occupiesSquareArea",
+        "airborne"
+      ],
+      "actionHints": [
+        "summon",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "move-and-attack-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/updraft_ridge_footprint_rules.rs",
+        "testName": "rule_catalog_0361_updraft_ridge_frees_square_occupying_non_anchor_ridge"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0362",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "An Airborne 2×2 that occupies no Updraft Ridge cannot take two surface steps. Ordinary one-step departure from the same B3-anchored square remains legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborneMinionsAtopMoveFreelyAway",
+        "occupiesSquareArea",
+        "airborne"
+      ],
+      "actionHints": [
+        "summon",
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/updraft_ridge_footprint_rules.rs",
+        "testName": "rule_catalog_0362_square_without_occupied_ridge_cannot_take_two_steps"
+      }
     }
   ]
 }
