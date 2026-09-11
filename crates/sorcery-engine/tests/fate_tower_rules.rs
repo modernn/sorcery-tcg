@@ -8,7 +8,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -190,7 +190,7 @@ fn opening_ids(session: &Session, zone: &str) -> Vec<String> {
 }
 
 fn state(session: &Session) -> Value {
-    session.replay_value().expect("authoritative replay")["state"].clone()
+    session.public_view(Seat::North).expect("public view")
 }
 
 fn fate_covers_c3_not_c4(descriptor: &Value) -> bool {
