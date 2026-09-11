@@ -2927,7 +2927,7 @@ impl Game {
         let CardFacts::Minion(facts) = &definition.facts else {
             return Err(invalid("selected cemetery minion lacks minion facts"));
         };
-        for destination in self.free_summon_destinations(facts) {
+        for destination in self.free_summon_destinations(seat, facts) {
             for (genesis_damage_choice, genesis_damage_target) in self.genesis_damage_choices(
                 seat,
                 &card.instance_id,
@@ -8041,32 +8041,39 @@ impl Game {
     }
 
     /// Enumerates the placements a free summon grants: any existing surface location, ignoring
-    /// site control, mana, thresholds, and the printed casting restrictions.
-    fn free_summon_destinations(&self, minion: &MinionFacts) -> Vec<SummonDestination> {
-        let may_enter = |cell: Cell| {
-            self.surface_location_exists(cell)
-                && self.teleport_entry_allowed(
-                    Location {
-                        cell,
-                        region: Region::Surface,
-                    },
-                    minion.attack,
-                )
-        };
+    /// site control, mana, affinity thresholds, and the printed casting restrictions.
+    /// Power-threshold site entry still uses the minion's prospective power on that cell
+    /// or 2x2 footprint.
+    fn free_summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
         if minion.occupies_square_area_two {
             Cell::SQUARE_AREAS
                 .into_iter()
                 .filter(|cells| {
-                    cells
-                        .iter()
-                        .all(|cell| !self.surface_location_exists(*cell) || may_enter(*cell))
+                    self.square_allows_power_entry(
+                        *cells,
+                        self.prospective_minion_entry_power(seat, minion, cells),
+                    )
                 })
                 .flat_map(|cells| {
-                    let summon_cell = |cell: Cell| may_enter(cell).then_some(0);
+                    let summon_cell = |cell: Cell| self.surface_location_exists(cell).then_some(0);
                     self.square_area_summon_destinations(minion, cells, summon_cell, true)
                 })
                 .collect()
         } else {
+            let may_enter = |cell: Cell| {
+                self.surface_location_exists(cell)
+                    && self.teleport_entry_allowed(
+                        Location {
+                            cell,
+                            region: Region::Surface,
+                        },
+                        self.prospective_minion_entry_power(
+                            seat,
+                            minion,
+                            std::slice::from_ref(&cell),
+                        ),
+                    )
+            };
             let mut destinations = Cell::ALL
                 .into_iter()
                 .filter(|cell| may_enter(*cell))
@@ -14572,7 +14579,7 @@ impl Game {
             return Err(invalid("cemetery minion candidate lacks minion facts"));
         };
         let dead_card_name = dead_definition.id.clone();
-        let placements = self.free_summon_destinations(facts);
+        let placements = self.free_summon_destinations(seat, facts);
         outcomes.push("dead-minion-selected", || {
             json!({
                 "cardId": dead_card_name,
@@ -19429,7 +19436,7 @@ impl Game {
         let starts_stealthed = facts.stealth;
         let starts_warded = facts.damage_prevention == Some(DamagePrevention::Ward);
         let placeable = self
-            .free_summon_destinations(facts)
+            .free_summon_destinations(seat, facts)
             .into_iter()
             .any(|destination| {
                 destination.cell == *cell

@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **328 rust-supported / 0 typescript-supported** out of 328.
+`data/rules/catalog.json`: **330 rust-supported / 0 typescript-supported** out of 330.
 
-Latest catalog proofs: Fate Lose strips power-threshold entry (`RULE-CATALOG-0327`–`0328`). A covered non-Ordinary site loses its printed bar, so movement and teleport can enter. An Ordinary site keeps the bar. 2×2 occupancy remains `RULE-CATALOG-0325`–`0326`.
+Latest catalog proofs: Cemetery free placement uses prospective power (`RULE-CATALOG-0329`–`0330`). Raise Dead of a printed-1 Tower-bonus minion cannot land on a threshold-3 Tower. A 2×2 Raise Dead uses footprint power, so a Tower on one cell of the square can close a threshold cell on another. Paid summons and Fate Lose remain `RULE-CATALOG-0323`–`0328`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
