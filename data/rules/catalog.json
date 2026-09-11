@@ -7511,6 +7511,62 @@
         "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
         "testName": "rule_catalog_0344_playing_water_onto_drought_rubble_relayers_underground"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0345",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-site Magic leaves no Rubble. A Burrowing minion underground on the returned site is remapped into the void and banished. It does not die as if stranded on missing terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowing",
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_site_layer_rules.rs",
+        "testName": "rule_catalog_0345_returning_land_banishes_underground_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0346",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-site Magic leaves no Rubble. A Submerge minion underwater on the returned site is remapped into the void and banished. It does not die as if stranded on missing terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteToOwnerHand",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_site_layer_rules.rs",
+        "testName": "rule_catalog_0346_returning_water_banishes_underwater_minion"
+      }
     }
   ]
 }
