@@ -171,19 +171,14 @@ fn rule_catalog_0320_pay_life_cost_is_paid_before_the_cast_resolves() {
     let mut session = opening_main(320, 20);
     let before = state(&session);
     assert_eq!(before["players"]["north"]["avatar"]["life"], 20);
-    let spell_id = before["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("north Spellbook")
-        .iter()
-        .find(|card| card["cardId"] == "north-pay")
-        .expect("Pay Life Magic")["instanceId"]
+    let south_observation = session.observe(Seat::South);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-pay"
+    });
+    let spell_id = descriptor["cardInstanceId"]
         .as_str()
         .expect("Pay Life identity")
         .to_owned();
-    let south_observation = session.observe(Seat::South);
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-pay"
-    });
     assert_eq!(
         event_types(&receipt),
         ["life-paid", "magic-cast", "avatar-healed", "magic-resolved"]
@@ -219,18 +214,13 @@ fn rule_catalog_0321_deaths_door_cannot_pay_life() {
 
     let mut session = opening_main(322, 2);
     assert!(offers_pay_life(&session));
-    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("north Spellbook")
-        .iter()
-        .find(|card| card["cardId"] == "north-pay")
-        .expect("Pay Life Magic")["instanceId"]
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-pay"
+    });
+    let spell_id = descriptor["cardInstanceId"]
         .as_str()
         .expect("Pay Life identity")
         .to_owned();
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-pay"
-    });
     assert_eq!(
         event_types(&receipt),
         [
