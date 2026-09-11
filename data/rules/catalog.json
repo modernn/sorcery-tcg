@@ -7343,6 +7343,62 @@
         "file": "crates/sorcery-engine/tests/overlay_layer_rules.rs",
         "testName": "rule_catalog_0338_drought_relayers_submerged_dual_region_minion_underground"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0339",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroying Flood flips a covered earth site back to land. A Burrowing and Submerge minion Flood had relayered underwater is relayered underground and stays in play. Returning or dispelling that Aura uses the same conversion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "destroyTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_0339_destroying_flood_relayers_dual_region_minion_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0340",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroying Drought restores a printed Water site. A Burrowing and Submerge minion Drought had relayered underground is relayered underwater and stays in play. Returning or dispelling that Aura uses the same conversion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "destroyTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_0340_destroying_drought_relayers_dual_region_minion_underwater"
+      }
     }
   ]
 }
