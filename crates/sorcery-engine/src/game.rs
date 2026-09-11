@@ -14914,6 +14914,7 @@ impl Game {
     }
 
     /// Official Fate Genesis submerges minions and loose Artifacts atop affected non-Ordinary sites.
+    /// Occupancy, not the anchor cell, decides who is atop a site. Mixed footprints die afterwards.
     fn apply_atlantean_fate_genesis(
         &mut self,
         cells: &[Cell],
@@ -14970,12 +14971,10 @@ impl Game {
             else {
                 continue;
             };
-            let occupied = Self::unit_occupied_cells(&self.position.units[index]);
-            if self.position.units[index].region != Region::Surface
-                || !occupied
-                    .iter()
-                    .all(|cell| self.location_exists_in_region(*cell, Region::Underwater))
-            {
+            // Every surface occupant of an affected site is submerged. A 2x2 that
+            // also covers land is still at this site; occupancy then kills the
+            // illegal underwater footprint instead of leaving the minion unharmed.
+            if self.position.units[index].region != Region::Surface {
                 continue;
             }
             self.position.units[index].region = Region::Underwater;

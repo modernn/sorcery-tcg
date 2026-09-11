@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/cave-in-footprint-0005`. Stack this on current `master` (`15a2c42`). Do not grow already-merged landings.
+Live line: `cursor/fate-footprint-0005`. Stack this on current `master` (`57b00ec`). Do not grow already-merged landings.
 
-This branch makes Cave-In burrow every surface occupant of the target land cell, including a 2×2 whose other cells cannot exist underground. Occupancy then kills that illegal footprint. A mixed land/Water square is hit instead of staying on the surface. All-land Burrowing squares still survive underground. Compact demo/batch stdout is unchanged.
+This branch makes Fate Genesis submerge every surface occupant of an affected non-Ordinary site, including a 2×2 whose other cells cannot exist underwater. Occupancy then kills that illegal footprint. A mixed land/Water square is hit instead of staying on the surface. An all-Water Submerge square still survives underwater. Do not cover C4 while the Avatar stands there. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **354 rust-supported / 0 typescript-supported** out of 354.
+`data/rules/catalog.json`: **356 rust-supported / 0 typescript-supported** out of 356.
 
-Latest catalog proofs: Cave-In burrows 2×2 occupants of the target land cell (`RULE-CATALOG-0353`–`0354`). A mixed land/Water square occupying the target is hit and then dies underground. An all-land Burrowing square occupying a non-anchor target survives underground. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
+Latest catalog proofs: Fate Genesis submerges 2×2 occupants of an affected site (`RULE-CATALOG-0355`–`0356`). A mixed land/Water square occupying the affected cell is hit and then dies underwater. An all-Water Submerge square occupying a non-anchor affected cell survives underwater. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.

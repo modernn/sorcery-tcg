@@ -7775,6 +7775,58 @@
         "file": "crates/sorcery-engine/tests/cave_in_footprint_rules.rs",
         "testName": "rule_catalog_0354_cave_in_burrows_all_land_square_occupying_non_anchor"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0355",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate Genesis submerges every surface minion that occupies an affected non-Ordinary site. A 2×2 square that occupies that cell and also covers land is still hit. Occupancy then kills the illegal underwater footprint. The minion does not stay on the surface unharmed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-conjured",
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_footprint_rules.rs",
+        "testName": "rule_catalog_0355_fate_submerges_mixed_square_occupying_affected_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0356",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate Genesis submerges a 2×2 that occupies an affected non-Ordinary site even when its anchor is another cell. An all-Water Submerge square anchored at B3 that occupies C3 stays underwater when Fate covers C3 and leaves C4 uncovered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "occupiesSquareArea",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-conjured",
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_footprint_rules.rs",
+        "testName": "rule_catalog_0356_fate_submerges_all_water_square_occupying_affected_site"
+      }
     }
   ]
 }
