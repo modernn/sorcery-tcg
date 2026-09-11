@@ -13103,6 +13103,7 @@ impl Game {
                 "to": target_cell,
             })
         });
+        self.settle_overlay_layers(std::slice::from_ref(&target_cell));
         self.settle_region_occupancy(outcomes)?;
         self.position.state_version += 1;
         Ok(())

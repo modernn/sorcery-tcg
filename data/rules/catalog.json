@@ -7399,6 +7399,62 @@
         "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
         "testName": "rule_catalog_0340_destroying_drought_relayers_dual_region_minion_underwater"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0341",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Site flight carries occupants to the destination cell. When a Flooded Air site flies onto a dry void, a Burrowing and Submerge minion Flood had relayered underwater is relayered underground and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "flyToNearbyVoidOncePerTurnAtAirThreshold",
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "fly-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-flown"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_flight_layer_rules.rs",
+        "testName": "rule_catalog_0341_flight_from_flooded_site_relayers_dual_region_minion_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0342",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Flood can cover voids. When an Air site flies onto a covered empty cell, that cell becomes Water and a Burrowing and Submerge minion already underground is relayered underwater and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "flyToNearbyVoidOncePerTurnAtAirThreshold",
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "fly-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-flown"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_flight_layer_rules.rs",
+        "testName": "rule_catalog_0342_flight_onto_flooded_void_relayers_dual_region_minion_underwater"
+      }
     }
   ]
 }
