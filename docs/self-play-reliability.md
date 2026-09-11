@@ -54,13 +54,13 @@ ordinary debug suite because running the same workload there takes several minut
 - Realm Artifacts are admitted as power Artifacts, Lethal Artifacts, end-turn site-controller
   life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder, including
   when paired with oversized minions or Cave-In.
-- A Siege Ballista shoots three damage at one unit within two measured steps of the cell its bearer
-  stands on, paid for by tapping that bearer and one other ready ally standing with it. The
+- A Siege Ballista shoots three damage at one unit within two measured steps of any cell its bearer
+  occupies, paid for by tapping that bearer and one other ready ally standing with it. The
   Artifact is the source, so the shot carries neither the bearer's power nor its Lethal, is not
   stopped by prevention keyed to unit power, and costs the bearer no Stealth.
 - A Payload Trebuchet pays those same two taps plus one Atlas or Spellbook card discarded from hand,
-  then deals that card's mana cost to every unit at one location within three measured steps of its
-  bearer's cell; a discarded site throws nothing. The location is targeted rather than its
+  then deals that card's mana cost to every unit at one location within three measured steps of any
+  cell its bearer occupies; a discarded site throws nothing. The location is targeted rather than its
   occupants, so a Stealthed occupant is included and a layer below the target is not, and the
   Artifact is again the source, so no bearer power or Lethal rides along.
 - A Rolling Boulder is pushed by tapping any one ready unit standing with it, needs no bearer, and
