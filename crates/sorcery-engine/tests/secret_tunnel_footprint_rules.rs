@@ -92,12 +92,12 @@ fn tunnel_manifest(seed: u32) -> String {
                     "north-earth",
                 ],
                 "avatar": "north-avatar",
-                "spellbook": vec!["north-giant"; 8],
+                "spellbook": vec!["north-giant"; 16],
             },
             "south": {
                 "atlas": vec!["south-site"; 9],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-plain"; 8],
+                "spellbook": vec!["south-plain"; 16],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -127,12 +127,12 @@ fn land_manifest(seed: u32) -> String {
             "north": {
                 "atlas": vec!["north-earth"; 9],
                 "avatar": "north-avatar",
-                "spellbook": vec!["north-giant"; 8],
+                "spellbook": vec!["north-giant"; 16],
             },
             "south": {
                 "atlas": vec!["south-site"; 9],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-plain"; 8],
+                "spellbook": vec!["south-plain"; 16],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -149,8 +149,10 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         .into_iter()
         .find(|action| predicate(&action.descriptor))
         .unwrap_or_else(|| {
+            let current = session.replay_value().expect("replay");
             panic!(
-                "expected engine-issued action among {:?}",
+                "expected engine-issued action in phase {} among {:?}",
+                current["state"]["phase"],
                 session
                     .legal_actions()
                     .expect("legal actions")
