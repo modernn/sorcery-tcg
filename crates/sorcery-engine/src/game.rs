@@ -13218,8 +13218,28 @@ impl Game {
         Ok(())
     }
 
-    /// Returns a real site to its owner's Atlas hand and remaps surface occupants into the void so
-    /// they banish instead of dying as if stranded on missing terrain.
+    /// Remaps occupants of a returned site into the void so they banish instead of dying as if
+    /// stranded on missing terrain. Return-site leaves no rubble, so every region at that cell is
+    /// gone.
+    fn remap_returned_site_occupants_to_void(&mut self, cell: Cell) {
+        for unit in &mut self.position.units {
+            if unit.location == cell && unit.region != Region::Void {
+                unit.region = Region::Void;
+                unit.planar_gate_voidwalk = false;
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
+                && *location == cell
+                && *region != Region::Void
+            {
+                *region = Region::Void;
+            }
+        }
+    }
+
+    /// Returns a real site to its owner's Atlas hand and remaps occupants into the void so they
+    /// banish instead of dying as if stranded on missing terrain.
     fn apply_return_target_site_to_owner_hand(
         &mut self,
         cell: Cell,
@@ -13251,20 +13271,7 @@ impl Game {
             });
             return Ok(());
         }
-        for unit in &mut self.position.units {
-            if unit.location == cell && unit.region == Region::Surface {
-                unit.region = Region::Void;
-                unit.planar_gate_voidwalk = false;
-            }
-        }
-        for artifact in &mut self.position.artifacts {
-            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement
-                && *location == cell
-                && *region == Region::Surface
-            {
-                *region = Region::Void;
-            }
-        }
+        self.remap_returned_site_occupants_to_void(cell);
         let card = target_site.card;
         self.position.sites[cell.index()] = None;
         self.position.players[seat_index(owner)]
