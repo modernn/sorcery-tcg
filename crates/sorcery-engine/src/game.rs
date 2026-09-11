@@ -7032,12 +7032,49 @@ impl Game {
     }
 
     fn avatar_entry_power(&self, seat: Seat) -> u8 {
-        let avatar = &self.position.players[seat_index(seat)].avatar;
-        let CardFacts::Avatar(facts) = &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
-        else {
-            return 0;
-        };
-        facts.attack
+        match self.avatar_current_stats(seat) {
+            Ok((attack, _)) => u8::try_from(attack).unwrap_or(u8::MAX),
+            Err(_) => u8::MAX,
+        }
+    }
+
+    fn prospective_minion_entry_power(&self, seat: Seat, facts: &MinionFacts, cell: Cell) -> u8 {
+        let mut bonus = 0_u16;
+        for source in &self.position.units {
+            if source.controller != seat || self.minion_is_disabled(source) {
+                continue;
+            }
+            let CardFacts::Minion(source_facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return u8::MAX;
+            };
+            if source_facts.other_nearby_allies_power_bonus
+                && source.region == Region::Surface
+                && Self::footprints_nearby(
+                    Self::unit_occupied_cells(source),
+                    std::slice::from_ref(&cell),
+                )
+            {
+                bonus = bonus.saturating_add(1);
+            }
+            if facts.mortal && source_facts.other_controlled_mortals_power_bonus {
+                bonus = bonus.saturating_add(1);
+            }
+        }
+        if facts.gains_power_ranged_and_spellcaster_atop_tower
+            && self.position.sites[cell.index()]
+                .as_ref()
+                .is_some_and(|site| {
+                    matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(site_facts) if site_facts.is_tower
+                    ) && !self.site_abilities_lost(cell)
+                })
+        {
+            bonus = bonus.saturating_add(2);
+        }
+        u8::try_from(u16::from(facts.attack).saturating_add(bonus)).unwrap_or(u8::MAX)
     }
 
     fn minion_entry_power(&self, unit: &UnitPosition) -> Result<u8, GameError> {
@@ -7795,7 +7832,9 @@ impl Game {
             if !self.site_abilities_lost(cell)
                 && site_facts
                     .prevents_units_with_power_at_least_from_entering
-                    .is_some_and(|threshold| minion.attack >= threshold)
+                    .is_some_and(|threshold| {
+                        self.prospective_minion_entry_power(seat, minion, cell) >= threshold
+                    })
             {
                 return None;
             }
