@@ -177,6 +177,15 @@ test('playable-core page renders the authoritative 5x4 checkpoint without artwor
   assert.match(page, /ArrowRight/);
   assert.match(page, /Chain status is written in text/);
   assert.match(page, /function shiftReplay/);
+  assert.match(page, /id="notice" role="status" aria-live="polite"/);
+  assert.match(page, /function visibleActionButtons/);
+  assert.match(page, /function focusAction/);
+  assert.match(page, /function focusFirstAction/);
+  assert.match(page, /\.action:focus,\.action\.is-focused/);
+  assert.match(page, /Number keys 1-9 play the first nine visible actions/);
+  assert.match(page, /Up and Down move among those actions/);
+  assert.match(page, /aria-keyshortcuts/);
+  assert.match(page, /\/\^\[1-9\]\$\//);
 });
 
 test('browser API keeps cast artifacts and auras visible without exposing the opponent hand', async () => {

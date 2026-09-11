@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/adapter-hashes-0005`. Stack this on current `master` (`2e6358e`). Do not grow already-merged landings.
+Live line: `cursor/keyboard-actions-0005`. Stack this on current `master` (`261e3f5`). Do not grow already-merged landings.
 
-This branch proves WEB-06: the seed-31 transcript produces the same hashes through `sorcery-engine record`, a fresh session-json step loop, and the playable-core HTTP adapter. Compact demo/batch stdout is unchanged.
+This branch adds WEB-05 keyboard equivalents on the playable core: number keys 1-9 play the first nine visible engine-issued actions, Up/Down move among those actions, and action/rejection text stays on a `role="status"` live region. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
