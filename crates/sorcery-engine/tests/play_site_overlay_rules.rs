@@ -69,16 +69,6 @@ fn dualer() -> Value {
     })
 }
 
-fn dummy() -> Value {
-    json!({
-        "attack": 1,
-        "cardType": "minion",
-        "defense": 1,
-        "manaCost": 0,
-        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-    })
-}
-
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
@@ -94,12 +84,11 @@ fn flood_manifest(seed: u32) -> String {
         },
         "cards": {
             "north-avatar": avatar(),
-            "north-destroy": destroy_site(),
             "north-dualer": dualer(),
             "north-earth": earth(),
             "north-flood": flood(),
             "south-avatar": avatar(),
-            "south-dummy": dummy(),
+            "south-destroy": destroy_site(),
             "south-site": earth(),
         },
         "decks": {
@@ -109,16 +98,16 @@ fn flood_manifest(seed: u32) -> String {
                 "spellbook": [
                     "north-flood",
                     "north-dualer",
-                    "north-destroy",
                     "north-flood",
                     "north-dualer",
-                    "north-destroy",
+                    "north-flood",
+                    "north-dualer",
                 ],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-dummy"; 6],
+                "spellbook": vec!["south-destroy"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -138,13 +127,12 @@ fn drought_manifest(seed: u32) -> String {
         },
         "cards": {
             "north-avatar": avatar(),
-            "north-destroy": destroy_site(),
             "north-drought": drought(),
             "north-dualer": dualer(),
             "north-earth": earth(),
             "north-water": water(),
             "south-avatar": avatar(),
-            "south-dummy": dummy(),
+            "south-destroy": destroy_site(),
             "south-site": earth(),
         },
         "decks": {
@@ -161,16 +149,16 @@ fn drought_manifest(seed: u32) -> String {
                 "spellbook": [
                     "north-drought",
                     "north-dualer",
-                    "north-destroy",
                     "north-drought",
                     "north-dualer",
-                    "north-destroy",
+                    "north-drought",
+                    "north-dualer",
                 ],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-dummy"; 6],
+                "spellbook": vec!["south-destroy"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -283,11 +271,10 @@ fn flood_opening() -> Session {
             let spells = opening_ids(&session, "spellbook");
             (atlas.iter().filter(|card| *card == "north-earth").count() >= 3
                 && spells.contains(&"north-flood".to_owned())
-                && spells.contains(&"north-dualer".to_owned())
-                && spells.contains(&"north-destroy".to_owned()))
+                && spells.contains(&"north-dualer".to_owned()))
             .then_some(session)
         })
-        .expect("bounded seed opening with Flood, destroy-site, a dual-region minion, and three earth sites")
+        .expect("bounded seed opening with Flood, a dual-region minion, and three earth sites")
 }
 
 fn drought_opening() -> Session {
@@ -300,11 +287,12 @@ fn drought_opening() -> Session {
             (atlas.contains(&"north-earth".to_owned())
                 && atlas.iter().filter(|card| *card == "north-water").count() >= 2
                 && spells.contains(&"north-drought".to_owned())
-                && spells.contains(&"north-dualer".to_owned())
-                && spells.contains(&"north-destroy".to_owned()))
+                && spells.contains(&"north-dualer".to_owned()))
             .then_some(session)
         })
-        .expect("bounded seed opening with Drought, destroy-site, a dual-region minion, earth, and two Water sites")
+        .expect(
+            "bounded seed opening with Drought, a dual-region minion, earth, and two Water sites",
+        )
 }
 
 fn bury_then_cover_c3(session: &mut Session, site_id: &str, region: &str, aura_id: &str) -> String {
@@ -345,11 +333,19 @@ fn bury_then_cover_c3(session: &mut Session, site_id: &str, region: &str, aura_i
         .as_str()
         .expect("C3 site identity")
         .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
     accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
-            && descriptor["cardId"] == "north-destroy"
+            && descriptor["cardId"] == "south-destroy"
             && descriptor["targetLocation"]["cell"] == "C3"
             && descriptor["targetSiteInstanceId"] == site_instance
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
     assert_eq!(
         realm_unit(&state(session), &dualer_id)["region"],
