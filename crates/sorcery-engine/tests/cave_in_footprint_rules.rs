@@ -337,7 +337,8 @@ fn summon_b3_square(session: &mut Session) -> String {
         .as_str()
         .expect("2x2 identity")
         .to_owned();
-    let occupant = realm_unit(&state(session), &giant_id).expect("2x2 remains in play");
+    let current = state(session);
+    let occupant = realm_unit(&current, &giant_id).expect("2x2 remains in play");
     assert_eq!(occupant["location"], "B3");
     assert_eq!(occupant["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
     assert_eq!(occupant["region"], "surface");
@@ -391,7 +392,8 @@ fn rule_catalog_0354_cave_in_burrows_all_land_square_occupying_non_anchor() {
             .any(|event| event.event_type == "minion-died" || event.event_type == "minion-banished")
     );
     assert!(event_types(&receipt).contains(&"minion-burrowed"));
-    let occupant = realm_unit(&state(&session), &giant_id).expect("burrowed 2x2 remains in play");
+    let current = state(&session);
+    let occupant = realm_unit(&current, &giant_id).expect("burrowed 2x2 remains in play");
     assert_eq!(occupant["location"], "B3");
     assert_eq!(occupant["occupiedCells"], json!(["B3", "B4", "C3", "C4"]));
     assert_eq!(occupant["region"], "underground");
