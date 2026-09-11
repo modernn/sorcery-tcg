@@ -7293,6 +7293,56 @@
         "file": "crates/sorcery-engine/tests/fate_tower_rules.rs",
         "testName": "rule_catalog_0336_ordinary_tower_keeps_its_bonus_under_fate"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0337",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate floods a covered non-Ordinary earth site the same way playing Water onto rubble floods the layer beneath it. A Burrowing and Submerge minion already underground there is relayered underwater and stays in play. Fate Genesis still only submerges surface occupants. Fate can cover voids, so this proof keeps C4 uncovered and never stands the Avatar on a flooded site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_layer_rules.rs",
+        "testName": "rule_catalog_0337_fate_relayers_burrowed_dual_region_minion_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0338",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Drought makes a printed Water site land again. A Burrowing and Submerge minion already underwater there is relayered underground and stays in play, the same conversion that destroying a current Water site uses.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_layer_rules.rs",
+        "testName": "rule_catalog_0338_drought_relayers_submerged_dual_region_minion_underground"
+      }
     }
   ]
 }

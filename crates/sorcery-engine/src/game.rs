@@ -7579,6 +7579,49 @@ impl Game {
         }
     }
 
+    /// Relayers lower-layer occupants when Flood, Drought, or Fate changes whether a site is Water.
+    ///
+    /// Playing Water onto rubble already floods the underground layer. Destroying a current Water
+    /// site already returns underwater occupants underground. Overlay Auras use the same conversion
+    /// so a Burrowing and Submerge unit is not stranded when the site's water-ness flips.
+    fn settle_overlay_layers(&mut self, cells: &[Cell]) {
+        let water = cells
+            .iter()
+            .copied()
+            .filter(|cell| self.is_water_site(*cell))
+            .collect::<BTreeSet<_>>();
+        let land = cells
+            .iter()
+            .copied()
+            .filter(|cell| self.is_land_site(*cell))
+            .collect::<BTreeSet<_>>();
+        for unit in &mut self.position.units {
+            let occupied = Self::unit_occupied_cells(unit);
+            match unit.region {
+                Region::Underground if occupied.iter().any(|cell| water.contains(cell)) => {
+                    unit.region = Region::Underwater;
+                }
+                Region::Underwater if occupied.iter().any(|cell| land.contains(cell)) => {
+                    unit.region = Region::Underground;
+                }
+                _ => {}
+            }
+        }
+        for artifact in &mut self.position.artifacts {
+            if let ArtifactPlacement::Loose { location, region } = &mut artifact.placement {
+                match *region {
+                    Region::Underground if water.contains(location) => {
+                        *region = Region::Underwater;
+                    }
+                    Region::Underwater if land.contains(location) => {
+                        *region = Region::Underground;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     fn minion_can_move_and_attack(&self, unit: &UnitPosition, seat: Seat) -> bool {
         unit.controller == seat
             && !self.minion_is_disabled(unit)
@@ -13065,9 +13108,9 @@ impl Game {
         Ok(())
     }
 
-    /// Replaces every destroyed site with Rubble, drains the Water layer it supported into the
-    /// relative underground layer for loose Artifacts and units, and hands back the destroyed
-    /// cards with the Rubble identities they left behind.
+    /// Replaces every destroyed site with Rubble, drains the Water layer a current Water site
+    /// supported into the relative underground layer for loose Artifacts and units, and hands
+    /// back the destroyed cards with the Rubble identities they left behind.
     #[expect(
         clippy::type_complexity,
         reason = "the caller settles the destroyed cards and the Rubble receipts on separate schedules"
@@ -13080,14 +13123,8 @@ impl Game {
         destroyed.sort_unstable_by_key(|(cell, _)| *cell);
         let flooded = destroyed
             .iter()
-            .filter_map(|(cell, site)| {
-                let CardFacts::Site(facts) =
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                else {
-                    return None;
-                };
-                facts.elements.contains(Element::Water).then_some(*cell)
-            })
+            .filter(|(cell, _)| self.is_water_site(*cell))
+            .map(|(cell, _)| *cell)
             .collect::<BTreeSet<_>>();
         for unit in &mut self.position.units {
             if unit.region == Region::Underwater
@@ -14813,6 +14850,7 @@ impl Game {
         ) {
             return Ok(());
         }
+        self.settle_overlay_layers(cells);
         if matches!(
             effect,
             AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
