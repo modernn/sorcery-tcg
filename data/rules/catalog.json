@@ -7006,6 +7006,48 @@
         "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
         "testName": "rule_catalog_0324_derived_power_closes_an_otherwise_legal_entry"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0325",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion cannot be summoned onto a square that includes a power-threshold site it is too strong to enter. Another legal 1x1 cell in the same square does not make the occupancy legal. A weaker 2x2 still can occupy that square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "preventsUnitsWithPowerAtLeastFromEntering"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
+        "testName": "rule_catalog_0325_a_two_by_two_cannot_occupy_a_threshold_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0326",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion cannot take a step that newly occupies a power-threshold site it is too strong to enter. Already occupied cells of the footprint do not waive the check on newly entered cells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "preventsUnitsWithPowerAtLeastFromEntering"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
+        "testName": "rule_catalog_0326_a_two_by_two_cannot_step_onto_a_new_threshold_cell"
+      }
     }
   ]
 }
