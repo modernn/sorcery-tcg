@@ -240,7 +240,8 @@ fn summon_b3_then_south_ready(session: &mut Session, region: &str) -> String {
         .as_str()
         .expect("2x2 identity")
         .to_owned();
-    let occupant = state(session)["realm"]["units"]
+    let before = state(session);
+    let occupant = before["realm"]["units"]
         .as_array()
         .expect("realm units")
         .iter()
