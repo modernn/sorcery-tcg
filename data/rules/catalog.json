@@ -6962,6 +6962,50 @@
         "file": "crates/sorcery-engine/tests/landbound_rules.rs",
         "testName": "rule_catalog_0322_drought_overlay_enables_landbound_in_place"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0323",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A site can prevent units whose power is at least a printed threshold from entering. A minion at or above that power cannot be summoned onto the site or step onto it. A weaker minion still can.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "preventsUnitsWithPowerAtLeastFromEntering"
+      ],
+      "actionHints": [
+        "summon",
+        "move"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
+        "testName": "rule_catalog_0323_printed_power_cannot_enter_a_threshold_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0324",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Site entry uses current derived power. A later power grant can close an otherwise legal step onto a threshold site without changing the minion's printed attack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "grantPowerToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "move"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_power_entry_rules.rs",
+        "testName": "rule_catalog_0324_derived_power_closes_an_otherwise_legal_entry"
+      }
     }
   ]
 }
