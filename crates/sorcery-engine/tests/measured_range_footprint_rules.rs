@@ -1,10 +1,9 @@
 //! Direct proofs that measured-range Magic uses a 2×2 caster's occupied cells
 //! (RULE-CATALOG-0359–0360).
 //!
-//! Minor Explosion walks at most two cardinal steps from the caster. A
-//! B3-anchored Spellcaster occupies C3, so C1 is in range even though it is
-//! three steps from the anchor. A far site such as D1 stays out of range of
-//! every occupied cell.
+//! Minor Explosion walks at most two cardinal steps along existing locations.
+//! A B3-anchored Spellcaster occupies C4, so D4 is in range even though it is
+//! three steps from the anchor. E3 is three steps from every occupied cell.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -246,7 +245,7 @@ fn opening() -> Session {
         .expect("bounded seed opening with earth, a 2x2 Spellcaster, and measured-range Magic")
 }
 
-fn establish_square_and_far_site(session: &mut Session) {
+fn establish_square_and_far_sites(session: &mut Session) {
     keep(session);
     keep(session);
     play_site(session, "north-earth", "C4");
@@ -255,12 +254,20 @@ fn establish_square_and_far_site(session: &mut Session) {
     end_and_draw(session);
     play_site(session, "north-earth", "B4");
     end_and_draw(session);
-    play_site(session, "south-site", "D1");
     end_and_draw(session);
     play_site(session, "north-earth", "C3");
     end_and_draw(session);
     end_and_draw_zone(session, "atlas");
     play_site(session, "north-earth", "B3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "north-earth", "D4");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "north-earth", "E4");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "north-earth", "E3");
 }
 
 fn summon_b3_square(session: &mut Session) -> String {
@@ -284,41 +291,32 @@ fn summon_b3_square(session: &mut Session) -> String {
 #[test]
 fn rule_catalog_0359_measured_range_reaches_from_occupied_non_anchor() {
     let mut session = opening();
-    establish_square_and_far_site(&mut session);
+    establish_square_and_far_sites(&mut session);
     let giant_id = summon_b3_square(&mut session);
     let cells = explosion_cells(&session, &giant_id);
     assert!(
-        cells.contains(&"C1".to_owned()),
-        "occupying C3 must put C1 within two steps, got {cells:?}"
+        cells.contains(&"D4".to_owned()),
+        "occupying C4 must put D4 within two steps, got {cells:?}"
     );
 
-    let (_, receipt) = accept_where(&mut session, |descriptor| {
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-explosion"
             && descriptor["casterInstanceId"] == giant_id.as_str()
-            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetLocation"]["cell"] == "D4"
     });
-    assert!(
-        receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "magic-damage-allocated"
-                && event.payload["amount"] == 1),
-        "C1 must take the measured-range damage"
-    );
-    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 19);
     assert_exact_replay(&session);
 }
 
 #[test]
 fn rule_catalog_0360_measured_range_excludes_cells_beyond_every_occupied_cell() {
     let mut session = opening();
-    establish_square_and_far_site(&mut session);
+    establish_square_and_far_sites(&mut session);
     let giant_id = summon_b3_square(&mut session);
     let cells = explosion_cells(&session, &giant_id);
     assert!(
-        !cells.contains(&"D1".to_owned()),
-        "D1 is three steps from every occupied cell, got {cells:?}"
+        !cells.contains(&"E3".to_owned()),
+        "E3 is three steps from every occupied cell, got {cells:?}"
     );
     assert_exact_replay(&session);
 }

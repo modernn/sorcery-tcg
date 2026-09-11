@@ -7883,7 +7883,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Measured-range Magic walks from every cell a 2×2 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C3 can Minor-Explosion C1, which is two cardinal steps from C3 and three from B3.",
+      "plainLanguage": "Measured-range Magic walks from every cell a 2×2 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C4 can Minor-Explosion D4, which is one cardinal step from C4 and three from B3.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "damageEachUnitAtLocationWithinTwoSteps",
@@ -7910,7 +7910,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Measured-range Magic still stops at two cardinal steps. A B3-anchored 2×2 Spellcaster cannot Minor-Explosion D1, because that site is three steps from every occupied cell.",
+      "plainLanguage": "Measured-range Magic still stops at two cardinal steps. A B3-anchored 2×2 Spellcaster cannot Minor-Explosion E3, because that site is three steps from every occupied cell.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "damageEachUnitAtLocationWithinTwoSteps",
