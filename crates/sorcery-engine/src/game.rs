@@ -7115,16 +7115,16 @@ impl Game {
         let facts = self.token_minion_facts(token_card_id)?;
         let mut power =
             self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell));
-        let pending_tower = site.is_tower && !(self.fate_covers_cell(cell) && !site.ordinary);
-        if facts.gains_power_ranged_and_spellcaster_atop_tower && pending_tower {
+        let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
+        if facts.gains_power_ranged_and_spellcaster_atop_tower && site.is_tower && !abilities_lost {
             power = u8::try_from(u16::from(power).saturating_add(2)).unwrap_or(u8::MAX);
         }
-        if self.fate_covers_cell(cell) && !site.ordinary {
+        if abilities_lost {
             return Ok(true);
         }
-        Ok(!site
+        Ok(site
             .prevents_units_with_power_at_least_from_entering
-            .is_some_and(|threshold| power >= threshold))
+            .is_none_or(|threshold| power < threshold))
     }
 
     fn site_prevents_power_entry(&self, cell: Cell, entry_power: u8) -> bool {
