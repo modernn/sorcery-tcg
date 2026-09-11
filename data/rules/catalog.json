@@ -7567,6 +7567,63 @@
         "file": "crates/sorcery-engine/tests/return_site_layer_rules.rs",
         "testName": "rule_catalog_0346_returning_water_banishes_underwater_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0347",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-site Magic remaps every unit that occupies the returned cell, not only a unit whose anchor is that cell. A 2×2 surface minion anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_site_footprint_rules.rs",
+        "testName": "rule_catalog_0347_returning_non_anchor_site_banishes_surface_square"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0348",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-site Magic remaps a 2×2 underground occupant the same way. A Burrowing square anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowing",
+        "occupiesSquareArea",
+        "returnTargetSiteToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-returned-to-hand",
+        "minion-banished",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_site_footprint_rules.rs",
+        "testName": "rule_catalog_0348_returning_non_anchor_site_banishes_underground_square"
+      }
     }
   ]
 }
