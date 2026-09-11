@@ -8026,6 +8026,57 @@
         "file": "crates/sorcery-engine/tests/terrain_water_cast_rules.rs",
         "testName": "rule_catalog_0364_drought_strips_water_site_casts_from_printed_water"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0365",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A 2×2 bearer that occupies a helper stands with that helper for a tap-pair Artifact. A B3-anchored square carrying a Siege Ballista remembered at C4 can tap a ready ally on B3 for the second cost.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "activate-artifact-damage"
+      ],
+      "eventHints": [
+        "artifact-conjured",
+        "artifact-damage-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_helper_footprint_rules.rs",
+        "testName": "rule_catalog_0365_square_bearer_accepts_helper_on_occupied_non_carried_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0366",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A helper that shares no occupied cell with a 2×2 bearer cannot pay a tap-pair Artifact's second tap. An ally on B2 does not stand with a B3-anchored square occupying B3, B4, C3, and C4.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "activate-artifact-damage"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_helper_footprint_rules.rs",
+        "testName": "rule_catalog_0366_helper_outside_square_cannot_pay_second_tap"
+      }
     }
   ]
 }

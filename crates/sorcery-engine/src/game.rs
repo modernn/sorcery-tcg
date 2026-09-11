@@ -4605,11 +4605,14 @@ impl Game {
             && self.position.decision_seat == seat
     }
 
-    /// The cell one carried Artifact fires from and every other ready ally standing there that can
-    /// pay the second tap alongside its ready bearer.
+    /// The cell one carried Artifact fires from and every other ready ally standing with its
+    /// bearer that can pay the second tap.
     ///
-    /// A loose Artifact has no bearer to tap, a spent bearer cannot pay the first tap, and a lone
-    /// bearer has nobody to pay the second, so each of those yields nothing.
+    /// "Standing with" is footprint overlap in the Artifact's region, not only the remembered
+    /// carried cell. A 2×2 bearer occupies every cell of its square; an ally on any of those
+    /// cells stands with it. A loose Artifact has no bearer to tap, a spent bearer cannot pay
+    /// the first tap, and a lone bearer has nobody to pay the second, so each of those yields
+    /// nothing.
     fn artifact_tap_pair_helpers(
         &self,
         artifact: &ArtifactPosition,
@@ -4627,6 +4630,7 @@ impl Game {
             return Ok(None);
         }
         let carried_at = self.artifact_location(artifact)?;
+        let bearer_cells = self.unit_target_occupied_cells(bearer)?;
         let mut helpers = Vec::new();
         for helper in allies {
             if helper.instance_id() != bearer.instance_id()
@@ -4634,7 +4638,8 @@ impl Game {
                 && self.unit_target_region(helper)? == carried_at.region
                 && self
                     .unit_target_occupied_cells(helper)?
-                    .contains(&carried_at.cell)
+                    .iter()
+                    .any(|cell| bearer_cells.contains(cell))
             {
                 helpers.push(helper.clone());
             }
