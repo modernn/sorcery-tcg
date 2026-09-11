@@ -13387,6 +13387,9 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let overlay_cells = self
+            .aura_changes_site_water(&aura)
+            .then(|| aura.cells.clone());
         let owner = aura.card.owner;
         let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
             .id
@@ -13415,6 +13418,9 @@ impl Game {
                 })
             });
         }
+        if let Some(cells) = overlay_cells {
+            self.settle_after_removed_terrain_aura(&cells, outcomes)?;
+        }
         Ok(())
     }
 
@@ -13425,6 +13431,9 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let aura = self.take_targeted_aura(target_aura_instance_id)?;
+        let overlay_cells = self
+            .aura_changes_site_water(&aura)
+            .then(|| aura.cells.clone());
         let owner = aura.card.owner;
         let card_id = self.rules.cards[usize::from(aura.card.card_id.0)]
             .id
@@ -13453,6 +13462,9 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
+        }
+        if let Some(cells) = overlay_cells {
+            self.settle_after_removed_terrain_aura(&cells, outcomes)?;
         }
         Ok(())
     }
@@ -14835,6 +14847,22 @@ impl Game {
         Ok(())
     }
 
+    fn aura_effect_changes_site_water(effect: AuraEffect) -> bool {
+        matches!(
+            effect,
+            AuraEffect::AffectedSitesAreFlooded
+                | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
+                | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
+        )
+    }
+
+    fn aura_changes_site_water(&self, aura: &AuraPosition) -> bool {
+        matches!(
+            &self.rules.cards[usize::from(aura.card.card_id.0)].facts,
+            CardFacts::Aura(facts) if Self::aura_effect_changes_site_water(facts.effect)
+        )
+    }
+
     fn settle_after_terrain_aura(
         &mut self,
         effect: AuraEffect,
@@ -14842,12 +14870,7 @@ impl Game {
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if !matches!(
-            effect,
-            AuraEffect::AffectedSitesAreFlooded
-                | AuraEffect::AffectedSitesAreNotWaterSitesAndProvideNoWaterThreshold
-                | AuraEffect::AffectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
-        ) {
+        if !Self::aura_effect_changes_site_water(effect) {
             return Ok(());
         }
         self.settle_overlay_layers(cells);
@@ -14857,6 +14880,18 @@ impl Game {
         ) {
             self.apply_atlantean_fate_genesis(cells, source_instance_id, outcomes);
         }
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        Ok(())
+    }
+
+    /// Relayers lower-layer occupants after Flood, Drought, or Fate leaves the realm.
+    fn settle_after_removed_terrain_aura(
+        &mut self,
+        cells: &[Cell],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        self.settle_overlay_layers(cells);
         self.settle_region_occupancy(outcomes)?;
         self.settle_nearby_enemy_stealth(outcomes);
         Ok(())
@@ -16819,6 +16854,9 @@ impl Game {
             .position(|aura| aura.card.instance_id == *aura_instance_id)
             .ok_or(GameError::IllegalAction)?;
         let aura = self.position.auras.remove(index);
+        let overlay_cells = self
+            .aura_changes_site_water(&aura)
+            .then(|| aura.cells.clone());
         let owner = aura.card.owner;
         let controller = aura.controller;
         let instance_id = aura.card.instance_id.clone();
@@ -16836,6 +16874,9 @@ impl Game {
                 "sourceInstanceId": instance_id,
             })
         });
+        if let Some(cells) = overlay_cells {
+            self.settle_after_removed_terrain_aura(&cells, outcomes)?;
+        }
         Ok(())
     }
 
