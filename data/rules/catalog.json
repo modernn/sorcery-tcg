@@ -7624,6 +7624,55 @@
         "file": "crates/sorcery-engine/tests/return_site_footprint_rules.rs",
         "testName": "rule_catalog_0348_returning_non_anchor_site_banishes_underground_square"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0349",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Creating adjacent Rubble while playing an earth site fills that void. A Voidwalk minion already in that void surfaces on the Rubble and stays in play. It is not banished as if stranded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "earthSitePlayCreatesAdjacentRubble",
+        "voidwalk"
+      ],
+      "actionHints": [
+        "play-site",
+        "summon"
+      ],
+      "eventHints": [
+        "rubble-created",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rubble_void_rules.rs",
+        "testName": "rule_catalog_0349_adjacent_rubble_surfaces_voidwalk_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0350",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Creating adjacent Rubble while playing an earth site fills that void. A loose Artifact already in that void surfaces on the Rubble, the same way playing a site surfaces the Artifacts its void held.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "earthSitePlayCreatesAdjacentRubble"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "rubble-created",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rubble_void_rules.rs",
+        "testName": "rule_catalog_0350_adjacent_rubble_surfaces_void_artifact"
+      }
     }
   ]
 }

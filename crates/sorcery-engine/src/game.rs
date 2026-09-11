@@ -7554,9 +7554,9 @@ impl Game {
             .collect()
     }
 
-    /// Relayers whatever a freshly played site now covers at its own cell.
+    /// Relayers whatever a freshly played site or newly created rubble now covers at its own cell.
     ///
-    /// The new site fills the void, so its occupants and the Artifacts lying loose there surface
+    /// The new surface fills the void, so its occupants and the Artifacts lying loose there surface
     /// instead of being stranded. Replacing rubble with water floods the layer beneath it.
     fn settle_covered_layers(&mut self, cell: Cell, floods_underground: bool) {
         let relayer = |region: &mut Region| match *region {
@@ -12722,6 +12722,9 @@ impl Game {
                     "sourceInstanceId": avatar_instance_id,
                 })
             });
+            // Adjacent rubble fills the void the same way a played site does.
+            self.settle_covered_layers(rubble_cell, false);
+            self.settle_region_occupancy(outcomes)?;
         }
         Ok(())
     }
