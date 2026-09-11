@@ -342,6 +342,17 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         )
         .is_ok()
     );
+    assert!(
+        parse_card_definition(
+            "pay-life-cost",
+            &with(
+                spell("magic", ("healController", json!(1))),
+                "payLifeAsAdditionalCost",
+                json!(2),
+            ),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -621,6 +632,37 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
                 json!(true),
             ),
             "competing additional discard costs",
+        ),
+        (
+            "pay life is not zero",
+            with(
+                spell("magic", ("healController", json!(1))),
+                "payLifeAsAdditionalCost",
+                json!(0),
+            ),
+            "must be between",
+        ),
+        (
+            "pay life is not a boolean",
+            with(
+                spell("magic", ("healController", json!(1))),
+                "payLifeAsAdditionalCost",
+                json!(true),
+            ),
+            "must be a supported safe integer",
+        ),
+        (
+            "pay life competes with chosen discard",
+            with(
+                with(
+                    spell("magic", ("healController", json!(1))),
+                    "discardCardAsAdditionalCost",
+                    json!(true),
+                ),
+                "payLifeAsAdditionalCost",
+                json!(2),
+            ),
+            "competing additional costs",
         ),
         (
             "bad damage grid value",

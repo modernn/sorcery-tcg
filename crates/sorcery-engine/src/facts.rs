@@ -285,6 +285,7 @@ pub struct MagicFacts {
     pub discard_card_as_additional_cost: bool,
     pub effect: MagicEffect,
     pub mana_cost: u64,
+    pub pay_life_as_additional_cost: Option<u8>,
     pub thresholds: Thresholds,
 }
 
@@ -812,6 +813,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "manaCost",
     "millSites",
     "millSpells",
+    "payLifeAsAdditionalCost",
     "returnMinionFromOwnCemetery",
     "returnTargetArtifactFromOwnCemetery",
     "returnTargetAuraFromOwnCemetery",
@@ -1369,6 +1371,15 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             "competing additional discard costs are unsupported",
         ));
     }
+    let pay_life_as_additional_cost =
+        optional_bounded_integer(object, "payLifeAsAdditionalCost", 1, MAX_COMBAT_STAT, path)?
+            .map(compact_u8);
+    if pay_life_as_additional_cost.is_some() && (discard_card || discard_site) {
+        return Err(FactError::new(
+            path,
+            "competing additional costs are unsupported",
+        ));
+    }
 
     let token_reference = parse_reference(
         object,
@@ -1497,6 +1508,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         discard_card_as_additional_cost: discard_card,
         effect,
         mana_cost: required_nonnegative_integer(object, "manaCost", MAX_SAFE_INTEGER, path)?,
+        pay_life_as_additional_cost,
         thresholds: parse_thresholds(object, path)?,
     })
 }

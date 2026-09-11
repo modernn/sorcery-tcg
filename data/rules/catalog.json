@@ -6889,6 +6889,55 @@
         "file": "crates/sorcery-engine/tests/landbound_rules.rs",
         "testName": "rule_catalog_0319_flood_overlay_disables_landbound_in_place"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0320",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Magic card with a printed Pay Life additional cost spends that life before the cast is announced. Paying life is not losing life or damage. The spell then resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost",
+        "healController"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "life-paid",
+        "magic-cast"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pay_life_rules.rs",
+        "testName": "rule_catalog_0320_pay_life_cost_is_paid_before_the_cast_resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0321",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Pay Life is legal only when current life is at least the printed amount. Paying the remaining life reaches Death's Door without a death blow. Death's Door cannot pay any life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "life-paid",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pay_life_rules.rs",
+        "testName": "rule_catalog_0321_deaths_door_cannot_pay_life"
+      }
     }
   ]
 }
