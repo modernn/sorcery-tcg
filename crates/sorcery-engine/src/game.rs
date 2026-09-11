@@ -13023,8 +13023,9 @@ impl Game {
     /// Flies one controlled site to a nearby empty cell, carrying everything standing on it.
     ///
     /// The site keeps its identity and controller, so only its cell changes; oversized units are
-    /// left behind because they never stood on the flying site alone. Whatever the departure or
-    /// arrival strands is settled afterwards by the ordinary region rules.
+    /// left behind because they never stood on the flying site alone. Arrival fills the void the
+    /// same way playing a site or creating rubble does, so occupants already there surface.
+    /// Whatever the departure or arrival strands is settled afterwards by the ordinary region rules.
     fn apply_site_flight_action(
         &mut self,
         seat: Seat,
@@ -13097,6 +13098,8 @@ impl Game {
             last_flight_turn: Some(self.position.turn_number),
             ..source
         });
+        // Arrival fills the void the same way playing a site or creating rubble does.
+        self.settle_covered_layers(target_cell, self.is_water_site(target_cell));
         outcomes.push("site-flown", || {
             json!({
                 "carriedArtifactInstanceIds": carried_artifact_instance_ids,
