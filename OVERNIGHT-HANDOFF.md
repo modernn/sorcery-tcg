@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/schedule-artifacts-0005`. Stack this on current `master` (`c4fd248`). Do not grow already-merged landings.
+Live line: `cursor/artifact-replay-0005`. Stack this on current `master` (`da01d0c`). Do not grow already-merged landings.
 
-This branch writes opt-in SIM-03 artifact directories from seat-swapped schedules (`schedule --out dir`). Games use the same flat `{dir}/{jobIndex}/` layout as batch. Compact schedule stdout is unchanged.
+This branch adds SIM-06 artifact replay: `sorcery-engine replay dir` replays `manifest.json` + `transcript.json` and classifies engine, schema, authority, identity, transcript, event, and state mismatches. Compact demo/batch/schedule stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

@@ -16,7 +16,9 @@ use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
     validate_deck,
 };
-use sorcery_engine::game_record::{record_synthetic_demo, write_game_artifacts};
+use sorcery_engine::game_record::{
+    record_synthetic_demo, replay_game_artifacts, write_game_artifacts,
+};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::schedule::{FailurePolicy, SeedBlock, run_synthetic_schedule};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
@@ -46,6 +48,9 @@ enum Command {
         workers: usize,
         seeds: Vec<u32>,
         artifacts_dir: Option<String>,
+    },
+    Replay {
+        artifacts_dir: String,
     },
 }
 
@@ -167,6 +172,9 @@ fn run() -> CliResult<()> {
             FailurePolicy::Abort,
             artifacts_dir.as_deref().map(Path::new),
         )?),
+        Command::Replay { artifacts_dir } => {
+            write_canonical_json(&replay_game_artifacts(Path::new(&artifacts_dir))?)
+        }
     }
 }
 
@@ -197,6 +205,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
         }
         Some("batch") => parse_batch_args(args),
         Some("schedule") => parse_schedule_args(args),
+        Some("replay") => {
+            let artifacts_dir = args
+                .next()
+                .ok_or_else(|| io::Error::other("usage: sorcery-engine replay dir"))?;
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine replay dir").into());
+            }
+            Ok(Command::Replay { artifacts_dir })
+        }
         Some("batch-json") => {
             if args.next().is_some() {
                 return Err(io::Error::other("usage: sorcery-engine batch-json").into());
@@ -204,7 +221,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | replay dir | batch-json",
         )
         .into()),
     }
@@ -500,6 +517,17 @@ mod tests {
         Command, MAX_BATCH_JSON_BYTES, manifest_deck_ids, parse_args, policy_for_deck,
         run_batch_json, validate_batch_json_size,
     };
+
+    #[test]
+    fn parse_args_should_require_replay_dir() {
+        let command = parse_args(["replay".to_owned(), "games/31".to_owned()].into_iter())
+            .expect("valid replay");
+        let Command::Replay { artifacts_dir } = command else {
+            panic!("expected replay command");
+        };
+        assert_eq!(artifacts_dir, "games/31");
+        assert!(parse_args(["replay".to_owned()].into_iter()).is_err());
+    }
 
     #[test]
     fn parse_args_should_default_record_seed() {

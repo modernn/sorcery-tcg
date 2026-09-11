@@ -24,7 +24,8 @@ use crate::facts::{
 };
 use crate::prng::PrngState;
 
-const ENGINE_VERSION: &str = "sorcery-core-v1";
+/// Frozen public engine version bound into every admitted manifest.
+pub const ENGINE_VERSION: &str = "sorcery-core-v1";
 const MAX_DECK_CARDS: usize = 200;
 const CHAIN_MAGIC_DAMAGE: u16 = 2;
 const CHAIN_MAGIC_EXTRA_TARGET_MANA: u64 = 2;

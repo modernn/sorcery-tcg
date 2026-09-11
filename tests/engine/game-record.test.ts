@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import { identityHash } from '../../src/authority/hash.ts';
+import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import { runGameDemo, runGameRecord } from '../../src/commands/run-game-demo.ts';
-import type { JsonValue } from '../../src/authority/canonical-json.ts';
+import { replayGameArtifacts } from '../../src/commands/run-game-replay.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 
@@ -86,4 +87,36 @@ test('TEST-02 fresh processes emit byte-identical game records', () => {
   const first = run();
   const second = run();
   assert.equal(first.compare(second), 0);
+});
+
+test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sorcery-artifact-replay-'));
+  try {
+    runGameDemo(31, dir);
+    const matched = replayGameArtifacts(dir);
+    assert.equal(matched.matched, true);
+    assert.equal(matched.replayVerified, true);
+    assert.equal(matched.classification, 'unranked_partial_rules_unverified_authority');
+    assert.equal(matched.mismatch, undefined);
+
+    const manifestPath = join(dir, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    manifest.engineVersion = 'sorcery-core-v0';
+    writeFileSync(manifestPath, `${canonicalJson(manifest as JsonValue)}\n`);
+    const engine = replayGameArtifacts(dir);
+    assert.equal(engine.matched, false);
+    assert.equal(engine.mismatch, 'engine-version');
+    assert.equal(engine.replayVerified, false);
+
+    runGameDemo(31, dir);
+    const outcomePath = join(dir, 'outcome.json');
+    const outcome = JSON.parse(readFileSync(outcomePath, 'utf8')) as Record<string, unknown>;
+    outcome.finalStateHash = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    writeFileSync(outcomePath, `${canonicalJson(outcome as JsonValue)}\n`);
+    const state = replayGameArtifacts(dir);
+    assert.equal(state.matched, false);
+    assert.equal(state.mismatch, 'final-state-hash');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
