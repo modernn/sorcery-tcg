@@ -1,3 +1,8 @@
+import {
+  parseEligibilityReport,
+  type EligibilityGates,
+  type EligibilityReason,
+} from '../engine/eligibility.ts';
 import { runRustEngineCommand, type Sha256Hash } from '../engine/rust-engine.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -38,6 +43,9 @@ export type ScheduleSummary = Readonly<{
   }>;
   eligibility: 'unranked_partial_rules_unverified_authority';
   games: number;
+  gates: EligibilityGates;
+  ranked: false;
+  reasons: readonly EligibilityReason[];
   length: Readonly<{
     totalActions: number;
     totalFights: number;
@@ -145,16 +153,25 @@ function parseSummary(value: unknown, gameCount: number): ScheduleSummary {
     || value.seatEffect !== bySeat.north.wins - bySeat.south.wins) {
     throw new Error('schedule uncertainty or seat effect did not match W/D/L');
   }
+  const eligibility = parseEligibilityReport({
+    classification: 'unranked_partial_rules_unverified_authority',
+    gates: value.gates,
+    ranked: value.ranked,
+    reasons: value.reasons,
+  });
   return Object.freeze({
     byDeck,
     bySeat,
     eligibility: 'unranked_partial_rules_unverified_authority',
     games,
+    gates: eligibility.gates,
     length: Object.freeze({
       totalActions: parseCount(value.length.totalActions, 'totalActions'),
       totalFights: parseCount(value.length.totalFights, 'totalFights'),
       totalTurns: parseCount(value.length.totalTurns, 'totalTurns'),
     }),
+    ranked: false as const,
+    reasons: eligibility.reasons,
     reliability,
     seatEffect: value.seatEffect as number,
     uncertainty,

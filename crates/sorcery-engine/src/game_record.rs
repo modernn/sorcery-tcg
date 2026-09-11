@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::batch::{BatchClassification, FinishedTerminal, MAX_GAME_ACTIONS};
 use crate::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
 use crate::contract::{ActionRequest, Event, Receipt};
+use crate::eligibility::{EligibilityGates, EligibilityReport, evaluate_eligibility};
 use crate::game::{ENGINE_VERSION, Game};
 use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
 use crate::session::{Session, SessionError, StepResult};
@@ -39,6 +40,8 @@ pub struct GameRecord {
     pub classification: BatchClassification,
     /// Action and event kinds exercised by this game.
     pub coverage: GameCoverage,
+    /// TEST-04 eligibility. Finished synthetic games stay unranked.
+    pub eligibility: EligibilityReport,
     /// Canonical JSONL of every transcript event, one object per line.
     pub event_jsonl: String,
     /// Identity of the flattened event list.
@@ -102,6 +105,8 @@ pub enum ReplayMismatch {
 pub struct ArtifactReplayReport {
     /// Ranked/public result classification.
     pub classification: BatchClassification,
+    /// TEST-04 eligibility. Replays stay unranked.
+    pub eligibility: EligibilityReport,
     /// Every compared hash and identity matched.
     pub matched: bool,
     /// First classified mismatch, if any.
@@ -121,6 +126,8 @@ pub struct GameOutcomeArtifact {
     pub accepted_action_count: usize,
     /// Ranked/public result classification.
     pub classification: BatchClassification,
+    /// TEST-04 eligibility. Finished synthetic games stay unranked.
+    pub eligibility: EligibilityReport,
     /// Identity of the flattened event list.
     pub events_hash: IdentityHash,
     /// Number of fights started.
@@ -212,6 +219,7 @@ impl GameRecord {
         GameOutcomeArtifact {
             accepted_action_count: self.accepted_action_count,
             classification: self.classification,
+            eligibility: self.eligibility.clone(),
             events_hash: self.events_hash.clone(),
             fight_count: self.fight_count,
             final_state_hash: self.final_state_hash.clone(),
@@ -291,6 +299,15 @@ pub fn replay_game_artifacts(dir: &Path) -> Result<ArtifactReplayReport, GameRec
 fn mismatch_report(mismatch: ReplayMismatch) -> ArtifactReplayReport {
     ArtifactReplayReport {
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        eligibility: evaluate_eligibility(EligibilityGates {
+            coverage: false,
+            design: false,
+            execution: false,
+            legality: false,
+            pinned_input: false,
+            replay: false,
+            reporting: true,
+        }),
         matched: false,
         mismatch: Some(mismatch),
         replay_verified: false,
@@ -348,11 +365,25 @@ fn compare_replay(
     } else {
         None
     };
+    let matched = mismatch.is_none();
     ArtifactReplayReport {
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
-        matched: mismatch.is_none(),
+        eligibility: if matched {
+            record.eligibility.clone()
+        } else {
+            evaluate_eligibility(EligibilityGates {
+                coverage: record.eligibility.gates.coverage,
+                design: record.eligibility.gates.design,
+                execution: record.eligibility.gates.execution,
+                legality: record.eligibility.gates.legality,
+                pinned_input: record.eligibility.gates.pinned_input,
+                replay: false,
+                reporting: true,
+            })
+        },
+        matched,
         mismatch,
-        replay_verified: mismatch.is_none(),
+        replay_verified: matched,
         schema_version: 1,
     }
 }
@@ -421,10 +452,13 @@ pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRec
     };
     let coverage = coverage_from_session(session)?;
     let events = flatten_events(session.transcript());
+    let manifest: Value = serde_json::from_str(session.manifest_json())?;
+    let eligibility = finished_game_eligibility(&manifest, &coverage, true);
     Ok(GameRecord {
         accepted_action_count: session.transcript().len(),
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         coverage,
+        eligibility,
         event_jsonl: event_jsonl(&events)?,
         events_hash: identity_hash(&serde_json::to_value(&events)?)?,
         fight_count: events
@@ -432,7 +466,7 @@ pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRec
             .filter(|event| event.event_type == "fight-started")
             .count(),
         final_state_hash: session.state_hash()?,
-        manifest: serde_json::from_str(session.manifest_json())?,
+        manifest,
         manifest_id: session.manifest_id().clone(),
         replay_verified: true,
         schema_version: 1,
@@ -440,6 +474,29 @@ pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRec
         transcript: session.transcript().to_vec(),
         transcript_hash: session.transcript_hash()?,
         turn_count: session.turn_number(),
+    })
+}
+
+fn finished_game_eligibility(
+    manifest: &Value,
+    coverage: &GameCoverage,
+    replay_verified: bool,
+) -> EligibilityReport {
+    evaluate_eligibility(EligibilityGates {
+        coverage: !coverage.offered_action_kinds.is_empty()
+            || !coverage.committed_action_kinds.is_empty(),
+        design: manifest
+            .get("decks")
+            .and_then(Value::as_object)
+            .is_some_and(|decks| decks.contains_key("north") && decks.contains_key("south")),
+        execution: true,
+        legality: true,
+        pinned_input: manifest.get("seed").is_some()
+            && manifest.get("manifestId").is_some()
+            && manifest.get("engineVersion").and_then(Value::as_str) == Some(ENGINE_VERSION)
+            && manifest_authority_hash(manifest).is_some(),
+        replay: replay_verified,
+        reporting: true,
     })
 }
 
@@ -616,6 +673,15 @@ mod tests {
 
         assert_eq!(record.schema_version, 1);
         assert!(record.replay_verified);
+        assert!(!record.eligibility.ranked);
+        assert!(record.eligibility.gates.all_passed());
+        assert_eq!(
+            record.eligibility.reasons,
+            [
+                crate::eligibility::EligibilityReason::PartialRules,
+                crate::eligibility::EligibilityReason::UnverifiedAuthority
+            ]
+        );
         assert_eq!(record.accepted_action_count, 230);
         assert_eq!(record.fight_count, 6);
         assert_eq!(record.turn_count, 27);
@@ -720,6 +786,8 @@ mod tests {
         assert!(report.matched);
         assert!(report.replay_verified);
         assert_eq!(report.mismatch, None);
+        assert!(!report.eligibility.ranked);
+        assert!(report.eligibility.gates.all_passed());
         assert_eq!(
             report.classification,
             crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority

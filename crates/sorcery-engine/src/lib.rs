@@ -8,6 +8,7 @@ pub mod checkpoint;
 pub mod contract;
 pub mod counterfactual;
 pub mod deck;
+pub mod eligibility;
 pub mod facts;
 pub mod game;
 pub mod game_record;

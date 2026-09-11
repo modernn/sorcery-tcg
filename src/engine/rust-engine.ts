@@ -9,6 +9,7 @@ import {
   parseJsonWithDuplicateKeyCheck,
   type JsonValue,
 } from '../authority/canonical-json.ts';
+import { parseEligibilityReport, type EligibilityReport } from './eligibility.ts';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const MAX_OUTPUT_BYTES = 16 * 1_048_576;
@@ -55,6 +56,7 @@ export type RustGameRecord = Readonly<{
     committedEventTypes: readonly string[];
     offeredActionKinds: readonly string[];
   }>;
+  eligibility: EligibilityReport;
   eventJsonl: string;
   eventsHash: Sha256Hash;
   fightCount: number;
@@ -293,6 +295,7 @@ function parseRustRecord(value: unknown): RustGameRecord {
         [...value.coverage.offeredActionKinds] as string[],
       ),
     }),
+    eligibility: parseEligibilityReport(value.eligibility),
     eventJsonl: value.eventJsonl,
     eventsHash: requireHash(value.eventsHash, 'eventsHash'),
     fightCount: value.fightCount as number,

@@ -20,6 +20,15 @@ test('SIM-05 seed-31 schedule reports integer W/D/L, seat effect, and eligibilit
   const report = runGameSchedule([31], 2);
   const { summary } = report;
   assert.equal(summary.eligibility, 'unranked_partial_rules_unverified_authority');
+  assert.equal(summary.ranked, false);
+  assert.deepEqual(summary.reasons, ['partial-rules', 'unverified-authority']);
+  assert.equal(summary.gates.coverage, true);
+  assert.equal(summary.gates.design, true);
+  assert.equal(summary.gates.execution, true);
+  assert.equal(summary.gates.legality, true);
+  assert.equal(summary.gates.pinnedInput, true);
+  assert.equal(summary.gates.replay, true);
+  assert.equal(summary.gates.reporting, true);
   assert.equal(summary.games, 2);
   assert.deepEqual(summary.bySeat.north, { draws: 0, games: 2, losses: 2, wins: 0 });
   assert.deepEqual(summary.bySeat.south, { draws: 0, games: 2, losses: 0, wins: 2 });
