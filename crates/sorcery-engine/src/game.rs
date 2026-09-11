@@ -3280,6 +3280,9 @@ impl Game {
             };
             if u64::from(player.mana) < facts.mana_cost
                 || !self.thresholds_met(seat, facts.thresholds)
+                || facts
+                    .pay_life_as_additional_cost
+                    .is_some_and(|amount| player.avatar.life < u16::from(amount))
             {
                 continue;
             }
@@ -14332,6 +14335,15 @@ impl Game {
         let mana_paid =
             facts.mana_cost + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(extra_targets);
         let mana_paid = u16::try_from(mana_paid).map_err(|_| GameError::IllegalAction)?;
+        let life_paid = facts.pay_life_as_additional_cost;
+        if life_paid.is_some_and(|amount| {
+            self.position.players[player_index].avatar.life < u16::from(amount)
+        }) {
+            return Err(GameError::IllegalAction);
+        }
+        if let Some(amount) = life_paid {
+            self.pay_avatar_life(action.seat, amount, &pending.card_instance_id, outcomes)?;
+        }
         let caster_kind = self
             .spellcaster_kind(action.seat, &pending.caster_instance_id)
             .ok_or(GameError::IllegalAction)?;
@@ -14359,14 +14371,18 @@ impl Game {
         self.position.decision_seat = self.position.active_seat;
         self.position.phase = Phase::Main;
         outcomes.push("magic-cast", || {
-            json!({
+            let mut payload = json!({
                 "cardId": card_id,
                 "casterInstanceId": pending.caster_instance_id,
                 "instanceId": pending.card_instance_id,
                 "manaPaid": mana_paid,
                 "seat": action.seat,
                 "targetInstanceIds": pending.targets.iter().map(UnitTarget::instance_id).collect::<Vec<_>>(),
-            })
+            });
+            if let Some(amount) = life_paid {
+                payload["lifePaid"] = json!(amount);
+            }
+            payload
         });
         self.record_unit_interaction(
             caster_kind,
@@ -16972,6 +16988,9 @@ impl Game {
         };
         if facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
+            || facts
+                .pay_life_as_additional_cost
+                .is_some_and(|amount| player.avatar.life < u16::from(amount))
             || !{
                 let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
                 if facts.discard_card_as_additional_cost {
@@ -17001,6 +17020,7 @@ impl Game {
         let effect = facts.effect.clone();
         let thresholds = facts.thresholds;
         let mana_paid = u16::try_from(facts.mana_cost).map_err(|_| GameError::IllegalAction)?;
+        let life_paid = facts.pay_life_as_additional_cost;
         let next_air_thresholds_cast_this_turn = player
             .air_thresholds_cast_this_turn
             .map(|cast_air| {
@@ -17138,6 +17158,9 @@ impl Game {
                 outcomes,
             )?;
         }
+        if let Some(amount) = life_paid {
+            self.pay_avatar_life(seat, amount, card_instance_id, outcomes)?;
+        }
         let card = {
             let player = &mut self.position.players[player_index];
             let hand_index = player
@@ -17169,6 +17192,9 @@ impl Game {
             }
             if let Some(discard_site_instance_id) = discard_site_instance_id {
                 payload["discardSiteInstanceId"] = json!(discard_site_instance_id);
+            }
+            if let Some(amount) = life_paid {
+                payload["lifePaid"] = json!(amount);
             }
             if let Some(ally) = ally {
                 payload["allyInstanceId"] = json!(ally.instance_id());
@@ -19954,6 +19980,42 @@ impl Game {
                     self.apply_untap_minion(&instance_id, seat, &source_id, outcomes)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn pay_avatar_life(
+        &mut self,
+        seat: Seat,
+        amount: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let player = &mut self.position.players[seat_index(seat)];
+        let paid = u16::from(amount);
+        if player.avatar.life < paid {
+            return Err(GameError::IllegalAction);
+        }
+        player.avatar.life -= paid;
+        let life = player.avatar.life;
+        outcomes.push("life-paid", || {
+            json!({
+                "amount": paid,
+                "life": life,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        if life == 0 {
+            player.avatar.death_door_turn = Some(self.position.turn_number);
+            let turn_number = self.position.turn_number;
+            outcomes.push("avatar-reached-deaths-door", || {
+                json!({
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                    "turnNumber": turn_number,
+                })
+            });
         }
         Ok(())
     }

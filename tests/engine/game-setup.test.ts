@@ -973,6 +973,53 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /competing additional discard costs/);
+  const payLifeManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 1,
+        manaCost: 0,
+        payLifeAsAdditionalCost: 2,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(payLifeManifest.cards[firstSpell], {
+    cardType: 'magic',
+    healController: 1,
+    manaCost: 0,
+    payLifeAsAdditionalCost: 2,
+    thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        healController: 1,
+        manaCost: 0,
+        payLifeAsAdditionalCost: 0,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /payLifeAsAdditionalCost/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        discardCardAsAdditionalCost: true,
+        drawSites: 1,
+        manaCost: 0,
+        payLifeAsAdditionalCost: 2,
+        thresholds: { air: 0, earth: 2, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /competing additional costs/);
   const freezeManifest = createGameManifest({
     ...input,
     cards: {

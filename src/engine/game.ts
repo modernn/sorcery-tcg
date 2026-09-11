@@ -373,6 +373,7 @@ export type GameCardDefinition =
     manaCost: number;
     millSites?: number;
     millSpells?: number;
+    payLifeAsAdditionalCost?: number;
     targetPlayerDiscardsCards?: number;
     targetPlayerDrawsSites?: number;
     targetPlayerDrawsSpells?: number;
@@ -1267,7 +1268,7 @@ const SUPPORTED_CARD_FIELDS = {
     fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
-    lureEnemyMinionOneStepCloser manaCost millSites millSpells returnMinionFromOwnCemetery
+    lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
@@ -1827,6 +1828,15 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     if (card.discardCardAsAdditionalCost === true && card.discardSiteAsAdditionalCost === true) {
       throw new RangeError(`${path} competing additional discard costs are unsupported`);
+    }
+    if (card.payLifeAsAdditionalCost !== undefined && (!Number.isSafeInteger(card.payLifeAsAdditionalCost)
+      || card.payLifeAsAdditionalCost < 1
+      || card.payLifeAsAdditionalCost > MAX_COMBAT_STAT)) {
+      throw new RangeError(`${path}.payLifeAsAdditionalCost must be a safe integer between 1 and ${MAX_COMBAT_STAT}`);
+    }
+    if (card.payLifeAsAdditionalCost !== undefined
+      && (card.discardCardAsAdditionalCost === true || card.discardSiteAsAdditionalCost === true)) {
+      throw new RangeError(`${path} competing additional costs are unsupported`);
     }
     if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
       throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
@@ -2911,6 +2921,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                 : {}),
               ...(card.discardCardAsAdditionalCost === true
                 ? { discardCardAsAdditionalCost: true as const }
+                : {}),
+              ...(card.payLifeAsAdditionalCost !== undefined
+                ? { payLifeAsAdditionalCost: card.payLifeAsAdditionalCost }
                 : {}),
             }
           : {

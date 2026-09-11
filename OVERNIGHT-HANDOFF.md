@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/landbound-keyword-0005`. Stack this on current `master` (`7acd63c`). Do not grow already-merged landings.
+Live line: `cursor/pay-life-cost-0005`. Stack this on current `master` (`a6e1eb3`). Do not grow already-merged landings.
 
-This branch binds official Landbound as the land-site sibling of Waterbound: a minion is Disabled while it occupies no land location, and the Landbound ability itself still applies while Disabled. Mixed Water sites and Flood overlays are not land. Compact demo/batch stdout is unchanged.
+This branch binds official Pay Life as an additional Magic cost: the caster pays the printed life before the cast is announced. Paying life is not losing life or damage. You can pay only if current life is at least the printed amount, so Death's Door cannot pay. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,10 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **319 rust-supported / 0 typescript-supported** out of 319.
+`data/rules/catalog.json`: **321 rust-supported / 0 typescript-supported** out of 321.
 
-Latest catalog proofs: Landbound (`RULE-CATALOG-0318`–`0319`). A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
+Latest catalog proofs: Pay Life (`RULE-CATALOG-0320`–`0321`). Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
+Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
 Official 2×2 Voidwalk remains `RULE-CATALOG-0316`–`0317`. A 2×2 Voidwalk minion summons and steps only on all-void squares. Existing helpers do not offer a surface step, because a one-cell translation overlaps.
 Official Monument carry prohibition remains `RULE-CATALOG-0314`–`0315`. A Monument can be conjured onto a site but cannot be conjured onto a unit or picked up. An ordinary Artifact on the same square stays carryable.
 Belfry nearby untap remains `RULE-CATALOG-0312`–`0313`.
