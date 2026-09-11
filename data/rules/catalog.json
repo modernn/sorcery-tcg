@@ -7673,6 +7673,54 @@
         "file": "crates/sorcery-engine/tests/rubble_void_rules.rs",
         "testName": "rule_catalog_0350_adjacent_rubble_surfaces_void_artifact"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0351",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Flying a site onto a nearby void fills that void. A Voidwalk minion already in that void surfaces on the arrived site and stays in play. It is not banished as if stranded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "flyToNearbyVoidOncePerTurnAtAirThreshold",
+        "voidwalk"
+      ],
+      "actionHints": [
+        "fly-site",
+        "summon"
+      ],
+      "eventHints": [
+        "site-flown"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_flight_void_rules.rs",
+        "testName": "rule_catalog_0351_flight_onto_void_surfaces_voidwalk_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0352",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-05"
+      ],
+      "plainLanguage": "Flying a site onto a nearby void fills that void. A loose Artifact already in that void surfaces on the arrived site, the same way playing a site or creating rubble surfaces the Artifacts its void held.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "flyToNearbyVoidOncePerTurnAtAirThreshold"
+      ],
+      "actionHints": [
+        "fly-site",
+        "cast-artifact",
+        "drop-artifacts"
+      ],
+      "eventHints": [
+        "site-flown"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_flight_void_rules.rs",
+        "testName": "rule_catalog_0352_flight_onto_void_surfaces_void_artifact"
+      }
     }
   ]
 }
