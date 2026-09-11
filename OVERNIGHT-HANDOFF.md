@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/trial-accounting-0005`. Stack this on current `master` (`7661f42`). Do not grow already-merged landings.
+Live line: `cursor/adapter-hashes-0005`. Stack this on current `master` (`2e6358e`). Do not grow already-merged landings.
 
-This branch adds TEST-05 trial accounting on schedule summaries. Every planned game is counted exactly once as completed, drawn, invalid, competitor failure, or infrastructure failure. Seed-31 is 2/0/0/0/0. A stopped later pair accounts the unrun games as infrastructure failures. Compact demo/batch stdout is unchanged.
+This branch proves WEB-06: the seed-31 transcript produces the same hashes through `sorcery-engine record`, a fresh session-json step loop, and the playable-core HTTP adapter. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

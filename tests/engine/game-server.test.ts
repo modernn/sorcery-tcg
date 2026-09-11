@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 
-import { createSyntheticDemoManifest } from '../../src/commands/run-game-demo.ts';
+import {
+  createSyntheticDemoManifest,
+  runGameDemo,
+  runGameRecord,
+} from '../../src/commands/run-game-demo.ts';
 import { createGameManifest } from '../../src/engine/game.ts';
 import { withRustSession } from '../../src/engine/rust-session-helpers.ts';
 import { createGamePrototypeServer } from '../../src/prototype/game-server.ts';
@@ -60,6 +64,21 @@ async function submit(candidate: JsonObject, base = origin): Promise<JsonObject>
     seat: candidate.seat,
     stateVersion: candidate.stateVersion,
   }, base);
+}
+
+function recordedAction(value: unknown): JsonObject {
+  assert.equal(typeof value === 'object' && value !== null && !Array.isArray(value), true);
+  const receipt = value as JsonObject;
+  assert.equal(typeof receipt.actionId, 'string');
+  assert.equal(typeof receipt.postStateHash, 'string');
+  assert.equal(receipt.seat === 'north' || receipt.seat === 'south', true);
+  assert.equal(Number.isSafeInteger(receipt.stateVersion), true);
+  return {
+    actionId: receipt.actionId,
+    postStateHash: receipt.postStateHash,
+    seat: receipt.seat,
+    stateVersion: receipt.stateVersion,
+  };
 }
 
 function keep(response: JsonObject): JsonObject {
@@ -586,4 +605,45 @@ test('browser API lets North play a deterministic South opponent through termina
   const replay = await post('/api/replay');
   assert.equal(replay.verified, true);
   assert.equal(replay.finalStateHash, current.stateHash);
+});
+
+test('WEB-06 seed-31 hashes match through headless and browser adapters', async () => {
+  const demo = runGameDemo(31);
+  const record = runGameRecord(31);
+  assert.equal(record.finalStateHash, demo.finalStateHash);
+  assert.equal(record.transcriptHash, demo.transcriptHash);
+  assert.equal(record.transcript.length, 230);
+
+  await withRustSession(createSyntheticDemoManifest(31), async (handle) => {
+    for (const receipt of record.transcript) {
+      const action = recordedAction(receipt);
+      const result = await handle.step({
+        actionId: String(action.actionId),
+        seat: action.seat as 'north' | 'south',
+        stateVersion: action.stateVersion as number,
+      });
+      assert.equal(result.accepted, true);
+      assert.equal(await handle.stateHash(), action.postStateHash);
+    }
+    assert.equal(await handle.stateHash(), record.finalStateHash);
+    assert.equal(await handle.verifyReplay(), true);
+  });
+
+  let current = await post('/api/reset', { opponent: 'manual', seed: 31 });
+  for (const receipt of record.transcript) {
+    const action = recordedAction(receipt);
+    current = await submit(action);
+    assert.equal(current.accepted, true);
+    assert.equal(current.stateHash, action.postStateHash);
+  }
+  assert.equal(current.stateHash, demo.finalStateHash);
+  assert.equal(((current.view as JsonObject).terminal as JsonObject).status, 'finished');
+  const replay = await post('/api/replay');
+  assert.equal(replay.verified, true);
+  assert.equal(replay.finalStateHash, record.finalStateHash);
+  assert.equal(replay.acceptedActionCount, 230);
+  const steps = await json('/api/replay/steps');
+  assert.equal(steps.chained, true);
+  assert.equal(steps.stepCount, 230);
+  assert.equal(steps.finalStateHash, record.finalStateHash);
 });
