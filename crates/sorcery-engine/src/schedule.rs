@@ -642,26 +642,21 @@ mod tests {
             report.summary.eligibility,
             crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
-        assert_eq!(report.summary.by_seat.north.games, 2);
-        assert_eq!(report.summary.by_seat.south.games, 2);
-        assert_eq!(report.summary.by_deck["north"].games, 2);
-        assert_eq!(report.summary.by_deck["south"].games, 2);
-        assert_eq!(
-            report.summary.seat_effect,
-            i64::try_from(report.summary.by_seat.north.wins).expect("wins")
-                - i64::try_from(report.summary.by_seat.south.wins).expect("wins")
-        );
-        assert_eq!(
-            report.summary.uncertainty.first_player_score,
-            report.summary.by_seat.north.wins * 2 + report.summary.by_seat.north.draws
-        );
+        assert_eq!(report.summary.by_seat.north.wins, 0);
+        assert_eq!(report.summary.by_seat.north.draws, 0);
+        assert_eq!(report.summary.by_seat.north.losses, 2);
+        assert_eq!(report.summary.by_seat.south.wins, 2);
+        assert_eq!(report.summary.by_deck["north"].wins, 1);
+        assert_eq!(report.summary.by_deck["south"].wins, 1);
+        assert_eq!(report.summary.seat_effect, -2);
+        assert_eq!(report.summary.uncertainty.first_player_score, 0);
         assert_eq!(report.summary.uncertainty.score_denominator, 4);
         assert!(report.summary.reliability.all_replay_verified);
         assert_eq!(report.summary.reliability.replay_verified_games, 2);
         assert_eq!(report.summary.reliability.replay_failed_games, 0);
-        assert!(report.summary.length.total_actions > 0);
-        assert!(report.summary.length.total_fights > 0);
-        assert!(report.summary.length.total_turns > 0);
+        assert_eq!(report.summary.length.total_actions, 436);
+        assert_eq!(report.summary.length.total_fights, 11);
+        assert_eq!(report.summary.length.total_turns, 51);
     }
 
     #[test]

@@ -18,23 +18,14 @@ test('SIM-05 seed-31 schedule reports integer W/D/L, seat effect, and eligibilit
   const { summary } = report;
   assert.equal(summary.eligibility, 'unranked_partial_rules_unverified_authority');
   assert.equal(summary.games, 2);
-  assert.equal(summary.bySeat.north.games, 2);
-  assert.equal(summary.bySeat.south.games, 2);
-  assert.equal(summary.byDeck.north.games, 2);
-  assert.equal(summary.byDeck.south.games, 2);
-  assert.equal(
-    summary.seatEffect,
-    summary.bySeat.north.wins - summary.bySeat.south.wins,
-  );
-  assert.equal(
-    summary.uncertainty.firstPlayerScore,
-    summary.bySeat.north.wins * 2 + summary.bySeat.north.draws,
-  );
-  assert.equal(summary.uncertainty.scoreDenominator, 4);
+  assert.deepEqual(summary.bySeat.north, { draws: 0, games: 2, losses: 2, wins: 0 });
+  assert.deepEqual(summary.bySeat.south, { draws: 0, games: 2, losses: 0, wins: 2 });
+  assert.equal(summary.byDeck.north.wins, 1);
+  assert.equal(summary.byDeck.south.wins, 1);
+  assert.equal(summary.seatEffect, -2);
+  assert.deepEqual(summary.uncertainty, { firstPlayerScore: 0, scoreDenominator: 4 });
   assert.equal(summary.reliability.allReplayVerified, true);
   assert.equal(summary.reliability.replayVerifiedGames, 2);
   assert.equal(summary.reliability.replayFailedGames, 0);
-  assert.ok(summary.length.totalActions > 0);
-  assert.ok(summary.length.totalFights > 0);
-  assert.ok(summary.length.totalTurns > 0);
+  assert.deepEqual(summary.length, { totalActions: 436, totalFights: 11, totalTurns: 51 });
 });
