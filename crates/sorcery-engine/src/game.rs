@@ -8532,11 +8532,15 @@ impl Game {
             ActionDescriptor::ActivateArtifactRollDamage { .. } => {
                 self.apply_artifact_roll_damage_action(action, outcomes)
             }
-            ActionDescriptor::ActivateDiscardRandomDamage { .. } => {
-                self.apply_discard_random_damage_action(action, outcomes, random_draws)
-            }
+            ActionDescriptor::ActivateDiscardRandomDamage { .. } => self
+                .apply_discard_random_damage_action(
+                    action,
+                    outcomes,
+                    random_draws,
+                    forced_random_outcome,
+                ),
             ActionDescriptor::ActivateSparkmage { .. } => {
-                self.apply_sparkmage_action(action, outcomes, random_draws)
+                self.apply_sparkmage_action(action, outcomes, random_draws, forced_random_outcome)
             }
             ActionDescriptor::AllocateStrike {
                 amount,
@@ -8651,9 +8655,12 @@ impl Game {
             ActionDescriptor::ShootDragProjectile { .. } => {
                 self.apply_drag_projectile_action(action, outcomes)
             }
-            ActionDescriptor::SummonMinion { .. } => {
-                self.apply_summon_minion_action(action, outcomes, random_draws)
-            }
+            ActionDescriptor::SummonMinion { .. } => self.apply_summon_minion_action(
+                action,
+                outcomes,
+                random_draws,
+                forced_random_outcome,
+            ),
             ActionDescriptor::MoveAndAttack {
                 from,
                 path,
@@ -14226,12 +14233,13 @@ impl Game {
         Ok(())
     }
 
-    /// Discards one Spellbook card so a minion damages a hidden random other unit at its location.
+    /// Discards one Spellbook card so a minion damages a hidden random other unit sharing its footprint.
     fn apply_discard_random_damage_action(
         &mut self,
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::ActivateDiscardRandomDamage {
             discard_card_instance_id,
@@ -14296,6 +14304,7 @@ impl Game {
             source_instance_id,
             "discard_spell_random_other_unit_here",
             random_draws,
+            forced_random_outcome,
         )?;
         outcomes.push("discard-random-damage-activated", || {
             let mut payload = json!({
@@ -14345,6 +14354,7 @@ impl Game {
         source_instance_id: &IdentityHash,
         purpose: &str,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
         let source = self
             .position
@@ -14354,17 +14364,7 @@ impl Game {
             .cloned()
             .ok_or(GameError::IllegalAction)?;
         let candidates = self.units_sharing_footprint(&source, false);
-        if candidates.is_empty() {
-            return Ok(None);
-        }
-        let index = draw_index(
-            &mut self.position.prng,
-            candidates.len(),
-            purpose,
-            "unit_index_candidate",
-            random_draws,
-        )?;
-        Ok(Some(candidates[index].clone()))
+        self.choose_forced_or_random_unit(&candidates, purpose, random_draws, forced_random_outcome)
     }
 
     /// Draws one hidden random unit sharing a location with an activated source, excluding it.
@@ -14374,19 +14374,38 @@ impl Game {
         source_instance_id: &IdentityHash,
         purpose: &str,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
         let mut candidates = self.units_at_location(location);
         candidates.retain(|(instance_id, _, _)| instance_id != source_instance_id);
+        self.choose_forced_or_random_unit(&candidates, purpose, random_draws, forced_random_outcome)
+    }
+
+    /// Picks the Lucky Charm outcome when one was committed, otherwise one hidden random unit.
+    fn choose_forced_or_random_unit(
+        &mut self,
+        candidates: &[(IdentityHash, UnitKind, Seat)],
+        purpose: &str,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
+    ) -> Result<Option<(IdentityHash, UnitKind, Seat)>, GameError> {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let index = draw_index(
-            &mut self.position.prng,
-            candidates.len(),
-            purpose,
-            "unit_index_candidate",
-            random_draws,
-        )?;
+        let index = if let Some(forced) = forced_random_outcome {
+            candidates
+                .iter()
+                .position(|(instance_id, ..)| instance_id == forced)
+                .ok_or(GameError::IllegalAction)?
+        } else {
+            draw_index(
+                &mut self.position.prng,
+                candidates.len(),
+                purpose,
+                "unit_index_candidate",
+                random_draws,
+            )?
+        };
         Ok(Some(candidates[index].clone()))
     }
 
@@ -14432,6 +14451,7 @@ impl Game {
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::ActivateSparkmage {
             source_instance_id,
@@ -14474,6 +14494,7 @@ impl Game {
             source_instance_id,
             "sparkmage_random_other_unit_at_nearby_location",
             random_draws,
+            forced_random_outcome,
         )?;
         outcomes.push("sparkmage-activated", || {
             let mut payload = json!({
@@ -15299,12 +15320,8 @@ impl Game {
                     .iter()
                     .find(|unit| unit.card.instance_id == *source_instance_id);
                 let source = source?;
-                let location = Location {
-                    cell: source.location,
-                    region: source.region,
-                };
                 let candidates = self
-                    .random_unit_candidates_at_location(location, Some(source_instance_id))
+                    .units_sharing_footprint(source, false)
                     .into_iter()
                     .map(|(instance_id, ..)| instance_id)
                     .collect::<Vec<_>>();
@@ -19240,6 +19257,53 @@ impl Game {
         Self::emit_continuation_magic_resolved(resolution.0, resolution.1, resolution.2, outcomes);
     }
 
+    /// Chooses the Aramos-style random discard, honoring a committed Lucky Charm outcome.
+    fn choose_alternative_summon_discard(
+        player: &PlayerPosition,
+        prng: &mut PrngState,
+        summon_card_instance_id: &IdentityHash,
+        hand_index: usize,
+        discard_candidate_count: usize,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
+    ) -> Result<(DeckZone, usize), GameError> {
+        if let Some(forced) = forced_random_outcome {
+            if let Some(index) = player
+                .hand_atlas
+                .iter()
+                .position(|card| card.instance_id == *forced)
+            {
+                return Ok((DeckZone::Atlas, index));
+            }
+            if let Some(index) = player.hand_spellbook.iter().position(|card| {
+                card.instance_id == *forced && card.instance_id != *summon_card_instance_id
+            }) {
+                return Ok((DeckZone::Spellbook, index));
+            }
+            return Err(GameError::IllegalAction);
+        }
+        let index = draw_index(
+            prng,
+            discard_candidate_count,
+            "summon_random_card_discard_cost",
+            "card_index_candidate",
+            random_draws,
+        )?;
+        Ok(if index < player.hand_atlas.len() {
+            (DeckZone::Atlas, index)
+        } else {
+            let spellbook_index = index - player.hand_atlas.len();
+            (
+                DeckZone::Spellbook,
+                if spellbook_index >= hand_index {
+                    spellbook_index + 1
+                } else {
+                    spellbook_index
+                },
+            )
+        })
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the closed summon transaction keeps caster validation, payment, and Genesis atomic"
@@ -19249,6 +19313,7 @@ impl Game {
         action: &IssuedAction,
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
+        forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
         let ActionDescriptor::SummonMinion {
             card_id,
@@ -19378,26 +19443,15 @@ impl Game {
             })
             .transpose()?;
         let discarded = if *payment_mode == Some(SummonPaymentMode::RandomCardDiscard) {
-            let index = draw_index(
+            Some(Self::choose_alternative_summon_discard(
+                player,
                 &mut self.position.prng,
+                card_instance_id,
+                hand_index,
                 discard_candidate_count,
-                "summon_random_card_discard_cost",
-                "card_index_candidate",
                 random_draws,
-            )?;
-            Some(if index < player.hand_atlas.len() {
-                (DeckZone::Atlas, index)
-            } else {
-                let spellbook_index = index - player.hand_atlas.len();
-                (
-                    DeckZone::Spellbook,
-                    if spellbook_index >= hand_index {
-                        spellbook_index + 1
-                    } else {
-                        spellbook_index
-                    },
-                )
-            })
+                forced_random_outcome,
+            )?)
         } else {
             None
         };
