@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::batch::{BatchClassification, FinishedTerminal, MAX_GAME_ACTIONS};
 use crate::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
 use crate::contract::{ActionRequest, Event, Receipt};
-use crate::game::Game;
+use crate::game::{ENGINE_VERSION, Game};
 use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
 use crate::session::{Session, SessionError, StepResult};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
@@ -73,6 +73,45 @@ pub const GAME_ARTIFACT_FILES: [&str; 5] = [
     "coverage.json",
     "outcome.json",
 ];
+
+/// Why an artifact replay did not match the recorded game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReplayMismatch {
+    /// Saved `authority.contentHash` is not the hash the engine bound.
+    Authority,
+    /// Saved `engineVersion` is not this engine.
+    EngineVersion,
+    /// Flattened events did not reproduce the recorded events hash.
+    EventsHash,
+    /// Replayed state did not reproduce the recorded final state hash.
+    FinalStateHash,
+    /// Saved or replayed manifest identity disagreed with the recorded outcome.
+    ManifestIdentity,
+    /// A recorded action was not legal in the replayed position.
+    ReplayRejected,
+    /// Saved `schemaVersion` is not this engine's schema.
+    SchemaVersion,
+    /// Replayed receipts did not reproduce the recorded transcript hash.
+    TranscriptHash,
+}
+
+/// Integer-canonical result of replaying one SIM-03 artifact directory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactReplayReport {
+    /// Ranked/public result classification.
+    pub classification: BatchClassification,
+    /// Every compared hash and identity matched.
+    pub matched: bool,
+    /// First classified mismatch, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mismatch: Option<ReplayMismatch>,
+    /// Authoritative replay reproduced the recorded transcript and hashes.
+    pub replay_verified: bool,
+    /// Replay report schema.
+    pub schema_version: u8,
+}
 
 /// Classified outcome and terminal identities for one finished game.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -210,6 +249,133 @@ pub fn write_game_artifacts(dir: &Path, record: &GameRecord) -> Result<(), GameR
         &serde_json::to_value(record.outcome_artifact())?,
     )?;
     Ok(())
+}
+
+/// Replays `manifest.json` + `transcript.json` and checks recorded hashes.
+///
+/// Classifies engine, schema, authority, identity, transcript, event, and
+/// state mismatches instead of treating them as a silent success.
+///
+/// # Errors
+///
+/// Returns [`GameRecordError`] when the directory escapes, a required file is
+/// missing, or the artifact JSON cannot be read.
+pub fn replay_game_artifacts(dir: &Path) -> Result<ArtifactReplayReport, GameRecordError> {
+    validate_artifacts_dir(dir)?;
+    let manifest = read_artifact_json(dir, "manifest.json")?;
+    let transcript = read_transcript(dir)?;
+    let outcome = read_artifact_json(dir, "outcome.json")?;
+    let events_hash = hash_events_file(dir)?;
+    if let Some(mismatch) = manifest_version_mismatch(&manifest) {
+        return Ok(mismatch_report(mismatch));
+    }
+    if manifest_authority_hash(&manifest).is_none() {
+        return Ok(mismatch_report(ReplayMismatch::Authority));
+    }
+    let action_ids = transcript
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect::<Vec<_>>();
+    let manifest_json = canonical_json(&manifest)?;
+    let replayed = match Session::replay(&manifest_json, &action_ids) {
+        Ok(session) => session,
+        Err(SessionError::ReplayRejected(_)) => {
+            return Ok(mismatch_report(ReplayMismatch::ReplayRejected));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let record = game_record_from_session(&replayed)?;
+    Ok(compare_replay(&record, &manifest, &outcome, &events_hash))
+}
+
+fn mismatch_report(mismatch: ReplayMismatch) -> ArtifactReplayReport {
+    ArtifactReplayReport {
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        matched: false,
+        mismatch: Some(mismatch),
+        replay_verified: false,
+        schema_version: 1,
+    }
+}
+
+fn manifest_version_mismatch(manifest: &Value) -> Option<ReplayMismatch> {
+    match manifest.get("engineVersion") {
+        Some(Value::String(version)) if version == ENGINE_VERSION => {}
+        _ => return Some(ReplayMismatch::EngineVersion),
+    }
+    match manifest.get("schemaVersion") {
+        Some(Value::Number(version)) if version.as_u64() == Some(1) => None,
+        _ => Some(ReplayMismatch::SchemaVersion),
+    }
+}
+
+fn manifest_authority_hash(manifest: &Value) -> Option<IdentityHash> {
+    IdentityHash::parse(
+        manifest
+            .get("authority")
+            .and_then(Value::as_object)
+            .and_then(|authority| authority.get("contentHash"))
+            .and_then(Value::as_str)?,
+    )
+    .ok()
+}
+
+fn compare_replay(
+    record: &GameRecord,
+    manifest: &Value,
+    outcome: &Value,
+    events_file_hash: &IdentityHash,
+) -> ArtifactReplayReport {
+    let recorded_authority = manifest_authority_hash(manifest);
+    let replayed_authority = manifest_authority_hash(&record.manifest);
+    let mismatch = if recorded_authority != replayed_authority {
+        Some(ReplayMismatch::Authority)
+    } else if outcome.get("manifestId").and_then(Value::as_str) != Some(record.manifest_id.as_str())
+    {
+        Some(ReplayMismatch::ManifestIdentity)
+    } else if outcome.get("transcriptHash").and_then(Value::as_str)
+        != Some(record.transcript_hash.as_str())
+    {
+        Some(ReplayMismatch::TranscriptHash)
+    } else if outcome.get("eventsHash").and_then(Value::as_str) != Some(record.events_hash.as_str())
+        || events_file_hash != &record.events_hash
+    {
+        Some(ReplayMismatch::EventsHash)
+    } else if outcome.get("finalStateHash").and_then(Value::as_str)
+        != Some(record.final_state_hash.as_str())
+    {
+        Some(ReplayMismatch::FinalStateHash)
+    } else {
+        None
+    };
+    ArtifactReplayReport {
+        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        matched: mismatch.is_none(),
+        mismatch,
+        replay_verified: mismatch.is_none(),
+        schema_version: 1,
+    }
+}
+
+fn read_artifact_json(dir: &Path, name: &str) -> Result<Value, GameRecordError> {
+    serde_json::from_str(&std::fs::read_to_string(dir.join(name))?).map_err(GameRecordError::from)
+}
+
+fn read_transcript(dir: &Path) -> Result<Vec<Receipt>, GameRecordError> {
+    serde_json::from_str(&std::fs::read_to_string(dir.join("transcript.json"))?)
+        .map_err(GameRecordError::from)
+}
+
+fn hash_events_file(dir: &Path) -> Result<IdentityHash, GameRecordError> {
+    let text = std::fs::read_to_string(dir.join("events.jsonl"))?;
+    let mut events = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        events.push(serde_json::from_str::<Value>(line)?);
+    }
+    identity_hash(&serde_json::to_value(events)?).map_err(GameRecordError::from)
 }
 
 /// Rejects empty artifact paths and parent-directory escapes.
@@ -419,8 +585,8 @@ mod tests {
     use std::fs;
 
     use super::{
-        GAME_ARTIFACT_FILES, event_jsonl, game_record_from_session, record_synthetic_demo,
-        validate_artifacts_dir, write_game_artifacts,
+        GAME_ARTIFACT_FILES, ReplayMismatch, event_jsonl, game_record_from_session,
+        record_synthetic_demo, replay_game_artifacts, validate_artifacts_dir, write_game_artifacts,
     };
     use crate::canonical::canonical_json;
     use crate::synthetic::synthetic_demo_session;
@@ -540,6 +706,65 @@ mod tests {
             outcome["classification"],
             "unranked_partial_rules_unverified_authority"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn seed_31_artifacts_replay_and_match() {
+        let record = record_synthetic_demo(31).expect("seed-31 record");
+        let dir =
+            std::env::temp_dir().join(format!("sorcery-artifact-replay-{}-31", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        write_game_artifacts(&dir, &record).expect("write artifacts");
+        let report = replay_game_artifacts(&dir).expect("replay");
+        assert!(report.matched);
+        assert!(report.replay_verified);
+        assert_eq!(report.mismatch, None);
+        assert_eq!(
+            report.classification,
+            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn artifact_replay_classifies_engine_and_hash_mismatches() {
+        let record = record_synthetic_demo(31).expect("seed-31 record");
+        let dir = std::env::temp_dir().join(format!(
+            "sorcery-artifact-mismatch-{}-31",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        write_game_artifacts(&dir, &record).expect("write artifacts");
+
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).expect("manifest"))
+                .expect("manifest JSON");
+        manifest["engineVersion"] = serde_json::json!("sorcery-core-v0");
+        fs::write(
+            dir.join("manifest.json"),
+            format!("{}\n", canonical_json(&manifest).expect("canonical")),
+        )
+        .expect("write manifest");
+        let engine = replay_game_artifacts(&dir).expect("engine mismatch");
+        assert!(!engine.matched);
+        assert_eq!(engine.mismatch, Some(ReplayMismatch::EngineVersion));
+
+        write_game_artifacts(&dir, &record).expect("restore");
+        let mut outcome: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("outcome.json")).expect("outcome"))
+                .expect("outcome JSON");
+        outcome["finalStateHash"] = serde_json::json!(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        fs::write(
+            dir.join("outcome.json"),
+            format!("{}\n", canonical_json(&outcome).expect("canonical")),
+        )
+        .expect("write outcome");
+        let state = replay_game_artifacts(&dir).expect("state mismatch");
+        assert!(!state.matched);
+        assert_eq!(state.mismatch, Some(ReplayMismatch::FinalStateHash));
         let _ = fs::remove_dir_all(&dir);
     }
 }
