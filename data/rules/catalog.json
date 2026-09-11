@@ -8128,6 +8128,58 @@
         "file": "crates/sorcery-engine/tests/artifact_range_footprint_rules.rs",
         "testName": "rule_catalog_0368_square_bearer_cannot_reach_target_three_steps_from_every_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0369",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lucky Charm extra-random for discard-funded damage uses every cell a 2×2 source occupies. A B3 occupant of an A3-anchored square is offered, and resolving that outcome deals the printed damage to that unit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "bearerControllerChoosesExtraRandomOutcome",
+        "discardSpellToDamageRandomOtherUnitHere",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "activate-discard-random-damage",
+        "resolve-random-outcome"
+      ],
+      "eventHints": [
+        "discard-random-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lucky_charm_footprint_rules.rs",
+        "testName": "rule_catalog_0369_lucky_charm_offers_unit_sharing_occupied_non_anchor_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0370",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lucky Charm extra-random for discard-funded damage does not offer a unit outside the source footprint. A minion on C1 stays out of an A3-anchored square's committed outcomes and takes no damage when the B3 occupant is chosen.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "bearerControllerChoosesExtraRandomOutcome",
+        "discardSpellToDamageRandomOtherUnitHere",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "activate-discard-random-damage",
+        "resolve-random-outcome"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lucky_charm_footprint_rules.rs",
+        "testName": "rule_catalog_0370_lucky_charm_excludes_unit_outside_discard_source_footprint"
+      }
     }
   ]
 }
