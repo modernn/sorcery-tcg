@@ -45,6 +45,7 @@ enum Command {
     Schedule {
         workers: usize,
         seeds: Vec<u32>,
+        artifacts_dir: Option<String>,
     },
 }
 
@@ -150,7 +151,11 @@ fn run() -> CliResult<()> {
             let input = read_batch_json_stdin()?;
             write_canonical_json(&run_batch_json(&input)?)
         }
-        Command::Schedule { workers, seeds } => write_canonical_json(&run_synthetic_schedule(
+        Command::Schedule {
+            workers,
+            seeds,
+            artifacts_dir,
+        } => write_canonical_json(&run_synthetic_schedule(
             &[SeedBlock {
                 id: "cli",
                 seeds: &seeds,
@@ -160,6 +165,7 @@ fn run() -> CliResult<()> {
             seeds.len(),
             workers,
             FailurePolicy::Abort,
+            artifacts_dir.as_deref().map(Path::new),
         )?),
     }
 }
@@ -198,7 +204,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             Ok(Command::BatchJson)
         }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] [dir] | record [seed] [dir] | batch [--out dir] [workers] [seeds...] | schedule [--out dir] [workers] [seeds...] | batch-json",
         )
         .into()),
     }
@@ -313,12 +319,25 @@ fn parse_batch_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
 }
 
 fn parse_schedule_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
+    let mut artifacts_dir = None;
+    let mut rest = Vec::new();
     let mut args = args;
-    let workers = args.next().map_or_else(
+    while let Some(arg) = args.next() {
+        if arg == "--out" {
+            let dir = args
+                .next()
+                .ok_or_else(|| io::Error::other("usage: sorcery-engine schedule --out dir"))?;
+            artifacts_dir = Some(dir);
+            continue;
+        }
+        rest.push(arg);
+    }
+    let mut rest = rest.into_iter();
+    let workers = rest.next().map_or_else(
         || Ok(default_batch_workers()),
         |value| parse_workers(&value),
     )?;
-    let mut seeds = args
+    let mut seeds = rest
         .map(|value| parse_seed(&value))
         .collect::<Result<Vec<_>, _>>()?;
     if seeds.is_empty() {
@@ -327,7 +346,11 @@ fn parse_schedule_args(args: impl Iterator<Item = String>) -> CliResult<Command>
     if seeds.len() > MAX_BATCH_JOBS / 2 {
         return Err(io::Error::other("schedule must contain 1-128 seeds").into());
     }
-    Ok(Command::Schedule { workers, seeds })
+    Ok(Command::Schedule {
+        workers,
+        seeds,
+        artifacts_dir,
+    })
 }
 
 fn compact_report(record: &sorcery_engine::game_record::GameRecord) -> DeterministicGameReport {
@@ -495,11 +518,19 @@ mod tests {
     #[test]
     fn parse_args_should_default_schedule_seed() {
         let command = parse_args(["schedule".to_owned()].into_iter()).expect("valid schedule");
-        let Command::Schedule { seeds, workers } = command else {
+        let Command::Schedule {
+            seeds,
+            workers,
+            artifacts_dir,
+        } = command
+        else {
             panic!("expected schedule command");
         };
 
-        assert_eq!((seeds, (1..=8).contains(&workers)), (vec![1], true));
+        assert_eq!(
+            (seeds, (1..=8).contains(&workers), artifacts_dir),
+            (vec![1], true, None)
+        );
     }
 
     #[test]
@@ -534,6 +565,30 @@ mod tests {
         } = batch
         else {
             panic!("expected batch command");
+        };
+        assert_eq!(
+            (workers, seeds, artifacts_dir.as_deref()),
+            (2, vec![31], Some("games"))
+        );
+
+        let schedule = parse_args(
+            [
+                "schedule".to_owned(),
+                "--out".to_owned(),
+                "games".to_owned(),
+                "2".to_owned(),
+                "31".to_owned(),
+            ]
+            .into_iter(),
+        )
+        .expect("valid schedule");
+        let Command::Schedule {
+            seeds,
+            workers,
+            artifacts_dir,
+        } = schedule
+        else {
+            panic!("expected schedule command");
         };
         assert_eq!(
             (workers, seeds, artifacts_dir.as_deref()),

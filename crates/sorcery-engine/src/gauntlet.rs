@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 
 use serde::Serialize;
 
 use crate::batch::{
     BatchClassification, BatchError, BatchJob, FinishedTerminal, GameBatchResult, MAX_BATCH_JOBS,
-    run_batch,
+    run_batch, run_batch_to_dir_from,
 };
 use crate::contract::Seat;
 
@@ -159,6 +160,37 @@ pub fn run_gauntlet(
     pairs: &[GauntletPair<'_>],
     requested_workers: usize,
 ) -> Result<GauntletReport, GauntletError> {
+    run_gauntlet_inner(pairs, requested_workers, None, 0)
+}
+
+/// Runs exact two-seat pairs and writes one SIM-03 directory per game.
+///
+/// Game `i` of this call writes into `{dir}/{job_index_base + i}/`.
+///
+/// # Errors
+///
+/// Returns [`GauntletError`] under the same conditions as [`run_gauntlet`], or
+/// when artifact paths or writes fail.
+pub fn run_gauntlet_to_dir(
+    pairs: &[GauntletPair<'_>],
+    requested_workers: usize,
+    artifacts_dir: &Path,
+    job_index_base: usize,
+) -> Result<GauntletReport, GauntletError> {
+    run_gauntlet_inner(
+        pairs,
+        requested_workers,
+        Some(artifacts_dir),
+        job_index_base,
+    )
+}
+
+fn run_gauntlet_inner(
+    pairs: &[GauntletPair<'_>],
+    requested_workers: usize,
+    artifacts_dir: Option<&Path>,
+    job_index_base: usize,
+) -> Result<GauntletReport, GauntletError> {
     if pairs.is_empty() || pairs.len() > MAX_BATCH_JOBS / 2 {
         return Err(GauntletError::Invalid(
             "gauntlet must contain 1-128 seed pairs",
@@ -169,7 +201,10 @@ pub fn run_gauntlet(
         .iter()
         .flat_map(|pair| pair.orientations.map(|orientation| orientation.job))
         .collect::<Vec<_>>();
-    let results = run_batch(&jobs, requested_workers)?;
+    let results = match artifacts_dir {
+        Some(dir) => run_batch_to_dir_from(&jobs, requested_workers, dir, job_index_base)?,
+        None => run_batch(&jobs, requested_workers)?,
+    };
     let mut by_deck = BTreeMap::<String, DeckOutcomeCounts>::new();
     let mut by_seat = SeatOutcomeCounts::default();
     let mut games = Vec::with_capacity(results.len());
