@@ -2668,7 +2668,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       [firstSpell]: {
         ...cards[firstSpell]!,
         landbound: true,
-      },
+      } as GameCardDefinition,
     },
   });
   assert.equal(
@@ -2694,7 +2694,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         ...cards[firstSpell]!,
         landbound: true,
         waterbound: true,
-      },
+      } as GameCardDefinition,
     },
   }), /Landbound with Waterbound is unsupported/);
   assert.throws(() => createGameManifest({
