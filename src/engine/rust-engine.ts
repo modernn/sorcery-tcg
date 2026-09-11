@@ -226,13 +226,15 @@ export function parseReplaySteps(value: unknown): RustReplayStepsReport {
     || value.schemaVersion !== 1
     || typeof value.chained !== 'boolean'
     || !Number.isSafeInteger(value.stepCount)
-    || value.stepCount < 0
-    || !Array.isArray(value.steps)
-    || value.stepCount !== value.steps.length) {
+    || !Array.isArray(value.steps)) {
+    throw new Error('Rust replay steps report did not match the expected contract');
+  }
+  const stepCount = value.stepCount as number;
+  if (stepCount < 0 || stepCount !== value.steps.length) {
     throw new Error('Rust replay steps report did not match the expected contract');
   }
   const steps = Object.freeze(value.steps.map((step, index) => parseReplayStep(step, index)));
-  if (value.stepCount === 0) {
+  if (stepCount === 0) {
     if (value.finalStateHash !== undefined) {
       throw new Error('empty replay steps must omit finalStateHash');
     }
@@ -253,7 +255,7 @@ export function parseReplaySteps(value: unknown): RustReplayStepsReport {
     classification: 'unranked_partial_rules_unverified_authority',
     finalStateHash,
     schemaVersion: 1 as const,
-    stepCount: value.stepCount,
+    stepCount,
     steps,
   });
 }
