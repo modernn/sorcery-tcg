@@ -13220,10 +13220,10 @@ impl Game {
 
     /// Remaps occupants of a returned site into the void so they banish instead of dying as if
     /// stranded on missing terrain. Return-site leaves no rubble, so every region at that cell is
-    /// gone.
+    /// gone. A 2×2 that occupies the cell from a different anchor is still an occupant.
     fn remap_returned_site_occupants_to_void(&mut self, cell: Cell) {
         for unit in &mut self.position.units {
-            if unit.location == cell && unit.region != Region::Void {
+            if unit.region != Region::Void && Self::unit_occupies_cell(unit, cell) {
                 unit.region = Region::Void;
                 unit.planar_gate_voidwalk = false;
             }
