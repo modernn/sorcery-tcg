@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/updraft-occupy-0005`. Stack this on current `master` (`9d225cb`). Do not grow already-merged landings.
+Live line: `cursor/flood-water-cast-0005`. Stack this on current `master` (`d85484a`). Do not grow already-merged landings.
 
-This branch prices Updraft Ridge departure from every cell a 2×2 Airborne occupies, not only the path anchor. A B3-anchored square occupying a Ridge at C4 takes two surface steps to B1. The same square with no Ridge cannot. Measured-range Magic, Secret Tunnel hops, and 2×2 Voidwalk stay unchanged. Compact demo/batch stdout is unchanged.
+This branch proves Flood and Drought gate water-layer casts through current water-ness, not the printed element. Flood on earth enables a water-site cast and a submerged-only underwater cast. Drought on printed Water strips the water-site cast. Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **362 rust-supported / 0 typescript-supported** out of 362.
+`data/rules/catalog.json`: **364 rust-supported / 0 typescript-supported** out of 364.
 
-Latest catalog proofs: Updraft Ridge frees a 2×2 that occupies the Ridge (`RULE-CATALOG-0361`–`0362`). A B3-anchored Airborne square occupying C4 can take two surface steps to B1 and cannot without that Ridge. Measured-range Magic walks from every occupied caster cell remain `RULE-CATALOG-0359`–`0360`. Secret Tunnel 2×2 hops remain `RULE-CATALOG-0357`–`0358`. Fate Genesis 2×2 occupants remain `RULE-CATALOG-0355`–`0356`. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
+Latest catalog proofs: Flood and Drought gate water-layer casts (`RULE-CATALOG-0363`–`0364`). Flood on printed earth enables a water-site cast and a submerged-only underwater cast; Drought on printed Water strips the water-site cast. Updraft Ridge occupy remains `RULE-CATALOG-0361`–`0362`. Measured-range Magic walks from every occupied caster cell remain `RULE-CATALOG-0359`–`0360`. Fate Genesis 2×2 occupants remain `RULE-CATALOG-0355`–`0356`. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.
