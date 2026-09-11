@@ -12,9 +12,9 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **332 rust-supported / 0 typescript-supported** out of 332.
+`data/rules/catalog.json`: **334 rust-supported / 0 typescript-supported** out of 334.
 
-Latest catalog proofs: Token placement uses the same power-threshold entry bar as other units (`RULE-CATALOG-0331`–`0332`). A Genesis paid token cannot enter a site it is too strong for, including a printed-1 token that would become 3 atop the Tower it is spawning on. Cemetery free placement remains `RULE-CATALOG-0329`–`0330`.
+Latest catalog proofs: Fate Lose strips Genesis paid tokens on covered non-Ordinary sites (`RULE-CATALOG-0333`–`0334`). Pay is not offered. An Ordinary site in the same 2×2 keeps the paid-token choice. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
 Official Pay Life remains `RULE-CATALOG-0320`–`0321`. Paying life is an additional Magic cost, not losing life. The caster may pay only when current life is at least the printed amount, so Death's Door cannot pay.
 Official Landbound remains `RULE-CATALOG-0318`–`0319`. A Landbound minion is Disabled while it occupies no land location. Flood and mixed Water sites are not land. The Landbound ability itself still applies while Disabled.

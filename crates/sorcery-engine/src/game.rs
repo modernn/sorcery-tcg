@@ -3149,12 +3149,14 @@ impl Game {
                         site_facts.genesis_pay_one_mana_to_summon_token.as_deref()
                     {
                         let mut choices = vec![Some(GenesisTokenChoice::Decline)];
-                        if self.token_may_enter_played_site(
-                            seat,
-                            token_card_id,
-                            *cell,
-                            site_facts,
-                        )? {
+                        if (site_facts.ordinary || !self.fate_covers_cell(*cell))
+                            && self.token_may_enter_played_site(
+                                seat,
+                                token_card_id,
+                                *cell,
+                                site_facts,
+                            )?
+                        {
                             choices.push(Some(GenesisTokenChoice::PayOneMana));
                         }
                         choices
@@ -12429,7 +12431,9 @@ impl Game {
             let token_card_id = genesis_token_card_id
                 .as_deref()
                 .ok_or(GameError::IllegalAction)?;
-            if !self.token_may_enter_played_site(seat, token_card_id, cell, facts)? {
+            if (self.fate_covers_cell(cell) && !facts.ordinary)
+                || !self.token_may_enter_played_site(seat, token_card_id, cell, facts)?
+            {
                 return Err(GameError::IllegalAction);
             }
         }
