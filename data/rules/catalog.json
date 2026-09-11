@@ -7455,6 +7455,62 @@
         "file": "crates/sorcery-engine/tests/site_flight_layer_rules.rs",
         "testName": "rule_catalog_0342_flight_onto_flooded_void_relayers_dual_region_minion_underwater"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0343",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed earth onto Flood-covered rubble makes that cell a Water site. A Burrowing and Submerge minion already underground there is relayered underwater and stays in play. Geomancer rubble replacement uses the same conversion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played",
+        "rubble-replaced"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_0343_playing_earth_onto_flooded_rubble_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0344",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto Drought-covered rubble makes that cell land. A Burrowing and Submerge minion the Water play flooded underwater is relayered underground and stays in play. Geomancer rubble replacement uses the same conversion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played",
+        "rubble-replaced"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_0344_playing_water_onto_drought_rubble_relayers_underground"
+      }
     }
   ]
 }
