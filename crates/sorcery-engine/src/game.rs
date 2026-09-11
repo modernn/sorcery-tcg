@@ -4605,14 +4605,13 @@ impl Game {
             && self.position.decision_seat == seat
     }
 
-    /// The cell one carried Artifact fires from and every other ready ally standing with its
+    /// The ready bearer, the Artifact's region, and every other ready ally standing with that
     /// bearer that can pay the second tap.
     ///
     /// "Standing with" is footprint overlap in the Artifact's region, not only the remembered
-    /// carried cell. A 2×2 bearer occupies every cell of its square; an ally on any of those
-    /// cells stands with it. A loose Artifact has no bearer to tap, a spent bearer cannot pay
-    /// the first tap, and a lone bearer has nobody to pay the second, so each of those yields
-    /// nothing.
+    /// carried cell. Measured range then walks from every occupied bearer cell. A loose
+    /// Artifact has no bearer to tap, a spent bearer cannot pay the first tap, and a lone
+    /// bearer has nobody to pay the second, so each of those yields nothing.
     fn artifact_tap_pair_helpers(
         &self,
         artifact: &ArtifactPosition,
@@ -4655,7 +4654,7 @@ impl Game {
         let allies = self.seat_unit_targets(seat);
         let mut descriptors = Vec::new();
         for artifact in &self.position.artifacts {
-            let Some((_, carried_at, helpers)) = self.artifact_tap_pair_helpers(
+            let Some((bearer, carried_at, helpers)) = self.artifact_tap_pair_helpers(
                 artifact,
                 seat,
                 ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
@@ -4664,8 +4663,14 @@ impl Game {
             else {
                 continue;
             };
+            // Official range is two measured steps of the cells the bearer stands on, not only
+            // the remembered carried cell. A 1×1 bearer keeps the same origin.
             let reachable: BTreeSet<_> = self
-                .locations_within_measured_steps(carried_at, 2)
+                .locations_within_measured_steps_from_cells(
+                    self.unit_target_occupied_cells(&bearer)?,
+                    carried_at.region,
+                    2,
+                )
                 .into_iter()
                 .map(|location| location.cell)
                 .collect();
@@ -4732,7 +4737,7 @@ impl Game {
         let allies = self.seat_unit_targets(seat);
         let mut descriptors = Vec::new();
         for artifact in &self.position.artifacts {
-            let Some((_, carried_at, helpers)) = self.artifact_tap_pair_helpers(
+            let Some((bearer, carried_at, helpers)) = self.artifact_tap_pair_helpers(
                 artifact,
                 seat,
                 ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
@@ -4741,7 +4746,11 @@ impl Game {
             else {
                 continue;
             };
-            let target_locations = self.locations_within_measured_steps(carried_at, 3);
+            let target_locations = self.locations_within_measured_steps_from_cells(
+                self.unit_target_occupied_cells(&bearer)?,
+                carried_at.region,
+                3,
+            );
             for helper in &helpers {
                 for (discard_card_instance_id, discard_zone) in &discards {
                     descriptors.extend(target_locations.iter().map(|target_location| {

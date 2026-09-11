@@ -8077,6 +8077,57 @@
         "file": "crates/sorcery-engine/tests/artifact_helper_footprint_rules.rs",
         "testName": "rule_catalog_0366_helper_outside_square_cannot_pay_second_tap"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0367",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A tap-pair Artifact measures range from every cell its 2×2 bearer occupies. A B3-anchored square carrying a Siege Ballista remembered at B3 can shoot a unit on D4, which is three steps from B3 and one step from occupied C4.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "activate-artifact-damage"
+      ],
+      "eventHints": [
+        "artifact-conjured",
+        "artifact-damage-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_range_footprint_rules.rs",
+        "testName": "rule_catalog_0367_square_bearer_reaches_target_two_steps_from_occupied_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0368",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A tap-pair Artifact cannot shoot a unit three measured steps from every occupied bearer cell. E3 is three steps from a B3-anchored square along existing surface and stays out of Siege Ballista range.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "activate-artifact-damage"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_range_footprint_rules.rs",
+        "testName": "rule_catalog_0368_square_bearer_cannot_reach_target_three_steps_from_every_cell"
+      }
     }
   ]
 }
