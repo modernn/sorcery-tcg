@@ -285,7 +285,7 @@ fn can_play_named_site(session: &Session, card_id: &str, cell: &str) -> bool {
     })
 }
 
-fn raise_on(card_id: &str, cell: &str) -> impl Fn(&Value) -> bool + '_ {
+fn raise_on<'a>(card_id: &'a str, cell: &'a str) -> impl Fn(&Value) -> bool + 'a {
     move |descriptor: &Value| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == card_id
@@ -294,7 +294,7 @@ fn raise_on(card_id: &str, cell: &str) -> impl Fn(&Value) -> bool + '_ {
     }
 }
 
-fn raise_square(card_id: &str, cells: &'static [&str; 4]) -> impl Fn(&Value) -> bool + '_ {
+fn raise_square<'a>(card_id: &'a str, cells: &'static [&str; 4]) -> impl Fn(&Value) -> bool + 'a {
     move |descriptor: &Value| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == card_id
