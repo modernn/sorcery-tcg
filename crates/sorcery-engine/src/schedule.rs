@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::batch::{BatchClassification, BatchJob};
+use crate::batch::{BatchClassification, BatchJob, FinishedTerminal};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::eligibility::{EligibilityGates, EligibilityReason, evaluate_eligibility};
 use crate::gauntlet::{
@@ -48,6 +48,17 @@ pub enum FailurePolicy {
     StopAfterPairFailure,
 }
 
+/// Finished-game bucket before unrun planned games become infrastructure failures.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FinishedTrialKind {
+    /// Decisive public terminal and matching replay.
+    Completed,
+    /// Draw terminal and matching replay.
+    Drawn,
+    /// Replay failed or the terminal is not a public result.
+    Invalid,
+}
+
 /// Whether the schedule ran every planned pair.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -68,6 +79,22 @@ pub struct ScheduleLength {
     pub total_fights: u64,
     /// Final turn numbers summed across finished games.
     pub total_turns: u64,
+}
+
+/// TEST-05 accounting: every planned game lands in exactly one bucket.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleTrials {
+    /// Finished games with a winner and matching replay.
+    pub completed: u64,
+    /// Agent could not produce a legal action. Baseline schedules stay at 0.
+    pub competitor_failure: u64,
+    /// Finished draws with matching replay.
+    pub drawn: u64,
+    /// Pair or worker failed, or a later pair never started after a stop.
+    pub infrastructure_failure: u64,
+    /// Finished games whose replay failed or terminal was not a public result.
+    pub invalid: u64,
 }
 
 /// Replay reliability of the finished games.
@@ -116,6 +143,8 @@ pub struct ScheduleSummary {
     pub reliability: ScheduleReliability,
     /// First-player wins minus second-player wins.
     pub seat_effect: i64,
+    /// Planned games accounted exactly once.
+    pub trials: ScheduleTrials,
     /// Half-point first-player score over `2 * games`.
     pub uncertainty: ScheduleUncertainty,
 }
@@ -336,7 +365,7 @@ pub fn run_declared_pairs(
         ));
     }
     let gauntlet = merge_gauntlet_reports(&completed)?;
-    let summary = schedule_summary(&gauntlet)?;
+    let summary = schedule_summary(&gauntlet, pairs.len())?;
     Ok(ScheduleReport {
         classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
         completed_seeds: planned_seeds
@@ -452,7 +481,54 @@ fn synthetic_pair<'a>(
     }
 }
 
-fn schedule_summary(gauntlet: &GauntletReport) -> Result<ScheduleSummary, ScheduleError> {
+fn classify_finished_trial(terminal: FinishedTerminal, replay_verified: bool) -> FinishedTrialKind {
+    if !replay_verified {
+        return FinishedTrialKind::Invalid;
+    }
+    match terminal {
+        FinishedTerminal::Draw { .. } => FinishedTrialKind::Drawn,
+        FinishedTerminal::Win { .. } => FinishedTrialKind::Completed,
+    }
+}
+
+fn account_trials(
+    games: &[crate::gauntlet::GauntletGameResult],
+    planned_trials: u64,
+) -> Result<ScheduleTrials, ScheduleError> {
+    let mut trials = ScheduleTrials::default();
+    for game in games {
+        match classify_finished_trial(
+            game.result.report.terminal,
+            game.result.report.replay_verified,
+        ) {
+            FinishedTrialKind::Completed => trials.completed += 1,
+            FinishedTrialKind::Drawn => trials.drawn += 1,
+            FinishedTrialKind::Invalid => trials.invalid += 1,
+        }
+    }
+    let finished = u64::try_from(games.len())
+        .map_err(|_| ScheduleError::Invalid("schedule trial count overflowed"))?;
+    let accounted = trials
+        .completed
+        .checked_add(trials.drawn)
+        .and_then(|count| count.checked_add(trials.invalid))
+        .and_then(|count| count.checked_add(trials.competitor_failure))
+        .ok_or(ScheduleError::Invalid("schedule trial count overflowed"))?;
+    if accounted != finished {
+        return Err(ScheduleError::Invalid(
+            "finished games were not accounted exactly once",
+        ));
+    }
+    trials.infrastructure_failure = planned_trials
+        .checked_sub(finished)
+        .ok_or(ScheduleError::Invalid("schedule trial count overflowed"))?;
+    Ok(trials)
+}
+
+fn schedule_summary(
+    gauntlet: &GauntletReport,
+    planned_pairs: usize,
+) -> Result<ScheduleSummary, ScheduleError> {
     let mut total_actions = 0_u64;
     let mut total_fights = 0_u64;
     let mut total_turns = 0_u64;
@@ -480,6 +556,13 @@ fn schedule_summary(gauntlet: &GauntletReport) -> Result<ScheduleSummary, Schedu
     }
     let games = u64::try_from(gauntlet.game_count)
         .map_err(|_| ScheduleError::Invalid("schedule game count overflowed"))?;
+    let planned_trials = u64::try_from(
+        planned_pairs
+            .checked_mul(2)
+            .ok_or(ScheduleError::Invalid("schedule trial count overflowed"))?,
+    )
+    .map_err(|_| ScheduleError::Invalid("schedule trial count overflowed"))?;
+    let trials = account_trials(&gauntlet.games, planned_trials)?;
     let replay_failed_games = games
         .checked_sub(replay_verified_games)
         .ok_or(ScheduleError::Invalid("schedule replay count overflowed"))?;
@@ -532,6 +615,7 @@ fn schedule_summary(gauntlet: &GauntletReport) -> Result<ScheduleSummary, Schedu
         seat_effect: first_wins
             .checked_sub(second_wins)
             .ok_or(ScheduleError::Invalid("schedule seat effect overflowed"))?,
+        trials,
         uncertainty: ScheduleUncertainty {
             first_player_score,
             score_denominator,
@@ -708,6 +792,16 @@ mod tests {
         assert_eq!(report.summary.length.total_actions, 436);
         assert_eq!(report.summary.length.total_fights, 11);
         assert_eq!(report.summary.length.total_turns, 51);
+        assert_eq!(
+            report.summary.trials,
+            super::ScheduleTrials {
+                completed: 2,
+                competitor_failure: 0,
+                drawn: 0,
+                infrastructure_failure: 0,
+                invalid: 0,
+            }
+        );
     }
 
     #[test]
@@ -798,5 +892,55 @@ mod tests {
         assert_eq!(stopped.gauntlet.game_count, 2);
         assert_eq!(stopped.summary.games, 2);
         assert!(stopped.summary.reliability.all_replay_verified);
+        assert_eq!(
+            stopped.summary.trials,
+            super::ScheduleTrials {
+                completed: 2,
+                competitor_failure: 0,
+                drawn: 0,
+                infrastructure_failure: 2,
+                invalid: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn finished_trials_are_completed_drawn_or_invalid() {
+        use crate::batch::{DrawReason, DrawResult, FinishedStatus, FinishedTerminal, WinReason};
+        use crate::contract::Seat;
+        let win = FinishedTerminal::Win {
+            loser: Seat::North,
+            reason: WinReason::AvatarDefeated,
+            status: FinishedStatus::Finished,
+            winner: Seat::South,
+        };
+        let draw = FinishedTerminal::Draw {
+            reason: DrawReason::SimultaneousAvatarDefeat,
+            result: DrawResult::Draw,
+            status: FinishedStatus::Finished,
+        };
+        assert_eq!(
+            super::classify_finished_trial(win, true),
+            super::FinishedTrialKind::Completed
+        );
+        assert_eq!(
+            super::classify_finished_trial(draw, true),
+            super::FinishedTrialKind::Drawn
+        );
+        assert_eq!(
+            super::classify_finished_trial(win, false),
+            super::FinishedTrialKind::Invalid
+        );
+        let unrun = super::account_trials(&[], 2).expect("unrun trials");
+        assert_eq!(
+            unrun,
+            super::ScheduleTrials {
+                completed: 0,
+                competitor_failure: 0,
+                drawn: 0,
+                infrastructure_failure: 2,
+                invalid: 0,
+            }
+        );
     }
 }

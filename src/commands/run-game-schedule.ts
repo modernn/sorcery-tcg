@@ -57,6 +57,13 @@ export type ScheduleSummary = Readonly<{
     replayVerifiedGames: number;
   }>;
   seatEffect: number;
+  trials: Readonly<{
+    completed: number;
+    competitorFailure: number;
+    drawn: number;
+    infrastructureFailure: number;
+    invalid: number;
+  }>;
   uncertainty: Readonly<{
     firstPlayerScore: number;
     scoreDenominator: number;
@@ -105,12 +112,38 @@ function parseDeckOutcomeCounts(value: unknown, label: string): DeckOutcomeCount
   return Object.freeze({ asNorth, asSouth, draws, games, losses, wins });
 }
 
-function parseSummary(value: unknown, gameCount: number): ScheduleSummary {
+function parseTrials(value: unknown, plannedTrials: number, finishedGames: number): ScheduleSummary['trials'] {
+  if (!isRecord(value)) {
+    throw new Error('schedule trials was invalid');
+  }
+  const trials = Object.freeze({
+    completed: parseCount(value.completed, 'trials.completed'),
+    competitorFailure: parseCount(value.competitorFailure, 'trials.competitorFailure'),
+    drawn: parseCount(value.drawn, 'trials.drawn'),
+    infrastructureFailure: parseCount(value.infrastructureFailure, 'trials.infrastructureFailure'),
+    invalid: parseCount(value.invalid, 'trials.invalid'),
+  });
+  const accounted = trials.completed
+    + trials.competitorFailure
+    + trials.drawn
+    + trials.infrastructureFailure
+    + trials.invalid;
+  if (accounted !== plannedTrials) {
+    throw new Error('schedule trials did not account for every planned game exactly once');
+  }
+  if (trials.completed + trials.drawn + trials.invalid !== finishedGames) {
+    throw new Error('schedule finished trials did not match gameCount');
+  }
+  return trials;
+}
+
+function parseSummary(value: unknown, gameCount: number, plannedTrials: number): ScheduleSummary {
   if (!isRecord(value)
     || !isRecord(value.byDeck)
     || !isRecord(value.bySeat)
     || !isRecord(value.length)
     || !isRecord(value.reliability)
+    || !isRecord(value.trials)
     || !isRecord(value.uncertainty)
     || value.eligibility !== 'unranked_partial_rules_unverified_authority'
     || !Number.isSafeInteger(value.seatEffect)) {
@@ -174,6 +207,7 @@ function parseSummary(value: unknown, gameCount: number): ScheduleSummary {
     reasons: eligibility.reasons,
     reliability,
     seatEffect: value.seatEffect as number,
+    trials: parseTrials(value.trials, plannedTrials, games),
     uncertainty,
   });
 }
@@ -210,7 +244,11 @@ function parseSchedule(value: unknown): SyntheticScheduleReport {
     schemaVersion: 1,
     scheduleId: value.scheduleId as Sha256Hash,
     status: 'completed',
-    summary: parseSummary(value.summary, value.gameCount as number),
+    summary: parseSummary(
+      value.summary,
+      value.gameCount as number,
+      value.plannedSeeds.length * 2,
+    ),
   });
 }
 

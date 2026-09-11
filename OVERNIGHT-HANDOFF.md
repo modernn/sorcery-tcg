@@ -1,8 +1,8 @@
 # Overnight handoff
 
-Live line: `cursor/replay-steps-0005`. Stack this on current `master` (`cd7040b`). Do not grow already-merged landings.
+Live line: `cursor/trial-accounting-0005`. Stack this on current `master` (`7661f42`). Do not grow already-merged landings.
 
-This branch adds WEB-04 replay-step inspection. `sorcery-engine replay-steps dir` and session-json `replaySteps` list chained committed receipts. The playable-core browser loads those steps from `GET /api/replay/steps` and walks them with Previous/Next plus Left/Right. Compact demo/batch stdout and the existing SIM-06 `replay` report stay unchanged.
+This branch adds TEST-05 trial accounting on schedule summaries. Every planned game is counted exactly once as completed, drawn, invalid, competitor failure, or infrastructure failure. Seed-31 is 2/0/0/0/0. A stopped later pair accounts the unrun games as infrastructure failures. Compact demo/batch stdout is unchanged.
 
 2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 

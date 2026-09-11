@@ -40,6 +40,13 @@ test('SIM-05 seed-31 schedule reports integer W/D/L, seat effect, and eligibilit
   assert.equal(summary.reliability.replayVerifiedGames, 2);
   assert.equal(summary.reliability.replayFailedGames, 0);
   assert.deepEqual(summary.length, { totalActions: 436, totalFights: 11, totalTurns: 51 });
+  assert.deepEqual(summary.trials, {
+    completed: 2,
+    competitorFailure: 0,
+    drawn: 0,
+    infrastructureFailure: 0,
+    invalid: 0,
+  });
 });
 
 test('SIM-03 seed-31 schedule writes flat artifact directories without changing stdout', () => {
