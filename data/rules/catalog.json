@@ -7827,6 +7827,54 @@
         "file": "crates/sorcery-engine/tests/fate_footprint_rules.rs",
         "testName": "rule_catalog_0356_fate_submerges_all_water_square_occupying_affected_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0357",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Secret Tunnel connects a burrowed 2×2 that occupies the controller's tunnel, even when the square's anchor is another cell. A B3-anchored underground square that occupies C4 hops to a far controlled land site. Occupancy, not the anchor cell, decides whether the square is at that tunnel.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "connectsBurrowedAllies",
+        "occupiesSquareArea",
+        "burrowing"
+      ],
+      "actionHints": [
+        "summon",
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/secret_tunnel_footprint_rules.rs",
+        "testName": "rule_catalog_0357_secret_tunnel_hops_square_occupying_non_anchor_tunnel"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0358",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A burrowed 2×2 that occupies no Secret Tunnel cannot hop to a far controlled land site. Ordinary underground steps still require adjacent land. The same B3-anchored square without a tunnel under it stays local.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "connectsBurrowedAllies",
+        "occupiesSquareArea",
+        "burrowing"
+      ],
+      "actionHints": [
+        "summon",
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/secret_tunnel_footprint_rules.rs",
+        "testName": "rule_catalog_0358_square_without_occupied_tunnel_does_not_hop_to_far_land"
+      }
     }
   ]
 }

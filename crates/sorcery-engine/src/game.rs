@@ -6770,8 +6770,13 @@ impl Game {
                             ),
                             current.region,
                         );
-                let tunnel_hops = self.burrowed_connection_locations(profile, current.cell);
-                for candidate in self.movement_step_candidates(current, profile, can_voidwalk) {
+                let occupied =
+                    Self::translated_footprint(profile.occupied_cells, start.cell, current.cell);
+                let tunnel_hops =
+                    self.burrowed_connection_locations(profile, current.cell, &occupied);
+                for candidate in
+                    self.movement_step_candidates(current, profile, can_voidwalk, &occupied)
+                {
                     let tunnel_hop =
                         current.region == Region::Underground && tunnel_hops.contains(&candidate);
                     let footprint_allowed = profile.occupied_cells.map_or_else(
@@ -6856,6 +6861,7 @@ impl Game {
         current: Location,
         profile: MovementProfile,
         can_voidwalk: bool,
+        occupied: &[Cell],
     ) -> Vec<Location> {
         let bordering = |region: Region| {
             current
@@ -6897,7 +6903,11 @@ impl Game {
                     region: Region::Surface,
                 });
                 candidates.extend(bordering(Region::Underground));
-                candidates.extend(self.burrowed_connection_locations(profile, current.cell));
+                candidates.extend(self.burrowed_connection_locations(
+                    profile,
+                    current.cell,
+                    occupied,
+                ));
                 if profile.regions.submerge {
                     candidates.extend(bordering(Region::Underwater));
                 }
@@ -7230,35 +7240,48 @@ impl Game {
     }
 
     /// Whether a played site connects the burrowed allies of its controller.
-    fn is_tunnel_site(&self, cell: Cell) -> bool {
+    fn is_tunnel_site(&self, seat: Seat, cell: Cell) -> bool {
         self.position.sites[cell.index()]
             .as_ref()
             .is_some_and(|site| {
-                matches!(
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
-                    CardFacts::Site(facts) if facts.connects_burrowed_allies
-                ) && !self.site_abilities_lost(cell)
+                site.controller == seat
+                    && matches!(
+                        &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                        CardFacts::Site(facts) if facts.connects_burrowed_allies
+                    )
+                    && !self.site_abilities_lost(cell)
             })
     }
 
-    /// Every lower location a burrowed ally reaches in one tunnel hop from `cell`.
+    /// Every lower location a burrowed ally reaches in one tunnel hop from `current`.
     ///
-    /// A tunnel reaches every other controlled site; any other controlled site reaches only the
-    /// tunnels themselves. Bordering cells are excluded because an ordinary step already covers
-    /// them.
-    fn burrowed_connection_locations(&self, profile: MovementProfile, cell: Cell) -> Vec<Location> {
+    /// A 2×2 occupies a tunnel when any current cell is the controller's tunnel, not only when
+    /// the anchor stands there. A tunnel reaches every other controlled site; any other
+    /// controlled site reaches only the tunnels themselves. Cells the footprint already occupies
+    /// and cells bordering the current anchor are excluded because they are here or an ordinary
+    /// step already covers them.
+    fn burrowed_connection_locations(
+        &self,
+        profile: MovementProfile,
+        current: Cell,
+        occupied: &[Cell],
+    ) -> Vec<Location> {
         if !profile.regions.burrowing
-            || !self
-                .controlled_site_cells(profile.seat)
-                .any(|controlled| controlled == cell)
+            || !occupied.iter().any(|cell| {
+                self.position.sites[cell.index()]
+                    .as_ref()
+                    .is_some_and(|site| site.controller == profile.seat)
+            })
         {
             return Vec::new();
         }
-        let at_tunnel = self.is_tunnel_site(cell);
-        let adjacent: Vec<Cell> = cell.bordering(profile.connects_top_bottom).collect();
+        let at_tunnel = occupied
+            .iter()
+            .any(|cell| self.is_tunnel_site(profile.seat, *cell));
+        let adjacent: Vec<Cell> = current.bordering(profile.connects_top_bottom).collect();
         self.controlled_site_cells(profile.seat)
-            .filter(|candidate| *candidate != cell && !adjacent.contains(candidate))
-            .filter(|candidate| at_tunnel || self.is_tunnel_site(*candidate))
+            .filter(|candidate| !occupied.contains(candidate) && !adjacent.contains(candidate))
+            .filter(|candidate| at_tunnel || self.is_tunnel_site(profile.seat, *candidate))
             .filter_map(|candidate| {
                 let region = if self.is_water_site(candidate) {
                     profile.regions.submerge.then_some(Region::Underwater)?
