@@ -7193,6 +7193,55 @@
         "file": "crates/sorcery-engine/tests/token_power_entry_rules.rs",
         "testName": "rule_catalog_0332_genesis_token_uses_prospective_power_on_a_tower"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0333",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fate is a Lose effect. A covered non-Ordinary site loses its printed Genesis paid-token ability, so the engine does not offer Pay 1 to summon that token onto the covered cell. Decline remains legal. Fate can cover voids, so the site is played onto the covered cell without standing a minion there first.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_genesis_token_rules.rs",
+        "testName": "rule_catalog_0333_fate_strips_genesis_paid_token_from_a_non_ordinary_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0334",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "An Ordinary site in a Fate 2x2 keeps its printed abilities. Its Genesis paid-token choice stays legal, and paying still summons the token onto that site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
+        "ordinary",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fate_genesis_token_rules.rs",
+        "testName": "rule_catalog_0334_ordinary_site_keeps_genesis_paid_token_under_fate"
+      }
     }
   ]
 }
