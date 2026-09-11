@@ -6842,6 +6842,53 @@
         "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
         "testName": "rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surface"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0318",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Landbound minion is enabled on a land site and becomes Disabled when it occupies no land location. The minion stays in the realm. Mixed Water sites are not land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound"
+      ],
+      "actionHints": [
+        "summon",
+        "move"
+      ],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0318_landbound_is_disabled_off_a_land_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0319",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Flood makes the occupied site a Water site, so a Landbound minion becomes Disabled in place. The Landbound ability itself still applies while Disabled.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0319_flood_overlay_disables_landbound_in_place"
+      }
     }
   ]
 }

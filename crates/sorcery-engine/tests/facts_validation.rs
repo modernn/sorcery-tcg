@@ -839,6 +839,15 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be true",
         ),
         (
+            "Landbound and Waterbound",
+            with(
+                with(minion(), "landbound", json!(true)),
+                "waterbound",
+                json!(true),
+            ),
+            "Landbound with Waterbound",
+        ),
+        (
             "competing start-turn triggers",
             with(
                 with(
@@ -1393,6 +1402,20 @@ fn oversized_waterbound_and_threshold_suppression_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.waterbound);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-landbound",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "landbound",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized Landbound minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.landbound);
 
     let CardFacts::Minion(facts) = parse_card_definition(
         "oversized-rats",

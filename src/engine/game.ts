@@ -438,6 +438,7 @@ export type GameCardDefinition =
     gainsStealthAtEndOfTurnIfNoEnemiesNearby?: boolean;
     immobile?: boolean;
     lanceCount?: 1 | 2 | 3;
+    landbound?: boolean;
     lethal?: boolean;
     manaCost: number;
     atEndOfControllerTurnControllerGainsLife?: number;
@@ -1285,7 +1286,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
-    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount lethal
+    gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
@@ -2490,8 +2491,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.voidwalk !== undefined && typeof card.voidwalk !== 'boolean') {
     throw new RangeError(`${path}.voidwalk must be boolean`);
   }
+  if (card.landbound !== undefined && typeof card.landbound !== 'boolean') {
+    throw new RangeError(`${path}.landbound must be boolean`);
+  }
   if (card.waterbound !== undefined && typeof card.waterbound !== 'boolean') {
     throw new RangeError(`${path}.waterbound must be boolean`);
+  }
+  if (card.landbound === true && card.waterbound === true) {
+    throw new RangeError(`${path} Landbound with Waterbound is unsupported`);
   }
   if (card.summonToAnySite !== undefined && typeof card.summonToAnySite !== 'boolean') {
     throw new RangeError(`${path}.summonToAnySite must be boolean`);
@@ -3031,6 +3038,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.immobile === true ? { immobile: true } : {}),
             ...(card.lanceCount !== undefined ? { lanceCount: card.lanceCount } : {}),
+            ...(card.landbound === true ? { landbound: true } : {}),
             ...(card.lethal === true ? { lethal: true } : {}),
             manaCost: card.manaCost,
             ...(card.mayRangedStrikeOnceDuringBasicMovement === true
