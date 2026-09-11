@@ -7976,6 +7976,56 @@
         "file": "crates/sorcery-engine/tests/updraft_ridge_footprint_rules.rs",
         "testName": "rule_catalog_0362_square_without_occupied_ridge_cannot_take_two_steps"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0363",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Flood makes a printed earth site a current Water site for casting. A water-site-only minion can be summoned to that flooded earth, and a submerged-only minion can be summoned underwater there. Printed earth without Flood remains illegal for both casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite",
+        "mustBeCastSubmerged"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-conjured",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_water_cast_rules.rs",
+        "testName": "rule_catalog_0363_flood_enables_water_site_and_underwater_casts_on_earth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0364",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Drought makes a printed Water site not a Water site for casting. A water-site-only minion can be summoned there before Drought and cannot after Drought covers it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_water_cast_rules.rs",
+        "testName": "rule_catalog_0364_drought_strips_water_site_casts_from_printed_water"
+      }
     }
   ]
 }
