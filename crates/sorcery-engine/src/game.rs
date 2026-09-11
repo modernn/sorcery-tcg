@@ -3018,13 +3018,17 @@ impl Game {
                     .genesis_pay_one_mana_to_summon_token
                     .as_deref()
                     .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
-                self.push_action(
-                    actions,
-                    ActionDescriptor::ResolveGenesisToken {
-                        choice: GenesisTokenChoice::PayOneMana,
-                    },
-                    format!("Pay 1 to summon {token_card_id}"),
-                );
+                if !self.site_abilities_lost(pending.cell)
+                    && self.token_may_enter_cell(pending.seat, token_card_id, pending.cell)?
+                {
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::ResolveGenesisToken {
+                            choice: GenesisTokenChoice::PayOneMana,
+                        },
+                        format!("Pay 1 to summon {token_card_id}"),
+                    );
+                }
             }
             return Ok(());
         }
@@ -3118,17 +3122,8 @@ impl Game {
                 let CardFacts::Site(site_facts) = &definition.facts else {
                     return Err(invalid("Atlas hand card lacks Site facts"));
                 };
-                let paid_token = site_facts.genesis_pay_one_mana_to_summon_token.is_some();
                 let creates_rubble = avatar.earth_site_play_creates_adjacent_rubble
                     && site_facts.elements.contains(Element::Earth);
-                let token_choices = if paid_token {
-                    [
-                        Some(GenesisTokenChoice::Decline),
-                        Some(GenesisTokenChoice::PayOneMana),
-                    ]
-                } else {
-                    [None, None]
-                };
                 for cell in &cells {
                     let rubble_choices: Vec<_> = if creates_rubble {
                         let candidates: Vec<_> = player
@@ -3150,11 +3145,23 @@ impl Game {
                     } else {
                         vec![None]
                     };
-                    for genesis_token_choice in
-                        token_choices
-                            .into_iter()
-                            .take(if paid_token { 2 } else { 1 })
+                    let token_choices = if let Some(token_card_id) =
+                        site_facts.genesis_pay_one_mana_to_summon_token.as_deref()
                     {
+                        let mut choices = vec![Some(GenesisTokenChoice::Decline)];
+                        if self.token_may_enter_played_site(
+                            seat,
+                            token_card_id,
+                            *cell,
+                            site_facts,
+                        )? {
+                            choices.push(Some(GenesisTokenChoice::PayOneMana));
+                        }
+                        choices
+                    } else {
+                        vec![None]
+                    };
+                    for genesis_token_choice in token_choices {
                         let token_suffix = match genesis_token_choice {
                             Some(GenesisTokenChoice::Decline) => " (decline Genesis)",
                             Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
@@ -7068,6 +7075,56 @@ impl Game {
             bonus = bonus.saturating_add(2);
         }
         u8::try_from(u16::from(facts.attack).saturating_add(bonus)).unwrap_or(u8::MAX)
+    }
+
+    fn token_minion_facts(&self, token_card_id: &str) -> Result<&MinionFacts, GameError> {
+        let definition = self
+            .rules
+            .cards
+            .iter()
+            .find(|definition| definition.id == token_card_id)
+            .ok_or_else(|| invalid("token effect lacks its referenced token minion definition"))?;
+        match &definition.facts {
+            CardFacts::Minion(facts) if facts.token => Ok(facts),
+            _ => Err(invalid(
+                "token effect lacks its referenced token minion definition",
+            )),
+        }
+    }
+
+    fn token_may_enter_cell(
+        &self,
+        seat: Seat,
+        token_card_id: &str,
+        cell: Cell,
+    ) -> Result<bool, GameError> {
+        let facts = self.token_minion_facts(token_card_id)?;
+        Ok(!self.site_prevents_power_entry(
+            cell,
+            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell)),
+        ))
+    }
+
+    fn token_may_enter_played_site(
+        &self,
+        seat: Seat,
+        token_card_id: &str,
+        cell: Cell,
+        site: &SiteFacts,
+    ) -> Result<bool, GameError> {
+        let facts = self.token_minion_facts(token_card_id)?;
+        let mut power =
+            self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell));
+        let pending_tower = site.is_tower && !(self.fate_covers_cell(cell) && !site.ordinary);
+        if facts.gains_power_ranged_and_spellcaster_atop_tower && pending_tower {
+            power = u8::try_from(u16::from(power).saturating_add(2)).unwrap_or(u8::MAX);
+        }
+        if self.fate_covers_cell(cell) && !site.ordinary {
+            return Ok(true);
+        }
+        Ok(!site
+            .prevents_units_with_power_at_least_from_entering
+            .is_some_and(|threshold| power >= threshold))
     }
 
     fn site_prevents_power_entry(&self, cell: Cell, entry_power: u8) -> bool {
@@ -12368,6 +12425,14 @@ impl Game {
             | (None, None) => {}
             _ => return Err(GameError::IllegalAction),
         }
+        if genesis_token_choice == Some(GenesisTokenChoice::PayOneMana) {
+            let token_card_id = genesis_token_card_id
+                .as_deref()
+                .ok_or(GameError::IllegalAction)?;
+            if !self.token_may_enter_played_site(seat, token_card_id, cell, facts)? {
+                return Err(GameError::IllegalAction);
+            }
+        }
         let (genesis_gain_mana, genesis_spell_draw_count) =
             self.site_genesis_gain_and_draws(seat, cell, played_card_id, facts);
         let replacing_rubble_with_water =
@@ -12638,6 +12703,12 @@ impl Game {
             return Err(invalid(
                 "token effect lacks its referenced token minion definition",
             ));
+        }
+        if self.site_prevents_power_entry(
+            cell,
+            self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell)),
+        ) {
+            return Err(GameError::IllegalAction);
         }
         let card_id = CardId(
             u16::try_from(index)
@@ -13490,7 +13561,11 @@ impl Game {
             .as_deref()
             .ok_or(GameError::IllegalAction)?;
         let paid = choice == GenesisTokenChoice::PayOneMana;
-        if paid && self.position.players[seat_index(seat)].mana == 0 {
+        if paid
+            && (self.position.players[seat_index(seat)].mana == 0
+                || self.site_abilities_lost(pending.cell)
+                || !self.token_may_enter_cell(seat, token_card_id, pending.cell)?)
+        {
             return Err(GameError::IllegalAction);
         }
         let token = paid
@@ -17091,14 +17166,19 @@ impl Game {
         let token_units = match &effect {
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => {
                 let enemy = other_seat(seat);
-                self.controlled_site_cells(seat)
-                    .filter(|cell| {
-                        cell.bordering(false).any(|bordering| {
-                            self.position.sites[bordering.index()]
-                                .as_ref()
-                                .is_some_and(|site| site.controller == enemy)
-                        })
-                    })
+                let mut cells = Vec::new();
+                for cell in self.controlled_site_cells(seat) {
+                    let borders_enemy = cell.bordering(false).any(|bordering| {
+                        self.position.sites[bordering.index()]
+                            .as_ref()
+                            .is_some_and(|site| site.controller == enemy)
+                    });
+                    if borders_enemy && self.token_may_enter_cell(seat, token_card_id, cell)? {
+                        cells.push(cell);
+                    }
+                }
+                cells
+                    .into_iter()
                     .enumerate()
                     .map(|(ordinal, cell)| {
                         self.create_token_unit(

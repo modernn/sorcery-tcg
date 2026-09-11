@@ -7144,6 +7144,55 @@
         "file": "crates/sorcery-engine/tests/free_summon_power_rules.rs",
         "testName": "rule_catalog_0330_free_two_by_two_uses_footprint_power"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0331",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Tokens are units, so creating one on a site is an entry. A Genesis paid token whose printed power meets a site's power-threshold bar cannot be paid onto that site. A weaker token still can.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "genesisPayOneManaToSummonToken",
+        "token"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_power_entry_rules.rs",
+        "testName": "rule_catalog_0331_genesis_token_respects_a_printed_power_threshold"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0332",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Genesis token placement uses the power the token would have on that site, not printed attack. A printed-1 token that would become 3 atop the Tower it is spawning on cannot be paid onto a threshold-3 Tower. The same token can still be paid onto a Tower without a bar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "preventsUnitsWithPowerAtLeastFromEntering",
+        "gainsPowerRangedAndSpellcasterAtopTower",
+        "isTower",
+        "genesisPayOneManaToSummonToken",
+        "token"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_power_entry_rules.rs",
+        "testName": "rule_catalog_0332_genesis_token_uses_prospective_power_on_a_tower"
+      }
     }
   ]
 }
