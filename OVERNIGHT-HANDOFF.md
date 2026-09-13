@@ -37,12 +37,13 @@ Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `mast
 | `5af97d4` | Update carried Artifact bearer seat when Mesmerism transfers control. |
 | `15763be` | Migrate setup-07 Siege Ballista through Mesmerism proofs onto SetupCtx. |
 | `7f3824d` | Migrate setup-08 Fatality through Devil's Egg play paths onto SetupCtx. |
+| *(uncommitted)* | Migrate setup-08 remaining play paths: Devil's Egg carried/regions, Lucky Charm teleports, Raise Dead, Craterize. |
 
-Tip: run `git log -1 --oneline` (expected near this handoff commit).
+Tip: run `git log -1 --oneline` (expected near this handoff commit). Uncommitted WIP above needs `pnpm verify` then commit.
 
 ## Gate status at tip
 
-- `pnpm verify` — **404 tests, 0 fail** (green after setup-08 batch 1).
+- `pnpm verify` — **not run this session** (shell hook blocked agent commands). Prior tip: **404 tests, 0 fail** after setup-08 batch 1 (`7f3824d`). Run `pnpm verify` before commit.
 - Do **not** apply `stash@{0}` (`wip-parallel`): incomplete/broken SetupCtx rewrites of setup-03/04/06 + novelty-rollout left by a parallel agent; tip TS versions of those files still pass.
 
 ## Boundary cutover status
@@ -58,7 +59,7 @@ Done:
 - `game-setup-02` **play-path complete**: Leap through Bury. Remaining refs are seed peeks + forged-state probes (Chain Magic mana/region/stealth; Blink empty-atlas steps).
 - `game-setup-07` **play-path complete**: Deathrite family; RULE-04 combat / Defend / Intercept / damage persistence / Death's Door; Artifact Pick Up/Drop + lethal bearers; Siege Ballista; Payload Trebuchet; Rolling Boulder; Mesmerism.
 - Rust Mesmerism now updates carried Artifact `bearer.seat` on control transfer (parity with TS).
-- `game-setup-08` **partial** (9/14 tests play-path on SetupCtx): Fatality; Sparkmage family (3); Tower minion (`ctx.resume` branches); Nimbus discard family (3); Devil's Egg site-controller life loss. Remaining: Devil's Egg carried/regions, Lucky Charm teleports, Raise Dead, Craterize. Forged-state probes (Fatality targets, Sparkmage reset, Nimbus disable/oversized) still use TS legality/stepGame intentionally.
+- `game-setup-08` **play-path complete** (14/14 on SetupCtx): Fatality; Sparkmage family (3); Tower minion; Nimbus discard family (3); Devil's Egg family (3); Lucky Charm start-turn teleports; Raise Dead; Craterize. Remaining refs: forged-state probes (Fatality targets, Sparkmage reset, Nimbus disable/oversized, Lucky Charm/Raise Dead/Craterize forged descriptors) + seed peeks — TS `legalGameActions`/`stepGame` intentionally.
 
 Still present — `src/engine/game.ts` (~525KB):
 - Still exports `createGameSession` / `legalGameActions` / `stepGame` because most split setup files and other callers still use them.
@@ -69,7 +70,7 @@ Still present — `src/engine/game.ts` (~525KB):
 
 ## Remaining TS legality surface (estimate)
 
-`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **354** total:
+`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **316** total:
 
 | File | ~calls |
 | --- | ---: |
@@ -80,7 +81,7 @@ Still present — `src/engine/game.ts` (~525KB):
 | game-setup-05 | 1 |
 | game-setup-06 | 70 |
 | game-setup-07 | 12 |
-| game-setup-08 | 51 |
+| game-setup-08 | 13 |
 | helpers | 7 |
 
 Other public/private callers still needing Rust cutover later:
@@ -93,8 +94,8 @@ Other public/private callers still needing Rust cutover later:
 
 ## Next exact step
 
-1. Finish `game-setup-08`: migrate Devil's Egg carried + regions (`withDevilsEggFixture`), Lucky Charm teleports, Raise Dead, Craterize play paths.
-2. Then remaining RULE-02/03 in setup-03 / 04 / 06 / 01 as capacity allows.
+1. Run `pnpm verify`; commit setup-08 batch 2 if green (suggested message: migrate remaining setup-08 play paths onto SetupCtx).
+2. Continue RULE-02/03 in **setup-03** (61 refs) then 04 / 06 / 01 as capacity allows.
 3. Prefer helpers in `game-setup-helpers.ts` (`withNorthAttacksAtC2`, `withDevilsEggFixture`, …); do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
 4. After public tests no longer call TS legality, gut `createGameSession` / `legalGameActions` / `stepGame` in `game.ts`.
 5. Drop or ignore `stash@{0}` after confirming tip does not need it (`git stash drop` only when ready).

@@ -24,6 +24,7 @@
 - Inspect and reuse existing code before adding abstractions or dependencies.
 - Prefer MCP servers for authoritative external data and connected services.
 - Use Podman, not Docker, when containers are necessary.
-- Run `pnpm verify` after changes. Run `pnpm authority:verify-private` only for authority-release work that has the required ignored local inputs.
+- Run `pnpm verify` (alias for `pnpm verify:public`) after TypeScript and public-test changes. PRs that touch `crates/sorcery-engine/` must also pass the full Rust suite in `pnpm verify:release` or the equivalent cargo commands below.
+- Run `pnpm verify:release` before merging to `master` or tagging a release. Run `pnpm game:check-private` and `pnpm authority:verify-private` only on a machine with `.local/authority/` and `pwsh` when private proofs or authority bundles change.
 - For Rust changes, use locked dependencies and run `cargo fmt --all -- --check`, `cargo check --workspace --all-targets --all-features --locked`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, and `cargo test --workspace --all-features --locked`.
 - Make one coherent verified commit per change. Delegate only independent work that benefits from parallel execution.

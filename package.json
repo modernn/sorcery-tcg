@@ -27,7 +27,9 @@
     "authority:verify-private": "node --test --test-concurrency=1 tests/private-authority/*.test.ts",
     "lint": "eslint .",
     "test": "node --test --test-concurrency=1 tests/authority/*.test.ts tests/engine/*.test.ts tests/ingestion/*.test.ts",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test"
+    "verify:public": "pnpm typecheck && pnpm lint && pnpm test",
+    "verify:release": "pnpm verify:public && cargo fmt --all -- --check && cargo check --workspace --all-targets --all-features --locked && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && cargo test --workspace --all-features --locked",
+    "verify": "pnpm verify:public"
   },
   "dependencies": {
     "zod": "4.4.3"

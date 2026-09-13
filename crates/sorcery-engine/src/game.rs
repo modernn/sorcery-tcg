@@ -14076,20 +14076,27 @@ impl Game {
         let mut dropped = Vec::new();
         for artifact in &mut self.position.artifacts {
             if artifact.carried_by(kind, seat, instance_id) {
+                // An Artifact leaves its bearer where it rode, not on the bearer's anchor.
+                let cell = match &artifact.placement {
+                    ArtifactPlacement::Carried { bearer_cell, .. } => {
+                        bearer_cell.unwrap_or(fell_at.cell)
+                    }
+                    ArtifactPlacement::Loose { location, .. } => *location,
+                };
                 artifact.placement = ArtifactPlacement::Loose {
-                    location: fell_at.cell,
+                    location: cell,
                     region: fell_at.region,
                 };
-                dropped.push(artifact.card.clone());
+                dropped.push((artifact.card.clone(), cell));
             }
         }
-        for card in dropped {
+        for (card, cell) in dropped {
             let card_id = self.rules.cards[usize::from(card.card_id.0)].id.clone();
             outcomes.push("artifact-dropped", || {
                 json!({
                     "bearerInstanceId": instance_id,
                     "cardId": card_id,
-                    "cell": fell_at.cell,
+                    "cell": cell,
                     "instanceId": card.instance_id,
                     "owner": card.owner,
                     "region": fell_at.region,
@@ -21805,8 +21812,9 @@ mod tests {
         assert_eq!(located(&game), cell("B2"));
 
         // The marked cell rides along when the bearer steps, staying inside the new footprint.
+        let giant_identity = IdentityHash::parse(giant_id).expect("giant identity");
         game.move_minion_to(
-            &IdentityHash::parse(giant_id).expect("giant identity"),
+            &giant_identity,
             Location {
                 cell: cell("B1"),
                 region: Region::Surface,
@@ -21814,5 +21822,29 @@ mod tests {
         )
         .expect("giant steps one file");
         assert_eq!(located(&game), cell("C2"));
+
+        // A dying bearer leaves the Artifact on the cell it rode, not on the bearer's anchor.
+        let fell_at = Location {
+            cell: cell("B1"),
+            region: Region::Surface,
+        };
+        let mut released = Vec::new();
+        game.release_carried_artifacts(
+            UnitKind::Minion,
+            Seat::North,
+            &giant_identity,
+            fell_at,
+            &mut OutcomeLog::Record(&mut released),
+        );
+        assert_eq!(
+            game.position.artifacts[0].placement,
+            ArtifactPlacement::Loose {
+                location: cell("C2"),
+                region: Region::Surface,
+            }
+        );
+        let (event_type, payload) = released.first().expect("artifact-dropped event");
+        assert_eq!(event_type, "artifact-dropped");
+        assert_eq!(payload["cell"], json!(cell("C2")));
     }
 }
