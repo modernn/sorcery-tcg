@@ -32,7 +32,7 @@ Private gauntlet remains four orientation jobs, 32-branch ceiling, pruning, and 
 - `tests/engine/game-setup-helpers.ts` still has sync TS fixtures (`action`, `keep`, `createGameSession`).
 - `src/engine/game.ts` still implements those legality exports.
 - `src/commands/run-private-game-check.ts` and setup files still call TS `observeGame` on exported state. Play paths otherwise use `SetupCtx`.
-- Simulator search loops in `src/simulator/{novelty-rollout,counterfactual,gauntlet}.ts` still live in TypeScript and call Rust per transition. That does not satisfy the native-search constraint.
+- Novelty selection now runs in Rust (`noveltyRollout`). Counterfactual search and gauntlet scheduling in `src/simulator/{counterfactual,gauntlet}.ts` still live in TypeScript and call Rust per transition. That remaining search is not yet native.
 - `benchmarks/typescript-engine.ts` remains until its imports are retired.
 
 Catalog stays 161 rust-supported / 0 typescript-supported. That label is not ranked readiness.

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use crate::canonical::{CanonicalError, canonical_json, parse_json_without_duplicate_keys};
 use crate::checkpoint::{create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint};
 use crate::contract::{ActionRequest, Seat};
+use crate::novelty::{self, NoveltyError};
 use crate::session::{Session, StepResult};
 
 const SCHEMA_VERSION: u8 = 1;
@@ -69,6 +70,7 @@ impl SessionJsonService {
             "verifyReplay" => self.verify_replay(request.id),
             "exportSession" => self.export_session(request.id),
             "checkpoint" => self.checkpoint(request.id),
+            "noveltyRollout" => self.novelty_rollout(request.id, &request.params),
             "resume" => self.resume(request.id, &request.params),
             _ => error_response(request.id, "session-json method is unsupported"),
         }
@@ -246,6 +248,31 @@ impl SessionJsonService {
                 Ok(value) => ok_response(id, json!({ "checkpoint": value })),
                 Err(error) => error_response(id, &error.to_string()),
             },
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn novelty_rollout(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(max_actions) = params.get("maxActions").and_then(Value::as_u64) else {
+            return error_response(id, "noveltyRollout requires maxActions");
+        };
+        match novelty::run_novelty_rollout(session, max_actions) {
+            Ok(rollout) => ok_response(
+                id,
+                json!({
+                    "emissions": rollout.emissions.iter().map(|emission| json!({
+                        "checkpoint": emission.checkpoint,
+                        "failureIfSinkRejects": emission.failure_if_sink_rejects,
+                    })).collect::<Vec<_>>(),
+                    "result": rollout.result,
+                }),
+            ),
+            Err(NoveltyError::InvalidLimit) => {
+                error_response(id, "noveltyRollout maxActions must be 0-500")
+            }
             Err(error) => error_response(id, &error.to_string()),
         }
     }

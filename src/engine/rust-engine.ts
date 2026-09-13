@@ -282,6 +282,14 @@ export class RustSessionClient {
     return result as JsonValue;
   }
 
+  async noveltyRollout(maxActions: number): Promise<JsonValue> {
+    const result = await this.call('noveltyRollout', { maxActions });
+    if (!isRecord(result) || result.result === undefined || !Array.isArray(result.emissions)) {
+      throw new Error('Rust session noveltyRollout result was invalid');
+    }
+    return result as JsonValue;
+  }
+
   async checkpoint(): Promise<JsonValue> {
     const result = await this.call('checkpoint', {});
     if (!isRecord(result) || result.checkpoint === undefined) {
