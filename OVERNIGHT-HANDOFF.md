@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Integration branch: `codex/rust-cutover`, started from later cutover work `9895d09` (`cursor/phase3-drown-bury-artifacts-36d3`). Do not reset to planning baseline `25424a8`. Local `master` remains at planning docs `504d576`. `origin/master` has 50 diverged feature commits from the same baseline; that line is preserved and is not this cutover.
+Integration branch: `codex/rust-cutover`. Shared-adapter foundation: `f95ff2c`. Started from later cutover work `9895d09` (`cursor/phase3-drown-bury-artifacts-36d3`). Do not reset to planning baseline `25424a8`. Local `master` remains at planning docs `504d576`. `origin/master` has 50 diverged feature commits from the same baseline; that line is preserved and is not this cutover.
 
 Audit checkout `codex/overnight-cutover-audit` at `.local/worktrees/overnight-cutover-audit` is not an implementation tree. Do not edit `docs/reports/overnight-cutover-audit.md` or that worktree.
 
