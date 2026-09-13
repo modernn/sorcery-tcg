@@ -16,11 +16,8 @@ import type {
   GameStepResult,
 } from '../../src/engine/game.ts';
 import {
-  hashGameState,
-  observeGame,
-} from '../../src/engine/game.ts';
-import {
   RustGameSessionHandle,
+  type RustCheckpointSnapshot,
 } from '../../src/engine/rust-session-helpers.ts';
 
 /** One Rust-backed setup session for engine rule proofs. */
@@ -93,14 +90,19 @@ export class SetupCtx {
     return this.handle.step(request);
   }
 
-  /** Returns a seat-scoped observation derived from the exported state. */
-  observe(viewer: GameSeat): GameObservation {
-    return observeGame(this.session.state, viewer);
+  /** Returns a seat-scoped observation from the Rust session. */
+  async observe(viewer: GameSeat): Promise<GameObservation> {
+    return this.handle.observe(viewer);
   }
 
-  /** Returns the authoritative state hash. */
-  stateHash(): StateHash {
-    return hashGameState(this.state);
+  /** Returns the authoritative Rust state hash. */
+  async stateHash(): Promise<StateHash> {
+    return this.handle.stateHash(this.state.decisionSeat);
+  }
+
+  /** Captures one checkpoint that can root an independent branch. */
+  async checkpoint(): Promise<RustCheckpointSnapshot> {
+    return this.handle.checkpoint();
   }
 
   /** Verifies replay integrity for the current journals. */
@@ -109,7 +111,7 @@ export class SetupCtx {
   }
 
   /** Resumes one parsed checkpoint into this live session. */
-  async resume(checkpoint: GameCheckpoint): Promise<GameSession> {
+  async resume(checkpoint: GameCheckpoint | JsonValue): Promise<GameSession> {
     return this.handle.resume(checkpoint as unknown as JsonValue);
   }
 

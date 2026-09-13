@@ -5,6 +5,7 @@ import type {
   GameActionRequest,
   GameLegalAction,
   GameManifest,
+  GameObservation,
   GameSeat,
   GameSession,
   GameStepResult,
@@ -40,6 +41,47 @@ export function asGameLegalActions(actions: readonly RustLegalAction[]): readonl
   return actions as readonly GameLegalAction[];
 }
 
+function isSeat(value: unknown): value is GameSeat {
+  return value === 'north' || value === 'south';
+}
+
+function isHiddenHand(value: unknown, own: boolean): boolean {
+  if (!isRecord(value)) return false;
+  const atlas = value.atlas;
+  const spellbook = value.spellbook;
+  return own
+    ? Array.isArray(atlas) && Array.isArray(spellbook)
+    : typeof atlas === 'number' && typeof spellbook === 'number';
+}
+
+/**
+ * Validates one Rust `publicView` payload as a seat observation.
+ * Opponent hands must be counts; the viewer's hands must be card lists.
+ */
+export function parseGameObservation(value: JsonValue, viewer: GameSeat): GameObservation {
+  if (!isRecord(value)
+    || value.schemaVersion !== 1
+    || value.viewer !== viewer
+    || !isSeat(value.activeSeat)
+    || !isSeat(value.decisionSeat)
+    || typeof value.phase !== 'string'
+    || !Number.isSafeInteger(value.stateVersion)
+    || !Number.isSafeInteger(value.turnNumber)
+    || !isRecord(value.terminal)
+    || (value.terminal.status !== 'active' && value.terminal.status !== 'finished')
+    || !isRecord(value.players)
+    || !isRecord(value.players.north)
+    || !isRecord(value.players.south)
+    || !isHiddenHand(value.players.north.hand, viewer === 'north')
+    || !isHiddenHand(value.players.south.hand, viewer === 'south')
+    || !isRecord(value.realm)
+    || !isRecord(value.realm.sites)
+    || !Array.isArray(value.realm.units)) {
+    throw new Error('Rust observation did not match GameObservation');
+  }
+  return deepFreeze(value as GameObservation);
+}
+
 export type RustCheckpointSnapshot = Readonly<{
   checkpoint: JsonValue;
   checkpointId: Sha256Hash;
@@ -60,12 +102,17 @@ export class RustGameSessionHandle {
     this.session = session;
   }
 
-  /** Opens one fresh Rust-backed session. */
+  /** Opens one fresh Rust-backed session and closes it if setup fails. */
   static async open(manifest: GameManifest): Promise<RustGameSessionHandle> {
     const client = await RustSessionClient.start();
-    await client.newSession(canonicalJson(manifest as unknown as JsonValue));
-    const session = parseExportedSession(await client.exportSession(), manifest);
-    return new RustGameSessionHandle(client, manifest, session);
+    try {
+      await client.newSession(canonicalJson(manifest as unknown as JsonValue));
+      const session = parseExportedSession(await client.exportSession(), manifest);
+      return new RustGameSessionHandle(client, manifest, session);
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
   }
 
   /** Returns the latest exported session snapshot. */
@@ -151,6 +198,15 @@ export class RustGameSessionHandle {
     await this.client.resume(checkpoint);
     this.session = parseExportedSession(await this.client.exportSession(), this.manifest);
     return this.session;
+  }
+
+  /**
+   * Returns the seat-scoped Rust observation.
+   * This is `publicView`, not the compact policy `observe` payload.
+   */
+  async observe(seat: GameSeat): Promise<GameObservation> {
+    const viewed = await this.client.publicView(seat);
+    return parseGameObservation(viewed.view, seat);
   }
 
   /** Returns the authoritative state hash for one seat observation. */

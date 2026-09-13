@@ -375,7 +375,7 @@ test('RULE-04 Malakhim untaps at its controller End Phase unless Disabled', asyn
       tapped: false,
       warded: true,
     }]);
-    assert.equal(ctx.observe('south').realm.units
+    assert.equal((await ctx.observe('south')).realm.units
       .find(({ instanceId }) => instanceId === malakhim.instanceId)?.warded, true);
 
     await takeAction(ctx, ({ descriptor }) =>
@@ -694,7 +694,7 @@ test('RULE-04 Submerge uses underwater summons, movement, and region-isolated co
     await take(({ descriptor }) => descriptor.kind === 'summon-minion' && descriptor.region === 'underwater');
     const northUnitId = ctx.state.realm.units[0]?.instanceId;
     assert.ok(northUnitId);
-    assert.equal(ctx.observe('north').realm.units[0]?.region, 'underwater');
+    assert.equal((await ctx.observe('north')).realm.units[0]?.region, 'underwater');
     await take(({ descriptor }) => descriptor.kind === 'end-turn');
 
     await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');

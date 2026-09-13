@@ -1,108 +1,51 @@
 # Overnight handoff
 
-Branch: `cursor/phase3-drown-bury-artifacts-36d3` is the integration line. `master` is fast-forwarded to it. Superseded branches and stashes live only as `archive/*` tags (`git tag -l 'archive/*'`).
+Integration branch: `codex/rust-cutover`, started from later cutover work `9895d09` (`cursor/phase3-drown-bury-artifacts-36d3`). Do not reset to planning baseline `25424a8`. Local `master` remains at planning docs `504d576`. `origin/master` has 50 diverged feature commits from the same baseline; that line is preserved and is not this cutover.
 
-## Catalog count
+Audit checkout `codex/overnight-cutover-audit` at `.local/worktrees/overnight-cutover-audit` is not an implementation tree. Do not edit `docs/reports/overnight-cutover-audit.md` or that worktree.
 
-`data/rules/catalog.json`: **161 rust-supported / 0 typescript-supported** out of 161.
+## Frozen adapter
 
-## Commits landed (this overnight SetupCtx line)
+`SetupCtx` and `RustGameSessionHandle` are the shared boundary. Workers must not edit `src/engine/rust-session-helpers.ts`, `src/engine/rust-engine.ts`, `src/engine/game.ts`, `tests/engine/rust-setup-session.ts`, shared Rust session/RPC files, or this handoff.
 
-| Hash | Change |
-| --- | --- |
-| `41dc56a` | Migrate core RULE-02 spatial setup proofs onto Rust SetupCtx. |
-| `cfe2398` | Migrate RULE-03 draw-spell + Spellcaster summon proofs to SetupCtx. |
-| `f80732b` | Split monolithic `game-setup.test.ts` into eight files + shared helpers. |
-| `7d0c208` | Migrate `game-setup-05` proofs to SetupCtx (batch 1/3). |
-| `5fa0ce3` | Migrate remaining RULE-01 empty-deck + stale-rejection proofs to SetupCtx. |
-| `af0b6f4` | Migrate RULE-02 Cloud City flight proof onto SetupCtx. |
-| `ed643a3` | Lint-only unused import cleanup after Cloud City. |
-| `7df79c6` | Document overnight SetupCtx migration progress and remaining call counts. |
-| `4057b2b` | Fix Defend legality for non-surface combat regions (void path Defend). |
-| `857a643` | Migrate RULE-02 Geomancer / settlement / edge-wrap compounds to SetupCtx. |
-| `2cd0931` | Migrate `game-setup-05` drag projectile proofs to SetupCtx (batch 2/3). |
-| `637d79a` | Document SetupCtx progress after RULE-02 compounds and drag batch 2. |
-| `87fd0cf` | Migrate `game-setup-05` remaining proofs to SetupCtx (batch 3/3). |
-| `e05133d` | Migrate setup-02 Leap Attack / Magic targets / Lash to SetupCtx. |
-| `285c394` | Migrate setup-02 Freeze disable proof onto SetupCtx. |
-| `0ea6877` | Migrate setup-02 subsurface disable, Lightning Bolt, Lucky Charm to SetupCtx. |
-| `170a183` | Migrate setup-02 Minor Explosion, Chain Magic, Rain of Arrows to SetupCtx. |
-| `6ae4ed2` | Migrate setup-02 Charge and Overpower proofs to SetupCtx. |
-| `bcd9d7d` | Migrate setup-02 nearby-allies and controlled Mortal power to SetupCtx. |
-| `d861152` | Migrate remaining setup-02 aura-loss and magic proofs (Deathrite→Bury). |
-| `9d8d49e` | Migrate setup-07 RULE-05 Deathrite family (Bladderblimp→healing). |
-| `ef5f7ab` | Document SetupCtx progress after setup-02 finish and setup-07 Deathrite. |
-| `81506e3` | Migrate setup-07 RULE-04 combat and Death's Door proofs onto SetupCtx. |
-| `ef278bc` | Migrate setup-07 Artifact Pick Up/Drop and lethal bearer proofs onto SetupCtx. |
-| `5af97d4` | Update carried Artifact bearer seat when Mesmerism transfers control. |
-| `15763be` | Migrate setup-07 Siege Ballista through Mesmerism proofs onto SetupCtx. |
-| `7f3824d` | Migrate setup-08 Fatality through Devil's Egg play paths onto SetupCtx. |
-| *(uncommitted)* | Migrate setup-08 remaining play paths: Devil's Egg carried/regions, Lucky Charm teleports, Raise Dead, Craterize. |
+Frozen methods:
 
-Tip: run `git log -1 --oneline` (expected near this handoff commit). Uncommitted WIP above needs `pnpm verify` then commit.
+- `observe(seat)` is async and returns a validated Rust `publicView` as `GameObservation`. Opponent hands are counts; the viewer's hands are card lists. This is not the compact policy `observe` RPC.
+- `stateHash()` is async and returns the Rust public-view state hash.
+- `checkpoint()` returns a Rust checkpoint that can root an independent branch. Restore it with `resume()` before each alternative. Do not treat a mutable handle as a sibling snapshot.
+- `step` / `stepRequest` return rejections without mutating state. `verifyReplay()` is the replay check.
+- `withSetup` closes the child session on callback failure. `RustGameSessionHandle.open` also closes the spawned process if session creation fails.
 
-## Gate status at tip
+Proof: `tests/engine/rust-setup-session.test.ts`.
 
-- `pnpm verify` — **not run this session** (shell hook blocked agent commands). Prior tip: **404 tests, 0 fail** after setup-08 batch 1 (`7f3824d`). Run `pnpm verify` before commit.
-- Do **not** apply `stash@{0}` (`wip-parallel`): incomplete/broken SetupCtx rewrites of setup-03/04/06 + novelty-rollout left by a parallel agent; tip TS versions of those files still pass.
+## Frozen native novelty contract
 
-## Boundary cutover status
+Worker B must not change RPC dispatch. Request a dispatch addition against this shape; do not invent a second result schema.
 
-Done:
-- Demo / batch / play / parity / public views / fail-closed demo agent (prior).
-- SetupCtx bridge + helpers (`toNorthSecondMain`, `takeAction`, `withNorthAttacksAtC2`, `withDevilsEggFixture`, …).
-- RULE-01 opening proofs (setup, mulligan, first player, empty-deck) + stale rejection.
-- Core RULE-02 spatial proofs (expansion, zero-domain recovery, draw-site, forged actions, Cloud City).
-- RULE-02 compounds: Geomancer rubble, region settlement (+ void Defend engine fix), top/bottom edge wrap.
-- RULE-03 opening draw-spell + Spellcaster summon.
-- `game-setup-05` **complete** (batches 1–3): genesis sleep through ranged/drag, Granary Rats, Airborne/Mountain Pass, Updraft Ridge, Stealth, Sly Fox.
-- `game-setup-02` **play-path complete**: Leap through Bury. Remaining refs are seed peeks + forged-state probes (Chain Magic mana/region/stealth; Blink empty-atlas steps).
-- `game-setup-07` **play-path complete**: Deathrite family; RULE-04 combat / Defend / Intercept / damage persistence / Death's Door; Artifact Pick Up/Drop + lethal bearers; Siege Ballista; Payload Trebuchet; Rolling Boulder; Mesmerism.
-- Rust Mesmerism now updates carried Artifact `bearer.seat` on control transfer (parity with TS).
-- `game-setup-08` **play-path complete** (14/14 on SetupCtx): Fatality; Sparkmage family (3); Tower minion; Nimbus discard family (3); Devil's Egg family (3); Lucky Charm start-turn teleports; Raise Dead; Craterize. Remaining refs: forged-state probes (Fatality targets, Sparkmage reset, Nimbus disable/oversized, Lucky Charm/Raise Dead/Craterize forged descriptors) + seed peeks — TS `legalGameActions`/`stepGame` intentionally.
+Input: manifest JSON, seed, `maxActions` 0–500, width ceiling 128, policy `one-step-novelty-v1`. Output keeps current `NoveltyRolloutResult`: status `completed` | `horizon` | `failed`; offered/probed/committed coverage; frontier candidates with checkpoint id, predicted events, and predicted state hash; explicit failure evidence; `rulesCoverage: unranked_partial_rules`; classification `authority-private` only for private runs. Repeated synthetic runs must be byte-identical. Selected branches must replay. Do not start a process per probe.
 
-Still present — `src/engine/game.ts` (~525KB):
-- Still exports `createGameSession` / `legalGameActions` / `stepGame` because most split setup files and other callers still use them.
-- Keep types / `hashGameState` / `createGameManifest` / `observeGame` as the thin TS boundary.
-- Geomancer / Granary Rats / Chain Magic / Blink empty-atlas / setup-08 forged probes still use TS legality only for forged-state probes.
-- Seed-search loops may still peek opening hands via `createGameSession` (cheap); play paths use SetupCtx.
-- Note: mid-combat Rust journals can diverge from TS `resumeGameCheckpoint`; use `SetupCtx.resumeCheckpoint` / `ctx.resume` for those roundtrips.
+Private gauntlet remains four orientation jobs, 32-branch ceiling, pruning, and stop-on-failure. Keep `loadPrivateStarterCatalog` and demo-manifest exports.
 
-## Remaining TS legality surface (estimate)
+## Remaining legacy callers
 
-`createGameSession(` / `legalGameActions(` / `stepGame(` call counts in setup tree ≈ **316** total:
+- `tests/engine/game-setup-04.test.ts` still calls `createGameSession` / `legalGameActions` / `stepGame` / `verifyGameReplay` for the oversized-footprint proof.
+- `tests/engine/game-setup-helpers.ts` still has sync TS fixtures (`action`, `keep`, `createGameSession`).
+- `src/engine/game.ts` still implements those legality exports.
+- `src/commands/run-private-game-check.ts` and setup files still call TS `observeGame` on exported state. Play paths otherwise use `SetupCtx`.
+- Simulator search loops in `src/simulator/{novelty-rollout,counterfactual,gauntlet}.ts` still live in TypeScript and call Rust per transition. That does not satisfy the native-search constraint.
+- `benchmarks/typescript-engine.ts` remains until its imports are retired.
 
-| File | ~calls |
-| --- | ---: |
-| game-setup-01 | 50 |
-| game-setup-02 | 19 |
-| game-setup-03 | 61 |
-| game-setup-04 | 83 |
-| game-setup-05 | 1 |
-| game-setup-06 | 70 |
-| game-setup-07 | 12 |
-| game-setup-08 | 13 |
-| helpers | 7 |
+Catalog stays 161 rust-supported / 0 typescript-supported. That label is not ranked readiness.
 
-Other public/private callers still needing Rust cutover later:
-- `tests/engine/game-novelty-rollout.test.ts` + `src/simulator/novelty-rollout.ts`
-- Sync `resumeGameCheckpoint` in `src/engine/checkpoint.ts`
-- Private: `run-private-game-check.ts`, `run-private-novelty-gauntlet.ts`
-- `benchmarks/typescript-engine.ts` (intentional until deletion)
+## Worker ownership
 
-`game.ts` legality exports still required.
+| Lane | Owns | Next step |
+| --- | --- | --- |
+| Integration | shared engine boundary, RPC, browser, parity scripts, this handoff | native novelty dispatch after Worker B requests it against the frozen schema |
+| A | `tests/engine/game-setup-04.test.ts` and allocated Rust proof files | migrate the remaining oversized-footprint legality calls; do not edit helpers except by request |
+| B | simulator, novelty commands, their tests, TS benchmark | deterministic native proof first; request RPC, do not edit `session_json.rs` |
+| C | `src/commands/run-private-game-check.ts` and its private test | one scenario family per commit through the frozen adapter; private inputs stay pending if absent |
 
-## Next exact step
+## Pending gates
 
-1. Run `pnpm verify`; commit setup-08 batch 2 if green (suggested message: migrate remaining setup-08 play paths onto SetupCtx).
-2. Continue RULE-02/03 in **setup-03** (61 refs) then 04 / 06 / 01 as capacity allows.
-3. Prefer helpers in `game-setup-helpers.ts` (`withNorthAttacksAtC2`, `withDevilsEggFixture`, …); do **not** re-run archived one-shot rewrite scripts under `.local/archive/`.
-4. After public tests no longer call TS legality, gut `createGameSession` / `legalGameActions` / `stepGame` in `game.ts`.
-5. Drop or ignore `stash@{0}` after confirming tip does not need it (`git stash drop` only when ready).
-
-## Do not
-
-- Commit anything under `.local/` (whole directory is ignored; `.local/authority/` holds private authority bytes).
-- Run more than one agent against this working tree at a time. Parallel WIP corrupted setup-04/06 migrations tonight (stashed as `wip-parallel`).
-- Push unless explicitly asked.
-- Reintroduce TypeScript as a second legality engine.
+Private `pnpm game:verify-private` and `pnpm game:novelty-private` are not claimed. Soak is not claimed. Results stay unranked.

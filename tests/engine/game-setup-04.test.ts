@@ -325,7 +325,7 @@ test('RULE-03 an end-turn Aura damages a random affected unit before its optiona
       cells: ['A1', 'A2', 'B1', 'B2'] as const,
       kind: 'resolve-end-turn-aura-move' as const,
     };
-    const beforeForgeHash = ctx.stateHash();
+    const beforeForgeHash = (await ctx.stateHash());
     const forged = await ctx.stepRequest({
       actionId: opaqueActionId('sorcery-core-v1', 'north', ctx.state.stateVersion, forgedDescriptor),
       seat: 'north',
@@ -1293,7 +1293,7 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
       assert.equal(resolved.session.state.players.north.mana, manaBefore + 2);
       assert.deepEqual(resolved.receipt.randomDraws, []);
       assert.equal(await ctx.verifyReplay(), true);
-      branchHashes.push(ctx.stateHash());
+      branchHashes.push((await ctx.stateHash()));
       await ctx.resume(branchCheckpoint);
     }
     assert.equal(new Set(branchHashes).size, 1);

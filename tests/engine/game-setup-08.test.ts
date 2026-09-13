@@ -228,7 +228,7 @@ test('RULE-03 Sparkmage may tap for zero damage at a nearby location with no oth
     assert.deepEqual(result.receipt.randomDraws, []);
     assert.deepEqual(result.receipt.events.map(({ type }) => type), ['sparkmage-activated']);
     assert.doesNotMatch(canonicalJson(result.receipt.events[0]!.payload), /targetInstanceId/);
-    assert.equal(ctx.observe('south').players.north.airThresholdsCastThisTurn, 0);
+    assert.equal((await ctx.observe('south')).players.north.airThresholdsCastThisTurn, 0);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
@@ -332,7 +332,7 @@ test('RULE-03 Sparkmage counts every player-cast spell source, resets, and damag
       && descriptor.cardId === 'sparkmage-magic'
       && descriptor.casterInstanceId === caster.instanceId);
     assert.equal(ctx.state.players.north.airThresholdsCastThisTurn, 3);
-    const opponentView = ctx.observe('south');
+    const opponentView = (await ctx.observe('south'));
     assert.equal(opponentView.players.north.airThresholdsCastThisTurn, 3);
     assert.equal(typeof opponentView.players.north.hand.spellbook, 'number');
 
@@ -639,7 +639,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'play-site'
       && descriptor.cardId === nonTowerId && descriptor.cell === 'C3');
 
-    const atopTower = ctx.observe('north').realm.units
+    const atopTower = (await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === conditional.instanceId);
     assert.deepEqual({ attack: atopTower?.attack, defense: atopTower?.defense }, {
       attack: 3,
@@ -678,7 +678,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       && descriptor.from.cell === 'C4'
       && descriptor.to.cell === 'C3');
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
-    const offTower = ctx.observe('north').realm.units
+    const offTower = (await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === conditional.instanceId);
     assert.deepEqual({ attack: offTower?.attack, defense: offTower?.defense }, {
       attack: 1,
@@ -699,7 +699,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       && descriptor.cardId === disableMagicId
       && descriptor.casterInstanceId === target.instanceId
       && descriptor.target?.instanceId === conditional.instanceId);
-    const disabled = ctx.observe('north').realm.units
+    const disabled = (await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === conditional.instanceId);
     assert.deepEqual({
       attack: disabled?.attack,
@@ -714,7 +714,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
         && descriptor.casterInstanceId === conditional.instanceId), false);
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'draw');
-    const awakened = ctx.observe('north').realm.units
+    const awakened = (await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === conditional.instanceId);
     assert.deepEqual({
       attack: awakened?.attack,
@@ -753,7 +753,7 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
       && descriptor.region === 'underground');
     const buried = ctx.state.realm.units.find(({ cardId }) => cardId === conditionalId);
     assert.ok(buried);
-    const buriedObserved = ctx.observe('north').realm.units
+    const buriedObserved = (await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === buried.instanceId);
     assert.deepEqual({ attack: buriedObserved?.attack, defense: buriedObserved?.defense }, {
       attack: 1,
@@ -907,7 +907,7 @@ test('RULE-03 a minion discards a chosen Spellbook card to damage a random other
       instanceId === discardedCard.instanceId), true);
     assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
       instanceId === source.instanceId)?.tapped, false);
-    const southView = ctx.observe('south');
+    const southView = (await ctx.observe('south'));
     assert.equal(southView.players.north.cemetery.some(({ instanceId }) =>
       instanceId === discardedCard.instanceId), true);
     assert.equal(typeof southView.players.north.hand.spellbook, 'number');
@@ -1067,7 +1067,7 @@ test('RULE-03 random other-unit damage includes allied, enemy, Avatar, and Steal
     // `disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire` in
     // crates/sorcery-engine/tests/damage_projectile_rules.rs.
     const forgedDescriptor = { ...activation.descriptor, targetInstanceId: enemy.instanceId };
-    const beforeForge = ctx.stateHash();
+    const beforeForge = (await ctx.stateHash());
     const forged = await ctx.stepRequest({
       actionId: opaqueActionId(
         'sorcery-core-v1',
@@ -1080,7 +1080,7 @@ test('RULE-03 random other-unit damage includes allied, enemy, Avatar, and Steal
     });
     assert.equal(forged.accepted, false);
     if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
-    assert.equal(ctx.stateHash(), beforeForge);
+    assert.equal((await ctx.stateHash()), beforeForge);
 
     // An oversized enemy footprint at the source's cell is not reachable through legal play here
     // (this deck has no oversized card), but it cannot inflate the random candidate pool anyway:
@@ -1226,7 +1226,7 @@ test('RULE-03 discard damage snapshots derived unit power and uses Ward and prev
       const target = ctx.state.realm.units.find(({ cardId }) =>
         cardId === 'nimbus-prevention-target');
       assert.ok(source && target);
-      assert.equal(ctx.observe('north').realm.units.find(({ instanceId }) =>
+      assert.equal((await ctx.observe('north')).realm.units.find(({ instanceId }) =>
         instanceId === source.instanceId)?.attack, auraBonus ? 4 : 3);
       const result = await ctx.step(await ctx.action(({ descriptor }) =>
         descriptor.kind === 'activate-discard-random-damage'
@@ -1369,7 +1369,7 @@ test('RULE-03 end-turn Artifact life loss uses its carried cell and survives bea
       'turn-ended',
       'turn-started',
     ]);
-    assert.deepEqual(ctx.observe('north').realm.artifacts?.map((artifact) => ({
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts?.map((artifact) => ({
       bearer: artifact.bearer,
       controller: artifact.controller,
       location: artifact.location,
@@ -1866,7 +1866,7 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
     if (placement.descriptor.kind !== 'summon-minion') return;
     const beforePlacementMana = ctx.state.players.north.mana;
     const beforePlacementLife = ctx.state.players.north.avatar.life;
-    const beforeForgeHash = ctx.stateHash();
+    const beforeForgeHash = (await ctx.stateHash());
     const beforeForgeTranscript = ctx.session.transcript;
     const forgedDescriptor = { ...placement.descriptor, cell: 'A1' as const };
     const forged = await ctx.stepRequest({
@@ -1881,7 +1881,7 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
     });
     assert.equal(forged.accepted, false);
     if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
-    assert.equal(ctx.stateHash(), beforeForgeHash);
+    assert.equal((await ctx.stateHash()), beforeForgeHash);
     assert.deepEqual(ctx.session.transcript, beforeForgeTranscript);
 
     const placed = await ctx.step(placement);
@@ -1915,12 +1915,12 @@ test('RULE-03 Raise Dead selects a public random cemetery minion before free pla
       'magic-resolved',
     ]);
 
-    const reusedHash = ctx.stateHash();
+    const reusedHash = (await ctx.stateHash());
     const reusedTranscript = ctx.session.transcript;
     const reused = await ctx.step(placement);
     assert.equal(reused.accepted, false);
     if (!reused.accepted) assert.equal(reused.reason.code, 'stale_version');
-    assert.equal(ctx.stateHash(), reusedHash);
+    assert.equal((await ctx.stateHash()), reusedHash);
     assert.deepEqual(ctx.session.transcript, reusedTranscript);
     assert.equal(await ctx.verifyReplay(), true);
   });
