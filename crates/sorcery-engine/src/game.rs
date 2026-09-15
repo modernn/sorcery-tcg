@@ -1786,7 +1786,8 @@ impl Game {
                     cell: unit.location,
                     region: unit.region,
                 };
-                let immobile = facts.immobile
+                let disabled = self.minion_is_disabled(unit);
+                let immobile = (!disabled && facts.immobile)
                     || self.footprint_is_immobilized(
                         unit.occupied_cells,
                         unit.location,
@@ -1800,7 +1801,7 @@ impl Game {
                     "controller": unit.controller,
                     "damage": unit.damage,
                     "defense": defense,
-                    "disabled": self.minion_is_disabled(unit),
+                    "disabled": disabled,
                     "immobile": immobile,
                     "instanceId": unit.card.instance_id,
                     "location": unit.location,
@@ -1860,16 +1861,13 @@ impl Game {
 
     fn observed_player(&self, owner: Seat, viewer: Seat) -> Result<Value, GameError> {
         let player = &self.position.players[seat_index(owner)];
-        let CardFacts::Avatar(facts) =
-            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
-        else {
+        if !matches!(
+            self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts,
+            CardFacts::Avatar(_)
+        ) {
             return Err(invalid("player Avatar lacks Avatar facts"));
-        };
-        let (attack, _) = self.combatant_attack_and_lethal(
-            UnitKind::Avatar,
-            owner,
-            &player.avatar.card.instance_id,
-        )?;
+        }
+        let (attack, defense) = self.avatar_current_stats(owner)?;
         let affinity = self.elemental_affinities(owner);
         let observed_card = |card: &CardInstance| {
             json!({
@@ -1878,6 +1876,13 @@ impl Game {
             })
         };
         let own = owner == viewer;
+        let immobile = self.location_is_immobilized(
+            Location {
+                cell: player.avatar.location,
+                region: Region::Surface,
+            },
+            false,
+        );
         let mut value = json!({
             "affinity": {
                 "air": affinity[3],
@@ -1890,8 +1895,8 @@ impl Game {
                 "attack": attack,
                 "cardId": self.rules.cards[usize::from(player.avatar.card.card_id.0)].id,
                 "deathDoorTurn": player.avatar.death_door_turn,
-                "defense": facts.defense,
-                "immobile": false,
+                "defense": defense,
+                "immobile": immobile,
                 "instanceId": player.avatar.card.instance_id,
                 "life": player.avatar.life,
                 "location": player.avatar.location,
@@ -8700,18 +8705,9 @@ impl Game {
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
-                let CardFacts::Avatar(facts) =
-                    &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                let bonus = Self::temporary_power_bonus(&avatar.temporary_power_sources)?
-                    .checked_add(self.carried_power_bonus(UnitKind::Avatar, seat, instance_id)?)
-                    .ok_or(GameError::IllegalAction)?;
+                let (attack, _) = self.avatar_current_stats(seat)?;
                 Ok((
-                    u16::from(facts.attack)
-                        .checked_add(bonus)
-                        .ok_or(GameError::IllegalAction)?,
+                    attack,
                     self.carried_lethal(UnitKind::Avatar, seat, instance_id)?,
                 ))
             }
@@ -8726,6 +8722,53 @@ impl Game {
                 Ok((attack, lethal))
             }
         }
+    }
+
+    /// Current Avatar attack and defense after temporary, carried, and nearby-ally power.
+    fn avatar_current_stats(&self, seat: Seat) -> Result<(u16, u16), GameError> {
+        let avatar = &self.position.players[seat_index(seat)].avatar;
+        let CardFacts::Avatar(facts) = &self.rules.cards[usize::from(avatar.card.card_id.0)].facts
+        else {
+            return Err(invalid("player Avatar lacks Avatar facts"));
+        };
+        let mut bonus = Self::temporary_power_bonus(&avatar.temporary_power_sources)?;
+        bonus = bonus
+            .checked_add(self.carried_power_bonus(
+                UnitKind::Avatar,
+                seat,
+                &avatar.card.instance_id,
+            )?)
+            .ok_or(GameError::IllegalAction)?;
+        for source in &self.position.units {
+            if source.controller != seat
+                || source.card.instance_id == avatar.card.instance_id
+                || source.region != Region::Surface
+                || self.minion_is_disabled(source)
+            {
+                continue;
+            }
+            let CardFacts::Minion(source_facts) =
+                &self.rules.cards[usize::from(source.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            if source_facts.other_nearby_allies_power_bonus
+                && Self::footprints_nearby(
+                    Self::unit_occupied_cells(source),
+                    std::slice::from_ref(&avatar.location),
+                )
+            {
+                bonus = bonus.checked_add(1).ok_or(GameError::IllegalAction)?;
+            }
+        }
+        Ok((
+            u16::from(facts.attack)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+            u16::from(facts.defense)
+                .checked_add(bonus)
+                .ok_or(GameError::IllegalAction)?,
+        ))
     }
 
     fn combatant_strike_stats(
