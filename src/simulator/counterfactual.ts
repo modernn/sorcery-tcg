@@ -1,15 +1,12 @@
 import { selectDeterministicGameAction } from '../commands/run-game-demo.ts';
 import { deepFreeze, type StateHash } from '../engine/contract.ts';
-import {
-  createGameCheckpoint,
-} from '../engine/checkpoint.ts';
+import { createGameCheckpoint } from '../engine/checkpoint.ts';
 import type { JsonValue } from '../authority/canonical-json.ts';
-import {
-  hashGameState,
-  type GameLegalAction,
-  type GameManifest,
-  type GameSession,
-  type GameTerminal,
+import type {
+  GameLegalAction,
+  GameManifest,
+  GameSession,
+  GameTerminal,
 } from '../engine/game.ts';
 import { withRustSession } from '../engine/rust-session-helpers.ts';
 
@@ -94,7 +91,7 @@ async function rolloutBranch(
     const session = handle.snapshot;
     const common = {
       decisionCount,
-      finalStateHash: hashGameState(session.state),
+      finalStateHash: await handle.stateHash(),
       rootActionId: rootAction.actionId,
     };
     return session.state.terminal.status === 'finished'
@@ -121,11 +118,13 @@ export async function runCounterfactualRollouts(
     || maxContinuationDecisions > MAX_CONTINUATION_ACTIONS) {
     throw new RangeError(`maxContinuationDecisions must be 0-${MAX_CONTINUATION_ACTIONS}`);
   }
-  const rootStateHash = hashGameState(root.state);
   const checkpoint = createGameCheckpoint(root) as unknown as JsonValue;
-  const actions = await withRustSession(root.manifest, async (handle) => {
+  const { actions, rootStateHash } = await withRustSession(root.manifest, async (handle) => {
     await handle.resume(checkpoint);
-    return handle.legalActions(root.state.decisionSeat);
+    return {
+      actions: await handle.legalActions(root.state.decisionSeat),
+      rootStateHash: await handle.stateHash(),
+    };
   });
   const base = {
     classification: 'authority-private-counterfactual' as const,
