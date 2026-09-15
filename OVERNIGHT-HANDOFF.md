@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Integration branch: `codex/rust-cutover`. Tip: `57989d8`. Shared-adapter foundation: `f95ff2c`. Native novelty: `4d44956`. Cascade strip: `ac884a6`. Native counterfactual/gauntlet: `6618d1a`. Native private novelty frontier: `57989d8`.
+Integration branch: `codex/rust-cutover`. Tip: `1b4d608` (engine cutover `57989d8`). Shared-adapter foundation: `f95ff2c`. Native novelty: `4d44956`. Cascade strip: `ac884a6`. Native counterfactual/gauntlet: `6618d1a`. Native private novelty frontier: `57989d8`.
 
 Started from later cutover work `9895d09` (`cursor/phase3-drown-bury-votes-36d3`). Do not reset to planning baseline `25424a8`. Local `master` remains at planning docs `504d576`.
 
@@ -45,7 +45,7 @@ Boundary regression: `tests/engine/retired-ts-legality.test.ts` (retired TS lega
 
 Catalog stays 161 rust-supported / 0 typescript-supported. That label is not ranked readiness.
 
-## Gates recorded on tip `57989d8`
+## Gates recorded on engine tip `57989d8` (docs tip `1b4d608`)
 
 - Release binaries rebuilt into this checkout's `target/release` (`session-json`, `sorcery-engine`) before JS checks that launch them.
 - `pnpm verify` green (typecheck + lint + 407 public tests).
