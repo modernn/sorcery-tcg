@@ -647,7 +647,7 @@ fn rejection_code_name(phase: &str) -> &'static str {
     "unknown_action"
 }
 
-fn request_for(action: &LegalAction) -> ActionRequest {
+pub(crate) fn request_for(action: &LegalAction) -> ActionRequest {
     ActionRequest {
         action_id: action.action_id.to_string(),
         seat: action.seat,
@@ -777,7 +777,7 @@ fn manifest_seed(session: &Session) -> u64 {
         .unwrap_or(0)
 }
 
-fn select_index(replay: &Value, actions: &[LegalAction]) -> Option<usize> {
+pub(crate) fn select_index(replay: &Value, actions: &[LegalAction]) -> Option<usize> {
     let state = &replay["state"];
     let seat = state["decisionSeat"].as_str().unwrap_or("north");
     let enemy = if seat == "north" { "south" } else { "north" };

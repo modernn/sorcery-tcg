@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use crate::canonical::{CanonicalError, canonical_json, parse_json_without_duplicate_keys};
 use crate::checkpoint::{create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint};
 use crate::contract::{ActionRequest, Seat};
+use crate::counterfactual::{self, CounterfactualError};
 use crate::novelty::{self, NoveltyError};
 use crate::session::{Session, StepResult};
 
@@ -71,6 +72,7 @@ impl SessionJsonService {
             "exportSession" => self.export_session(request.id),
             "checkpoint" => self.checkpoint(request.id),
             "noveltyRollout" => self.novelty_rollout(request.id, &request.params),
+            "counterfactualRollout" => self.counterfactual_rollout(request.id, &request.params),
             "resume" => self.resume(request.id, &request.params),
             _ => error_response(request.id, "session-json method is unsupported"),
         }
@@ -273,6 +275,29 @@ impl SessionJsonService {
             Err(NoveltyError::InvalidLimit) => {
                 error_response(id, "noveltyRollout maxActions must be 0-500")
             }
+            Err(error) => error_response(id, &error.to_string()),
+        }
+    }
+
+    fn counterfactual_rollout(&self, id: u64, params: &Value) -> RpcResponse {
+        let Some(session) = &self.session else {
+            return error_response(id, "session-json process has no active session");
+        };
+        let Some(max_continuation) = params
+            .get("maxContinuationDecisions")
+            .and_then(Value::as_u64)
+        else {
+            return error_response(
+                id,
+                "counterfactualRollout requires maxContinuationDecisions",
+            );
+        };
+        match counterfactual::run_counterfactual_rollouts(session, max_continuation) {
+            Ok(report) => ok_response(id, json!({ "result": report.result })),
+            Err(CounterfactualError::InvalidLimit) => error_response(
+                id,
+                "counterfactualRollout maxContinuationDecisions must be 0-32",
+            ),
             Err(error) => error_response(id, &error.to_string()),
         }
     }

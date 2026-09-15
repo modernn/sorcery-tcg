@@ -9,12 +9,14 @@ use sorcery_engine::batch::{
     default_batch_workers, run_game_batch,
 };
 use sorcery_engine::canonical::{
-    IdentityHash, canonical_json, identity_hash, parse_json_without_duplicate_keys,
+    IdentityHash, canonical_json, canonical_json_allowing_finite_floats, identity_hash,
+    parse_json_without_duplicate_keys,
 };
 use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, FormatContext, OfficialCardMapping,
     validate_deck,
 };
+use sorcery_engine::gauntlet::{GauntletOrientation, GauntletPair, GauntletReport, run_gauntlet};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -28,6 +30,7 @@ enum Command {
     Demo { seed: u32 },
     Batch { workers: usize, seeds: Vec<u32> },
     BatchJson,
+    GauntletJson,
 }
 
 #[derive(Deserialize)]
@@ -54,6 +57,30 @@ struct ValidatedBatchJsonJob {
     north_policy: PolicySnapshot,
     south_deck_id: IdentityHash,
     south_policy: PolicySnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GauntletJsonRequest {
+    deck_a_id: String,
+    deck_b_id: String,
+    pairs: Vec<GauntletJsonPair>,
+    schema_version: u8,
+    workers: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GauntletJsonPair {
+    a_north: BatchJsonJob,
+    b_north: BatchJsonJob,
+    seed: u32,
+}
+
+struct ValidatedGauntletPair {
+    a_north: ValidatedBatchJsonJob,
+    b_north: ValidatedBatchJsonJob,
+    seed: u32,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +133,10 @@ fn run() -> CliResult<()> {
             let input = read_batch_json_stdin()?;
             write_canonical_json(&run_batch_json(&input)?)
         }
+        Command::GauntletJson => {
+            let input = read_batch_json_stdin()?;
+            write_report_json(&run_gauntlet_json(&input)?)
+        }
     }
 }
 
@@ -141,8 +172,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             }
             Ok(Command::BatchJson)
         }
+        Some("gauntlet-json") => {
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine gauntlet-json").into());
+            }
+            Ok(Command::GauntletJson)
+        }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json",
+            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json | gauntlet-json",
         )
         .into()),
     }
@@ -165,6 +202,33 @@ fn validate_batch_json_size(bytes: usize) -> CliResult<()> {
     Ok(())
 }
 
+fn validate_batch_json_job(job: BatchJsonJob, label: &str) -> CliResult<ValidatedBatchJsonJob> {
+    let (north_manifest_deck_id, south_manifest_deck_id) = manifest_deck_ids(&job.manifest_json)?;
+    if job.north_deck_id != north_manifest_deck_id || job.south_deck_id != south_manifest_deck_id {
+        return Err(io::Error::other(format!(
+            "{label} deck IDs do not match manifest deck composition"
+        ))
+        .into());
+    }
+    Ok(ValidatedBatchJsonJob {
+        manifest_json: job.manifest_json,
+        north_deck_id: job.north_deck_id,
+        north_policy: parse_policy_snapshot(&canonical_json(&job.north_policy)?)?,
+        south_deck_id: job.south_deck_id,
+        south_policy: parse_policy_snapshot(&canonical_json(&job.south_policy)?)?,
+    })
+}
+
+fn batch_job_from_validated(job: &ValidatedBatchJsonJob) -> BatchJob<'_> {
+    BatchJob {
+        manifest_json: &job.manifest_json,
+        north_deck_id: &job.north_deck_id,
+        north_policy: &job.north_policy,
+        south_deck_id: &job.south_deck_id,
+        south_policy: &job.south_policy,
+    }
+}
+
 fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
     validate_batch_json_size(input.len())?;
     let text = std::str::from_utf8(input)?;
@@ -182,37 +246,67 @@ fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
     let validated = request
         .jobs
         .into_iter()
-        .map(|job| {
-            let (north_manifest_deck_id, south_manifest_deck_id) =
-                manifest_deck_ids(&job.manifest_json)?;
-            if job.north_deck_id != north_manifest_deck_id
-                || job.south_deck_id != south_manifest_deck_id
-            {
-                return Err(io::Error::other(
-                    "batch-json deck IDs do not match manifest deck composition",
-                )
-                .into());
-            }
-            Ok(ValidatedBatchJsonJob {
-                manifest_json: job.manifest_json,
-                north_deck_id: job.north_deck_id,
-                north_policy: parse_policy_snapshot(&canonical_json(&job.north_policy)?)?,
-                south_deck_id: job.south_deck_id,
-                south_policy: parse_policy_snapshot(&canonical_json(&job.south_policy)?)?,
-            })
-        })
+        .map(|job| validate_batch_json_job(job, "batch-json"))
         .collect::<CliResult<Vec<_>>>()?;
     let jobs = validated
         .iter()
-        .map(|job| BatchJob {
-            manifest_json: &job.manifest_json,
-            north_deck_id: &job.north_deck_id,
-            north_policy: &job.north_policy,
-            south_deck_id: &job.south_deck_id,
-            south_policy: &job.south_policy,
-        })
+        .map(batch_job_from_validated)
         .collect::<Vec<_>>();
     Ok(run_game_batch(&jobs, request.workers)?)
+}
+
+fn run_gauntlet_json(input: &[u8]) -> CliResult<GauntletReport> {
+    validate_batch_json_size(input.len())?;
+    let text = std::str::from_utf8(input)?;
+    let value = parse_json_without_duplicate_keys(text)?;
+    let request: GauntletJsonRequest = serde_json::from_value(value)?;
+    if request.schema_version != 1 {
+        return Err(io::Error::other("gauntlet-json schemaVersion must be 1").into());
+    }
+    if !(1..=MAX_BATCH_WORKERS).contains(&request.workers) {
+        return Err(io::Error::other("gauntlet-json workers must be 1-8").into());
+    }
+    if request.pairs.is_empty() || request.pairs.len() > MAX_BATCH_JOBS / 2 {
+        return Err(io::Error::other("gauntlet-json must contain 1-128 seed pairs").into());
+    }
+    if request.deck_a_id.trim().is_empty()
+        || request.deck_b_id.trim().is_empty()
+        || request.deck_a_id == request.deck_b_id
+    {
+        return Err(
+            io::Error::other("gauntlet-json deck IDs must be distinct nonempty strings").into(),
+        );
+    }
+    let validated = request
+        .pairs
+        .into_iter()
+        .map(|pair| {
+            Ok(ValidatedGauntletPair {
+                a_north: validate_batch_json_job(pair.a_north, "gauntlet-json")?,
+                b_north: validate_batch_json_job(pair.b_north, "gauntlet-json")?,
+                seed: pair.seed,
+            })
+        })
+        .collect::<CliResult<Vec<_>>>()?;
+    let pairs = validated
+        .iter()
+        .map(|pair| GauntletPair {
+            seed: pair.seed,
+            orientations: [
+                GauntletOrientation {
+                    job: batch_job_from_validated(&pair.a_north),
+                    north_deck_id: request.deck_a_id.as_str(),
+                    south_deck_id: request.deck_b_id.as_str(),
+                },
+                GauntletOrientation {
+                    job: batch_job_from_validated(&pair.b_north),
+                    north_deck_id: request.deck_b_id.as_str(),
+                    south_deck_id: request.deck_a_id.as_str(),
+                },
+            ],
+        })
+        .collect::<Vec<_>>();
+    Ok(run_gauntlet(&pairs, request.workers)?)
 }
 
 fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHash)> {
@@ -329,6 +423,35 @@ fn write_canonical_json(value: &impl Serialize) -> CliResult<()> {
     let mut stdout = stdout.lock();
     writeln!(stdout, "{output}")?;
     Ok(())
+}
+
+/// Reports may include finite float averages; identity JSON still stays integer-only.
+fn write_report_json(value: &impl Serialize) -> CliResult<()> {
+    let mut value = serde_json::to_value(value)?;
+    normalize_whole_number_field(&mut value, "averageTurns");
+    let output = canonical_json_allowing_finite_floats(&value)?;
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    writeln!(stdout, "{output}")?;
+    Ok(())
+}
+
+fn normalize_whole_number_field(value: &mut Value, field: &str) {
+    let Some(Value::Number(number)) = value.get_mut(field) else {
+        return;
+    };
+    let Some(float) = number.as_f64().filter(|value| value.is_finite()) else {
+        return;
+    };
+    if float.fract() != 0.0 {
+        return;
+    }
+    let rendered = format!("{float:.0}");
+    if let Ok(as_u64) = rendered.parse::<u64>() {
+        *number = serde_json::Number::from(as_u64);
+    } else if let Ok(as_i64) = rendered.parse::<i64>() {
+        *number = serde_json::Number::from(as_i64);
+    }
 }
 
 #[cfg(test)]

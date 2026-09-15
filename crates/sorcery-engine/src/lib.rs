@@ -6,6 +6,7 @@ pub mod board;
 pub mod canonical;
 pub mod checkpoint;
 pub mod contract;
+pub mod counterfactual;
 pub mod deck;
 pub mod facts;
 pub mod game;

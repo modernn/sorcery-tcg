@@ -158,6 +158,66 @@ pub fn canonical_json(value: &Value) -> Result<String, CanonicalError> {
     Ok(output)
 }
 
+/// Canonical key-sorted JSON that also accepts finite floats for report payloads.
+///
+/// Engine identity surfaces must still use [`canonical_json`].
+///
+/// # Errors
+///
+/// Returns [`CanonicalError`] when a number is non-finite or a string cannot be encoded.
+pub fn canonical_json_allowing_finite_floats(value: &Value) -> Result<String, CanonicalError> {
+    let mut output = String::new();
+    write_value_allowing_floats(value, &mut output)?;
+    Ok(output)
+}
+
+fn write_value_allowing_floats(value: &Value, output: &mut String) -> Result<(), CanonicalError> {
+    match value {
+        Value::Null => output.push_str("null"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) if value.is_i64() || value.is_u64() => {
+            output.push_str(&value.to_string());
+        }
+        Value::Number(value) => {
+            let Some(float) = value.as_f64().filter(|float| float.is_finite()) else {
+                return Err(CanonicalError::NonIntegralNumber);
+            };
+            output.push_str(
+                &serde_json::to_string(&float).map_err(CanonicalError::StringSerialization)?,
+            );
+        }
+        Value::String(value) => output
+            .push_str(&serde_json::to_string(value).map_err(CanonicalError::StringSerialization)?),
+        Value::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                write_value_allowing_floats(value, output)?;
+            }
+            output.push(']');
+        }
+        Value::Object(values) => {
+            let mut entries: Vec<_> = values.iter().collect();
+            entries.sort_unstable_by(|(left, _), (right, _)| compare_utf16(left, right));
+            output.push('{');
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key).map_err(CanonicalError::StringSerialization)?,
+                );
+                output.push(':');
+                write_value_allowing_floats(value, output)?;
+            }
+            output.push('}');
+        }
+    }
+    Ok(())
+}
+
 /// Hashes an engine value using its canonical JSON bytes.
 ///
 /// # Errors

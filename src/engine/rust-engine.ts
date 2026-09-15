@@ -290,6 +290,14 @@ export class RustSessionClient {
     return result as JsonValue;
   }
 
+  async counterfactualRollout(maxContinuationDecisions: number): Promise<JsonValue> {
+    const result = await this.call('counterfactualRollout', { maxContinuationDecisions });
+    if (!isRecord(result) || result.result === undefined) {
+      throw new Error('Rust session counterfactualRollout result was invalid');
+    }
+    return result as JsonValue;
+  }
+
   async checkpoint(): Promise<JsonValue> {
     const result = await this.call('checkpoint', {});
     if (!isRecord(result) || result.checkpoint === undefined) {
