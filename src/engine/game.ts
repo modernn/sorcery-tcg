@@ -1,5 +1,9 @@
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
+/* eslint-disable @typescript-eslint/no-unused-vars --
+ * TypeScript legality/observation entry points fail closed. Shared helpers remain
+ * until the dead-code cascade is deleted after callers finish migrating.
+ */
 import {
   createAttempt,
   createEvents,
@@ -3548,31 +3552,7 @@ function createPlayer(
 }
 
 export function createGameSession(manifest: GameManifest): GameSession {
-  assertCanonicalGameManifest(manifest);
-  const initialEngine = createEngineState(manifest.seed);
-  const north = createPlayer(manifest, 'north', initialEngine);
-  const south = createPlayer(manifest, 'south', north.engine);
-  const state: GameState = deepFreeze({
-    activeSeat: 'north',
-    cards: manifest.cards,
-    decisionSeat: 'north',
-    engine: south.engine,
-    pendingCombat: null,
-    phase: 'mulligan',
-    players: { north: north.player, south: south.player },
-    realm: { sites: {}, units: [] },
-    schemaVersion: 1,
-    stateVersion: 0,
-    terminal: { status: 'active' },
-    turnNumber: 0,
-  });
-  return deepFreeze({
-    attempts: [],
-    initialRandomDraws: [...north.randomDraws, ...south.randomDraws],
-    manifest,
-    state,
-    transcript: [],
-  });
+  throw new Error('TypeScript createGameSession is retired; use RustSessionClient / SetupCtx');
 }
 
 export function hashGameState(state: GameState): StateHash {
@@ -3732,117 +3712,7 @@ function observePlayer(state: GameState, player: PlayerState, owner: GameSeat, v
 }
 
 export function observeGame(state: GameState, viewer: GameSeat): GameObservation {
-  const artifacts = state.realm.artifacts?.map((artifact) => {
-    if ('bearer' in artifact) {
-      const carriedAt = artifactLocation(state, artifact);
-      return {
-        bearer: artifact.bearer,
-        cardId: artifact.cardId,
-        controller: artifact.bearer.seat,
-        instanceId: artifact.instanceId,
-        location: carriedAt.cell,
-        owner: artifact.owner,
-        region: carriedAt.region,
-      };
-    }
-    return {
-      cardId: artifact.cardId,
-      controller: null,
-      instanceId: artifact.instanceId,
-      location: artifact.location,
-      owner: artifact.owner,
-      region: artifact.region,
-    };
-  });
-  const auras = state.realm.auras?.map((aura) => ({
-    cardId: aura.cardId,
-    cells: [...aura.cells] as TwoByTwoArea,
-    controller: aura.controller,
-    instanceId: aura.instanceId,
-    owner: aura.owner,
-    turnCounters: aura.turnCounters,
-  }));
-  const sites = Object.fromEntries(
-    Object.entries(state.realm.sites).map(([cell, card]) => {
-      if (isRubble(card)) {
-        return [cell, {
-          cardId: 'rubble',
-          controller: null,
-          elements: [],
-          instanceId: card.instanceId,
-          rubble: true,
-        }];
-      }
-      const definition = cardDefinition(state, card.cardId);
-      if (definition.cardType !== 'site') throw new Error('realm site lacks site definition');
-      return [cell, {
-        cardId: card.cardId,
-        controller: card.controller,
-        elements: definition.elements,
-        instanceId: card.instanceId,
-        owner: card.owner,
-      }];
-    }),
-  ) as GameObservation['realm']['sites'];
-  const units = state.realm.units.map((unit) => {
-    const definition = cardDefinition(state, unit.cardId);
-    if (definition.cardType !== 'minion') throw new Error('unit lacks minion definition');
-    const status = unitStatus(state, {
-      instanceId: unit.instanceId,
-      kind: 'minion',
-      seat: unit.controller,
-    });
-    return {
-      airborne: status.airborne,
-      attack: status.attack,
-      cardId: unit.cardId,
-      ...(unit.carriedLanceCount ? { carriedLanceCount: unit.carriedLanceCount } : {}),
-      controller: unit.controller,
-      damage: unit.damage,
-      defense: status.defense,
-      disabled: minionDisabled(state, unit),
-      immobile: status.immobile,
-      instanceId: unit.instanceId,
-      location: unit.location,
-      ...(unit.occupiedCells ? { occupiedCells: unit.occupiedCells } : {}),
-      owner: unit.owner,
-      region: unit.region,
-      stealthed: status.stealthed,
-      summoningSickness: unit.summoningSickness,
-      tapped: unit.tapped,
-      ...(definition.token === true ? { token: true as const } : {}),
-      warded: unit.warded,
-    };
-  });
-  return deepFreeze({
-    activeSeat: state.activeSeat,
-    decisionSeat: state.decisionSeat,
-    pendingCombat: state.pendingCombat,
-    phase: state.phase,
-    players: {
-      north: observePlayer(state, state.players.north, 'north', viewer),
-      south: observePlayer(state, state.players.south, 'south', viewer),
-    },
-    realm: {
-      ...(artifacts ? { artifacts } : {}),
-      ...(auras ? { auras } : {}),
-      ...(state.realm.immobileAreas
-        ? {
-          immobileAreas: state.realm.immobileAreas.map((area) => ({
-            ...area,
-            cells: [...area.cells],
-          })),
-        }
-        : {}),
-      sites,
-      units,
-    },
-    schemaVersion: 1,
-    stateVersion: state.stateVersion,
-    terminal: state.terminal,
-    turnNumber: state.turnNumber,
-    viewer,
-  });
+  throw new Error('TypeScript observeGame is retired; use RustSessionClient.publicView / SetupCtx.observe');
 }
 
 function permutations<T>(items: readonly T[]): readonly (readonly T[])[] {
@@ -5750,22 +5620,8 @@ function actionLabel(state: GameState, descriptor: GameActionDescriptor): string
   return 'End turn';
 }
 
-const legalActionCache = new WeakMap<GameState, Map<GameSeat, readonly GameLegalAction[]>>();
-
 export function legalGameActions(state: GameState, seat: GameSeat): readonly GameLegalAction[] {
-  const cached = legalActionCache.get(state)?.get(seat);
-  if (cached) return cached;
-  const actions = orderLegalActions(actionDescriptors(state, seat).map((descriptor) => ({
-    actionId: opaqueActionId('sorcery-core-v1', seat, state.stateVersion, descriptor),
-    descriptor,
-    label: actionLabel(state, descriptor),
-    seat,
-    stateVersion: state.stateVersion,
-  })));
-  const bySeat = legalActionCache.get(state) ?? new Map();
-  bySeat.set(seat, actions);
-  legalActionCache.set(state, bySeat);
-  return actions;
+  throw new Error('TypeScript legalGameActions is retired; use RustSessionClient / SetupCtx');
 }
 
 function withStateVersion(state: GameState, changes: Partial<GameState>): GameState {
@@ -13387,153 +13243,14 @@ function applyDescriptor(
 }
 
 export function stepGame(session: GameSession, request: GameActionRequest): GameStepResult {
-  const state = session.state;
-  const command: GameActionRequest = deepFreeze({
-    actionId: request.actionId,
-    seat: request.seat,
-    stateVersion: request.stateVersion,
-  });
-  const stateHash = hashGameState(state);
-  const reject = (code: EngineRejection['code']): GameStepResult => {
-    const reason = createRejection(code, state.stateVersion, stateHash);
-    const attempt = createAttempt(
-      session.attempts.length + 1,
-      command,
-      state.stateVersion,
-      stateHash,
-      { reasonCode: code },
-    );
-    return deepFreeze({
-      accepted: false,
-      reason,
-      session: { ...session, attempts: [...session.attempts, attempt] },
-    });
-  };
-
-  if (state.terminal.status === 'finished') return reject('terminal_state');
-  if (command.stateVersion !== state.stateVersion) return reject('stale_version');
-  if (command.seat !== state.decisionSeat) return reject('wrong_seat');
-  const action = legalGameActions(state, command.seat).find(({ actionId }) => actionId === command.actionId);
-  if (!action) return reject('unknown_action');
-
-  const receiptSequence = session.transcript.length + 1;
-  const firstEventSequence = session.transcript.reduce((count, receipt) => count + receipt.events.length, 0) + 1;
-  const [appliedState, appliedOutcomes, randomDraws] = applyDescriptor(
-    state,
-    action.descriptor,
-    session.manifest,
-  );
-  const stealthSettlement = settleNearbyEnemyStealth(appliedState);
-  const powerSettlement = stealthSettlement.state.pendingDeathrites
-    ? { outcomes: [] as readonly GameOutcome[], state: stealthSettlement.state }
-    : settleStaticPowerDeaths(stealthSettlement.state);
-  const settlementOutcomes = [...stealthSettlement.outcomes, ...powerSettlement.outcomes];
-  const completionIndex = appliedOutcomes.findIndex(({ type }) =>
-    type === 'game-ended' || type === 'magic-resolved' || type === 'turn-ended');
-  const settlementEndIndex = settlementOutcomes.findIndex(({ type }) =>
-    type === 'game-ended');
-  const settlementBeforeCompletion = settlementEndIndex < 0
-    ? settlementOutcomes
-    : settlementOutcomes.slice(0, settlementEndIndex);
-  const settlementAfterCompletion = settlementEndIndex < 0
-    ? []
-    : settlementOutcomes.slice(settlementEndIndex);
-  const orderedOutcomes = settlementOutcomes.length === 0
-    ? appliedOutcomes
-    : completionIndex < 0
-      ? [...appliedOutcomes, ...settlementOutcomes]
-      : [
-        ...appliedOutcomes.slice(0, completionIndex),
-        ...settlementBeforeCompletion,
-        ...appliedOutcomes.slice(completionIndex),
-        ...settlementAfterCompletion,
-      ];
-  const deferredIndex = powerSettlement.state.pendingDeathrites
-    ? orderedOutcomes.findIndex(({ type }) => type === 'magic-resolved' || type === 'turn-ended')
-    : -1;
-  const completionState = deferredIndex < 0
-    ? powerSettlement.state
-    : deepFreeze({
-      ...powerSettlement.state,
-      pendingDeathrites: {
-        ...powerSettlement.state.pendingDeathrites!,
-        deferredOutcomes: [
-          ...(powerSettlement.state.pendingDeathrites!.deferredOutcomes ?? []),
-          orderedOutcomes[deferredIndex]!,
-        ],
-      },
-    });
-  const outcomes = deferredIndex < 0
-    ? orderedOutcomes
-    : orderedOutcomes.filter((_, index) => index !== deferredIndex);
-  const rangedState = state.phase !== 'movement'
-    && action.descriptor.kind === 'shoot-projectile' && action.descriptor.hit
-    ? queueRangedStep(completionState, action.descriptor.shooterInstanceId)
-    : completionState;
-  const nextState = exposeDeathriteOrder(rangedState);
-  const events: readonly EngineEvent[] = createEvents(
-    command.actionId,
-    receiptSequence,
-    firstEventSequence,
-    outcomes,
-  );
-  const receipt = createReceipt({
-    actionId: command.actionId,
-    events,
-    nextStateVersion: nextState.stateVersion,
-    postStateHash: hashGameState(nextState),
-    preStateHash: stateHash,
-    randomDraws,
-    receiptSequence,
-    seat: command.seat,
-    stateVersion: state.stateVersion,
-  });
-  const attempt = createAttempt(
-    session.attempts.length + 1,
-    command,
-    state.stateVersion,
-    stateHash,
-    { receiptId: receipt.receiptId },
-  );
-  return deepFreeze({
-    accepted: true,
-    receipt,
-    session: {
-      ...session,
-      attempts: [...session.attempts, attempt],
-      state: nextState,
-      transcript: [...session.transcript, receipt],
-    },
-  });
+  throw new Error('TypeScript stepGame is retired; use RustSessionClient / SetupCtx');
 }
 
 export function replayGame(manifest: GameManifest, actionIds: readonly string[]): GameSession {
-  let session = createGameSession(manifest);
-  for (const actionId of actionIds) {
-    const result = stepGame(session, {
-      actionId,
-      seat: session.state.decisionSeat,
-      stateVersion: session.state.stateVersion,
-    });
-    if (!result.accepted) throw new Error(`game replay rejected action: ${result.reason.code}`);
-    session = result.session;
-  }
-  return session;
+  throw new Error('TypeScript replayGame is retired; use RustSessionClient / SetupCtx');
 }
 
 export function verifyGameReplay(expected: GameSession): boolean {
-  try {
-    const replayed = replayGame(expected.manifest, expected.transcript.map(({ actionId }) => actionId));
-    return canonicalJson({
-      initialRandomDraws: replayed.initialRandomDraws,
-      state: replayed.state,
-      transcript: replayed.transcript,
-    }) === canonicalJson({
-      initialRandomDraws: expected.initialRandomDraws,
-      state: expected.state,
-      transcript: expected.transcript,
-    });
-  } catch {
-    return false;
-  }
+  throw new Error('TypeScript verifyGameReplay is retired; use RustSessionClient / SetupCtx');
 }
+
