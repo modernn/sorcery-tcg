@@ -17,6 +17,10 @@ use sorcery_engine::deck::{
     validate_deck,
 };
 use sorcery_engine::gauntlet::{GauntletOrientation, GauntletPair, GauntletReport, run_gauntlet};
+use sorcery_engine::novelty::NOVELTY_ACTION_LIMIT;
+use sorcery_engine::novelty_frontier::{
+    FrontierJob, frontier_response_value, run_private_novelty_frontier,
+};
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -31,6 +35,7 @@ enum Command {
     Batch { workers: usize, seeds: Vec<u32> },
     BatchJson,
     GauntletJson,
+    NoveltyGauntletJson,
 }
 
 #[derive(Deserialize)]
@@ -75,6 +80,23 @@ struct GauntletJsonPair {
     a_north: BatchJsonJob,
     b_north: BatchJsonJob,
     seed: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NoveltyGauntletJsonRequest {
+    jobs: Vec<NoveltyGauntletJsonJob>,
+    max_actions: u64,
+    schema_version: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NoveltyGauntletJsonJob {
+    job_id: String,
+    lesson_id: String,
+    manifest_json: String,
+    orientation: String,
 }
 
 struct ValidatedGauntletPair {
@@ -137,6 +159,10 @@ fn run() -> CliResult<()> {
             let input = read_batch_json_stdin()?;
             write_report_json(&run_gauntlet_json(&input)?)
         }
+        Command::NoveltyGauntletJson => {
+            let input = read_batch_json_stdin()?;
+            write_canonical_json(&run_novelty_gauntlet_json(&input)?)
+        }
     }
 }
 
@@ -178,8 +204,14 @@ fn parse_args(args: impl Iterator<Item = String>) -> CliResult<Command> {
             }
             Ok(Command::GauntletJson)
         }
+        Some("novelty-gauntlet-json") => {
+            if args.next().is_some() {
+                return Err(io::Error::other("usage: sorcery-engine novelty-gauntlet-json").into());
+            }
+            Ok(Command::NoveltyGauntletJson)
+        }
         _ => Err(io::Error::other(
-            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json | gauntlet-json",
+            "usage: sorcery-engine demo [seed] | batch [workers] [seeds...] | batch-json | gauntlet-json | novelty-gauntlet-json",
         )
         .into()),
     }
@@ -307,6 +339,47 @@ fn run_gauntlet_json(input: &[u8]) -> CliResult<GauntletReport> {
         })
         .collect::<Vec<_>>();
     Ok(run_gauntlet(&pairs, request.workers)?)
+}
+
+fn run_novelty_gauntlet_json(input: &[u8]) -> CliResult<Value> {
+    validate_batch_json_size(input.len())?;
+    let text = std::str::from_utf8(input)?;
+    let value = parse_json_without_duplicate_keys(text)?;
+    let request: NoveltyGauntletJsonRequest = serde_json::from_value(value)?;
+    if request.schema_version != 1 {
+        return Err(io::Error::other("novelty-gauntlet-json schemaVersion must be 1").into());
+    }
+    if request.max_actions > NOVELTY_ACTION_LIMIT {
+        return Err(io::Error::other("novelty-gauntlet-json maxActions must be 0-500").into());
+    }
+    if request.jobs.len() != 4 {
+        return Err(io::Error::other("novelty-gauntlet-json must contain exactly 4 jobs").into());
+    }
+    for job in &request.jobs {
+        if job.job_id.trim().is_empty()
+            || job.lesson_id.trim().is_empty()
+            || job.orientation.trim().is_empty()
+            || job.manifest_json.trim().is_empty()
+        {
+            return Err(io::Error::other(
+                "novelty-gauntlet-json jobs require nonempty jobId, lessonId, orientation, and manifestJson",
+            )
+            .into());
+        }
+    }
+    let jobs = request
+        .jobs
+        .into_iter()
+        .map(|job| FrontierJob {
+            job_id: job.job_id,
+            lesson_id: job.lesson_id,
+            orientation: job.orientation,
+            manifest_json: job.manifest_json,
+        })
+        .collect::<Vec<_>>();
+    let run = run_private_novelty_frontier(&jobs, request.max_actions)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(frontier_response_value(&run))
 }
 
 fn manifest_deck_ids(manifest_json: &str) -> CliResult<(IdentityHash, IdentityHash)> {

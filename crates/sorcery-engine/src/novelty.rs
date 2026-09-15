@@ -754,7 +754,7 @@ fn committed_event_set(items: &[FirstSeen]) -> HashSet<String> {
     committed_kind_set(items)
 }
 
-fn hash_state(state: &Value) -> Result<String, NoveltyError> {
+pub(crate) fn hash_state(state: &Value) -> Result<String, NoveltyError> {
     Ok(identity_hash(state)?.to_string())
 }
 

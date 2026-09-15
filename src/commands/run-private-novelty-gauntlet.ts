@@ -1,24 +1,23 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { lstat, mkdir, writeFile } from 'node:fs/promises';
-import { relative, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { resolveWithinAuthorityRoot } from '../authority/validate-bundle.ts';
 import {
+  parseGameCheckpoint,
   serializeGameCheckpoint,
   type GameCheckpoint,
 } from '../engine/checkpoint.ts';
 import { deepFreeze } from '../engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
   type GameManifest,
-  type GameSession,
 } from '../engine/game.ts';
-import { withRustSession } from '../engine/rust-session-helpers.ts';
 import {
   NOVELTY_ROLLOUT_ACTION_LIMIT,
-  runNoveltyRollout,
   type NoveltyFrontierCandidate,
   type NoveltyRolloutResult,
 } from '../simulator/novelty-rollout.ts';
@@ -28,6 +27,7 @@ import {
 } from './run-private-game-check.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
+const DEFAULT_TARGET_DIR = resolve(REPOSITORY_ROOT, 'target');
 const DEFAULT_SCENARIO = resolve(
   REPOSITORY_ROOT,
   '.local',
@@ -37,8 +37,8 @@ const DEFAULT_SCENARIO = resolve(
 );
 const LESSON_IDS = ['air-vs-earth-lesson', 'earth-vs-air-lesson'] as const;
 const CHECKPOINT_ID_PATTERN = /^sha256:([0-9a-f]{64})$/u;
-const FRONTIER_BRANCH_LIMIT = 32;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
+const MAX_OUTPUT_BYTES = 128 * 1024 * 1024;
 
 type LessonId = typeof LESSON_IDS[number];
 type Orientation = 'original' | 'swapped';
@@ -97,27 +97,6 @@ export type PrivateNoveltyGauntletReport = Readonly<{
     savedCheckpoints: number;
   }>;
 }>;
-
-type FrontierSeed = Readonly<{
-  actionId: string;
-  actionKind: NoveltyFrontierCandidate['actionKind'];
-  branchId: string;
-  checkpointId: string;
-  depth: number;
-  parentBranchId: string | null;
-  parentJobId: string;
-  predictedEventTypes: readonly string[];
-  predictedStateHash: string;
-  signals: NoveltyFrontierCandidate['signal'][];
-}>;
-
-function compareStrings(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function signalKey(signal: NoveltyFrontierCandidate['signal']): string {
-  return `${signal.kind}:\0${signal.value}`;
-}
 
 function swappedManifest(manifest: GameManifest): GameManifest {
   return createGameManifest({
@@ -187,6 +166,106 @@ async function saveCheckpoints(
   return checkpoints.size;
 }
 
+function noveltyGauntletLaunch(): Readonly<{ args: readonly string[]; command: string }> {
+  const targetDir = process.env.CARGO_TARGET_DIR ?? DEFAULT_TARGET_DIR;
+  const binaryName = process.platform === 'win32' ? 'sorcery-engine.exe' : 'sorcery-engine';
+  const binary = join(targetDir, 'release', binaryName);
+  if (existsSync(binary)) return { args: ['novelty-gauntlet-json'], command: binary };
+  return {
+    args: [
+      'run', '--release', '--locked', '--quiet', '-p', 'sorcery-engine',
+      '--bin', 'sorcery-engine', '--', 'novelty-gauntlet-json',
+    ],
+    command: 'cargo',
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+async function runRustNoveltyGauntlet(request: string): Promise<Readonly<{
+  checkpoints: ReadonlyMap<string, GameCheckpoint>;
+  report: PrivateNoveltyGauntletReport;
+}>> {
+  const launch = noveltyGauntletLaunch();
+  const child = spawn(launch.command, [...launch.args], {
+    cwd: REPOSITORY_ROOT,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const fail = (message: string): void => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      rejectPromise(new Error(message));
+    };
+    child.once('error', () => fail('private novelty gauntlet failed to start Rust'));
+    child.stdin.once('error', () => fail('private novelty gauntlet failed while sending Rust input'));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_OUTPUT_BYTES) {
+        return fail('private novelty gauntlet Rust output exceeded its limit');
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes > MAX_OUTPUT_BYTES) {
+        return fail('private novelty gauntlet Rust error output exceeded its limit');
+      }
+      stderr.push(chunk);
+    });
+    child.once('close', (code) => {
+      if (settled) return;
+      if (code !== 0) {
+        const message = Buffer.concat(stderr).toString('utf8').trim() || 'unknown error';
+        return fail(`private novelty gauntlet failed in Rust: ${message}`);
+      }
+      try {
+        const text = Buffer.concat(stdout).toString('utf8').trim();
+        const parsed: unknown = JSON.parse(text);
+        if (canonicalJson(parsed as JsonValue) !== text) throw new Error('noncanonical output');
+        if (!isRecord(parsed)
+          || !isRecord(parsed.report)
+          || !Array.isArray(parsed.checkpoints)) {
+          throw new Error('invalid response shape');
+        }
+        const checkpoints = new Map<string, GameCheckpoint>();
+        for (const entry of parsed.checkpoints) {
+          if (!isRecord(entry)
+            || typeof entry.checkpointId !== 'string'
+            || entry.checkpoint === undefined) {
+            throw new Error('invalid checkpoint entry');
+          }
+          const checkpoint = parseGameCheckpoint(
+            canonicalJson(entry.checkpoint as JsonValue),
+          );
+          if (checkpoint.checkpointId !== entry.checkpointId) {
+            throw new Error('checkpoint identity mismatch');
+          }
+          checkpoints.set(entry.checkpointId, checkpoint);
+        }
+        settled = true;
+        resolvePromise({
+          checkpoints,
+          report: parsed.report as PrivateNoveltyGauntletReport,
+        });
+      } catch (error) {
+        fail(error instanceof Error
+          ? `private novelty gauntlet Rust output was invalid: ${error.message}`
+          : 'private novelty gauntlet Rust output was invalid');
+      }
+    });
+    child.stdin.end(`${request}\n`);
+  });
+}
+
 export async function runPrivateNoveltyGauntlet(
   scenarioPath = DEFAULT_SCENARIO,
   maxActions = NOVELTY_ROLLOUT_ACTION_LIMIT,
@@ -205,235 +284,34 @@ export async function runPrivateNoveltyGauntlet(
     throw new Error('private novelty lesson manifests must use one authority revision');
   }
 
-  const jobs: PrivateNoveltyGauntletReport['jobs'][number][] = [];
-  const checkpoints = new Map<string, GameCheckpoint>();
-  const captureCheckpoint = (checkpoint: GameCheckpoint): void => {
-    const existing = checkpoints.get(checkpoint.checkpointId);
-    if (existing && serializeGameCheckpoint(existing) !== serializeGameCheckpoint(checkpoint)) {
-      throw new Error('private novelty checkpoint identity collision');
-    }
-    checkpoints.set(checkpoint.checkpointId, checkpoint);
-  };
-  for (const preset of selected) {
-    for (const orientation of ['original', 'swapped'] as const) {
-      const manifest = orientation === 'original'
-        ? preset.manifest
-        : swappedManifest(preset.manifest);
-      const root = await withRustSession(manifest, async (handle) => handle.snapshot);
-      jobs.push({
-        jobId: `${preset.id}:${orientation}`,
-        lessonId: preset.id as LessonId,
-        orientation,
-        result: await runNoveltyRollout(root, {
-          maxActions,
-          onCheckpoint: captureCheckpoint,
-        }),
-      });
-    }
-  }
+  const jobs = selected.flatMap((preset) => (
+    ['original', 'swapped'] as const
+  ).map((orientation) => {
+    const manifest = orientation === 'original'
+      ? preset.manifest
+      : swappedManifest(preset.manifest);
+    return {
+      jobId: `${preset.id}:${orientation}`,
+      lessonId: preset.id as LessonId,
+      manifestJson: canonicalJson(manifest as unknown as JsonValue),
+      orientation,
+    };
+  }));
 
-  const queue: FrontierSeed[] = [];
-  const seenBranches = new Set<string>();
-  let nextBranchOrdinal = 1;
-  const enqueueFrontier = (
-    frontier: NoveltyRolloutResult['frontier'],
-    parentJobId: string,
-    parentBranchId: string | null,
-    depth: number,
-  ): void => {
-    const grouped = new Map<string, Omit<FrontierSeed, 'branchId'>>();
-    for (const candidate of frontier) {
-      const key = `${candidate.checkpointId}\0${candidate.actionId}`;
-      const existing = grouped.get(key);
-      if (existing) {
-        if (existing.actionKind !== candidate.actionKind
-          || existing.predictedStateHash !== candidate.predictedStateHash
-          || canonicalJson(existing.predictedEventTypes as unknown as JsonValue)
-            !== canonicalJson(candidate.predictedEventTypes as unknown as JsonValue)) {
-          throw new Error('private novelty frontier action has inconsistent predictions');
-        }
-        existing.signals.push(candidate.signal);
-      } else {
-        grouped.set(key, {
-          actionId: candidate.actionId,
-          actionKind: candidate.actionKind,
-          checkpointId: candidate.checkpointId,
-          depth,
-          parentBranchId,
-          parentJobId,
-          predictedEventTypes: candidate.predictedEventTypes,
-          predictedStateHash: candidate.predictedStateHash,
-          signals: [candidate.signal],
-        });
-      }
-    }
-    for (const seed of [...grouped.values()].sort((left, right) =>
-      compareStrings(left.checkpointId, right.checkpointId)
-        || compareStrings(left.actionId, right.actionId))) {
-      const key = `${seed.checkpointId}\0${seed.actionId}`;
-      if (seenBranches.has(key)) continue;
-      seenBranches.add(key);
-      seed.signals.sort((left, right) => compareStrings(signalKey(left), signalKey(right)));
-      queue.push({
-        ...seed,
-        branchId: `${parentJobId}:branch-${nextBranchOrdinal}`,
-      });
-      nextBranchOrdinal += 1;
-    }
-  };
-
-  const exercisedSignals = new Set<string>();
-  for (const job of jobs) {
-    enqueueFrontier(job.result.frontier, job.jobId, null, 1);
-  }
-
-  const frontierBranches: PrivateNoveltyGauntletReport['frontierBranches'][number][] = [];
-  let cursor = 0;
-  let frontierPrunedCovered = 0;
-  let stopAfterFailure = false;
-  while (cursor < queue.length
-    && frontierBranches.length < FRONTIER_BRANCH_LIMIT
-    && !stopAfterFailure) {
-    const seed = queue[cursor++]!;
-    const novelSignalsAtDispatch = seed.signals
-      .filter((signal) => !exercisedSignals.has(signalKey(signal)));
-    if (novelSignalsAtDispatch.length === 0) {
-      frontierPrunedCovered += 1;
-      continue;
-    }
-    const checkpoint = checkpoints.get(seed.checkpointId);
-    if (!checkpoint) throw new Error('private novelty frontier checkpoint was not captured');
-    const entry = await withRustSession(checkpoint.manifest, async (handle): Promise<Readonly<{
-      eventTypes: readonly string[];
-      session: GameSession;
-    }>> => {
-      await handle.resume(checkpoint as unknown as JsonValue);
-      const issued = (await handle.legalActions())
-        .filter(({ actionId }) => actionId === seed.actionId);
-      if (issued.length !== 1) throw new Error('private novelty frontier action is stale');
-      if (issued[0]!.descriptor.kind !== seed.actionKind) {
-        throw new Error('private novelty frontier action kind changed');
-      }
-      const applied = await handle.stepAction(issued[0]!);
-      if (!applied.accepted) {
-        throw new Error(`private novelty frontier action rejected: ${applied.reason.code}`);
-      }
-      return {
-        eventTypes: [...new Set(applied.receipt.events.map(({ type }) => type))].sort(),
-        session: applied.session,
-      };
-    });
-    const entryEventTypes = entry.eventTypes;
-    if (hashGameState(entry.session.state) !== seed.predictedStateHash
-      || canonicalJson(entryEventTypes as unknown as JsonValue)
-        !== canonicalJson(seed.predictedEventTypes as unknown as JsonValue)
-      || seed.signals.some((signal) => signal.kind === 'action-kind'
-        ? signal.value !== seed.actionKind
-        : !entryEventTypes.includes(signal.value))) {
-      throw new Error('private novelty frontier prediction did not replay exactly');
-    }
-    exercisedSignals.add(signalKey({ kind: 'action-kind', value: seed.actionKind }));
-    for (const value of entryEventTypes) {
-      exercisedSignals.add(signalKey({ kind: 'event-type', value }));
-    }
-    const result = await runNoveltyRollout(entry.session, {
-      maxActions,
-      onCheckpoint: captureCheckpoint,
-    });
-    if (result.initialStateHash !== seed.predictedStateHash) {
-      throw new Error('private novelty frontier rollout started from the wrong state');
-    }
-    frontierBranches.push({
-      actionId: seed.actionId,
-      actionKind: seed.actionKind,
-      branchId: seed.branchId,
-      checkpointId: seed.checkpointId,
-      depth: seed.depth,
-      entryActionCount: 1,
-      entryEventTypes,
-      novelSignalsAtDispatch,
-      parentBranchId: seed.parentBranchId,
-      parentJobId: seed.parentJobId,
-      result,
-      signals: seed.signals,
-    });
-    if (result.status === 'failed') {
-      stopAfterFailure = true;
-    } else {
-      enqueueFrontier(result.frontier, seed.parentJobId, seed.branchId, seed.depth + 1);
-    }
-  }
-
-  const frontierPending: PrivateNoveltyGauntletReport['frontierPending'][number][] = [];
-  for (const seed of queue.slice(cursor)) {
-    const signals = seed.signals.filter((signal) => !exercisedSignals.has(signalKey(signal)));
-    if (signals.length === 0) {
-      frontierPrunedCovered += 1;
-      continue;
-    }
-    frontierPending.push({
-      actionId: seed.actionId,
-      actionKind: seed.actionKind,
-      branchId: seed.branchId,
-      checkpointId: seed.checkpointId,
-      depth: seed.depth,
-      parentBranchId: seed.parentBranchId,
-      parentJobId: seed.parentJobId,
-      predictedEventTypes: seed.predictedEventTypes,
-      predictedStateHash: seed.predictedStateHash,
-      signals,
-    });
-  }
-  const pendingSignals = new Set(frontierPending.flatMap(({ signals }) =>
-    signals.map(signalKey)));
-
-  for (const result of [
-    ...jobs.map((job) => job.result),
-    ...frontierBranches.map((branch) => branch.result),
-  ]) {
-    const required = [
-      ...result.frontier.map(({ checkpointId }) => checkpointId),
-      ...(result.status === 'horizon' ? [result.checkpointId] : []),
-      ...(result.status === 'failed' && 'checkpointId' in result.failure
-        ? [result.failure.checkpointId]
-        : []),
-    ];
-    if (required.some((checkpointId) => !checkpoints.has(checkpointId))) {
-      throw new Error('private novelty gauntlet did not capture a reported checkpoint');
-    }
-  }
-  if (frontierPending.some(({ checkpointId }) => !checkpoints.has(checkpointId))) {
-    throw new Error('private novelty gauntlet did not capture a pending checkpoint');
-  }
-
-  const savedCheckpoints = await saveCheckpoints(revisionId, outputId, checkpoints);
-  const report: PrivateNoveltyGauntletReport = deepFreeze({
-    classification: 'authority-private' as const,
-    frontierBranches,
-    frontierPending,
+  const rust = await runRustNoveltyGauntlet(canonicalJson({
     jobs,
-    policyVersion: 'signal-guided-bounded-frontier-v2' as const,
-    schemaVersion: 2 as const,
+    maxActions,
+    schemaVersion: 1,
+  } as JsonValue));
+
+  const savedCheckpoints = await saveCheckpoints(revisionId, outputId, rust.checkpoints);
+  const report = deepFreeze({
+    ...rust.report,
     totals: {
-      branchLimit: FRONTIER_BRANCH_LIMIT,
-      completed: jobs.filter(({ result }) => result.status === 'completed').length,
-      failed: jobs.filter(({ result }) => result.status === 'failed').length,
-      frontierBranches: frontierBranches.length,
-      frontierCompleted: frontierBranches.filter(({ result }) => result.status === 'completed').length,
-      frontierFailed: frontierBranches.filter(({ result }) => result.status === 'failed').length,
-      frontierHorizon: frontierBranches.filter(({ result }) => result.status === 'horizon').length,
-      frontierLimitReached: frontierBranches.length === FRONTIER_BRANCH_LIMIT
-        && frontierPending.length > 0,
-      frontierMaxDepth: frontierBranches.reduce((maximum, { depth }) =>
-        Math.max(maximum, depth), 0),
-      frontierPending: frontierPending.length,
-      frontierPendingSignals: pendingSignals.size,
-      frontierPrunedCovered,
-      horizon: jobs.filter(({ result }) => result.status === 'horizon').length,
-      jobs: 4 as const,
+      ...rust.report.totals,
       savedCheckpoints,
     },
-  });
+  }) as PrivateNoveltyGauntletReport;
   const destination = await outputPath(revisionId, outputId);
   await writeFile(destination, `${canonicalJson(report as unknown as JsonValue)}\n`, 'utf8');
   return { outputPath: destination, report };
