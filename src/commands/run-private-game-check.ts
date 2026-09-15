@@ -17,22 +17,25 @@ import { createGameCheckpoint } from '../engine/checkpoint.ts';
 import type { EngineRejection } from '../engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
-  observeGame,
   type GameActionRequest,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameElement,
   type GameLegalAction,
   type GameManifest,
+  type GameObservation,
   type GameReceipt,
   type GameStepResult,
   type RealmCell,
   type GameSeat,
   type GameSession,
 } from '../engine/game.ts';
-import { RustSessionClient } from '../engine/rust-engine.ts';
-import { asGameLegalActions, parseExportedSession } from '../engine/rust-session-helpers.ts';
+import { RustSessionClient, type Sha256Hash } from '../engine/rust-engine.ts';
+import {
+  asGameLegalActions,
+  parseExportedSession,
+  parseGameObservation,
+} from '../engine/rust-session-helpers.ts';
 import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
@@ -6238,6 +6241,20 @@ async function verifyReplayAt(session: GameSession): Promise<boolean> {
   return (await positioned(session)).verifyReplay();
 }
 
+/** Returns the Rust public-view observation for one seat at the requested history. */
+async function observeAt(
+  session: GameSession,
+  viewer: GameSeat,
+): Promise<GameObservation> {
+  const viewed = await (await positioned(session)).publicView(viewer);
+  return parseGameObservation(viewed.view, viewer);
+}
+
+/** Returns the Rust public-view state hash at the requested history. */
+async function stateHashAt(session: GameSession): Promise<Sha256Hash> {
+  return (await (await positioned(session)).publicView(session.state.decisionSeat)).stateHash;
+}
+
 async function action(
   session: GameSession,
   predicate: (candidate: GameLegalAction) => boolean,
@@ -11538,7 +11555,7 @@ async function runFireGranaryRats(
       && descriptor.cell === 'C4'));
   if (!siteResult.accepted) throw new Error('private Granary Rats Wasteland play was rejected');
   session = siteResult.session;
-  const beforeSummon = observeGame(session.state, 'north');
+  const beforeSummon = await observeAt(session, 'north');
   const manaBeforeSummon = session.state.players.north.mana;
   const summonAction = await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
@@ -11559,7 +11576,7 @@ async function runFireGranaryRats(
     && isJsonRecord(summonResult.receipt.events[0].payload)
     ? summonResult.receipt.events[0].payload
     : undefined;
-  const afterSummon = observeGame(session.state, 'north');
+  const afterSummon = await observeAt(session, 'north');
   const site = session.state.realm.sites.C4;
   const rats = afterSummon.realm.units.find(({ instanceId }) =>
     instanceId === opening.minionInstanceId);
@@ -11647,7 +11664,7 @@ async function runFireHamlet(
   if (!hamletResult.accepted) throw new Error('private Hamlet play was rejected');
   session = hamletResult.session;
 
-  const beforeSummon = observeGame(session.state, 'north');
+  const beforeSummon = await observeAt(session, 'north');
   const manaBeforeSummon = session.state.players.north.mana;
   const raalSummons = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
@@ -11683,7 +11700,7 @@ async function runFireHamlet(
     : undefined;
   const wastelandSite = session.state.realm.sites.C4;
   const hamletSite = session.state.realm.sites.C3;
-  const raal = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const raal = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
   const sameCaster = hamletSummon.descriptor.kind === 'summon-minion'
     && wastelandSummon.descriptor.kind === 'summon-minion'
@@ -11782,7 +11799,7 @@ async function runEarthOverpower(
 
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
-  const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedBefore = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   if (!before || !observedBefore) throw new Error('private Overpower setup lacks Eltham Townsfolk');
   const allyActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
@@ -11813,7 +11830,7 @@ async function runEarthOverpower(
 
   const afterGrant = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
-  const observedAfterGrant = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedAfterGrant = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   if (!afterGrant || !observedAfterGrant) throw new Error('private Overpower removed its ally');
   const castReceipt = session.transcript.at(-1);
@@ -11845,7 +11862,7 @@ async function runEarthOverpower(
   await take(({ descriptor }) => descriptor.kind === 'end-turn');
   const afterExpiry = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
-  const observedAfterExpiry = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedAfterExpiry = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
   const expiryReceipt = session.transcript.at(-1);
   const expiryEvents = expiryReceipt?.events ?? [];
@@ -12598,7 +12615,7 @@ async function runEarthEntangleTerrain(
   await drawAndEndSouthTurn();
 
   await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
-  const beforeView = observeGame(session.state, 'north');
+  const beforeView = await observeAt(session, 'north');
   const affectedCells = ['B3', 'B4', 'C3', 'C4'] as const;
   const castActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-aura'
@@ -12616,7 +12633,7 @@ async function runEarthEntangleTerrain(
   const castPayload = castEvent && isJsonRecord(castEvent.payload) ? castEvent.payload : undefined;
   const aura = session.state.realm.auras?.find(({ instanceId }) =>
     instanceId === opening.entangleTerrainInstanceId);
-  const auraView = observeGame(session.state, 'north');
+  const auraView = await observeAt(session, 'north');
   const malakhimBefore = beforeView.realm.units.find(({ instanceId }) =>
     instanceId === opening.malakhimInstanceId);
   const malakhimDuring = auraView.realm.units.find(({ instanceId }) =>
@@ -12638,7 +12655,7 @@ async function runEarthEntangleTerrain(
   await take(({ descriptor }) => descriptor.kind === 'end-turn');
   counters.push(session.state.realm.auras?.[0]?.turnCounters);
 
-  const finalView = observeGame(session.state, 'north');
+  const finalView = await observeAt(session, 'north');
   const malakhimAfter = finalView.realm.units.find(({ instanceId }) =>
     instanceId === opening.malakhimInstanceId);
   const caveTrollsAfter = finalView.realm.units.find(({ instanceId }) =>
@@ -12842,7 +12859,7 @@ async function runEarthBedrock(
     && descriptor.cardInstanceId === opening.granaryRatsInstanceId
     && descriptor.cell === 'C3'
     && descriptor.region === undefined);
-  const affinityWithRats = observeGame(session.state, 'north').players.north.affinity;
+  const affinityWithRats = (await observeAt(session, 'north')).players.north.affinity;
   await take(({ descriptor }) => descriptor.kind === 'end-turn');
   await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
   await take(({ descriptor }) => descriptor.kind === 'end-turn');
@@ -12877,7 +12894,7 @@ async function runEarthBedrock(
   const sourceRubble = session.state.realm.sites.B3;
   const rats = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.granaryRatsInstanceId);
-  const affinityAfterAttempt = observeGame(session.state, 'north').players.north.affinity;
+  const affinityAfterAttempt = (await observeAt(session, 'north')).players.north.affinity;
   const deck = deckList(opening.manifest.decks.north, opening.names);
 
   return Object.freeze({
@@ -13164,7 +13181,7 @@ async function runEarthKingOfRealm(
 
   await take(({ descriptor }) => descriptor.kind === 'draw' && descriptor.zone === 'atlas');
   await playSite(opening.northSiteInstanceIds[6], 'A1');
-  const beforeView = observeGame(session.state, 'north');
+  const beforeView = await observeAt(session, 'north');
   const beforeLandSurveyor = beforeView.realm.units.find(({ instanceId }) =>
     instanceId === opening.landSurveyorInstanceId);
   const beforeScentHounds = beforeView.realm.units.find(({ instanceId }) =>
@@ -13181,7 +13198,7 @@ async function runEarthKingOfRealm(
   if (!castResult.accepted) throw new Error('private King of the Realm summon was rejected');
   session = castResult.session;
 
-  const afterView = observeGame(session.state, 'north');
+  const afterView = await observeAt(session, 'north');
   const afterLandSurveyor = afterView.realm.units.find(({ instanceId }) =>
     instanceId === opening.landSurveyorInstanceId);
   const afterScentHounds = afterView.realm.units.find(({ instanceId }) =>
@@ -13313,7 +13330,7 @@ async function runEarthMountainGiant(
   session = summonResult.session;
   const initialStateGiant = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.mountainGiantInstanceId);
-  const initialObservedGiant = observeGame(session.state, 'south').realm.units
+  const initialObservedGiant = (await observeAt(session, 'south')).realm.units
     .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
   const mountainDefinition = session.state.cards[input.mountainGiant.stableId];
 
@@ -13355,7 +13372,7 @@ async function runEarthMountainGiant(
     );
   }
   session = moveResult.session;
-  const movedGiant = observeGame(session.state, 'north').realm.units
+  const movedGiant = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.mountainGiantInstanceId);
   const attackResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'declare-attack'
@@ -13529,7 +13546,7 @@ async function runEarthSlumberingGiantess(
     throw new Error(`private Slumbering Giantess summon rejected: ${summonResult.reason.code}`);
   }
   session = summonResult.session;
-  const summoned = observeGame(session.state, 'north').realm.units
+  const summoned = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.slumberingGiantessInstanceId);
   const summonEvents = summonResult.receipt.events;
   const summonPayload = summonEvents.find(({ type }) => type === 'minion-summoned');
@@ -13596,7 +13613,7 @@ async function runEarthSlumberingGiantess(
       && payload.instanceId === opening.albespinePikemenInstanceId);
   const giantess = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.slumberingGiantessInstanceId);
-  const observedGiantess = observeGame(session.state, 'north').realm.units
+  const observedGiantess = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.slumberingGiantessInstanceId);
   const deck = deckList(opening.manifest.decks.north, opening.names);
 
@@ -13760,7 +13777,7 @@ async function runEarthCaveIn(
     instanceId === opening.caveTrollsInstanceId);
   const swordAndShield = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.swordAndShieldInstanceId);
-  const observedSwordAndShield = observeGame(session.state, 'north').realm.artifacts
+  const observedSwordAndShield = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.swordAndShieldInstanceId);
   const controlAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.controlScentInstanceId);
@@ -14874,8 +14891,8 @@ async function runEarthDuel(
   if (!boskBefore || !elthamBefore) throw new Error('private Duel setup lacks its real minions');
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const avatarsBefore = canonicalJson({
-    north: observeGame(session.state, 'north').players.north.avatar,
-    south: observeGame(session.state, 'north').players.south.avatar,
+    north: (await observeAt(session, 'north')).players.north.avatar,
+    south: (await observeAt(session, 'north')).players.south.avatar,
   } as unknown as JsonValue);
   const manaBefore = session.state.players.north.mana;
   const choices = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
@@ -14948,8 +14965,8 @@ async function runEarthDuel(
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue) === sitesBefore
       && canonicalJson({
-        north: observeGame(session.state, 'north').players.north.avatar,
-        south: observeGame(session.state, 'north').players.south.avatar,
+        north: (await observeAt(session, 'north')).players.north.avatar,
+        south: (await observeAt(session, 'north')).players.south.avatar,
       } as unknown as JsonValue) === avatarsBefore,
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.duelInstanceId)
@@ -15057,7 +15074,7 @@ async function runEarthSwordAndShield(
   if (!castResult.accepted) throw new Error('private Sword and Shield cast was rejected');
   session = castResult.session;
 
-  const castView = observeGame(session.state, 'north');
+  const castView = await observeAt(session, 'north');
   const castArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
   const castArtifactView = castView.realm.artifacts?.find(({ instanceId }) =>
@@ -15078,7 +15095,7 @@ async function runEarthSwordAndShield(
   session = pickupResult.session;
   const manaAfterPickup = session.state.players.north.mana;
 
-  const pickedView = observeGame(session.state, 'north');
+  const pickedView = await observeAt(session, 'north');
   const pickedArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
   const pickedArtifactView = pickedView.realm.artifacts?.find(({ instanceId }) =>
@@ -15099,7 +15116,7 @@ async function runEarthSwordAndShield(
   const dropResult = await stepAt(dropBranchStart, chosenDrop);
   if (!dropResult.accepted) throw new Error('private Sword and Shield Drop was rejected');
   const dropSession = dropResult.session;
-  const droppedView = observeGame(dropSession.state, 'north');
+  const droppedView = await observeAt(dropSession, 'north');
   const droppedArtifactState = dropSession.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
   const droppedArtifactView = droppedView.realm.artifacts?.find(({ instanceId }) =>
@@ -15129,7 +15146,7 @@ async function runEarthSwordAndShield(
       && descriptor.target?.kind === 'minion'
       && descriptor.target.instanceId === opening.elthamTownsfolkInstanceId);
   }
-  const damagedBearer = await (observeGame(dropDeathSession.state, 'north')).realm.units
+  const damagedBearer = (await observeAt(dropDeathSession, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.elthamTownsfolkInstanceId);
   const dropDeathResult = await stepAt(dropDeathSession, await action(dropDeathSession, ({ descriptor }) =>
     descriptor.kind === 'drop-artifacts'
@@ -15139,7 +15156,7 @@ async function runEarthSwordAndShield(
       && descriptor.artifactInstanceIds[0] === opening.artifactInstanceId));
   if (!dropDeathResult.accepted) throw new Error('private lethal Sword Drop was rejected');
   dropDeathSession = dropDeathResult.session;
-  const dropDeathArtifact = await (observeGame(dropDeathSession.state, 'north')).realm.artifacts
+  const dropDeathArtifact = (await observeAt(dropDeathSession, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const dropDeathEvents = dropDeathResult.receipt.events;
   const dropDeathDropPayload = dropDeathEvents[0] && isJsonRecord(dropDeathEvents[0].payload)
@@ -15185,7 +15202,7 @@ async function runEarthSwordAndShield(
       && descriptor.to.cell === 'C2'));
   if (!moveResult.accepted) throw new Error('private Sword bearer move was rejected');
   session = moveResult.session;
-  const movedView = observeGame(session.state, 'north');
+  const movedView = await observeAt(session, 'north');
   const movedArtifact = movedView.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
   const movedEltham = movedView.realm.units.find(({ instanceId }) =>
@@ -15217,7 +15234,7 @@ async function runEarthSwordAndShield(
   const firstDamageIndex = fightEvents.findIndex(({ type }) => type === 'damage-dealt');
   const finalArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const finalArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
+  const finalArtifactView = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const finalEltham = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.elthamTownsfolkInstanceId);
@@ -15471,7 +15488,7 @@ async function runEarthPoisonousDagger(
 
   const castArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const castArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
+  const castArtifactView = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const moveResult = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
@@ -15515,7 +15532,7 @@ async function runEarthPoisonousDagger(
   const firstDamageIndex = events.findIndex(({ type }) => type === 'damage-dealt');
   const finalArtifactState = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const finalArtifactView = await (observeGame(session.state, 'north')).realm.artifacts
+  const finalArtifactView = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const castVerified: boolean = castResult.receipt.events.length === 1
     && castResult.receipt.events[0]?.type === 'artifact-conjured'
@@ -15648,7 +15665,7 @@ async function runEarthRescue(
     && descriptor.cardInstanceId === opening.buryInstanceId
     && descriptor.target?.instanceId === opening.boskTrollInstanceId);
 
-  const northViewAfterBury = observeGame(session.state, 'north');
+  const northViewAfterBury = await observeAt(session, 'north');
   const southHandCountAfterBury = northViewAfterBury.players.south.hand.spellbook;
   const boskWasPublic = northViewAfterBury.players.south.cemetery
     .some(({ cardId, instanceId }) => cardId === input.firstStrikeTargetMinion.stableId
@@ -15671,7 +15688,7 @@ async function runEarthRescue(
   const manaBefore = session.state.players.south.mana;
   session = await accept(session, selected);
 
-  const northViewAfter = observeGame(session.state, 'north');
+  const northViewAfter = await observeAt(session, 'north');
   const events = session.transcript.at(-1)?.events ?? [];
   const castPayload = events[0] && isJsonRecord(events[0].payload) ? events[0].payload : undefined;
   const returnedPayload = events[1] && isJsonRecord(events[1].payload)
@@ -15725,7 +15742,7 @@ async function runEarthShallowGrave(
   const before = session.state.players.north;
   const topTwo = before.spellbook.slice(0, 2);
   if (topTwo.length !== 2) throw new Error('private site discard Genesis lacks two spells');
-  const southViewBefore = canonicalJson(observeGame(session.state, 'south') as unknown as JsonValue);
+  const southViewBefore = canonicalJson(await observeAt(session, 'south') as unknown as JsonValue);
   const hiddenBeforeDiscard = topTwo.every(({ cardId, instanceId }) =>
     !southViewBefore.includes(cardId) && !southViewBefore.includes(instanceId));
   const spellHandBefore = canonicalJson(before.hand.spellbook as unknown as JsonValue);
@@ -15737,7 +15754,7 @@ async function runEarthShallowGrave(
 
   const after = session.state.players.north;
   const discarded = after.cemetery.slice(-2);
-  const southViewAfter = observeGame(session.state, 'south').players.north.cemetery.slice(-2);
+  const southViewAfter = (await observeAt(session, 'south')).players.north.cemetery.slice(-2);
   const events = session.transcript.at(-1)?.events ?? [];
   const discardEventsMatch = topTwo.every((card, index) => {
     const event = events[index + 1];
@@ -15753,7 +15770,7 @@ async function runEarthShallowGrave(
 
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
-    affinityProvided: observeGame(session.state, 'north').players.north.affinity.earth === 1,
+    affinityProvided: (await observeAt(session, 'north')).players.north.affinity.earth === 1,
     avatarTapped: after.avatar.tapped,
     causalEventsVerified: events.map(({ type }) => type).join(',')
       === 'site-played,spell-discarded,spell-discarded'
@@ -15823,7 +15840,7 @@ async function advanceToNorthSiteRecovery(
   session = result.session;
   const site = session.state.realm.sites.C4;
   const realSite = site && !('rubble' in site) ? site : undefined;
-  const affinity = observeGame(session.state, 'north').players.north.affinity;
+  const affinity = (await observeAt(session, 'north')).players.north.affinity;
   if (result.receipt.events.map(({ type }) => type).join(',') !== 'rubble-replaced,site-played'
     || result.receipt.randomDraws.length !== 0) {
     throw new Error('private zero-domain recovery emitted unexpected events or randomness');
@@ -15903,7 +15920,7 @@ async function runEarthSinkhole(
   const rubbleC4Payload = events[3] && isJsonRecord(events[3].payload)
     ? events[3].payload
     : undefined;
-  const affinity = observeGame(session.state, 'north').players.north.affinity;
+  const affinity = (await observeAt(session, 'north')).players.north.affinity;
   const destructionAcceptedActionCount = session.transcript.length;
   const avatarRemainedOnSurface = session.state.players.north.avatar.location === 'C4'
     && session.state.players.north.avatar.region === 'surface';
@@ -16315,13 +16332,13 @@ async function runEarthRamp(
     descriptor.kind === 'play-site'
       && descriptor.cardInstanceId === opening.northSiteInstanceIds[1]
       && descriptor.cell === 'C3'));
-  const affinityBeforeProvider = observeGame(session.state, 'north').players.north.affinity.earth;
+  const affinityBeforeProvider = (await observeAt(session, 'north')).players.north.affinity.earth;
   session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.providerInstanceId
       && descriptor.cell === 'C4'));
   const affinityAdded =
-    observeGame(session.state, 'north').players.north.affinity.earth === affinityBeforeProvider + 1;
+    (await observeAt(session, 'north')).players.north.affinity.earth === affinityBeforeProvider + 1;
   session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
 
   session = await accept(session, await action(session, ({ descriptor }) =>
@@ -16520,7 +16537,7 @@ async function runEarthMalakhim(
   const summonPayload = summonEvent && isJsonRecord(summonEvent.payload)
     ? summonEvent.payload
     : undefined;
-  const affinity = (observeGame(session.state, 'north')).players.north.affinity.earth;
+  const affinity = (await observeAt(session, 'north')).players.north.affinity.earth;
   const move = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'move-and-attack'
       && descriptor.unitInstanceId === opening.malakhimInstanceId
@@ -16962,7 +16979,7 @@ async function runAirFireFatality(
   const healthyChoices = (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.fatalityInstanceId);
-  const affinity = observeGame(session.state, 'north').players.north.affinity;
+  const affinity = (await observeAt(session, 'north')).players.north.affinity;
   const manaBeforeZap = session.state.players.north.mana;
   const zap = await stepAt(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'cast-magic'
@@ -17740,8 +17757,8 @@ async function runAirRainOfArrows(
     throw new Error('private Rain of Arrows setup lacks both surface comparison minions');
   }
   const avatarsBefore = canonicalJson({
-    north: observeGame(session.state, 'north').players.north.avatar,
-    south: observeGame(session.state, 'north').players.south.avatar,
+    north: (await observeAt(session, 'north')).players.north.avatar,
+    south: (await observeAt(session, 'north')).players.south.avatar,
   } as unknown as JsonValue);
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const northCemeteryBefore = canonicalJson(
@@ -17802,8 +17819,8 @@ async function runAirRainOfArrows(
   return Object.freeze({
     acceptedActionCount: session.transcript.length,
     avatarsPreserved: canonicalJson({
-      north: observeGame(session.state, 'north').players.north.avatar,
-      south: observeGame(session.state, 'north').players.south.avatar,
+      north: (await observeAt(session, 'north')).players.north.avatar,
+      south: (await observeAt(session, 'north')).players.south.avatar,
     } as unknown as JsonValue) === avatarsBefore,
     causalEventsVerified: events.map(({ type }) => type).join(',')
       === 'magic-cast,magic-damage-allocated,magic-damage-allocated,damage-dealt,damage-dealt,magic-resolved'
@@ -18465,7 +18482,7 @@ async function runAirVoidArtifact(
   session = dropResult.session;
   const dropped = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const droppedView = observeGame(session.state, 'north').realm.artifacts
+  const droppedView = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
 
   await take(({ descriptor }) => descriptor.kind === 'end-turn');
@@ -18481,7 +18498,7 @@ async function runAirVoidArtifact(
   session = coverResult.session;
   const relocated = session.state.realm.artifacts?.find(({ instanceId }) =>
     instanceId === opening.artifactInstanceId);
-  const relocatedView = observeGame(session.state, 'north').realm.artifacts
+  const relocatedView = (await observeAt(session, 'north')).realm.artifacts
     ?.find(({ instanceId }) => instanceId === opening.artifactInstanceId);
   const surfacedStalker = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.stalkerInstanceId);
@@ -18569,7 +18586,7 @@ async function runAirGenesisSpell(
   const drewSpell = after.spellbook.length === before.spellbook.length - 1
     && after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId)
     && summoned.receipt.events.map(({ type }) => type).join(',') === 'minion-summoned,spell-drawn';
-  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const opponentHand = (await observeAt(session, 'south')).players.north.hand.spellbook;
   const hiddenFromOpponent = typeof opponentHand === 'number'
     && !canonicalJson(summoned.receipt.events as unknown as JsonValue).includes(drawn.instanceId);
 
@@ -18679,13 +18696,13 @@ async function runAirGrandmasterWizard(
       after.hand.spellbook.slice(-3).map(({ instanceId }) => instanceId) as unknown as JsonValue,
     ) === canonicalJson(drawnInstanceIds as unknown as JsonValue)
     && after.hand.spellbook.length === before.hand.spellbook.length + 2;
-  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const opponentHand = (await observeAt(session, 'south')).players.north.hand.spellbook;
   const hiddenFromOpponent = typeof opponentHand === 'number'
     && opponentHand === after.hand.spellbook.length
     && drawnInstanceIds.every((instanceId) =>
       !canonicalJson(events as unknown as JsonValue).includes(instanceId));
   const definition = session.state.cards[input.grandmasterWizard.stableId];
-  const grandmaster = observeGame(session.state, 'north').realm.units
+  const grandmaster = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.featuredInstanceId);
   const deck = deckList(opening.manifest.decks.north, opening.names);
 
@@ -18848,7 +18865,7 @@ async function runAirSlingPixies(
   await endTurn();
 
   await draw('spellbook');
-  const beforeSecond = observeGame(session.state, 'north').realm.units;
+  const beforeSecond = (await observeAt(session, 'north')).realm.units;
   await take(({ descriptor }) => descriptor.kind === 'move-and-attack'
     && descriptor.unitInstanceId === slingInstanceId
     && descriptor.from.cell === 'C3'
@@ -19009,7 +19026,7 @@ async function runAirSpireLich(
   await endTurn();
 
   await drawSpell();
-  const towerView = observeGame(session.state, 'north').realm.units
+  const towerView = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
   const spireDefinition = session.state.cards[input.spireLich.stableId];
   const darkTowerDefinition = session.state.cards[input.darkTower.stableId];
@@ -19139,7 +19156,7 @@ async function runAirSpireLich(
   await endTurn();
   await drawSpell();
 
-  const offTowerView = observeGame(session.state, 'north').realm.units
+  const offTowerView = (await observeAt(session, 'north')).realm.units
     .find(({ instanceId }) => instanceId === opening.spireLichInstanceId);
   const offTowerActions = await legalActionsAt(session, 'north');
   const secondZapInHand = session.state.players.north.hand.spellbook
@@ -19263,12 +19280,11 @@ async function runAirNimbusJinn(
     && descriptor.cardInstanceId === opening.nimbusInstanceId
     && descriptor.cell === 'C3');
 
-  const before = session.state;
-  const bandBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+  const bandBefore = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.bandInstanceId);
-  const raalBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+  const raalBefore = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.raalInstanceId);
-  const nimbusBefore = observeGame(before, 'north').realm.units.find(({ instanceId }) =>
+  const nimbusBefore = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.nimbusInstanceId);
   const candidates = [opening.bandInstanceId, opening.raalInstanceId]
     .sort((left, right) => left.localeCompare(right));
@@ -19351,7 +19367,7 @@ async function runAirNimbusJinn(
     .map(({ payload, type }) => ({ payload, type }));
   const firstEventSequence = activated.receipt.events[0]?.eventSequence;
   const northCemetery = session.state.players.north.cemetery;
-  const southView = observeGame(session.state, 'south');
+  const southView = await observeAt(session, 'south');
   const remainingNorthHandIds = session.state.players.north.hand.spellbook
     .map(({ instanceId }) => instanceId);
   const eventBytes = canonicalJson(activated.receipt.events as unknown as JsonValue);
@@ -20398,7 +20414,7 @@ async function runAirSpellcasterFreeze(
     instanceId === opening.apprenticeWizardInstanceId);
   const seravaAfter = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.seravaInstanceId);
-  const observedSerava = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedSerava = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.seravaInstanceId);
   const receipt = session.transcript.at(-1);
   const events = receipt?.events ?? [];
@@ -20509,7 +20525,7 @@ async function runAirLeyline(
     && drawEvent?.type === 'spell-drawn'
     && isJsonRecord(drawEvent.payload)
     && drawEvent.payload.sourceInstanceId === opening.hengeInstanceIds[1];
-  const opponentHand = observeGame(session.state, 'south').players.north.hand.spellbook;
+  const opponentHand = (await observeAt(session, 'south')).players.north.hand.spellbook;
   const hiddenFromOpponent = typeof opponentHand === 'number'
     && !canonicalJson(second.receipt.events as unknown as JsonValue).includes(drawn.instanceId);
 
@@ -21203,15 +21219,15 @@ async function runFireAramos(
   const southBefore = session.state.players.south;
   const sitesBefore = canonicalJson(session.state.realm.sites as unknown as JsonValue);
   const unitsBefore = canonicalJson(session.state.realm.units as unknown as JsonValue);
-  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
+  const northAvatarBefore = (await observeAt(session, 'north')).players.north.avatar;
   const eligibleCards = [
     ...northBefore.hand.atlas.map((card) => ({ ...card, zone: 'atlas' as const })),
     ...(northBefore.hand.spellbook
       .filter(({ instanceId }) => instanceId !== opening.aramosInstanceId))
       .map((card) => ({ ...card, zone: 'spellbook' as const })),
   ];
-  const northObservedBefore = observeGame(session.state, 'north').players.north.hand;
-  const southObservedBefore = observeGame(session.state, 'south').players.north.hand;
+  const northObservedBefore = (await observeAt(session, 'north')).players.north.hand;
+  const southObservedBefore = (await observeAt(session, 'south')).players.north.hand;
   const summonActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.aramosInstanceId);
@@ -21249,8 +21265,8 @@ async function runFireAramos(
   const northAfter = session.state.players.north;
   const aramos = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.aramosInstanceId);
-  const southObservedAfter = observeGame(session.state, 'south').players.north.hand;
-  const southObservedCemetery = observeGame(session.state, 'south').players.north.cemetery;
+  const southObservedAfter = (await observeAt(session, 'south')).players.north.hand;
+  const southObservedCemetery = (await observeAt(session, 'south')).players.north.cemetery;
   const random = result.receipt.randomDraws[0];
   const randomDomain = random && isJsonRecord(random.domain) ? random.domain : undefined;
   const expectedAtlasHand = northBefore.hand.atlas.filter(({ instanceId }) =>
@@ -21324,7 +21340,7 @@ async function runFireAramos(
         === canonicalJson(northBefore.atlas as unknown as JsonValue)
       && canonicalJson(northAfter.spellbook as unknown as JsonValue)
         === canonicalJson(northBefore.spellbook as unknown as JsonValue)
-      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
+      && canonicalJson((await observeAt(session, 'north')).players.north.avatar as unknown as JsonValue)
         === canonicalJson(northAvatarBefore as unknown as JsonValue)
       && canonicalJson(session.state.players.south as unknown as JsonValue)
         === canonicalJson(southBefore as unknown as JsonValue)
@@ -21821,8 +21837,8 @@ async function runFireLeapAttack(
     instanceId === opening.northRaalInstanceId);
   if (!allyBefore) throw new Error('private Leap Attack setup lacks its allied Raal Dromedary');
   const sitesBefore = session.state.realm.sites;
-  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
-  const southAvatarBefore = observeGame(session.state, 'north').players.south.avatar;
+  const northAvatarBefore = (await observeAt(session, 'north')).players.north.avatar;
+  const southAvatarBefore = (await observeAt(session, 'north')).players.south.avatar;
   const leapActions = await (await legalActionsAt(session, 'north')).filter(({ descriptor }) =>
     descriptor.kind === 'cast-magic'
       && descriptor.cardInstanceId === opening.leapAttackInstanceId
@@ -21918,9 +21934,9 @@ async function runFireLeapAttack(
     sitesAndAvatarsPreserved:
       canonicalJson(session.state.realm.sites as unknown as JsonValue)
         === canonicalJson(sitesBefore as unknown as JsonValue)
-      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
+      && canonicalJson((await observeAt(session, 'north')).players.north.avatar as unknown as JsonValue)
         === canonicalJson(northAvatarBefore as unknown as JsonValue)
-      && canonicalJson(observeGame(session.state, 'north').players.south.avatar as unknown as JsonValue)
+      && canonicalJson((await observeAt(session, 'north')).players.south.avatar as unknown as JsonValue)
         === canonicalJson(southAvatarBefore as unknown as JsonValue),
     spellEnteredCemetery: session.state.players.north.hand.spellbook
       .every(({ instanceId }) => instanceId !== opening.leapAttackInstanceId)
@@ -22706,9 +22722,9 @@ async function runWaterRiver(
       && privateIdentity.every((identity) =>
         !canonicalJson(choices.map(({ descriptor }) => descriptor) as unknown as JsonValue)
           .includes(identity)),
-    hiddenFromOpponent: canonicalJson(observeGame(kept.session.state, 'south') as unknown as JsonValue)
-      === canonicalJson(observeGame(bottomed.session.state, 'south') as unknown as JsonValue)
-      && !canonicalJson(observeGame(played.session.state, 'south') as unknown as JsonValue)
+    hiddenFromOpponent: canonicalJson(await observeAt(kept.session, 'south') as unknown as JsonValue)
+      === canonicalJson(await observeAt(bottomed.session, 'south') as unknown as JsonValue)
+      && !canonicalJson(await observeAt(played.session, 'south') as unknown as JsonValue)
         .includes(top.instanceId)
       && privateIdentity.every((identity) => !publicEvents.includes(identity)),
     keptNextSpell: keptOrder.join(',') === beforeOrder.join(','),
@@ -23082,7 +23098,7 @@ async function runWaterGnarledWendigo(
   const northBefore = session.state.players.north;
   const southBefore = session.state.players.south;
   const sitesBefore = session.state.realm.sites;
-  const northAvatarBefore = observeGame(session.state, 'north').players.north.avatar;
+  const northAvatarBefore = (await observeAt(session, 'north')).players.north.avatar;
   const otherUnitsBefore = session.state.realm.units.filter(({ instanceId }) =>
     instanceId !== opening.seravaInstanceId);
   const stateVersionBefore = session.state.stateVersion;
@@ -23184,7 +23200,7 @@ async function runWaterGnarledWendigo(
         === canonicalJson(northBefore.spellbook as unknown as JsonValue)
       && canonicalJson(northAfter.hand.atlas as unknown as JsonValue)
         === canonicalJson(northBefore.hand.atlas as unknown as JsonValue)
-      && canonicalJson(observeGame(session.state, 'north').players.north.avatar as unknown as JsonValue)
+      && canonicalJson((await observeAt(session, 'north')).players.north.avatar as unknown as JsonValue)
         === canonicalJson(northAvatarBefore as unknown as JsonValue),
     replayVerified: await verifyReplayAt(session),
     seravaTownsfolk: input.seravaTownsfolk.name,
@@ -23897,7 +23913,7 @@ async function runWaterMesmerism(
     throw new Error('private Mesmerism exact nearby target is not uniquely available');
   }
   const manaBefore = session.state.players.north.mana;
-  const affinityBefore = (observeGame(session.state, 'north')).players.north.affinity.water;
+  const affinityBefore = (await observeAt(session, 'north')).players.north.affinity.water;
   const cast = await stepAt(session, chosen);
   if (!cast.accepted) throw new Error('private Mesmerism cast was rejected');
   session = cast.session;
@@ -24069,7 +24085,7 @@ async function runWaterPirateShip(
 
   const before = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.pirateShipInstanceId);
-  const observedBefore = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedBefore = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.pirateShipInstanceId);
   const waterSite = session.state.realm.sites.C3;
   const waterSiteDefinition = waterSite && 'cardId' in waterSite
@@ -24108,7 +24124,7 @@ async function runWaterPirateShip(
 
   const after = session.state.realm.units.find(({ instanceId }) =>
     instanceId === opening.pirateShipInstanceId);
-  const observedAfter = observeGame(session.state, 'north').realm.units.find(({ instanceId }) =>
+  const observedAfter = (await observeAt(session, 'north')).realm.units.find(({ instanceId }) =>
     instanceId === opening.pirateShipInstanceId);
   const events = moved.receipt.events;
   const movementPayload = events[0] && isJsonRecord(events[0].payload)
@@ -24626,13 +24642,13 @@ async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> 
 
   session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  const affinityBeforeProvider = observeGame(session.state, 'north').players.north.affinity.fire;
+  const affinityBeforeProvider = (await observeAt(session, 'north')).players.north.affinity.fire;
   session = await accept(session, await action(session, ({ descriptor }) =>
     descriptor.kind === 'summon-minion'
       && descriptor.cardInstanceId === opening.northProviderInstanceId
       && descriptor.cell === 'C3'));
   const providerAffinityAdded =
-    observeGame(session.state, 'north').players.north.affinity.fire === affinityBeforeProvider + 1;
+    (await observeAt(session, 'north')).players.north.affinity.fire === affinityBeforeProvider + 1;
   const beforeAvatarDraw = session.state.players.north;
   session = await accept(session, await action(session, ({ descriptor }) => descriptor.kind === 'draw-spell'));
   const afterAvatarDraw = session.state.players.north;
@@ -24776,7 +24792,7 @@ async function runPrivateGameScenarios(path: string): Promise<PrivateGameCheck> 
     fireRecklessSquire,
     fireResponse,
     fireStarter,
-    finalStateHash: hashGameState(session.state),
+    finalStateHash: await stateHashAt(session) as Hash,
     formatStableId: input.formatStableId,
     genesis: {
       minion: opening.names.get(input.genesisMinion.stableId) ?? input.genesisMinion.stableId,

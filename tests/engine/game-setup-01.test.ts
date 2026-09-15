@@ -11,7 +11,6 @@ import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
   hashGameState,
-  observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -33,7 +32,7 @@ test('RULE-01 setup shuffles two decks, deals split hidden hands, and places Ava
   await withSetup(manifest(7), async (ctx) => {
     const session = ctx.session;
     const north = session.state.players.north;
-    const southView = observeGame(session.state, 'south');
+    const southView = await ctx.observe('south');
 
     assert.equal(session.state.phase, 'mulligan');
     assert.equal(session.state.activeSeat, 'north');
@@ -1086,8 +1085,8 @@ test('TEST-03 different opponent hidden cards cannot change an observation or le
         second.state.players.north.hand.atlas[0]?.cardId,
       );
       assert.equal(
-        canonicalJson(observeGame(first.state, 'south')),
-        canonicalJson(observeGame(second.state, 'south')),
+        canonicalJson(await firstCtx.observe('south')),
+        canonicalJson(await secondCtx.observe('south')),
       );
       assert.equal(
         canonicalJson(await firstCtx.legalActions('south')),
@@ -1300,7 +1299,7 @@ test('RULE-02 a player with no sites recovers at the closest available cell', as
       assert.deepEqual(recovered.receipt.randomDraws, []);
       assert.equal(ctx.state.realm.sites.C4?.controller, 'north');
       assert.equal('rubble' in ctx.state.realm.sites.C4!, false);
-      assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 1);
+      assert.equal((await ctx.observe('north')).players.north.affinity.earth, 1);
       assert.equal(ctx.state.players.north.avatar.tapped, true);
       assert.equal(ctx.state.players.north.hand.atlas.length, handBefore - 1);
       assert.equal(ctx.state.players.north.mana, 1);
@@ -1327,7 +1326,7 @@ test('RULE-02 the Avatar may draw a private site instead of playing one', async 
     assert.deepEqual(result.receipt.events[0]?.payload, { seat: 'north' });
     assert.equal(result.receipt.events[0]?.type, 'site-drawn');
     assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(drawn.cardId), false);
-    assert.equal(canonicalJson(observeGame(ctx.state, 'south')).includes(drawn.cardId), false);
+    assert.equal(canonicalJson((await ctx.observe('south'))).includes(drawn.cardId), false);
     const afterDrawKinds = (await ctx.legalActions('north')).map(({ descriptor }) => descriptor.kind);
     assert.equal(afterDrawKinds.includes('play-site'), false);
     assert.equal(afterDrawKinds.includes('draw-site'), false);
@@ -1352,7 +1351,7 @@ test('RULE-03 a draw-spell Avatar pays its tap cost and keeps the drawn identity
     assert.equal(ctx.state.players.north.hand.spellbook.length, beforeHand + 1);
     assert.equal(ctx.session.transcript.at(-1)?.events[0]?.type, 'spell-drawn');
     assert.doesNotMatch(canonicalJson(ctx.session.transcript.at(-1)?.events[0]?.payload ?? null), /north-spell-/);
-    assert.doesNotMatch(canonicalJson(observeGame(ctx.state, 'south')), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson((await ctx.observe('south'))), new RegExp(drawn.cardId));
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
@@ -1628,15 +1627,15 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
       region: 'underground',
       source: artifactCard.source,
     });
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.sites.C2, {
+    assert.deepEqual((await ctx.observe('north')).realm.sites.C2, {
       cardId: 'rubble',
       controller: null,
       elements: [],
       instanceId: ctx.state.realm.sites.C2?.instanceId,
       rubble: true,
     });
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 1);
-    assert.equal(observeGame(ctx.state, 'north').players.south.affinity.water, 0);
+    assert.equal((await ctx.observe('north')).players.north.affinity.earth, 1);
+    assert.equal((await ctx.observe('north')).players.south.affinity.water, 0);
 
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'play-site' && descriptor.cell === 'C3');
@@ -1673,7 +1672,7 @@ test('RULE-03/04 a Spellcaster pays mana and summons a minion atop a controlled 
     const before = ctx.state.players.north;
     const summons = (await ctx.legalActions('north'))
       .filter(({ descriptor }) => descriptor.kind === 'summon-minion');
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 1);
+    assert.equal((await ctx.observe('north')).players.north.affinity.earth, 1);
     assert.equal(summons.length, 3);
     assert.ok(summons.every(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
@@ -1842,7 +1841,7 @@ test('RULE-03/04 token Magic summons deterministically and tokens banish instead
       },
     ]);
     assert.equal(new Set(tokens.map(({ instanceId }) => instanceId)).size, 2);
-    assert.deepEqual(observeGame(ctx.state, 'south').realm.units
+    assert.deepEqual((await ctx.observe('south')).realm.units
       .filter(({ token }) => token)
       .map(({ attack, defense, instanceId }) => ({ attack, defense, instanceId })),
     tokens.map(({ instanceId }) => ({ attack: 1, defense: 1, instanceId })));
@@ -1972,7 +1971,7 @@ test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card in
     assert.ok(eligible.length > 0);
     assert.deepEqual(new Set(eligible.map(({ zone }) => zone)), new Set(['atlas', 'spellbook']));
     const handBefore = ctx.state.players.north.hand;
-    const southBefore = canonicalJson(observeGame(ctx.state, 'south'));
+    const southBefore = canonicalJson((await ctx.observe('south')));
     assert.ok(eligible.every(({ cardId, instanceId }) =>
       !southBefore.includes(cardId) && !southBefore.includes(instanceId)));
     const cp = createGameCheckpoint(ctx.session);
@@ -2020,7 +2019,7 @@ test('RULE-03 Aramos Mercenaries may discard a deterministic random hand card in
         && drawDomain.kind === 'card_index_candidate'
         && drawDomain.exclusiveMaximum === eligible.length;
     }));
-    const southAfter = canonicalJson(observeGame(ctx.state, 'south'));
+    const southAfter = canonicalJson((await ctx.observe('south')));
     assert.ok(southAfter.includes(String(discardedCardId)));
     assert.ok(southAfter.includes(String(discardedInstanceId)));
     assert.equal(await ctx.verifyReplay(), true);
@@ -2182,7 +2181,7 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
       && (descriptor.sacrificedMinionInstanceIds ?? []).some((instanceId) =>
         instanceId === submerged.instanceId || instanceId === enemy.instanceId)), false);
 
-    const checkpointHash = hashGameState(ctx.state);
+    const checkpointHash = (await ctx.stateHash());
     const transcriptLengthBeforeForge = ctx.session.transcript.length;
     const forged = await ctx.stepRequest({
       actionId: `${cast.actionId}:forged`,
@@ -2191,7 +2190,7 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
     });
     assert.equal(forged.accepted, false);
     assert.equal(forged.reason?.code, 'unknown_action');
-    assert.equal(hashGameState(forged.session.state), checkpointHash);
+    assert.equal((await ctx.stateHash()), checkpointHash);
     assert.equal(forged.session.transcript.length, transcriptLengthBeforeForge);
 
     const preCastVersion = ctx.state.stateVersion;
@@ -2353,7 +2352,7 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
         region: 'surface',
       }]);
       assert.equal(await ctx.verifyReplay(), true);
-      branchHashes.push(hashGameState(ctx.state));
+      branchHashes.push((await ctx.stateHash()));
     }
     assert.equal(new Set(branchHashes).size, 1);
   });
@@ -2688,7 +2687,7 @@ test('RULE-03 printed Spellcasters cast while tapped or summoning sick from thei
     }, { stealthed: true, summoningSickness: true, tapped: false });
     assert.equal(preBranchState.realm.units.find(({ instanceId }) =>
       instanceId === tappedCaster.instanceId)?.tapped, true);
-    assert.equal(observeGame(preBranchState, 'north').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === disabledCaster.instanceId)?.disabled, true);
 
     const actions = await ctx.legalActions('north');

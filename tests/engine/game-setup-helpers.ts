@@ -7,9 +7,6 @@ import { parseExportedSession } from '../../src/engine/rust-session-helpers.ts';
 
 import {
   createGameManifest,
-  createGameSession,
-  legalGameActions,
-  stepGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -335,44 +332,6 @@ export function manifest(
   });
 }
 
-export function action(
-  session: GameSession,
-  predicate: (candidate: GameLegalAction) => boolean,
-): GameLegalAction {
-  const found = legalGameActions(session.state, session.state.decisionSeat).find(predicate);
-  assert.ok(found, 'expected legal action');
-  return found;
-}
-
-export function accept(session: GameSession, candidate: GameLegalAction): GameSession {
-  const result = stepGame(session, candidate);
-  assert.equal(result.accepted, true);
-  return result.session;
-}
-
-export function keep(session: GameSession): GameSession {
-  return accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'mulligan'
-      && descriptor.atlasOrder.length === 0
-      && descriptor.spellbookOrder.length === 0));
-}
-
-export function northSecondMain(seed = 23, shortDecks = false, spell?: SpellFacts): GameSession {
-  const options = shortDecks
-    ? { north: deck('north', 3, 4), south: deck('south', 3, 4), ...(spell ? { spell } : {}) }
-    : spell ? { spell } : {};
-  let session = keep(createGameSession(manifest(seed, options)));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-  return accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-}
-
 /** Advances one Rust setup session through both opening turns into north's second main. */
 export async function toNorthSecondMain(ctx: SetupCtx): Promise<void> {
   await ctx.keep();
@@ -385,181 +344,6 @@ export async function toNorthSecondMain(ctx: SetupCtx): Promise<void> {
   await ctx.accept(await ctx.action(({ descriptor }) => descriptor.kind === 'end-turn'));
   await ctx.accept(await ctx.action(({ descriptor }) =>
     descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-}
-
-export function numericGenesisSession(remainingCount: number, seed: number): GameSession {
-  const decks = {
-    north: deck(`genesis-spells-north-${remainingCount}`, 5, 3 + remainingCount),
-    south: deck(`genesis-spells-south-${remainingCount}`, 5, 3 + remainingCount),
-  };
-  const cards = cardsFor(decks, {
-    attack: 0,
-    defense: 0,
-    genesisDrawSpells: 3,
-    manaCost: 1,
-    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
-  }, undefined, { elements: ['air'] });
-  let session = keep(createGameSession(createGameManifest({
-    authority: {
-      contentHash: SYNTHETIC_AUTHORITY_HASH,
-      mode: 'synthetic',
-      revisionId: `synthetic-genesis-spells-${remainingCount}-v1`,
-    },
-    cards,
-    decks,
-    firstSeat: 'north',
-    seed,
-  })));
-  session = keep(session);
-  return accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-}
-
-export function northAttacksAtC2(
-  seed: number,
-  spell?: SpellFacts,
-  avatar?: AvatarFacts,
-  emptyAtlasAfterOpening = false,
-  southSpell?: SpellFacts,
-  extraSouthMinionsAtC1 = 0,
-): Readonly<{
-  attackerInstanceId: string;
-  defenderInstanceId: string;
-  session: GameSession;
-  targetInstanceId: string;
-}> {
-  const shortDecks = emptyAtlasAfterOpening
-    ? { north: deck('north', 3), south: deck('south', 3) }
-    : {};
-  let session = keep(createGameSession(manifest(seed, {
-    ...shortDecks,
-    ...(spell ? { spell } : {}),
-    ...(southSpell ? { southSpell } : {}),
-    ...(avatar ? { avatar } : {}),
-  })));
-  session = keep(session);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
-  const attackerInstanceId = session.state.realm.units.find(({ controller }) => controller === 'north')?.instanceId;
-  assert.ok(attackerInstanceId);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
-  const defenderInstanceId = session.state.realm.units.find(({ controller }) => controller === 'south')?.instanceId;
-  assert.ok(defenderInstanceId);
-  for (let index = 0; index < extraSouthMinionsAtC1; index += 1) {
-    session = accept(session, action(session, ({ descriptor }) =>
-      descriptor.kind === 'summon-minion' && descriptor.cell === 'C1'));
-  }
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === attackerInstanceId
-      && descriptor.to.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C2'));
-  const targetInstanceId = session.state.realm.units
-    .find(({ controller, location }) => controller === 'south' && location === 'C2')?.instanceId;
-  assert.ok(targetInstanceId);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === attackerInstanceId
-      && descriptor.from.cell === 'C3'
-      && descriptor.to.cell === 'C2'));
-  return { attackerInstanceId, defenderInstanceId, session, targetInstanceId };
-}
-
-export function northAvatarAttacksSouthAtC2(seed: number): Readonly<{
-  northAvatarInstanceId: string;
-  northMinionInstanceId: string;
-  session: GameSession;
-  southAvatarInstanceId: string;
-}> {
-  let session = keep(createGameSession(manifest(seed, {
-    avatar: { attack: 2, defense: 1, drawSpell: false, life: 1 },
-  })));
-  session = keep(session);
-  const northAvatarInstanceId = session.state.players.north.avatar.card.instanceId;
-  const southAvatarInstanceId = session.state.players.south.avatar.card.instanceId;
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'summon-minion' && descriptor.cell === 'C4'));
-  const northMinionInstanceId = session.state.realm.units[0]?.instanceId;
-  assert.ok(northMinionInstanceId);
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'play-site'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northMinionInstanceId
-      && descriptor.to.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'play-site' && descriptor.cell === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northMinionInstanceId
-      && descriptor.to.cell === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northAvatarInstanceId
-      && descriptor.to.cell === 'C3'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === southAvatarInstanceId
-      && descriptor.to.cell === 'C2'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'decline-attack'));
-  session = accept(session, action(session, ({ descriptor }) => descriptor.kind === 'end-turn'));
-
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'draw' && descriptor.zone === 'spellbook'));
-  session = accept(session, action(session, ({ descriptor }) =>
-    descriptor.kind === 'move-and-attack'
-      && descriptor.unitInstanceId === northAvatarInstanceId
-      && descriptor.to.cell === 'C2'));
-  return { northAvatarInstanceId, northMinionInstanceId, session, southAvatarInstanceId };
 }
 
 export function devilsEggManifest(kind: 'both' | 'carried' | 'regions', seed: number) {
@@ -609,35 +393,6 @@ export function devilsEggManifest(kind: 'both' | 'carried' | 'regions', seed: nu
   });
   return { gameManifest, ids };
 }
-
-export function devilsEggFixture(kind: 'both' | 'carried' | 'regions', seed: number) {
-  const { gameManifest, ids } = devilsEggManifest(kind, seed);
-  let checkpoint = keep(keep(createGameSession(gameManifest)));
-  const take = (predicate: Parameters<typeof action>[1]): void => {
-    checkpoint = accept(checkpoint, action(checkpoint, predicate));
-  };
-  take(({ descriptor }) => descriptor.kind === 'play-site' && descriptor.cell === 'C4');
-  if (kind === 'carried') {
-    take(({ descriptor }) => descriptor.kind === 'summon-minion'
-      && descriptor.cardId === ids.carrier && descriptor.cell === 'C4');
-    const carrier = checkpoint.state.realm.units.find(({ cardId }) => cardId === ids.carrier);
-    assert.ok(carrier);
-    take(({ descriptor }) => descriptor.kind === 'cast-artifact'
-      && descriptor.cardId === ids.northEgg
-      && descriptor.bearer?.instanceId === carrier.instanceId);
-  } else {
-    for (let index = 0; index < (kind === 'regions' ? 3 : 1); index += 1) {
-      take(({ descriptor }) => descriptor.kind === 'cast-artifact'
-        && descriptor.cardId === ids.northEgg && descriptor.cell === 'C4');
-    }
-  }
-  return { checkpoint, gameManifest, ids };
-}
-
-// ---------------------------------------------------------------------------
-// Rust-backed twins of the legacy TypeScript fixtures above. Migrated proofs use
-// these; the sync helpers above are deleted once no proof calls them.
-// ---------------------------------------------------------------------------
 
 /** Finds one legal action on a Rust setup session and requires acceptance. */
 export async function takeAction(

@@ -10,8 +10,6 @@ import {
 import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
-  observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameManifest,
@@ -368,7 +366,7 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       assert.equal(stale.accepted, false);
       assert.equal(stale.reason.code, 'stale_version');
       assert.equal(canonicalJson(stale.session.state), beforeStale);
-      branchHashes.push(hashGameState(ctx.state));
+      branchHashes.push((await ctx.stateHash()));
     }
     assert.equal(new Set(branchHashes).size, 1);
   });
@@ -918,7 +916,7 @@ test('shared stale rejection leaves game state, PRNG, and accepted transcript un
     const accepted = await ctx.step(command);
     assert.equal(accepted.accepted, true);
     const before = canonicalJson(accepted.session.state);
-    const beforeHash = hashGameState(accepted.session.state);
+    const beforeHash = (await ctx.stateHash());
     const stale = await ctx.step(command);
 
     assert.equal(stale.accepted, false);
@@ -1097,7 +1095,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
     // Artifact), and a disabled unit is excluded from both Pick Up and Drop even standing
     // beside a ready ally.
 
-    const beforeForge = hashGameState(ctx.state);
+    const beforeForge = (await ctx.stateHash());
     const forged = await ctx.stepRequest({
       actionId: 'sha256:9999999999999999999999999999999999999999999999999999999999999999',
       seat: 'north',
@@ -1105,7 +1103,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
     });
     assert.equal(forged.accepted, false);
     assert.equal(forged.reason.code, 'unknown_action');
-    assert.equal(hashGameState(forged.session.state), beforeForge);
+    assert.equal((await ctx.stateHash()), beforeForge);
 
     const manaBeforePickUp = ctx.state.players.north.mana;
     const picked = await ctx.step(await ctx.action(({ descriptor }) =>
@@ -1154,7 +1152,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
       type: 'artifacts-dropped',
     }]);
     assert.deepEqual(voluntarilyDropped.receipt.randomDraws, []);
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.artifacts
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts
       ?.filter(({ instanceId }) => instanceId === artifactInstanceIds[0])
       .map(({ bearer: droppedBearer, controller, location, owner, region }) => ({
         bearer: droppedBearer,
@@ -1180,7 +1178,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
 
     assert.equal((await pickupDescriptorsLive()).some(({ unit }) => unit.kind === 'minion'), false);
     assert.equal((await pickupDescriptorsLive()).some(({ unit }) => unit.kind === 'avatar'), true);
-    let northView = observeGame(ctx.state, 'north');
+    let northView = (await ctx.observe('north'));
     assert.equal(northView.realm.units.find(({ instanceId }) =>
       instanceId === bearer.instanceId)?.attack, 3);
 
@@ -1228,7 +1226,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
     // the unit's `last_interacted_turn`, checked identically by `drop_artifact_descriptors` in
     // crates/sorcery-engine/src/game.rs regardless of which interaction set it), so no separate
     // forged south minion is needed to prove the attack case here.
-    northView = observeGame(ctx.state, 'north');
+    northView = (await ctx.observe('north'));
     const observedBearer = northView.realm.units.find(({ instanceId }) =>
       instanceId === bearer.instanceId);
     assert.equal(observedBearer?.attack, 5);
@@ -1246,7 +1244,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
         && descriptor.unitInstanceId === bearer.instanceId && descriptor.to.cell === 'C3');
-    northView = observeGame(ctx.state, 'north');
+    northView = (await ctx.observe('north'));
     assert.deepEqual(northView.realm.artifacts?.map(({
       bearer: artifactBearer, controller, location, region,
     }) => ({
@@ -1283,7 +1281,7 @@ test('RULE-04 Pick Up and Drop manage local carried Artifacts once per unit turn
       && canonicalJson(payload).includes(bearer.instanceId));
     assert.equal(dropIndexes.length, 2);
     assert.equal(dropIndexes.every((index) => index < deathIndex), true);
-    northView = observeGame(ctx.state, 'north');
+    northView = (await ctx.observe('north'));
     assert.deepEqual(northView.realm.artifacts?.map((artifact) => ({
       bearer: artifact.bearer,
       controller: artifact.controller,
@@ -1386,7 +1384,7 @@ test('RULE-04 dropping a power Artifact immediately kills a lethally wounded bea
         && descriptor.bearer?.instanceId === bearer.instanceId);
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'summon-minion' && descriptor.cardId === 'drop-static-servant');
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.units
+    assert.deepEqual((await ctx.observe('north')).realm.units
       .filter(({ instanceId }) => instanceId === bearer.instanceId)
       .map(({ damage, defense }) => ({ damage, defense })), [{ damage: 1, defense: 3 }]);
 
@@ -1408,7 +1406,7 @@ test('RULE-04 dropping a power Artifact immediately kills a lethally wounded bea
       instanceId === bearer.instanceId), false);
     assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
       instanceId === bearer.instanceId), true);
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.artifacts?.map((artifact) => ({
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts?.map((artifact) => ({
       bearer: artifact.bearer,
       controller: artifact.controller,
       location: artifact.location,
@@ -1559,7 +1557,7 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
     assert.ok(dropIndex >= 0 && dropIndex < bearerDeathIndex);
     assert.equal(ctx.state.realm.units.some(({ instanceId }) =>
       instanceId === bearer.instanceId || instanceId === enemy.instanceId), false);
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.artifacts?.map((artifact) => ({
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts?.map((artifact) => ({
       bearer: artifact.bearer,
       controller: artifact.controller,
       location: artifact.location,
@@ -2394,7 +2392,7 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
       ...southRoll.descriptor,
       path: southRoll.descriptor.path.slice(0, 2),
     };
-    const beforeForge = hashGameState(ctx.state);
+    const beforeForge = (await ctx.stateHash());
     const forged = await ctx.stepRequest({
       actionId: opaqueActionId(
         'sorcery-core-v1',
@@ -2407,7 +2405,7 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
     });
     assert.equal(forged.accepted, false);
     assert.equal(forged.reason.code, 'unknown_action');
-    assert.equal(hashGameState(forged.session.state), beforeForge);
+    assert.equal((await ctx.stateHash()), beforeForge);
 
     const beforeZero = createGameCheckpoint(ctx.session);
     const zeroResult = await ctx.step(zeroRoll);
@@ -2420,7 +2418,7 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
     assert.deepEqual(zeroResult.receipt.events.map(({ type }) => type), [
       'artifact-roll-damage-activated',
     ]);
-    assert.equal(observeGame(ctx.state, 'north').realm.artifacts
+    assert.equal((await ctx.observe('north')).realm.artifacts
       ?.find(({ instanceId }) => instanceId === boulder.instanceId)?.location, 'C4');
     assert.equal(await ctx.verifyReplay(), true);
     await ctx.resume(beforeZero);
@@ -2470,7 +2468,7 @@ test('RULE-03 Rolling Boulder rolls maximally and damages other units along its 
     });
     assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
       instanceId === originTarget.instanceId), true);
-    assert.deepEqual(observeGame(ctx.state, 'north').realm.artifacts
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts
       ?.filter(({ instanceId }) => instanceId === boulder.instanceId)
       .map(({ bearer, controller, location, region }) => ({
         bearer, controller, location, region,
@@ -2734,7 +2732,7 @@ test('RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new contr
       ...carriedBefore,
       bearer: { ...carriedBefore.bearer, seat: 'north' },
     });
-    const northView = observeGame(ctx.state, 'north');
+    const northView = (await ctx.observe('north'));
     assert.deepEqual({
       artifactController: northView.realm.artifacts?.[0]?.controller,
       artifactSeat: northView.realm.artifacts?.[0]?.bearer?.seat,
@@ -2810,7 +2808,7 @@ test('RULE-03/05 Mesmerism transfers a minion and its Deathrite to the new contr
     const deathIndex = deathEvents.findIndex(({ payload, type }) => type === 'minion-died'
       && canonicalJson(payload).includes(hiddenTarget.instanceId));
     assert.ok(drawIndex >= 0 && drawIndex < dropIndex && dropIndex < deathIndex);
-    assert.equal(observeGame(ctx.state, 'north').realm.artifacts?.[0]?.controller, null);
+    assert.equal((await ctx.observe('north')).realm.artifacts?.[0]?.controller, null);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

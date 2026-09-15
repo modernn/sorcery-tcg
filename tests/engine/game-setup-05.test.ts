@@ -10,8 +10,6 @@ import {
 import { opaqueActionId } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
-  observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -48,7 +46,7 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
     check: (ctx: SetupCtx, ids: NorthAttacksAtC2Ids) => Promise<void>,
   ): Promise<void> => {
     await withNorthAttacksAtC2({ seed, spell: northSpell, southSpell }, async (ctx, ids) => {
-      assert.equal(observeGame(ctx.state, 'north').realm.units
+      assert.equal((await ctx.observe('north')).realm.units
         .find(({ instanceId }) => instanceId === ids.targetInstanceId)?.disabled, true);
       await takeAction(ctx, ({ descriptor }) =>
         descriptor.kind === 'declare-attack'
@@ -65,7 +63,7 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
       .find(({ instanceId }) => instanceId === ordinary.attackerInstanceId)?.damage, 0);
     assert.equal(ctx.state.realm.units
       .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.damage, 2);
-    assert.equal(observeGame(ctx.state, 'north').realm.units
+    assert.equal((await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === ordinary.targetInstanceId)?.disabled, false);
     assert.equal(ctx.session.transcript.at(-1)?.events
       .filter(({ type }) => type === 'minion-awakened').length, 1);
@@ -77,7 +75,7 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
       .find(({ instanceId }) => instanceId === early.attackerInstanceId)?.damage, 5);
     assert.equal(ctx.state.realm.units
       .find(({ instanceId }) => instanceId === early.targetInstanceId)?.damage, 2);
-    assert.equal(observeGame(ctx.state, 'north').realm.units
+    assert.equal((await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === early.targetInstanceId)?.disabled, false);
     assert.equal(await ctx.verifyReplay(), true);
   });
@@ -85,7 +83,7 @@ test('RULE-03/04 Genesis sleep ends on real damage without retroactive strikes',
   await fight(121, attacker, { ...sleeper, ward: true }, async (ctx, warded) => {
     assert.equal(ctx.state.realm.units
       .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.damage, 0);
-    assert.equal(observeGame(ctx.state, 'north').realm.units
+    assert.equal((await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === warded.targetInstanceId)?.disabled, true);
     assert.equal(ctx.session.transcript.at(-1)?.events
       .some(({ type }) => type === 'minion-awakened'), false);
@@ -109,7 +107,7 @@ test('RULE-04 Lance buffs and breaks on the next unit strike but not a site stri
   } as const;
 
   await withNorthAttacksAtC2({ seed: 124, spell: lance, southSpell: twoPower }, async (ctx, attacking) => {
-    assert.equal(observeGame(ctx.state, 'south').realm.units
+    assert.equal((await ctx.observe('south')).realm.units
       .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, 1);
     assert.equal(ctx.session.transcript.some(({ events }) => events.some(({ payload, type }) =>
       type === 'lance-gained'
@@ -136,7 +134,7 @@ test('RULE-04 Lance buffs and breaks on the next unit strike but not a site stri
       .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.damage, 0);
     assert.equal(ctx.state.players.south.cemetery
       .some(({ instanceId }) => instanceId === attacking.targetInstanceId), true);
-    assert.equal(observeGame(ctx.state, 'north').realm.units
+    assert.equal((await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === attacking.attackerInstanceId)?.carriedLanceCount, undefined);
     assert.equal(await ctx.verifyReplay(), true);
   });
@@ -362,7 +360,7 @@ test('RULE-04 Ranged strikes without return damage and Ward prevents the first p
       'damage-dealt',
       'ward-broken',
     ]);
-    assert.equal(observeGame(ctx.state, 'north').realm.units
+    assert.equal((await ctx.observe('north')).realm.units
       .find(({ instanceId }) => instanceId === targetInstanceId)?.warded, false);
 
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
@@ -689,7 +687,7 @@ test('RULE-04 a Ranged unit may strike once during Move and Attack or Defend', a
         type === 'stealth-lost' && canonicalJson(payload).includes(shooter.instanceId)), true);
       assert.equal((await shooterShots()).length, 0);
 
-      const beforeForgeHash = hashGameState(ctx.state);
+      const beforeForgeHash = (await ctx.stateHash());
       const beforeForgeTranscript = ctx.session.transcript.length;
       const forged = await ctx.stepRequest({
         actionId: opaqueActionId(
@@ -703,7 +701,7 @@ test('RULE-04 a Ranged unit may strike once during Move and Attack or Defend', a
       });
       assert.equal(forged.accepted, false);
       if (!forged.accepted) assert.equal(forged.reason.code, 'unknown_action');
-      assert.equal(hashGameState(forged.session.state), beforeForgeHash);
+      assert.equal((await ctx.stateHash()), beforeForgeHash);
       assert.equal(forged.session.transcript.length, beforeForgeTranscript);
       await take(({ descriptor }) => descriptor.kind === 'continue-basic-movement');
       assert.equal(findUnit(ctx.state, shooter.instanceId)?.location, 'C3');
@@ -1123,7 +1121,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
       assert.equal(types.indexOf('fight-started') > types.indexOf('unit-dragged'),
         choice.descriptor.fightOnArrival);
       assert.equal(await ctx.verifyReplay(), true);
-      branchHashes.push(hashGameState(resolved.session.state));
+      branchHashes.push((await ctx.stateHash()));
     }
     assert.equal(new Set(branchHashes).size, 2);
   });
@@ -1242,8 +1240,7 @@ test('RULE-03 Granary Rats suppresses its site threshold while enabled', async (
     const rats = ctx.state.players.north.hand.spellbook.find(({ cardId }) => cardId === 'rats');
     assert.ok(gated);
     assert.ok(rats);
-    const baseline = ctx.session;
-    assert.deepEqual(observeGame(baseline.state, 'north').players.north.affinity,
+    assert.deepEqual((await ctx.observe('north')).players.north.affinity,
       { air: 0, earth: 1, fire: 1, water: 0 });
     assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
       descriptor.kind === 'summon-minion'
@@ -1272,16 +1269,16 @@ test('RULE-03 a provider adds affinity until that minion dies', async () => {
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
     },
   }, async (ctx, setup) => {
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 3);
-    assert.equal(observeGame(ctx.state, 'south').players.south.affinity.earth, 4);
+    assert.equal((await ctx.observe('north')).players.north.affinity.earth, 3);
+    assert.equal((await ctx.observe('south')).players.south.affinity.earth, 4);
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'declare-attack'
         && descriptor.target.kind === 'minion'
         && descriptor.target.instanceId === setup.targetInstanceId);
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates);
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.earth, 2);
-    assert.equal(observeGame(ctx.state, 'south').players.south.affinity.earth, 3);
+    assert.equal((await ctx.observe('north')).players.north.affinity.earth, 2);
+    assert.equal((await ctx.observe('south')).players.south.affinity.earth, 3);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });

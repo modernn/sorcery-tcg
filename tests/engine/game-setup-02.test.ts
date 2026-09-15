@@ -10,8 +10,6 @@ import {
 import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
 import {
   createGameManifest,
-  hashGameState,
-  observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameManifest,
@@ -145,7 +143,8 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
     const enemy = ctx.state.realm.units.find(({ cardId }) => cardId === enemyId);
     assert.ok(source && enemy);
     assert.equal(source.location, 'C3');
-    assert.deepEqual(fragiles.map(({ instanceId }) => observeGame(ctx.state, 'north').realm.units
+    const northView = await ctx.observe('north');
+    assert.deepEqual(fragiles.map(({ instanceId }) => northView.realm.units
       .find((unit) => unit.instanceId === instanceId)?.defense), [2, 2]);
     const atlasBefore = ctx.state.players.north.atlas.length;
     const atlasHandBefore = ctx.state.players.north.hand.atlas.length;
@@ -229,7 +228,7 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
       assert.equal(ctx.state.players.north.atlas.length, atlasBefore - 2);
       assert.equal(ctx.state.players.north.hand.atlas.length, atlasHandBefore + 2);
       assert.equal(await ctx.verifyReplay(), true);
-      branchHashes.push(hashGameState(ctx.state));
+      branchHashes.push((await ctx.stateHash()));
     }
     assert.equal(new Set(branchHashes).size, 1);
   });
@@ -543,7 +542,7 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
         && descriptor.cardInstanceId === freezeCards[0]?.instanceId
         && descriptor.target?.instanceId === ally.instanceId);
     const disabledAlly = ctx.state.realm.units.find(({ instanceId }) => instanceId === ally.instanceId);
-    assert.equal(observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === ally.instanceId)?.disabled, true);
     assert.deepEqual({ stealthed: disabledAlly?.stealthed, warded: disabledAlly?.warded }, {
       stealthed: false,
@@ -602,9 +601,9 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
       expiresAtSeat: 'north',
       sourceInstanceId: freezeCards[1]!.instanceId,
     }]);
-    assert.equal(observeGame(ctx.state, 'south').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('south')).realm.units.find(({ instanceId }) =>
       instanceId === target.instanceId)?.disabled, true);
-    assert.equal(observeGame(ctx.state, 'south').players.south.affinity.air, 0);
+    assert.equal((await ctx.observe('south')).players.south.affinity.air, 0);
     assert.deepEqual(freeze.receipt.events.map(({ type }) => type), [
       'magic-cast',
       'minion-disabled',
@@ -616,7 +615,7 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
       type === 'minion-disable-expired'), false);
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'draw' && descriptor.zone === 'atlas');
-    assert.equal(observeGame(ctx.state, 'south').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('south')).realm.units.find(({ instanceId }) =>
       instanceId === target.instanceId)?.disabled, true);
     const disabledKinds = (await ctx.legalActions('south')).flatMap(({ descriptor }) =>
       'unitInstanceId' in descriptor && descriptor.unitInstanceId === target.instanceId
@@ -648,9 +647,9 @@ test('RULE-03 Freeze disables a nearby minion until the caster next Start Phase'
       instanceId === target.instanceId);
     assert.equal(expiredTarget?.disableEffects, undefined);
     assert.deepEqual({ warded: expiredTarget?.warded }, { warded: false });
-    assert.equal(observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === target.instanceId)?.disabled, false);
-    assert.equal(observeGame(ctx.state, 'north').players.south.affinity.air, 1);
+    assert.equal((await ctx.observe('north')).players.south.affinity.air, 1);
     assert.equal(await ctx.verifyReplay(), true);
   });
 });
@@ -1923,8 +1922,8 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
     assert.equal(avatarGrant.accepted, true);
     if (!avatarGrant.accepted) return;
     assert.deepEqual({
-      attack: observeGame(ctx.state, 'north').players.north.avatar.attack,
-      defense: observeGame(ctx.state, 'north').players.north.avatar.defense,
+      attack: (await ctx.observe('north')).players.north.avatar.attack,
+      defense: (await ctx.observe('north')).players.north.avatar.defense,
     }, { attack: 3, defense: 3 });
     assert.deepEqual(avatarGrant.receipt.events.slice(1, 2).map(({ payload, type }) => ({
       payload,
@@ -1947,7 +1946,7 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
         && descriptor.ally?.instanceId === disabled.instanceId));
     assert.equal(disabledGrant.accepted, true);
     if (!disabledGrant.accepted) return;
-    const disabledView = observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    const disabledView = (await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === disabled.instanceId);
     assert.deepEqual({
       attack: disabledView?.attack,
@@ -1968,7 +1967,7 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
       'power-granted',
       'magic-resolved',
     ]);
-    const poweredView = observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    const poweredView = (await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === fighter.instanceId);
     assert.deepEqual({ attack: poweredView?.attack, defense: poweredView?.defense }, {
       attack: 4,
@@ -2008,7 +2007,7 @@ test('RULE-03 Overpower changes current power for source-aware prevention until 
       seat: 'north',
       sourceInstanceId: overpower.instanceId,
     });
-    const expired = observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    const expired = (await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === fighter.instanceId);
     assert.deepEqual({
       attack: expired?.attack,
@@ -2104,7 +2103,7 @@ test('RULE-04 nearby-allies power is derived and settles deaths when its source 
     assert.ok(ally);
     assert.ok(source);
     assert.ok(disabledSource);
-    const view = observeGame(ctx.state, 'north');
+    const view = (await ctx.observe('north'));
     const status = (instanceId: string) => view.realm.units.find((unit) =>
       unit.instanceId === instanceId);
     assert.deepEqual({
@@ -2264,7 +2263,7 @@ test('RULE-04 controlled Mortal power follows current control and settles deaths
     assert.ok(northMortal);
     assert.ok(northKingA);
     assert.ok(northKingB);
-    const northOpening = observeGame(ctx.state, 'north');
+    const northOpening = (await ctx.observe('north'));
     const openingStatus = (instanceId: string) => northOpening.realm.units.find((unit) =>
       unit.instanceId === instanceId);
     assert.deepEqual({
@@ -2308,7 +2307,7 @@ test('RULE-04 controlled Mortal power follows current control and settles deaths
       && descriptor.unitInstanceId === northKingA.instanceId
       && descriptor.path.map(({ cell }) => cell).join(',') === 'C4,C3');
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
-    const separated = observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    const separated = (await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === northMortal.instanceId);
     assert.deepEqual([separated?.attack, separated?.defense], [3, 3]);
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
@@ -2344,7 +2343,7 @@ test('RULE-04 controlled Mortal power follows current control and settles deaths
     assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
       instanceId === northMortal.instanceId), true);
 
-    const finalView = observeGame(ctx.state, 'north');
+    const finalView = (await ctx.observe('north'));
     const status = (instanceId: string) => finalView.realm.units.find((unit) =>
       unit.instanceId === instanceId);
     assert.deepEqual({
@@ -3203,7 +3202,7 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     const beneficiary = ctx.state.realm.units.find(({ instanceId }) =>
       instanceId === beneficiaryInstanceId);
     assert.ok(beneficiary);
-    assert.equal(observeGame(ctx.state, 'north').realm.units.find(({ instanceId }) =>
+    assert.equal((await ctx.observe('north')).realm.units.find(({ instanceId }) =>
       instanceId === beneficiaryInstanceId)?.disabled, true);
     assert.equal(beneficiary.damage, 1);
     const blinkInstanceId = ctx.state.players.north.hand.spellbook
@@ -3254,7 +3253,7 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     assert.equal(ctx.state.players.north.hand.spellbook.length, beforeHandCount);
     assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) =>
       instanceId === drawnSpell.instanceId), true);
-    assert.equal(typeof observeGame(ctx.state, 'south').players.north.hand.spellbook, 'number');
+    assert.equal(typeof (await ctx.observe('south')).players.north.hand.spellbook, 'number');
     assert.equal(await ctx.verifyReplay(), true);
 
     await ctx.resume(checkpoint);
@@ -3272,7 +3271,7 @@ test('RULE-03 Blink teleports a nearby ally before deaths and a private chosen-d
     ]);
     assert.equal(ctx.state.players.north.hand.atlas.some(({ instanceId }) =>
       instanceId === drawnSite.instanceId), true);
-    assert.equal(typeof observeGame(ctx.state, 'south').players.north.hand.atlas, 'number');
+    assert.equal(typeof (await ctx.observe('south')).players.north.hand.atlas, 'number');
     assert.equal(await ctx.verifyReplay(), true);
 
     // An empty-atlas GameSession (players.north.atlas forced to []) is not reachable
@@ -3428,8 +3427,8 @@ test('RULE-03 Rescue returns a chosen own cemetery minion to hidden hand or reso
     });
     assert.equal(canonicalJson(result.receipt.events[0]?.payload ?? null).includes(
       `\"cemeteryMinionInstanceId\":\"${ownMinion.instanceId}\"`), true);
-    const northView = observeGame(ctx.state, 'north');
-    const southView = observeGame(ctx.state, 'south');
+    const northView = (await ctx.observe('north'));
+    const southView = (await ctx.observe('south'));
     assert.equal(Array.isArray(northView.players.north.hand.spellbook)
       && northView.players.north.hand.spellbook.some(({ instanceId }) =>
         instanceId === ownMinion.instanceId), true);

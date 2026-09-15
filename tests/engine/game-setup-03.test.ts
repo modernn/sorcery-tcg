@@ -5,7 +5,6 @@ import { canonicalJson } from '../../src/authority/canonical-json.ts';
 import { createGameCheckpoint } from '../../src/engine/checkpoint.ts';
 import {
   createGameManifest,
-  observeGame,
   type GameCardDefinition,
   type GameDeckSpec,
   type GameLegalAction,
@@ -907,9 +906,9 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
       descriptor.kind === 'summon-minion'
         && descriptor.cardInstanceId === waterbound.instanceId
         && (descriptor.region ?? 'surface') === 'underwater');
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, false);
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, true);
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 2);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.disabled, false);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.stealthed, true);
+    assert.equal((await ctx.observe('north')).players.north.affinity.water, 2);
     assert.equal(await ctx.verifyReplay(), true);
 
     await northSecondMain();
@@ -942,7 +941,7 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
       descriptor.kind === 'summon-minion'
         && descriptor.cardInstanceId === waterbound.instanceId
         && (descriptor.region ?? 'surface') === 'surface');
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, true);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.stealthed, true);
     const surfaceCp = createGameCheckpoint(ctx.session);
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
     await takeAction(ctx, ({ descriptor }) =>
@@ -964,9 +963,9 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
     assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
       instanceId === waterbound.instanceId)?.stealthed, false);
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'decline-attack');
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, true);
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, false);
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 1);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.disabled, true);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.stealthed, false);
+    assert.equal((await ctx.observe('north')).players.north.affinity.water, 1);
     await takeAction(ctx, ({ descriptor }) => descriptor.kind === 'end-turn');
     await takeAction(ctx, ({ descriptor }) =>
       descriptor.kind === 'draw' && descriptor.zone === 'spellbook');
@@ -1011,9 +1010,9 @@ test('RULE-03/04 Waterbound derives Disabled from terrain and survives only with
       summoningSickness: false,
       tapped: false,
     });
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.disabled, false);
-    assert.equal(observeGame(ctx.state, 'north').realm.units[0]?.stealthed, false);
-    assert.equal(observeGame(ctx.state, 'north').players.north.affinity.water, 2);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.disabled, false);
+    assert.equal((await ctx.observe('north')).realm.units[0]?.stealthed, false);
+    assert.equal((await ctx.observe('north')).players.north.affinity.water, 2);
     const enabledActions = await ctx.legalActions('north');
     assert.equal(enabledActions.some(({ descriptor }) =>
       descriptor.kind === 'move-and-attack'
@@ -1376,7 +1375,7 @@ test('RULE-02/04 playing a site surfaces uncarried Artifacts from the covered vo
       instanceId === carried.instanceId), { ...dropped, region: 'surface' });
     assert.deepEqual(result.session.state.realm.artifacts?.find(({ instanceId }) =>
       instanceId === stillCarried.instanceId), stillCarried);
-    assert.deepEqual(observeGame(result.session.state, 'north').realm.artifacts
+    assert.deepEqual((await ctx.observe('north')).realm.artifacts
       ?.find(({ instanceId }) => instanceId === stillCarried.instanceId), {
       bearer: stillCarried.bearer,
       cardId: stillCarried.cardId,
@@ -1437,7 +1436,7 @@ test('RULE-03 Genesis draws a hidden site and an empty Atlas loses after summoni
     assert.equal(ctx.state.players.north.hand.atlas.length, before.hand.atlas.length + 1);
     assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'site-drawn']);
     assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
-    assert.doesNotMatch(canonicalJson(observeGame(ctx.state, 'south')), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson((await ctx.observe('south'))), new RegExp(drawn.cardId));
     assert.equal(await ctx.verifyReplay(), true);
   });
 
@@ -1483,7 +1482,7 @@ test('RULE-03 Genesis draws a hidden spell and an empty Spellbook loses after su
     assert.equal(ctx.state.players.north.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
     assert.deepEqual(result.receipt.events.map(({ type }) => type), ['minion-summoned', 'spell-drawn']);
     assert.doesNotMatch(canonicalJson(result.receipt.events[1]?.payload ?? null), new RegExp(drawn.cardId));
-    assert.doesNotMatch(canonicalJson(observeGame(ctx.state, 'south')), new RegExp(drawn.cardId));
+    assert.doesNotMatch(canonicalJson((await ctx.observe('south'))), new RegExp(drawn.cardId));
     assert.equal(await ctx.verifyReplay(), true);
   });
 
@@ -1530,9 +1529,9 @@ test('RULE-03 numeric Genesis spell draw counts draw ordered hidden cards', asyn
     for (const drawn of expectedDraws) {
       assert.equal(after.hand.spellbook.some(({ instanceId }) => instanceId === drawn.instanceId), true);
       assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
-      assert.doesNotMatch(canonicalJson(observeGame(result.session.state, 'south')), new RegExp(drawn.cardId));
+      assert.doesNotMatch(canonicalJson(await ctx.observe('south')), new RegExp(drawn.cardId));
     }
-    assert.equal(observeGame(result.session.state, 'north').realm.units.some(({ attack, damage, defense }) =>
+    assert.equal((await ctx.observe('north')).realm.units.some(({ attack, damage, defense }) =>
       attack === 0 && damage === 0 && defense === 0), true);
     assert.deepEqual(result.receipt.randomDraws, []);
     assert.equal(await ctx.verifyReplay(), true);
@@ -1567,7 +1566,7 @@ test('RULE-03 numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards bef
           .some(({ instanceId }) => instanceId === drawn.instanceId), true);
         assert.doesNotMatch(canonicalJson(result.receipt.events), new RegExp(drawn.cardId));
         assert.doesNotMatch(
-          canonicalJson(observeGame(result.session.state, 'south')),
+          canonicalJson(await ctx.observe('south')),
           new RegExp(drawn.cardId),
         );
       }
@@ -2501,7 +2500,7 @@ test('RULE-03 site Genesis makes units at nearby sites Immobile until its contro
     assert.ok(firstCaster);
     assert.ok(secondCaster);
     assert.ok(enemy);
-    let view = observeGame(ctx.state, 'north');
+    let view = (await ctx.observe('north'));
     assert.deepEqual(view.realm.immobileAreas, [{
       cells: ['C1', 'C2', 'C3'],
       expiresAtSeat: 'north',
@@ -2532,7 +2531,7 @@ test('RULE-03 site Genesis makes units at nearby sites Immobile until its contro
       && descriptor.casterInstanceId === firstCaster.instanceId
       && descriptor.ally?.instanceId === secondCaster.instanceId
       && descriptor.targetLocation?.cell === 'C3');
-    view = observeGame(ctx.state, 'north');
+    view = (await ctx.observe('north'));
     assert.equal(view.realm.units.find(({ instanceId }) =>
       instanceId === secondCaster.instanceId)?.immobile, true);
     await take(({ descriptor }) => descriptor.kind === 'cast-magic'
@@ -2540,7 +2539,7 @@ test('RULE-03 site Genesis makes units at nearby sites Immobile until its contro
       && descriptor.casterInstanceId === secondCaster.instanceId
       && descriptor.ally?.instanceId === secondCaster.instanceId
       && descriptor.targetLocation?.cell === 'C4');
-    view = observeGame(ctx.state, 'north');
+    view = (await ctx.observe('north'));
     assert.equal(view.realm.units.find(({ instanceId }) =>
       instanceId === secondCaster.instanceId)?.immobile, false);
 
@@ -2555,13 +2554,13 @@ test('RULE-03 site Genesis makes units at nearby sites Immobile until its contro
     await take(({ descriptor }) => descriptor.kind === 'activate-site-destruction'
       && descriptor.sourceSiteInstanceId === ctx.state.realm.sites.C1?.instanceId
       && descriptor.targetCell === 'C2');
-    view = observeGame(ctx.state, 'south');
+    view = (await ctx.observe('south'));
     assert.deepEqual(view.realm.immobileAreas?.[0]?.cells, ['C1', 'C2', 'C3']);
     assert.equal(view.players.south.avatar.immobile, true);
     assert.equal(view.realm.units.find(({ instanceId }) => instanceId === enemy.instanceId)?.immobile, true);
 
     await take(({ descriptor }) => descriptor.kind === 'end-turn');
-    view = observeGame(ctx.state, 'north');
+    view = (await ctx.observe('north'));
     assert.equal(view.realm.immobileAreas, undefined);
     assert.equal(view.players.south.avatar.immobile, false);
     assert.deepEqual({
