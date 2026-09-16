@@ -8492,6 +8492,55 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_damage"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0387",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and mill, the Start Phase resolves them in order on a single trigger: draw first, then mill the new top card. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0387_start_turn_draw_then_mill_spells_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0388",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "In that stacked draw-then-mill trigger, the mill is a paid no-op once the draw leaves an empty Spellbook. The game continues to the Draw step instead of decking out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0388_start_turn_mill_spells_is_a_no_op_after_draw_empties_the_library"
+      }
     }
   ]
 }

@@ -1,6 +1,7 @@
 //! Direct proofs for start-turn triggers: random teleports (RULE-CATALOG-0158),
-//! controller Spellbook draws (RULE-CATALOG-0237–0238), and controller Atlas
-//! draws (RULE-CATALOG-0241–0242).
+//! controller Spellbook draws (RULE-CATALOG-0237–0238), controller Atlas
+//! draws (RULE-CATALOG-0241–0242), and stacked library triggers
+//! (RULE-CATALOG-0387–0388).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1170,5 +1171,293 @@ fn rule_catalog_0242_start_turn_draw_sites_decks_out_on_an_empty_library() {
     assert_eq!(after["phase"], "terminal");
     assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_eq!(after["terminal"]["loser"], "north");
+    assert_exact_replay(&session);
+}
+
+fn draw_mill_stack_manifest(seed: u32, north_spellbook: &[&str]) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-mill-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-mill-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw-card": minion(json!({})),
+            "north-mill-card": minion(json!({})),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 1,
+                "atStartOfControllerTurnMillSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_mill_stack_start_turn(seed: u32, north_spellbook: &[&str]) -> Session {
+    let mut session =
+        Session::new(&draw_mill_stack_manifest(seed, north_spellbook)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn draw_mill_empty_after_draw_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-mill-empty" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-mill-empty-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw-card": minion(json!({})),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 3,
+                "atStartOfControllerTurnMillSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-draw-card",
+                    "north-draw-card",
+                    "north-draw-card",
+                    "north-draw-card",
+                    "north-draw-card",
+                    "north-source",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_mill_empty_after_draw_start_turn(seed: u32) -> Session {
+    let mut session =
+        Session::new(&draw_mill_empty_after_draw_manifest(seed)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0387_start_turn_draw_then_mill_spells_resolves_in_order() {
+    let mut session = draw_mill_stack_start_turn(
+        387,
+        &[
+            "north-draw-card",
+            "north-mill-card",
+            "north-source",
+            "north-source",
+            "north-source",
+            "north-source",
+        ],
+    );
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let drawn_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("next spell")["instanceId"]
+        .clone();
+    let milled_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .get(1)
+        .expect("second spell")["instanceId"]
+        .clone();
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let library_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    let cemetery_before = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .len();
+    let triggers: Vec<_> = session
+        .legal_actions()
+        .expect("start-turn triggers")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .collect();
+    assert_eq!(triggers.len(), 1);
+    assert_eq!(triggers[0].descriptor["sourceInstanceId"], source_id);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn", "spell-discarded"]);
+    assert_eq!(receipt.events[1].payload["instanceId"], milled_id);
+    assert_ne!(drawn_id, milled_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        library_before - 2
+    );
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        cemetery_before + 1
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0388_start_turn_mill_spells_is_a_no_op_after_draw_empties_the_library() {
+    let mut session = draw_mill_empty_after_draw_start_turn(388);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let library_before = state(&session)["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    assert_eq!(library_before, 3);
+    let source_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let cemetery_before = state(&session)["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["spell-drawn", "spell-drawn", "spell-drawn"]
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + library_before
+    );
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        cemetery_before
+    );
     assert_exact_replay(&session);
 }
