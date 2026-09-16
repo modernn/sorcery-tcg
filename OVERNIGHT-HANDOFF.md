@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Canonical line: `master` @ `e5a7e04`. Integration branch `cursor/square-token-0005` (@ `29d764a`, PR #55) lands the four parallel 2×2 lanes through `RULE-CATALOG-0378`. Branch new Phase 3 work as `cursor/<one-family>-0005` from `master` after that merge. Do not grow already-merged landings.
+Canonical line: `master` @ `1ad8307`. The four parallel 2×2 lanes through `RULE-CATALOG-0378` are merged. Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
 
 Lucky Charm extra-random discard-here damage, Sparkmage/Aramos random-discard honor, and the 2×2 occupy proofs through `RULE-CATALOG-0370` are merged on `master` (#54). Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
@@ -12,7 +12,7 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 ## Catalog count
 
-`data/rules/catalog.json`: **378 rust-supported / 0 typescript-supported** out of 378 on `cursor/square-token-0005` (370 on `master` until PR #55 merges).
+`data/rules/catalog.json`: **378 rust-supported / 0 typescript-supported** out of 378.
 
 Latest catalog proofs: 2×2 token footprint occupancy and banish (`RULE-CATALOG-0371`–`0372`), wraparound summon and movement (`0373`–`0374`), outer-column cast restriction combo (`0375`–`0376`), and deterministic deck-pair opening plus batch transcript replay (`0377`–`0378`). Lucky Charm extra-random for discard-here uses a 2×2 source’s occupied cells (`RULE-CATALOG-0369`–`0370`). A B3 occupant of an A3-anchored square is offered and takes the chosen damage; a C1 minion is not. Tap-pair Artifact range walks from every occupied bearer cell remain `RULE-CATALOG-0367`–`0368`. Tap-pair helpers standing with a 2×2 bearer remain `RULE-CATALOG-0365`–`0366`. Flood and Drought water-layer casts remain `RULE-CATALOG-0363`–`0364`. Updraft Ridge occupy remains `RULE-CATALOG-0361`–`0362`. Measured-range Magic walks from every occupied caster cell remain `RULE-CATALOG-0359`–`0360`. Fate Genesis 2×2 occupants remain `RULE-CATALOG-0355`–`0356`. Cave-In 2×2 occupants remain `RULE-CATALOG-0353`–`0354`. Site flight onto a void surfaces occupants remains `RULE-CATALOG-0351`–`0352`. Geomancer adjacent rubble surfaces void occupants remains `RULE-CATALOG-0349`–`0350`. Return-site 2×2 footprint banishment remains `RULE-CATALOG-0347`–`0348`. Return-site lower-layer banishment remains `RULE-CATALOG-0345`–`0346`. Play-site overlay conversion remains `RULE-CATALOG-0343`–`0344`. Site-flight layer conversion remains `RULE-CATALOG-0341`–`0342`. Overlay leave conversion remains `RULE-CATALOG-0339`–`0340`. Overlay enter conversion remains `RULE-CATALOG-0337`–`0338`. Fate Lose strips a covered non-Ordinary Tower bonus remains `RULE-CATALOG-0335`–`0336`. Fate Lose strips Genesis paid tokens remains `RULE-CATALOG-0333`–`0334`. Token power-threshold entry remains `RULE-CATALOG-0331`–`0332`.
 Official Drought enabling Landbound remains `RULE-CATALOG-0322`. A Landbound minion on a Water site is Disabled; Drought makes that site land and the minion becomes enabled in place.
@@ -89,10 +89,9 @@ Still TypeScript (not a second legality, observation, or agent engine):
 
 ## Next exact step
 
-1. Merge PR #55 (`cursor/square-token-0005` → `master`) after CI. Verified on branch: full Rust suite, engine TS (277), `pnpm game:check-private`, and `pnpm game:selfplay-acceptance` (~151s).
-2. `pnpm game:check-private` is green on `cursor/square-token-0005` with local `.local/authority/` (verified 2026-09-16). `pnpm authority:verify-private` still fails the production boundary-scan tests on this machine (same on `master`); that is an environment gap, not a rules regression. Ranked results still stay `unranked_partial_rules`.
-3. Retire stale lane branches (`cursor/square-wrap-0396`, `cursor/square-outer-column-0005-4d19`, `cursor/deck-pair-harness-8038`) after the merge.
-4. Retire this handoff only after the private-check run is green on the merged line.
+1. Continue remaining Phase 3 rule families listed in `03-PROGRESS.md` §Still required.
+2. `pnpm game:check-private` and `pnpm game:selfplay-acceptance` are green on `master` with local `.local/authority/`. `pnpm authority:verify-private` still fails the production boundary-scan tests on this machine; that is an environment gap, not a rules regression. Ranked results still stay `unranked_partial_rules`.
+3. Retire this handoff when ranked-ready gates and private authority verification are both green.
 
 ## Do not
 
