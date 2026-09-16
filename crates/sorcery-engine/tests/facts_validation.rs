@@ -281,6 +281,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("damageEachUnitAtLocationWithinTwoSteps", json!(2)),
         ("damageRandomUnitAtLocation", json!(2)),
         ("damageTargetUnit", json!(2)),
+        (
+            "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
+            json!(true),
+        ),
         ("destroyTargetArtifact", json!(true)),
         ("destroyTargetAura", json!(true)),
         ("destroyTargetSite", json!(true)),
@@ -1851,6 +1855,47 @@ fn kill_mortal_minions_at_location_within_two_steps_should_parse() {
         facts.effect,
         MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
     );
+}
+
+#[test]
+fn destroy_artifacts_and_auras_at_location_within_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "destroy-artifacts-and-auras-at-location",
+        &spell(
+            "magic",
+            (
+                "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid destroy-artifacts-and-auras-at-location Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
+    );
+}
+
+#[test]
+fn destroy_artifacts_and_auras_at_location_must_not_combine_with_destroy_target_artifact() {
+    let error = parse_card_definition(
+        "destroy-relics-here-plus-destroy-target-artifact",
+        &with(
+            spell(
+                "magic",
+                (
+                    "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
+                    json!(true),
+                ),
+            ),
+            "destroyTargetArtifact",
+            json!(true),
+        ),
+    )
+    .expect_err("composed location destroy stays exclusive of destroyTargetArtifact");
+    assert!(error.to_string().contains("exactly one"), "{error}");
 }
 
 #[test]

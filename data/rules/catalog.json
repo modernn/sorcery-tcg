@@ -13105,6 +13105,52 @@
         "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
         "testName": "rule_catalog_0568_location_with_only_a_non_mortal_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0569",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-artifacts-and-auras-at-a-location-within-two-steps Magic offers locations within two measured steps of the caster. After C4 and C3 exist, choosing C3 destroys a loose Artifact there and leaves a far Artifact at C1, which is three steps away and not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_0569_destroy_relics_here_destroys_a_nearby_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0570",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-artifacts-and-auras-at-a-location-within-two-steps Magic still offers a location with no Artifact or Aura. Choosing that location resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_0570_destroy_relics_here_empty_location_is_a_paid_noop"
+      }
     }
   ]
 }

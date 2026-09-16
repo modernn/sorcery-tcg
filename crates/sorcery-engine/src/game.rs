@@ -1452,6 +1452,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetMagicFromOwnCemetery
         | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
+        | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
         | MagicEffect::DestroyTargetArtifact
         | MagicEffect::DestroyTargetAura
         | MagicEffect::DestroyTargetSite
@@ -7235,6 +7236,7 @@ impl Game {
                 choices
             }
             MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
+            | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
             | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
                 let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
                 self.locations_within_measured_steps_from_cells(cells, origin.region, 2)
@@ -21475,6 +21477,33 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps => {
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
+                let mut artifact_ids: Vec<IdentityHash> = self
+                    .position
+                    .artifacts
+                    .iter()
+                    .filter_map(|artifact| {
+                        let location = self.artifact_location(artifact).ok()?;
+                        (location == target_location).then(|| artifact.card.instance_id.clone())
+                    })
+                    .collect();
+                artifact_ids.sort_unstable();
+                let mut aura_ids: Vec<IdentityHash> = self
+                    .position
+                    .auras
+                    .iter()
+                    .filter(|aura| aura.cells.contains(&target_location.cell))
+                    .map(|aura| aura.card.instance_id.clone())
+                    .collect();
+                aura_ids.sort_unstable();
+                for instance_id in &artifact_ids {
+                    self.apply_destroy_target_artifact(instance_id, card_instance_id, outcomes)?;
+                }
+                for instance_id in &aura_ids {
+                    self.apply_destroy_target_aura(instance_id, card_instance_id, outcomes)?;
+                }
+            }
             MagicEffect::DestroyTargetSite => {
                 let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
                 let target_site_instance_id = target_site_instance_id
@@ -25754,6 +25783,10 @@ mod tests {
             (
                 MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(3),
                 json!({ "damageEachUnitAtLocationWithinTwoSteps": 3 }),
+            ),
+            (
+                MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps,
+                json!({ "destroyArtifactsAndAurasAtLocationWithinTwoSteps": true }),
             ),
             (
                 MagicEffect::DestroyTargetArtifact,
