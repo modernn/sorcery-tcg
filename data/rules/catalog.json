@@ -9149,6 +9149,58 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0410_site_genesis_pay_token_and_gain_mana_net"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0411",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis gain-mana and may-bottom-next-spell, playing it publicly gains mana first, then enters hidden spell Genesis where the controller may bottom the next spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0411_site_genesis_gain_mana_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0412",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same gain-mana and may-bottom site is played, declining the bottom choice keeps the Spellbook order while the mana gain remains resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0412_site_genesis_gain_mana_then_decline_bottom_next_spell"
+      }
     }
   ]
 }
