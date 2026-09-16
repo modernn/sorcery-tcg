@@ -1907,6 +1907,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const mortalityManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        killMortalMinionsAtLocationWithinTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(mortalityManifest.cards[firstSpell], {
+    cardType: 'magic',
+    killMortalMinionsAtLocationWithinTwoSteps: true,
+    manaCost: 2,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        killMortalMinionsAtLocationWithinTwoSteps: false,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /killMortalMinionsAtLocationWithinTwoSteps/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        damageEachUnitAtLocationWithinTwoSteps: 3,
+        killMortalMinionsAtLocationWithinTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const adjacentBuryManifest = createGameManifest({
     ...input,
     cards: {

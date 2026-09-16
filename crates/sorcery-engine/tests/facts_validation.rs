@@ -319,6 +319,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("drawSiteThenMayPlayLandSite", json!(true)),
         ("drawSiteThenMayPlayWaterSite", json!(true)),
         ("drawSpells", json!(2)),
+        ("killMortalMinionsAtLocationWithinTwoSteps", json!(true)),
         ("killTargetMinion", json!(true)),
         ("killTargetWoundedMinion", json!(true)),
         ("leapAttackAlly", json!(true)),
@@ -1831,6 +1832,24 @@ fn teleport_target_one_diagonal_should_parse() {
     assert_eq!(
         facts.effect,
         MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal
+    );
+}
+
+#[test]
+fn kill_mortal_minions_at_location_within_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "kill-mortal-minions-at-location-within-two-steps",
+        &spell(
+            "magic",
+            ("killMortalMinionsAtLocationWithinTwoSteps", json!(true)),
+        ),
+    )
+    .expect("valid kill-mortal-minions-at-location-within-two-steps Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
     );
 }
 

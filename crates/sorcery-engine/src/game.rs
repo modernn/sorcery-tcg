@@ -1487,6 +1487,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
+        | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
@@ -7233,7 +7234,8 @@ impl Game {
                 }
                 choices
             }
-            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
+            | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
                 let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
                 self.locations_within_measured_steps_from_cells(cells, origin.region, 2)
                     .into_iter()
@@ -21108,6 +21110,71 @@ impl Game {
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }
+            MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
+                let mut victims = Vec::new();
+                for unit in &self.position.units {
+                    if unit.region != target_location.region
+                        || !Self::unit_occupies_cell(unit, target_location.cell)
+                    {
+                        continue;
+                    }
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        return Err(GameError::IllegalAction);
+                    };
+                    if facts.mortal {
+                        victims.push((
+                            unit.card.instance_id.clone(),
+                            unit.controller,
+                            unit.card.owner,
+                            self.rules.cards[usize::from(unit.card.card_id.0)]
+                                .id
+                                .clone(),
+                        ));
+                    }
+                }
+                victims.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+                let mut dead_minions = Vec::new();
+                for (instance_id, target_seat, owner, card_id) in victims {
+                    let unit = self
+                        .position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == instance_id && unit.controller == target_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?;
+                    if unit.warded {
+                        unit.warded = false;
+                        outcomes.push(
+                            "ward-broken",
+                            || json!({ "instanceId": instance_id, "seat": target_seat }),
+                        );
+                    } else {
+                        outcomes.push("minion-killed", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                                "seat": target_seat,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                        dead_minions.push(instance_id);
+                    }
+                }
+                if !dead_minions.is_empty() {
+                    self.begin_minion_deaths(
+                        &dead_minions,
+                        &[],
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+            }
             MagicEffect::KillTargetMinion | MagicEffect::KillTargetWoundedMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -25739,6 +25806,10 @@ mod tests {
             (
                 MagicEffect::TargetPlayerDrawsSpells(1),
                 json!({ "targetPlayerDrawsSpells": 1 }),
+            ),
+            (
+                MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps,
+                json!({ "killMortalMinionsAtLocationWithinTwoSteps": true }),
             ),
             (
                 MagicEffect::KillTargetMinion,

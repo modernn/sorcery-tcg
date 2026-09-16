@@ -13058,6 +13058,53 @@
         "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
         "testName": "rule_catalog_0566_next_strike_double_expires_before_a_later_strike"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0567",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic offers the same measured locations as area damage: existing sites within two cardinal steps of the caster footprint. Casting at a shared site kills every Mortal minion there, leaves a non-Mortal occupant unwounded, and does not kill a Mortal three cardinal steps away.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_0567_kills_mortal_at_location_and_spares_non_mortal_and_far_mortal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0568",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic still offers a location that holds only a non-Mortal minion. Casting there is a paid no-op: the non-Mortal stays unwounded and the spell still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_0568_location_with_only_a_non_mortal_is_a_paid_noop"
+      }
     }
   ]
 }

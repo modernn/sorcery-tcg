@@ -408,6 +408,7 @@ export type GameCardDefinition =
     grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell?: true;
     healController?: number;
     healTargetMinion?: number;
+    killMortalMinionsAtLocationWithinTwoSteps?: true;
     killTargetMinion?: true;
     killTargetWoundedMinion?: true;
     leapAttackAlly?: true;
@@ -1353,7 +1354,7 @@ const SUPPORTED_CARD_FIELDS = {
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantDoubleDamageToAllyNextStrikeThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
     grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
-    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite wardNearbyMinionOrSite healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
+    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite wardNearbyMinionOrSite healController healTargetMinion killMortalMinionsAtLocationWithinTwoSteps killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
@@ -1915,6 +1916,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
     }
+    if (card.killMortalMinionsAtLocationWithinTwoSteps !== undefined
+      && card.killMortalMinionsAtLocationWithinTwoSteps !== true) {
+      throw new RangeError(`${path}.killMortalMinionsAtLocationWithinTwoSteps must be true when defined`);
+    }
     if (card.killTargetMinion !== undefined
       && card.killTargetMinion !== true) {
       throw new RangeError(`${path}.killTargetMinion must be true when defined`);
@@ -2063,6 +2068,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.drawSiteThenMayPlayLandSite === true)
       + Number(card.drawSiteThenMayPlayWaterSite === true)
       + Number(card.drawSpells !== undefined)
+      + Number(card.killMortalMinionsAtLocationWithinTwoSteps === true)
       + Number(card.killTargetMinion === true)
       + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
@@ -2984,6 +2990,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantPowerToAllyThisTurn: 2 as const }
                   : card.grantPowerTwoToAllyThisTurnThenDrawSpell === true
                     ? { grantPowerTwoToAllyThisTurnThenDrawSpell: true as const }
+                  : card.killMortalMinionsAtLocationWithinTwoSteps === true
+                    ? { killMortalMinionsAtLocationWithinTwoSteps: true as const }
                   : card.killTargetMinion === true
                     ? { killTargetMinion: true as const }
                   : card.killTargetWoundedMinion === true
