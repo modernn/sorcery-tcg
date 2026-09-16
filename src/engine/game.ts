@@ -1442,8 +1442,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     if (card.genesisPayOneManaToSummonToken !== undefined
-      && (card.genesisDrawSpellPerAdjacentSameCard
-        || card.genesisEnemiesLoseStealth
+      && (card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
@@ -1464,9 +1463,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.genesisMayBottomNextSpell must be true`);
     }
     if (card.genesisMayBottomNextSpell === true
-      && (card.genesisDiscardTopSpells !== undefined
-        || card.genesisDrawSpellPerAdjacentSameCard
-        || card.genesisEnemiesLoseStealth
+      && (card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
@@ -1477,8 +1474,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.genesisReorderNextSpells must be 3`);
     }
     if (card.genesisReorderNextSpells === 3
-      && (card.genesisDrawSpellPerAdjacentSameCard
-        || card.genesisEnemiesLoseStealth
+      && (card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {

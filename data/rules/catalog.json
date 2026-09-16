@@ -9624,6 +9624,208 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0428_site_genesis_discard_then_keep_spell_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0429",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis gain-mana and draw-spell-per-adjacent-same-card, playing it adjacent to a matching site publicly gains mana first, then draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0429_site_genesis_gain_mana_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0430",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same gain-mana and adjacent-draw site is played without a bordering matching site, only the mana gain resolves and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0430_site_genesis_gain_mana_only_without_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0431",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both draw-spell-per-adjacent-same-card and may-bottom-next-spell, playing it adjacent to a matching site publicly draws for each bordering match first, then enters hidden spell Genesis where the controller may bottom the new top spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0431_site_genesis_draw_per_adjacent_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0432",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same adjacent-draw and may-bottom site is played, keeping the new top spell after the adjacent draws completes Genesis without further spellbook changes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0432_site_genesis_draw_per_adjacent_then_keep_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0433",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both draw-spell-per-adjacent-same-card and reorder-next-spells, playing it adjacent to a matching site publicly draws for each bordering match first, then enters hidden reorder Genesis where the controller may reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0433_site_genesis_draw_per_adjacent_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0434",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same adjacent-draw and reorder site is played, confirming the unchanged top-three order after the adjacent draws completes Genesis without further spellbook changes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0434_site_genesis_draw_per_adjacent_then_keep_spell_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0435",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both paid-token and draw-spell-per-adjacent-same-card, playing it adjacent to a matching site and paying one mana summons the token first, then draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0435_site_genesis_pay_token_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0436",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same paid-token and adjacent-draw site is played, declining the token still draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0436_site_genesis_decline_token_then_draw_per_adjacent_same_card"
+      }
     }
   ]
 }
