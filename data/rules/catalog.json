@@ -13293,6 +13293,53 @@
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
         "testName": "rule_catalog_0576_destroy_undead_relics_here_empty_location_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0577",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-own-artifact-at-location-for-area-damage Magic offers a controlled loose or carried Artifact paired with its location. After a relic sits at C3 with an enemy minion there, casting destroys that relic and deals 3 damage to each other Unit at C3.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0578",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-own-artifact-at-location-for-area-damage Magic is unoffered when the caster controls no Artifact, even if an enemy Artifact is in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "play-site"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_0578_detonate_is_unoffered_without_an_own_artifact"
+      }
     }
   ]
 }

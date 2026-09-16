@@ -1454,6 +1454,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
         | MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps
+        | MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(_)
         | MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
         | MagicEffect::DestroyTargetArtifact
         | MagicEffect::DestroyTargetAura
@@ -6588,6 +6589,33 @@ impl Game {
         Ok(*target_seat)
     }
 
+    fn artifact_controlled_by(artifact: &ArtifactPosition, seat: Seat) -> bool {
+        artifact
+            .bearer()
+            .map_or(artifact.card.owner == seat, |bearer| bearer.seat() == seat)
+    }
+
+    fn own_artifact_at_location_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = self
+            .position
+            .artifacts
+            .iter()
+            .filter(|artifact| Self::artifact_controlled_by(artifact, seat))
+            .map(|artifact| {
+                Ok(MagicChoice {
+                    target_artifact_instance_id: Some(artifact.card.instance_id.clone()),
+                    target_location: Some(self.artifact_location(artifact)?),
+                    ..MagicChoice::default()
+                })
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        choices.sort_unstable_by(|left, right| {
+            left.target_artifact_instance_id
+                .cmp(&right.target_artifact_instance_id)
+        });
+        Ok(choices)
+    }
+
     fn artifact_target_choices(
         &self,
         seat: Seat,
@@ -7239,6 +7267,9 @@ impl Game {
                     }
                 }
                 choices
+            }
+            MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(_) => {
+                self.own_artifact_at_location_choices(seat)?
             }
             MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
             | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
@@ -15463,6 +15494,94 @@ impl Game {
         Ok(self.position.artifacts.remove(index))
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "destroy, excluded bearer, and area damage stay one explicit transaction"
+    )]
+    fn apply_destroy_own_artifact_at_location_for_area_damage(
+        &mut self,
+        seat: Seat,
+        target_artifact_instance_id: &IdentityHash,
+        expected_location: Option<Location>,
+        amount: u8,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *target_artifact_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if !Self::artifact_controlled_by(artifact, seat) {
+            return Err(GameError::IllegalAction);
+        }
+        let location = self.artifact_location(artifact)?;
+        if expected_location.is_some_and(|expected| expected != location) {
+            return Err(GameError::IllegalAction);
+        }
+        let excluded_bearer = artifact.bearer().map(|bearer| bearer.instance_id().clone());
+        self.apply_destroy_target_artifact(
+            target_artifact_instance_id,
+            source_instance_id,
+            outcomes,
+        )?;
+        let targets = self
+            .units_at_location(location)
+            .into_iter()
+            .filter(|(instance_id, _, _)| excluded_bearer.as_ref() != Some(instance_id))
+            .map(|(instance_id, kind, target_seat)| {
+                let status = if kind == UnitKind::Minion {
+                    Some(self.minion_damage_status(&instance_id)?)
+                } else {
+                    None
+                };
+                Ok((instance_id, kind, target_seat, status))
+            })
+            .collect::<Result<Vec<_>, GameError>>()?;
+        for (instance_id, _, _, _) in &targets {
+            outcomes.push("magic-damage-allocated", || {
+                json!({
+                    "amount": amount,
+                    "sourceInstanceId": source_instance_id,
+                    "targetInstanceId": instance_id,
+                })
+            });
+        }
+        let mut dead_minions = Vec::new();
+        let mut defeated_avatars = Vec::new();
+        for (instance_id, kind, target_seat, status) in targets {
+            let damage = self.apply_simple_damage_with_status(
+                kind,
+                target_seat,
+                &instance_id,
+                u16::from(amount),
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                status,
+                outcomes,
+            )?;
+            if damage.minion_died {
+                dead_minions.push(instance_id);
+            }
+            if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
+                defeated_avatars.push(target_seat);
+            }
+        }
+        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+            self.begin_minion_deaths(
+                &dead_minions,
+                &defeated_avatars,
+                Phase::Main,
+                self.position.active_seat,
+                outcomes,
+            )?;
+        }
+        Ok(())
+    }
+
     fn apply_destroy_target_artifact(
         &mut self,
         target_artifact_instance_id: &IdentityHash,
@@ -21660,6 +21779,19 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(amount) => {
+                let target_artifact_instance_id = target_artifact_instance_id
+                    .as_ref()
+                    .ok_or(GameError::IllegalAction)?;
+                self.apply_destroy_own_artifact_at_location_for_area_damage(
+                    seat,
+                    target_artifact_instance_id,
+                    *target_location,
+                    *amount,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps => {
                 let target_location = target_location.ok_or(GameError::IllegalAction)?;
                 let mut artifact_ids: Vec<IdentityHash> = self
@@ -25974,6 +26106,10 @@ mod tests {
             (
                 MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps,
                 json!({ "destroyMinionsAtWaterSiteWithinTwoSteps": true }),
+            ),
+            (
+                MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(3),
+                json!({ "destroyOwnArtifactAtLocationForAreaDamage": 3 }),
             ),
             (
                 MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps,

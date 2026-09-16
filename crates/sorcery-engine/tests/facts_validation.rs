@@ -286,6 +286,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             json!(true),
         ),
         ("destroyMinionsAtWaterSiteWithinTwoSteps", json!(true)),
+        ("destroyOwnArtifactAtLocationForAreaDamage", json!(3)),
         (
             "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
             json!(true),
@@ -2085,6 +2086,54 @@ fn destroy_artifacts_and_auras_at_location_must_not_combine_with_destroy_target_
         ),
     )
     .expect_err("composed location destroy stays exclusive of destroyTargetArtifact");
+    assert!(error.to_string().contains("exactly one"), "{error}");
+}
+
+#[test]
+fn destroy_own_artifact_at_location_for_area_damage_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "destroy-own-artifact-at-location-for-area-damage",
+        &spell(
+            "magic",
+            ("destroyOwnArtifactAtLocationForAreaDamage", json!(3)),
+        ),
+    )
+    .expect("valid destroy-own-artifact-at-location-for-area-damage Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::DestroyOwnArtifactAtLocationForAreaDamage(3)
+    );
+}
+
+#[test]
+fn destroy_own_artifact_at_location_for_area_damage_must_be_three() {
+    let error = parse_card_definition(
+        "destroy-own-artifact-wrong-amount",
+        &spell(
+            "magic",
+            ("destroyOwnArtifactAtLocationForAreaDamage", json!(2)),
+        ),
+    )
+    .expect_err("Detonate area damage stays fixed at 3");
+    assert!(error.to_string().contains("must be 3"), "{error}");
+}
+
+#[test]
+fn destroy_own_artifact_at_location_must_not_combine_with_destroy_target_artifact() {
+    let error = parse_card_definition(
+        "detonate-plus-destroy-target-artifact",
+        &with(
+            spell(
+                "magic",
+                ("destroyOwnArtifactAtLocationForAreaDamage", json!(3)),
+            ),
+            "destroyTargetArtifact",
+            json!(true),
+        ),
+    )
+    .expect_err("Detonate stays exclusive of destroyTargetArtifact");
     assert!(error.to_string().contains("exactly one"), "{error}");
 }
 

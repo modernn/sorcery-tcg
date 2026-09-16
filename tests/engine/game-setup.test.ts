@@ -2148,6 +2148,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const detonateManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyOwnArtifactAtLocationForAreaDamage: 3,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(detonateManifest.cards[firstSpell], {
+    cardType: 'magic',
+    destroyOwnArtifactAtLocationForAreaDamage: 3,
+    manaCost: 2,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyOwnArtifactAtLocationForAreaDamage: 2,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /destroyOwnArtifactAtLocationForAreaDamage must be 3/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyOwnArtifactAtLocationForAreaDamage: 3,
+        destroyTargetArtifact: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const adjacentBuryManifest = createGameManifest({
     ...input,
     cards: {
