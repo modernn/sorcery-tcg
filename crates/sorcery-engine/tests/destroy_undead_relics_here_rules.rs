@@ -102,8 +102,8 @@ fn unravel_manifest(seed: u32) -> String {
                     "north-relic",
                     "north-unravel",
                     "north-beast",
-                    "north-undead",
-                    "north-unravel",
+                    "north-beast",
+                    "north-beast",
                 ],
             },
             "south": {
@@ -301,18 +301,13 @@ fn assert_exact_replay(session: &Session) {
 
 #[test]
 fn rule_catalog_0575_destroy_undead_relics_here_destroys_undead_and_artifact_and_spares_beast() {
-    let encoded = seed_with(&[
-        "north-unravel",
-        "north-undead",
-        "north-relic",
-        "north-beast",
-    ]);
+    let encoded = seed_with(&["north-unravel", "north-undead", "north-relic"]);
     let mut session = opening_main(&encoded);
-    let beast_id = summon_at(&mut session, "north-beast", "C4");
     south_plays_c1_and_ends(&mut session);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
     });
+    let beast_id = summon_at(&mut session, "north-beast", "C4");
     let undead_id = summon_at(&mut session, "north-undead", "C3");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-artifact"
