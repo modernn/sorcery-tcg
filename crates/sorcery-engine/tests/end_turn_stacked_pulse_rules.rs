@@ -1,5 +1,5 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
-//! (RULE-CATALOG-0389–0390).
+//! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -42,6 +42,25 @@ fn stacked_gain_here_damage() -> Value {
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
+}
+
+fn stacked_triple() -> Value {
+    json!({
+        "atEndOfControllerTurnControllerGainsLife": 3,
+        "atEndOfControllerTurnControllerLosesLife": 2,
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn stacked_triple_disabled_on_entry() -> Value {
+    let mut minion = stacked_triple();
+    minion["genesisDisableSelfUntilDamaged"] = json!(true);
+    minion
 }
 
 fn drain() -> Value {
@@ -90,6 +109,96 @@ fn life_stack_manifest() -> String {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-drain"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn triple_pulse_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-triple-pulse" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-end-turn-triple-pulse-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-pulser": stacked_triple(),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+            "south-visitor": visitor(2),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-pulser"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn triple_pulse_disabled_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-triple-pulse-disabled" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-end-turn-triple-pulse-disabled-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-pulser": stacked_triple_disabled_on_entry(),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+            "south-visitor": visitor(2),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-pulser"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                ],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -189,6 +298,23 @@ fn unit_id(session: &Session, card_id: &str) -> Value {
         .clone()
 }
 
+fn avatar_id(session: &Session, seat: &str) -> Value {
+    state(session)["players"][seat]["avatar"]["card"]["instanceId"].clone()
+}
+
+fn allocated_here_damage_targets(receipt: &Receipt, source_id: &Value) -> Vec<Value> {
+    receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "end-turn-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 1);
+            assert_eq!(event.payload["sourceInstanceId"], *source_id);
+            event.payload["targetInstanceId"].clone()
+        })
+        .collect()
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<_> = session
         .transcript()
@@ -233,6 +359,85 @@ fn after_north_source_ready_to_end_turn() -> Session {
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn after_north_ready_to_end_turn_with_triple_pulser() -> Session {
+    let mut session = Session::new(&triple_pulse_manifest()).expect("valid triple-pulse session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn after_north_ready_to_end_turn_with_disabled_triple_pulser() -> Session {
+    let mut session =
+        Session::new(&triple_pulse_disabled_manifest()).expect("valid disabled triple session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
             && descriptor["cell"] == "C4"
     });
     session
@@ -366,6 +571,107 @@ fn rule_catalog_0390_end_turn_gain_then_here_damage_on_same_minion() {
             .expect("units")
             .iter()
             .any(|unit| unit["cardId"] == "south-visitor" && unit["instanceId"] == visitor_id)
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0395_end_turn_gain_loss_then_here_damage_on_same_minion() {
+    let mut session = after_north_ready_to_end_turn_with_triple_pulser();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let north_avatar_id = avatar_id(&session, "north");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let loss_index = event_index(&receipt, "avatar-life-lost").expect("life loss event");
+    let damage_index =
+        event_index(&receipt, "end-turn-damage-allocated").expect("here damage event");
+    assert!(
+        heal_index < loss_index && loss_index < damage_index,
+        "end-turn pulses must resolve gain, then loss, then here-area damage on the same minion"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-healed"
+            && event.payload["amount"] == 2
+            && event.payload["attemptedAmount"] == 3
+            && event.payload["life"] == 20
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-life-lost"
+            && event.payload["amount"] == 2
+            && event.payload["life"] == 18
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    let mut here_targets = allocated_here_damage_targets(&receipt, &source_id);
+    here_targets.sort_by_key(Value::to_string);
+    let mut expected_here_targets = vec![north_avatar_id, visitor_id.clone()];
+    expected_here_targets.sort_by_key(Value::to_string);
+    assert_eq!(here_targets, expected_here_targets);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 17);
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == visitor_id)
+            .expect("visitor")["damage"],
+        0
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0396_disabled_triple_pulse_minion_skips_all_end_turn_effects() {
+    let mut session = after_north_ready_to_end_turn_with_disabled_triple_pulser();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(
+        before["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == source_id)
+            .expect("disabled pulser")["disabledUntilDamaged"],
+        true
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.payload.get("sourceInstanceId") == Some(&source_id)),
+        "disabled triple-pulse minion must not emit end-turn pulse events"
+    );
+    assert!(
+        receipt.events.iter().all(|event| {
+            event.event_type != "avatar-healed"
+                && event.event_type != "avatar-life-lost"
+                && event.event_type != "end-turn-damage-allocated"
+        }),
+        "disabled triple-pulse minion must skip life and here-area end-turn pulses"
+    );
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == visitor_id)
+            .expect("visitor")["damage"],
+        0
     );
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["activeSeat"], "south");

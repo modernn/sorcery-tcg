@@ -8640,6 +8640,57 @@
       }
     },
     {
+      "ruleId": "RULE-CATALOG-0395",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries all three end-of-controller-turn pulses—Avatar life gain, Avatar life loss, and here-area damage—the End Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing end-turn continuation path.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "avatar-life-lost",
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0395_end_turn_gain_loss_then_here_damage_on_same_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0396",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion carrying all three end-of-controller-turn pulses is Disabled, none of those pulses fire at end of turn: life gain and loss are skipped in the controller-life resolver and here-area damage is omitted from the end-turn continuation path.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere",
+        "genesisDisableSelfUntilDamaged"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0396_disabled_triple_pulse_minion_skips_all_end_turn_effects"
+      }
+    },
+    {
       "ruleId": "RULE-CATALOG-0391",
       "requirementIds": [
         "RULE-02",
