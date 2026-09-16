@@ -1477,6 +1477,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const baptizeManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        wardEachAlliedMinionAtTargetWaterSite: true,
+      },
+    },
+  });
+  assert.deepEqual(baptizeManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 3,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    wardEachAlliedMinionAtTargetWaterSite: true,
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        wardEachAlliedMinionAtTargetWaterSite: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /wardEachAlliedMinionAtTargetWaterSite/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantWardToTargetMinion: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        wardEachAlliedMinionAtTargetWaterSite: true,
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

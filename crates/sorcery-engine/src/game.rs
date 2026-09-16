@@ -1471,6 +1471,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
+        | MagicEffect::WardEachAlliedMinionAtTargetWaterSite
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
@@ -7155,6 +7156,15 @@ impl Game {
                     Vec::new()
                 }
             }
+            MagicEffect::WardEachAlliedMinionAtTargetWaterSite => self
+                .destroy_target_site_choices(seat, caster_instance_id)?
+                .into_iter()
+                .filter(|choice| {
+                    choice
+                        .target_location
+                        .is_some_and(|location| self.is_water_site(location.cell))
+                })
+                .collect(),
             MagicEffect::DestroyTargetSite | MagicEffect::ReturnTargetSiteToOwnerHand => {
                 self.destroy_target_site_choices(seat, caster_instance_id)?
             }
@@ -19338,6 +19348,33 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::WardEachAlliedMinionAtTargetWaterSite => {
+                let Some(Location {
+                    cell,
+                    region: Region::Surface,
+                }) = target_location
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                if !self.is_water_site(*cell) {
+                    return Err(GameError::IllegalAction);
+                }
+                let mut allies = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| {
+                        unit.controller == seat
+                            && unit.region == Region::Surface
+                            && Self::unit_occupies_cell(unit, *cell)
+                    })
+                    .map(|unit| unit.card.instance_id.clone())
+                    .collect::<Vec<_>>();
+                allies.sort_unstable();
+                for instance_id in &allies {
+                    self.apply_grant_ward_minion(instance_id, seat, card_instance_id, outcomes)?;
+                }
+            }
             MagicEffect::TapTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -24623,6 +24660,10 @@ mod tests {
             (
                 MagicEffect::GrantWardToTargetMinion,
                 json!({ "grantWardToTargetMinion": true }),
+            ),
+            (
+                MagicEffect::WardEachAlliedMinionAtTargetWaterSite,
+                json!({ "wardEachAlliedMinionAtTargetWaterSite": true }),
             ),
             (
                 MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell,

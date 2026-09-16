@@ -12544,6 +12544,52 @@
         "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
         "testName": "rule_catalog_0544_token_then_draw_still_draws_without_an_allied_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0545",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ward-each-allied-minion-at-target-water-site Magic offers only Water sites, Wards every allied minion occupying the chosen site, and leaves an enemy minion there unwarded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_0545_baptize_wards_allied_minions_at_a_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0546",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ward-each-allied-minion-at-target-water-site Magic does not offer an Earth site. Targeting a Water site with no allied minion is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_0546_baptize_ignores_earth_sites_and_empty_water"
+      }
     }
   ]
 }
