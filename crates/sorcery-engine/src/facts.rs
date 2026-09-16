@@ -1840,12 +1840,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "requires ranged",
         ));
     }
-    if may_ranged_strike_once_during_basic_movement && may_step_after_ranged_strike {
-        return Err(FactError::new(
-            path,
-            "simultaneous during-movement and post-Ranged movement is unsupported",
-        ));
-    }
     if at_start_of_controller_turn_teleport_to_random_site_or_void && !voidwalk {
         return Err(FactError::new(
             format!("{path}.atStartOfControllerTurnTeleportToRandomSiteOrVoid"),

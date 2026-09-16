@@ -8989,7 +8989,9 @@ impl Game {
                 hit: Some(_),
                 shooter_instance_id,
                 ..
-            } if self.position.phase != Phase::Movement => Some(shooter_instance_id),
+            } if self.shooter_may_step_after_ranged_strike(shooter_instance_id) => {
+                Some(shooter_instance_id)
+            }
             _ => None,
         };
         let applied = match &action.descriptor {
