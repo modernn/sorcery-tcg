@@ -1465,6 +1465,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantRangedToAllyThisTurn
+        | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
@@ -6783,6 +6784,7 @@ impl Game {
             | MagicEffect::DrawSiteThenMayPlayWaterSite
             | MagicEffect::DrawSpells(_)
             | MagicEffect::DamageEachAbovegroundMinionOne
+            | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
             | MagicEffect::SummonRandomMinionFromAnyCemetery
             | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 vec![MagicChoice::default()]
@@ -19143,6 +19145,20 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell => {
+                let mut allies = self
+                    .position
+                    .units
+                    .iter()
+                    .filter(|unit| unit.controller == seat)
+                    .map(|unit| unit.card.instance_id.clone())
+                    .collect::<Vec<_>>();
+                allies.sort_unstable();
+                for instance_id in &allies {
+                    self.apply_grant_stealth_minion(instance_id, seat, card_instance_id, outcomes)?;
+                }
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::GrantWardToTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -24445,6 +24461,10 @@ mod tests {
             (
                 MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell,
                 json!({ "grantMovementOneToAllyThisTurnThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell,
+                json!({ "grantStealthToAlliedMinionsThenDrawSpell": true }),
             ),
             (
                 MagicEffect::TapTargetMinion,

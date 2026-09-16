@@ -12403,6 +12403,53 @@
         "file": "crates/sorcery-engine/tests/genesis_untap_adjacent_rules.rs",
         "testName": "rule_catalog_0538_genesis_does_not_untap_a_same_cell_avatar"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0539",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth-to-allied-minions then draw-spell Magic stealths every allied minion, never the Avatar or an enemy, and then draws one hidden spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_0539_stealth_then_draw_stealths_allied_minions_not_enemies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0540",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth-to-allied-minions then draw-spell Magic still draws one hidden spell when no allied minion is in play. No minion is stealthed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions"
+      }
     }
   ]
 }
