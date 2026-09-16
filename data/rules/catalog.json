@@ -9201,6 +9201,56 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0412_site_genesis_gain_mana_then_decline_bottom_next_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0415",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis gain-mana and discard-top-spells, playing it publicly gains mana first, then publicly discards the top two spells from the controller's Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0415_site_genesis_gain_mana_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0416",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same gain-mana and discard-top-spells site is played with fewer than two spells in the Spellbook, the mana gain still resolves and only the available top spell is publicly discarded without deck-out.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0416_site_genesis_gain_mana_then_discards_only_available_spell"
+      }
     }
   ]
 }
