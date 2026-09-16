@@ -9407,6 +9407,62 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0420_site_genesis_pay_token_then_discards_top_spells"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0421",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both may-bottom-next-spell and reorder-next-spells, playing it enters hidden spell Genesis first, then privately reorders the next three spells after the controller bottoms the top spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayBottomNextSpell",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-bottomed",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0421_site_genesis_bottom_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0422",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same may-bottom and reorder site is played, keeping the top spell still chains into hidden reorder Genesis where the controller may confirm the unchanged top-three order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayBottomNextSpell",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-kept",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0422_site_genesis_keep_then_reorder_next_spells"
+      }
     }
   ]
 }
