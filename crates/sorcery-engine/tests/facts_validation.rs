@@ -801,28 +801,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "requires voidwalk",
         ),
         (
-            "oversized outer column",
-            with(
-                with(minion(), "occupiesSquareArea", json!(2)),
-                "mustBeCastToOuterColumn",
-                json!(true),
-            ),
-            "cannot combine with outer-column casting restriction",
-        ),
-        (
-            "oversized token outer column",
-            with(
-                with(
-                    with(minion(), "occupiesSquareArea", json!(2)),
-                    "mustBeCastToOuterColumn",
-                    json!(true),
-                ),
-                "token",
-                json!(true),
-            ),
-            "cannot combine with outer-column casting restriction",
-        ),
-        (
             "movement restrictions",
             with(
                 with(minion(), "movesOnlyForward", json!(true)),
@@ -1807,7 +1785,7 @@ fn oversized_during_movement_and_post_ranged_step_should_parse() {
 }
 
 #[test]
-fn oversized_token_should_parse_while_outer_column_stays_fail_closed() {
+fn oversized_token_should_parse() {
     let definition = with(
         with(minion(), "occupiesSquareArea", json!(2)),
         "token",
@@ -1820,18 +1798,6 @@ fn oversized_token_should_parse_while_outer_column_stays_fail_closed() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.token);
-
-    let outer_column = with(
-        with(minion(), "occupiesSquareArea", json!(2)),
-        "mustBeCastToOuterColumn",
-        json!(true),
-    );
-    assert!(
-        parse_card_definition("oversized-token-outer-column", &outer_column)
-            .expect_err("outer-column combo")
-            .to_string()
-            .contains("cannot combine with outer-column casting restriction")
-    );
 }
 
 #[test]
@@ -1849,4 +1815,21 @@ fn oversized_wrap_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.connects_top_bottom);
+}
+
+#[test]
+fn oversized_outer_column_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-outer-column",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "mustBeCastToOuterColumn",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized outer-column minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_outer_column);
 }

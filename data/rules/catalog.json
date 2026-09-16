@@ -8276,6 +8276,52 @@
         "file": "crates/sorcery-engine/tests/square_wrap_footprint_rules.rs",
         "testName": "rule_catalog_0374_square_wrap_steps_from_canonical_to_wrapped_footprint"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0375",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 minion with an outer-column cast restriction can be summoned legally when its anchor sits in column A or E and occupies the full canonical footprint.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustBeCastToOuterColumn",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/square_outer_column_footprint_rules.rs",
+        "testName": "rule_catalog_0375_outer_column_giant_summons_to_an_outer_column_anchor"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0376",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "An outer-column cast restriction on a 2×2 minion filters summons only; after it enters play the whole footprint may step into inner columns.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustBeCastToOuterColumn",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "decline-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/square_outer_column_footprint_rules.rs",
+        "testName": "rule_catalog_0376_outer_column_giant_movement_is_not_cast_restricted"
+      }
     }
   ]
 }
