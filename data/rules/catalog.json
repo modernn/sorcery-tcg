@@ -8789,6 +8789,106 @@
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0394_start_turn_draw_spells_then_life_loss_resolves_in_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0397",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and controller mana gain, the Start Phase resolves them in order on a single trigger: draw a spell first, then add mana to the site-produced pool. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnControllerGainsMana"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0397_start_turn_draw_spells_then_mana_gain_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0398",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and here-area damage, the Start Phase resolves them in order on a single trigger: draw a site first, then allocate damage to each other unit sharing the footprint. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0398_start_turn_draw_sites_then_here_damage_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0399",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Avatar life gain and life loss, the Start Phase resolves them in order on that minion before other exclusive pulses: gain first, then loss. Both pulses apply to the controller Avatar and net together on a single resolve-start-turn-trigger action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife",
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0399_start_turn_gain_then_loss_applies_net_avatar_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0400",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Avatar life gain and here-area damage, the Start Phase resolves life gain first, then here-area damage through the existing start-turn continuation path on a single resolve-start-turn-trigger action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife",
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0400_start_turn_gain_then_here_damage_on_same_minion"
+      }
     }
   ]
 }

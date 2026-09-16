@@ -1,7 +1,8 @@
 //! Direct proofs for start-turn triggers: random teleports (RULE-CATALOG-0158),
 //! controller Spellbook draws (RULE-CATALOG-0237–0238), controller Atlas
 //! draws (RULE-CATALOG-0241–0242), and stacked library triggers
-//! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392, RULE-CATALOG-0393–0394).
+//! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392, RULE-CATALOG-0393–0394,
+//! RULE-CATALOG-0397–0398).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2022,5 +2023,218 @@ fn rule_catalog_0394_start_turn_draw_spells_then_life_loss_resolves_in_order() {
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
+    assert_exact_replay(&session);
+}
+
+fn draw_spells_mana_gain_stack_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-mana-gain-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-mana-gain-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnControllerGainsMana": 1,
+                "atStartOfControllerTurnDrawSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_sites_here_damage_stack_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-here-damage-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-here-damage-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+                "atStartOfControllerTurnDrawSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-site": site(json!({})),
+            "south-visitor": minion(json!({
+                "summonToAnySite": true,
+            })),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-visitor"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_sites_here_damage_stack_start_turn(seed: u32) -> Session {
+    let mut session =
+        Session::new(&draw_sites_here_damage_stack_manifest(seed)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0397_start_turn_draw_spells_then_mana_gain_resolves_in_order() {
+    let mut session =
+        draw_spells_exclusive_stack_start_turn(&draw_spells_mana_gain_stack_manifest(397));
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    assert_eq!(before["players"]["north"]["mana"], 1);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn", "mana-gained"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["players"]["north"]["mana"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0398_start_turn_draw_sites_then_here_damage_resolves_in_order() {
+    let mut session = draw_sites_here_damage_stack_start_turn(398);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let visitor_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "south-visitor")
+        .expect("visitor minion")["instanceId"]
+        .clone();
+    let north_avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"].clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "site-drawn")
+        .expect("site-drawn event");
+    let damage_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "start-turn-damage-allocated")
+        .expect("start-turn-damage-allocated event");
+    assert!(
+        draw_index < damage_index,
+        "Atlas draw must resolve before here-area damage on the same minion"
+    );
+    assert_eq!(
+        receipt.events[draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    let mut here_targets: Vec<Value> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "start-turn-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 1);
+            assert_eq!(event.payload["sourceInstanceId"], source_id);
+            event.payload["targetInstanceId"].clone()
+        })
+        .collect();
+    here_targets.sort_by_key(Value::to_string);
+    let mut expected_here_targets = vec![north_avatar_id, visitor_id.clone()];
+    expected_here_targets.sort_by_key(Value::to_string);
+    assert_eq!(here_targets, expected_here_targets);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == visitor_id)
+            .expect("visitor")["damage"],
+        1
+    );
     assert_exact_replay(&session);
 }
