@@ -1649,6 +1649,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const insultManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        silenceAndTapNearbyMinionThenMayDrawSpell: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(insultManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 2,
+    silenceAndTapNearbyMinionThenMayDrawSpell: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        silenceAndTapNearbyMinionThenMayDrawSpell: false,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /silenceAndTapNearbyMinionThenMayDrawSpell/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        silenceAndTapNearbyMinionThenMayDrawSpell: true,
+        tapTargetMinion: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

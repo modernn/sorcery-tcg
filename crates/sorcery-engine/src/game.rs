@@ -439,6 +439,7 @@ struct UnitPosition {
     temporary_movement_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     temporary_ranged_sources: Vec<IdentityHash>,
+    temporary_silence_sources: Vec<IdentityHash>,
     warded: bool,
 }
 
@@ -480,6 +481,7 @@ impl SummonPlacement {
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
             warded: self.warded,
         }
     }
@@ -1476,6 +1478,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::WardEachAlliedMinionAtTargetWaterSite
         | MagicEffect::WardNearbyMinionOrSite
+        | MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
@@ -2023,6 +2026,9 @@ impl Game {
                     "tapped": unit.tapped,
                     "warded": unit.warded,
                 });
+                if Self::minion_is_silenced(unit) {
+                    value["silenced"] = json!(true);
+                }
                 if unit.carried_lance_count > 0 {
                     value["carriedLanceCount"] = json!(unit.carried_lance_count);
                 }
@@ -4878,7 +4884,7 @@ impl Game {
         let player = &self.position.players[seat_index(seat)];
         std::iter::once((UnitKind::Avatar, player.avatar.card.instance_id.clone()))
             .chain(self.position.units.iter().filter_map(|unit| {
-                if unit.controller != seat || self.minion_is_disabled(unit) {
+                if unit.controller != seat || self.minion_abilities_lost(unit) {
                     return None;
                 }
                 let CardFacts::Minion(facts) =
@@ -4900,7 +4906,7 @@ impl Game {
         let unit = self.position.units.iter().find(|unit| {
             unit.controller == seat
                 && unit.card.instance_id == *instance_id
-                && !self.minion_is_disabled(unit)
+                && !self.minion_abilities_lost(unit)
         })?;
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
         else {
@@ -5798,7 +5804,7 @@ impl Game {
     /// cell of its footprint.
     fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
         (facts.airborne || !unit.temporary_airborne_sources.is_empty())
-            && !self.minion_is_disabled(unit)
+            && !self.minion_abilities_lost(unit)
             && !Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.location_suppresses_airborne(Location {
                     cell: *cell,
@@ -5820,8 +5826,16 @@ impl Game {
             || (facts.landbound && !occupied.iter().any(|cell| self.is_land_site(*cell)))
     }
 
+    fn minion_is_silenced(unit: &UnitPosition) -> bool {
+        !unit.temporary_silence_sources.is_empty()
+    }
+
+    fn minion_abilities_lost(&self, unit: &UnitPosition) -> bool {
+        self.minion_is_disabled(unit) || Self::minion_is_silenced(unit)
+    }
+
     fn minion_has_active_stealth(&self, unit: &UnitPosition) -> bool {
-        unit.stealthed && !self.minion_is_disabled(unit)
+        unit.stealthed && !self.minion_abilities_lost(unit)
     }
 
     /// Reports whether an active surface minion stands on a Tower it can draw from.
@@ -5832,7 +5846,7 @@ impl Game {
         };
         facts.gains_power_ranged_and_spellcaster_atop_tower
             && unit.region == Region::Surface
-            && !self.minion_is_disabled(unit)
+            && !self.minion_abilities_lost(unit)
             && Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.position.sites[cell.index()]
                     .as_ref()
@@ -5846,7 +5860,10 @@ impl Game {
     }
 
     fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        facts.ranged || !unit.temporary_ranged_sources.is_empty() || self.minion_atop_tower(unit)
+        !self.minion_abilities_lost(unit)
+            && (facts.ranged
+                || !unit.temporary_ranged_sources.is_empty()
+                || self.minion_atop_tower(unit))
     }
 
     fn has_nearby_enemy(&self, unit: &UnitPosition) -> bool {
@@ -6248,7 +6265,6 @@ impl Game {
         else {
             return Err(GameError::IllegalAction);
         };
-        let disabled = self.minion_is_disabled(unit);
         let nearby = |source: &UnitPosition| {
             source.region == unit.region
                 && Self::footprints_nearby(
@@ -6260,7 +6276,7 @@ impl Game {
         for source in &self.position.units {
             if source.card.instance_id == unit.card.instance_id
                 || source.controller != unit.controller
-                || self.minion_is_disabled(source)
+                || self.minion_abilities_lost(source)
             {
                 continue;
             }
@@ -6296,7 +6312,7 @@ impl Game {
             u16::from(facts.defense)
                 .checked_add(bonus)
                 .ok_or(GameError::IllegalAction)?,
-            !disabled && lethal,
+            !self.minion_abilities_lost(unit) && lethal,
         ))
     }
 
@@ -6468,6 +6484,30 @@ impl Game {
                 }),
         );
         Ok(choices)
+    }
+
+    fn silence_and_tap_nearby_then_may_draw_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let targets = self.targeted_magic_choices(seat, caster_instance_id, true, true)?;
+        Ok(targets
+            .into_iter()
+            .flat_map(|choice| {
+                [
+                    MagicChoice {
+                        target: choice.target.clone(),
+                        ..MagicChoice::default()
+                    },
+                    MagicChoice {
+                        target: choice.target,
+                        draw_zone: Some(DeckZone::Spellbook),
+                        ..MagicChoice::default()
+                    },
+                ]
+            })
+            .collect())
     }
 
     fn avatar_player_choices(&self) -> Vec<MagicChoice> {
@@ -7283,6 +7323,9 @@ impl Game {
                 .collect(),
             MagicEffect::WardNearbyMinionOrSite => {
                 self.ward_nearby_minion_or_site_choices(seat, caster_instance_id)?
+            }
+            MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell => {
+                self.silence_and_tap_nearby_then_may_draw_choices(seat, caster_instance_id)?
             }
             MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell => {
                 self.pull_adjacent_aboveground_to_water_site_choices(seat, caster_instance_id)?
@@ -8987,7 +9030,7 @@ impl Game {
         else {
             return false;
         };
-        !self.minion_is_disabled(unit)
+        !self.minion_abilities_lost(unit)
             && (facts.charge || !unit.temporary_charge_sources.is_empty())
     }
 
@@ -12844,7 +12887,7 @@ impl Game {
                     || facts.deathrite_lose_life_per_nearby_site_controlled
                     || facts.deathrite_mill_sites
                     || facts.deathrite_mill_spells;
-                if has_deathrite && !self.minion_is_disabled(unit) {
+                if has_deathrite && !self.minion_abilities_lost(unit) {
                     let (current_power, _, lethal) = self.minion_current_stats(unit)?;
                     sources.push(PendingDeathriteSource {
                         controller: unit.controller,
@@ -13016,8 +13059,8 @@ impl Game {
         };
         let sustained = match unit.region {
             Region::Surface => true,
-            Region::Underground => !self.minion_is_disabled(unit) && facts.burrowing,
-            Region::Underwater => !self.minion_is_disabled(unit) && facts.submerge,
+            Region::Underground => !self.minion_abilities_lost(unit) && facts.burrowing,
+            Region::Underwater => !self.minion_abilities_lost(unit) && facts.submerge,
             Region::Void => self.minion_can_voidwalk(unit),
         };
         if sustained {
@@ -14440,6 +14483,7 @@ impl Game {
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -19683,6 +19727,31 @@ impl Game {
                 }
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
             }
+            MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                let absorbed = self.apply_silence_and_tap_minion(
+                    instance_id,
+                    *target_seat,
+                    seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+                if !absorbed && *draw_zone == Some(DeckZone::Spellbook) {
+                    self.apply_genesis_draws(
+                        seat,
+                        card_instance_id,
+                        DeckZone::Spellbook,
+                        1,
+                        outcomes,
+                    );
+                }
+            }
             MagicEffect::TapTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -22553,6 +22622,56 @@ impl Game {
         Ok(())
     }
 
+    fn apply_silence_and_tap_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        target_seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == target_seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.warded && target_seat != caster_seat {
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": target_seat }),
+            );
+            return Ok(true);
+        }
+        if !unit
+            .temporary_silence_sources
+            .iter()
+            .any(|source| source == source_instance_id)
+        {
+            unit.temporary_silence_sources
+                .push(source_instance_id.clone());
+            outcomes.push("minion-silenced", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": target_seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        if !unit.tapped {
+            unit.tapped = true;
+            outcomes.push("minion-tapped", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": target_seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(false)
+    }
+
     fn apply_tap_minion(
         &mut self,
         instance_id: &IdentityHash,
@@ -23354,6 +23473,20 @@ impl Game {
                 })
             })
             .collect();
+        let expired_silence_sources: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .flat_map(|unit| {
+                unit.temporary_silence_sources.iter().map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+            })
+            .collect();
         let ending_avatar = &self.position.players[seat_index(seat)].avatar;
         let mut expired_movement_sources: Vec<_> = ending_avatar
             .temporary_movement_sources
@@ -23435,6 +23568,7 @@ impl Game {
             unit.temporary_movement_sources.clear();
             unit.temporary_power_sources.clear();
             unit.temporary_ranged_sources.clear();
+            unit.temporary_silence_sources.clear();
             if unit.controller == seat {
                 if gains_stealth {
                     unit.stealthed = true;
@@ -23527,6 +23661,15 @@ impl Game {
         }
         for (instance_id, controller, source_instance_id) in expired_ranged_sources {
             outcomes.push("ranged-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_silence_sources {
+            outcomes.push("silence-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -24188,6 +24331,10 @@ impl Game {
         value
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "authoritative unit JSON keeps every named dynamic flag on one explicit surface"
+    )]
     fn unit_value(&self, unit: &UnitPosition) -> Value {
         let mut value = self.card_value(&unit.card);
         let Value::Object(object) = &mut value else {
@@ -24206,6 +24353,9 @@ impl Game {
             ("tapped".to_owned(), json!(unit.tapped)),
             ("warded".to_owned(), json!(unit.warded)),
         ]);
+        if Self::minion_is_silenced(unit) {
+            object.insert("silenced".to_owned(), json!(true));
+        }
         if let Some(turn) = unit.last_dropped_artifacts_turn {
             object.insert("lastDroppedArtifactsTurn".to_owned(), json!(turn));
         }
@@ -24284,6 +24434,12 @@ impl Game {
             object.insert(
                 "temporaryRangedSources".to_owned(),
                 json!(unit.temporary_ranged_sources),
+            );
+        }
+        if !unit.temporary_silence_sources.is_empty() {
+            object.insert(
+                "temporarySilenceSources".to_owned(),
+                json!(unit.temporary_silence_sources),
             );
         }
         value
@@ -24993,6 +25149,10 @@ mod tests {
                 json!({ "wardNearbyMinionOrSite": true }),
             ),
             (
+                MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell,
+                json!({ "silenceAndTapNearbyMinionThenMayDrawSpell": true }),
+            ),
+            (
                 MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,
                 json!({ "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell": true }),
             ),
@@ -25685,6 +25845,7 @@ mod tests {
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
@@ -25963,6 +26124,7 @@ mod tests {
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
             warded: false,
         }
     }
@@ -26905,6 +27067,7 @@ mod tests {
                 temporary_movement_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 temporary_ranged_sources: Vec::new(),
+                temporary_silence_sources: Vec::new(),
                 warded: false,
             };
         game.position.units = vec![

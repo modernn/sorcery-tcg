@@ -439,6 +439,7 @@ export type GameCardDefinition =
     grantWardToTargetMinion?: true;
     wardEachAlliedMinionAtTargetWaterSite?: true;
     wardNearbyMinionOrSite?: true;
+    silenceAndTapNearbyMinionThenMayDrawSpell?: true;
     tapTargetMinion?: true;
     targetNearby?: boolean;
     targetPlayerGainsLife?: number;
@@ -1352,7 +1353,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
-    submergeTargetMinion
+    silenceAndTapNearbyMinionThenMayDrawSpell submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToAlliedMinionThenDrawSpell summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSites targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
@@ -1915,6 +1916,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.wardNearbyMinionOrSite !== undefined && card.wardNearbyMinionOrSite !== true) {
       throw new RangeError(`${path}.wardNearbyMinionOrSite must be true when defined`);
     }
+    if (card.silenceAndTapNearbyMinionThenMayDrawSpell !== undefined
+      && card.silenceAndTapNearbyMinionThenMayDrawSpell !== true) {
+      throw new RangeError(`${path}.silenceAndTapNearbyMinionThenMayDrawSpell must be true when defined`);
+    }
     if (card.tapTargetMinion !== undefined && card.tapTargetMinion !== true) {
       throw new RangeError(`${path}.tapTargetMinion must be true when defined`);
     }
@@ -2017,6 +2022,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantWardToTargetMinion === true)
       + Number(card.wardEachAlliedMinionAtTargetWaterSite === true)
       + Number(card.wardNearbyMinionOrSite === true)
+      + Number(card.silenceAndTapNearbyMinionThenMayDrawSpell === true)
       + Number(card.healController !== undefined)
       + Number(card.healTargetMinion !== undefined)
       + Number(card.drawSites !== undefined)
@@ -3007,6 +3013,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { wardEachAlliedMinionAtTargetWaterSite: true as const }
                         : card.wardNearbyMinionOrSite === true
                           ? { wardNearbyMinionOrSite: true as const }
+                        : card.silenceAndTapNearbyMinionThenMayDrawSpell === true
+                          ? { silenceAndTapNearbyMinionThenMayDrawSpell: true as const }
                         : card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell === true
                           ? { pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true as const }
                         : card.tapTargetMinion === true

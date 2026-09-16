@@ -12732,6 +12732,56 @@
         "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
         "testName": "rule_catalog_0552_bless_wards_a_nearby_site_until_targeted_destroy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0553",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic offers each nearby minion with or without a spell draw. Choosing the draw Silences and taps that minion, then draws one hidden spell. A far minion is not offered. Silence is this-turn ability loss, not Disable, so a printed Spellcaster cannot cast while Silenced while the Avatar still can.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_0553_insult_silences_and_taps_a_nearby_minion_then_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0554",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic still Silences and taps when the spell draw is declined. Silence expires at End Phase; the tap remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped",
+        "silence-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_0554_insult_still_silences_and_taps_when_the_draw_is_declined"
+      }
     }
   ]
 }

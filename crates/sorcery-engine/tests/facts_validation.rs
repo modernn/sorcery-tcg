@@ -355,6 +355,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("targetPlayerDiscardsCards", json!(1)),
         ("targetPlayerGainsLife", json!(2)),
         ("targetPlayerLosesLife", json!(2)),
+        ("silenceAndTapNearbyMinionThenMayDrawSpell", json!(true)),
         ("tapTargetMinion", json!(true)),
         ("teleportAllyToTargetSite", json!(true)),
         ("teleportNearbyAllyThenDrawCard", json!(true)),
@@ -1759,6 +1760,24 @@ fn ward_nearby_minion_or_site_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::WardNearbyMinionOrSite);
+}
+
+#[test]
+fn silence_and_tap_nearby_minion_then_may_draw_spell_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "silence-and-tap-nearby-then-may-draw",
+        &spell(
+            "magic",
+            ("silenceAndTapNearbyMinionThenMayDrawSpell", json!(true)),
+        ),
+    )
+    .expect("valid silence-and-tap-nearby then may-draw Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell
+    );
 }
 
 #[test]

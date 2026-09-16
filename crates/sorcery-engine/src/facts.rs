@@ -290,6 +290,7 @@ pub enum MagicEffect {
     TargetPlayerDrawsSpells(u8),
     TargetPlayerGainsLife(u8),
     TargetPlayerLosesLife(u8),
+    SilenceAndTapNearbyMinionThenMayDrawSpell,
     TapTargetMinion,
     TeleportAllyToTargetSite,
     TeleportNearbyAllyThenDrawCard,
@@ -854,6 +855,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "returnTargetMinionToOwnerHand",
     "returnTargetSiteFromOwnCemetery",
     "returnTargetSiteToOwnerHand",
+    "silenceAndTapNearbyMinionThenMayDrawSpell",
     "submergeTargetMinion",
     "summonRandomMinionFromAnyCemetery",
     "summonTokenToAlliedMinionThenDrawSpell",
@@ -1544,6 +1546,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .map(|amount| MagicEffect::TargetPlayerGainsLife(compact_u8(amount))),
             optional_bounded_integer(object, "targetPlayerLosesLife", 1, MAX_COMBAT_STAT, path)?
                 .map(|amount| MagicEffect::TargetPlayerLosesLife(compact_u8(amount))),
+            true_only(object, "silenceAndTapNearbyMinionThenMayDrawSpell", path)?
+                .then_some(MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell),
             true_only(object, "tapTargetMinion", path)?.then_some(MagicEffect::TapTargetMinion),
             true_only(object, "teleportAllyToTargetSite", path)?
                 .then_some(MagicEffect::TeleportAllyToTargetSite),
