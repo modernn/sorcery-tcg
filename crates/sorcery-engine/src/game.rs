@@ -13,7 +13,7 @@ use crate::action::{
     GenesisTokenChoice, ProjectileDirection, RangedStepChoice, SummonPaymentMode, UnitTarget,
     compare_canonical, location_label,
 };
-use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_square};
+use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_square_connecting};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
 use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
@@ -1905,6 +1905,7 @@ impl Game {
                         unit.location,
                         location,
                         true,
+                        facts.connects_top_bottom,
                     );
                 let mut value = json!({
                     "airborne": self.minion_is_airborne(unit, facts),
@@ -2531,8 +2532,13 @@ impl Game {
                         return false;
                     };
                     profile.occupied_cells.map_or(end == &destination, |area| {
-                        translated_square(area, start, end.cell)
-                            .is_some_and(|cells| cells.contains(&destination.cell))
+                        Self::translate_footprint(
+                            area,
+                            start,
+                            end.cell,
+                            profile.connects_top_bottom,
+                        )
+                        .is_some_and(|cells| cells.contains(&destination.cell))
                     })
                 })
             {
@@ -3914,8 +3920,12 @@ impl Game {
         if facts.cannot_attack_sites || destination.region != Region::Surface {
             return false;
         }
-        let attacker_cells =
-            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let attacker_cells = Self::translated_footprint(
+            unit.occupied_cells,
+            unit.location,
+            destination.cell,
+            facts.connects_top_bottom,
+        );
         let opposing_seat = other_seat(unit.controller);
         attacker_cells.iter().any(|cell| {
             self.position.sites[cell.index()]
@@ -3934,8 +3944,12 @@ impl Game {
             return false;
         };
         let attacker_airborne = self.minion_is_airborne(unit, facts);
-        let attacker_cells =
-            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let attacker_cells = Self::translated_footprint(
+            unit.occupied_cells,
+            unit.location,
+            destination.cell,
+            facts.connects_top_bottom,
+        );
         let opposing_seat = other_seat(unit.controller);
         let opposing_player = &self.position.players[seat_index(opposing_seat)];
         if destination.region == Region::Surface
@@ -3973,8 +3987,12 @@ impl Game {
             return false;
         };
         let attacker_airborne = self.minion_is_airborne(unit, facts);
-        let attacker_cells =
-            Self::translated_footprint(unit.occupied_cells, unit.location, destination.cell);
+        let attacker_cells = Self::translated_footprint(
+            unit.occupied_cells,
+            unit.location,
+            destination.cell,
+            facts.connects_top_bottom,
+        );
         let opposing_seat = other_seat(unit.controller);
         self.position.units.iter().any(|enemy| {
             if enemy.controller != opposing_seat
@@ -5191,6 +5209,44 @@ impl Game {
         cells.map_or(std::slice::from_ref(cell), |area| area.as_slice())
     }
 
+    fn minion_square_areas(minion: &MinionFacts) -> impl Iterator<Item = SquareArea> + '_ {
+        Cell::SQUARE_AREAS.into_iter().chain(
+            minion
+                .connects_top_bottom
+                .then_some(Cell::WRAPPED_SQUARE_AREAS)
+                .into_iter()
+                .flatten(),
+        )
+    }
+
+    fn minion_connects_top_bottom(&self, unit: &UnitPosition) -> bool {
+        matches!(
+            &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+            CardFacts::Minion(facts) if facts.connects_top_bottom
+        )
+    }
+
+    fn unit_target_connects_top_bottom(&self, target: &UnitTarget) -> bool {
+        match target {
+            UnitTarget::Avatar { .. } => false,
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .is_some_and(|unit| self.minion_connects_top_bottom(unit)),
+        }
+    }
+
+    fn translate_footprint(
+        area: SquareArea,
+        from: Cell,
+        to: Cell,
+        connects_top_bottom: bool,
+    ) -> Option<SquareArea> {
+        translated_square_connecting(area, from, to, connects_top_bottom)
+    }
+
     /// Controlled surface minions standing on any cell of the summoning footprint.
     fn sacrifice_minions_at_summoning_location(
         &self,
@@ -5342,15 +5398,21 @@ impl Game {
         location: Location,
     ) -> Result<(), GameError> {
         let retains = self.retains_planar_gate_voidwalk(instance_id, location);
-        let unit = self
+        let unit_index = self
             .position
             .units
-            .iter_mut()
-            .find(|unit| unit.card.instance_id == *instance_id)
+            .iter()
+            .position(|unit| unit.card.instance_id == *instance_id)
             .ok_or(GameError::IllegalAction)?;
+        let card_id = self.position.units[unit_index].card.card_id;
+        let connects_top_bottom = matches!(
+            &self.rules.cards[usize::from(card_id.0)].facts,
+            CardFacts::Minion(facts) if facts.connects_top_bottom
+        );
+        let unit = &mut self.position.units[unit_index];
         if let Some(area) = unit.occupied_cells {
             unit.occupied_cells = Some(
-                translated_square(area, unit.location, location.cell)
+                Self::translate_footprint(area, unit.location, location.cell, connects_top_bottom)
                     .ok_or(GameError::IllegalAction)?,
             );
         }
@@ -6075,11 +6137,22 @@ impl Game {
                             .iter()
                             .find(|unit| unit.card.instance_id == *enemy.instance_id())
                             .and_then(|unit| unit.occupied_cells);
+                        let connects_top_bottom = self
+                            .position
+                            .units
+                            .iter()
+                            .find(|unit| unit.card.instance_id == *enemy.instance_id())
+                            .is_some_and(|unit| self.minion_connects_top_bottom(unit));
                         for destination in self.card_effect_step_destinations(enemy, from)? {
                             let destination_cells = match area {
-                                Some(area) => translated_square(area, from.cell, destination.cell)
-                                    .ok_or(GameError::IllegalAction)?
-                                    .to_vec(),
+                                Some(area) => Self::translate_footprint(
+                                    area,
+                                    from.cell,
+                                    destination.cell,
+                                    connects_top_bottom,
+                                )
+                                .ok_or(GameError::IllegalAction)?
+                                .to_vec(),
                                 None => vec![destination.cell],
                             };
                             if minimum_cardinal_distance(&destination_cells, ally_cells)
@@ -6413,8 +6486,13 @@ impl Game {
         for ally in self.controlled_allies(seat) {
             let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
             let power = self.unit_target_entry_power(&ally)?;
+            let connects_top_bottom = self.unit_target_connects_top_bottom(&ally);
             for (target_location, target_site_instance_id) in &destinations {
-                for area in self.teleport_destination_areas(&occupied, *target_location) {
+                for area in self.teleport_destination_areas(
+                    &occupied,
+                    *target_location,
+                    connects_top_bottom,
+                ) {
                     let cells: &[Cell] = area
                         .as_ref()
                         .map_or(std::slice::from_ref(&target_location.cell), |cells| cells);
@@ -6441,6 +6519,7 @@ impl Game {
             let occupied = self.unit_target_occupied_cells(&ally)?.to_vec();
             let from = self.unit_target_location(&ally)?;
             let power = self.unit_target_entry_power(&ally)?;
+            let connects_top_bottom = self.unit_target_connects_top_bottom(&ally);
             // Blink relocates without a deliberate step, so only the layer must exist.
             let destinations = occupied
                 .iter()
@@ -6463,7 +6542,9 @@ impl Game {
                     .as_ref()
                     .map(|site| site.card.instance_id.clone())
                     .or_else(|| self.position.rubble[cell.index()].clone());
-                for area in self.teleport_destination_areas(&occupied, target_location) {
+                for area in
+                    self.teleport_destination_areas(&occupied, target_location, connects_top_bottom)
+                {
                     let cells: &[Cell] = area
                         .as_ref()
                         .map_or(std::slice::from_ref(&cell), |cells| cells);
@@ -6490,12 +6571,19 @@ impl Game {
         &self,
         occupied: &[Cell],
         target: Location,
+        connects_top_bottom: bool,
     ) -> Vec<Option<SquareArea>> {
         if occupied.len() <= 1 {
             return vec![None];
         }
         Cell::SQUARE_AREAS
             .into_iter()
+            .chain(
+                connects_top_bottom
+                    .then_some(Cell::WRAPPED_SQUARE_AREAS)
+                    .into_iter()
+                    .flatten(),
+            )
             .filter(|area| {
                 area.contains(&target.cell) && self.footprint_exists(*area, target.region)
             })
@@ -6585,8 +6673,20 @@ impl Game {
                     .find(|unit| unit.card.instance_id == *ally.instance_id())
                     .and_then(|unit| unit.occupied_cells)
                     .ok_or(GameError::IllegalAction)?;
-                let destination_cells = translated_square(area, from.cell, destination.cell)
-                    .ok_or(GameError::IllegalAction)?;
+                let connects_top_bottom = self.minion_connects_top_bottom(
+                    self.position
+                        .units
+                        .iter()
+                        .find(|unit| unit.card.instance_id == *ally.instance_id())
+                        .ok_or(GameError::IllegalAction)?,
+                );
+                let destination_cells = Self::translate_footprint(
+                    area,
+                    from.cell,
+                    destination.cell,
+                    connects_top_bottom,
+                )
+                .ok_or(GameError::IllegalAction)?;
                 for cell in destination_cells {
                     choices.push(MagicChoice {
                         ally: Some(ally.clone()),
@@ -6751,8 +6851,17 @@ impl Game {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "movement path search keeps wrap footprint translation inline"
+    )]
     fn movement_paths(&self, start: Location, profile: MovementProfile) -> Vec<Vec<Location>> {
-        if !self.footprint_location_exists(profile.occupied_cells, start.cell, start) {
+        if !self.footprint_location_exists(
+            profile.occupied_cells,
+            start.cell,
+            start,
+            profile.connects_top_bottom,
+        ) {
             return Vec::new();
         }
         let mut paths = vec![vec![start]];
@@ -6769,6 +6878,7 @@ impl Game {
                     start.cell,
                     current,
                     profile.moving_minion,
+                    profile.connects_top_bottom,
                 ) {
                     continue;
                 }
@@ -6780,11 +6890,16 @@ impl Game {
                                 profile.occupied_cells,
                                 start.cell,
                                 current.cell,
+                                profile.connects_top_bottom,
                             ),
                             current.region,
                         );
-                let occupied =
-                    Self::translated_footprint(profile.occupied_cells, start.cell, current.cell);
+                let occupied = Self::translated_footprint(
+                    profile.occupied_cells,
+                    start.cell,
+                    current.cell,
+                    profile.connects_top_bottom,
+                );
                 let tunnel_hops =
                     self.burrowed_connection_locations(profile, current.cell, &occupied);
                 for candidate in
@@ -6798,14 +6913,20 @@ impl Game {
                                 && self.unit_entry_allowed(current, candidate, profile)
                         },
                         |area| {
-                            let Some(current_area) =
-                                translated_square(area, start.cell, current.cell)
-                            else {
+                            let Some(current_area) = Self::translate_footprint(
+                                area,
+                                start.cell,
+                                current.cell,
+                                profile.connects_top_bottom,
+                            ) else {
                                 return false;
                             };
-                            let Some(candidate_area) =
-                                translated_square(area, start.cell, candidate.cell)
-                            else {
+                            let Some(candidate_area) = Self::translate_footprint(
+                                area,
+                                start.cell,
+                                candidate.cell,
+                                profile.connects_top_bottom,
+                            ) else {
                                 return false;
                             };
                             candidate_area.into_iter().all(|entered| {
@@ -6858,11 +6979,12 @@ impl Game {
         occupied_cells: Option<SquareArea>,
         start: Cell,
         current: Cell,
+        connects_top_bottom: bool,
     ) -> Vec<Cell> {
         occupied_cells.map_or_else(
             || vec![current],
             |area| {
-                translated_square(area, start, current)
+                Self::translate_footprint(area, start, current, connects_top_bottom)
                     .map(Vec::from)
                     .unwrap_or_default()
             },
@@ -6963,15 +7085,17 @@ impl Game {
         occupied_cells: Option<SquareArea>,
         start: Cell,
         location: Location,
+        connects_top_bottom: bool,
     ) -> bool {
         occupied_cells.map_or_else(
             || self.location_exists_in_region(location.cell, location.region),
             |area| {
-                translated_square(area, start, location.cell).is_some_and(|translated| {
-                    translated
-                        .into_iter()
-                        .all(|cell| self.location_exists_in_region(cell, location.region))
-                })
+                Self::translate_footprint(area, start, location.cell, connects_top_bottom)
+                    .is_some_and(|translated| {
+                        translated
+                            .into_iter()
+                            .all(|cell| self.location_exists_in_region(cell, location.region))
+                    })
             },
         )
     }
@@ -7008,21 +7132,23 @@ impl Game {
         start: Cell,
         current: Location,
         minion: bool,
+        connects_top_bottom: bool,
     ) -> bool {
         occupied_cells.map_or_else(
             || self.location_is_immobilized(current, minion),
             |area| {
-                translated_square(area, start, current.cell).is_some_and(|translated| {
-                    translated.into_iter().any(|cell| {
-                        self.location_is_immobilized(
-                            Location {
-                                cell,
-                                region: current.region,
-                            },
-                            minion,
-                        )
+                Self::translate_footprint(area, start, current.cell, connects_top_bottom)
+                    .is_some_and(|translated| {
+                        translated.into_iter().any(|cell| {
+                            self.location_is_immobilized(
+                                Location {
+                                    cell,
+                                    region: current.region,
+                                },
+                                minion,
+                            )
+                        })
                     })
-                })
             },
         )
     }
@@ -8084,8 +8210,7 @@ impl Game {
             Some(minion.mana_cost.saturating_sub(discount))
         };
         if minion.occupies_square_area_two {
-            Cell::SQUARE_AREAS
-                .into_iter()
+            Self::minion_square_areas(minion)
                 .filter(|cells| {
                     (!minion.must_be_cast_to_outer_column || cells[0].in_outer_file())
                         && self.square_allows_power_entry(
@@ -8288,8 +8413,7 @@ impl Game {
     /// or 2x2 footprint.
     fn free_summon_destinations(&self, seat: Seat, minion: &MinionFacts) -> Vec<SummonDestination> {
         if minion.occupies_square_area_two {
-            Cell::SQUARE_AREAS
-                .into_iter()
+            Self::minion_square_areas(minion)
                 .filter(|cells| {
                     self.square_allows_power_entry(
                         *cells,
@@ -9436,15 +9560,20 @@ impl Game {
                     .occupied_cells
             }
         };
+        let profile = self.haul_movement_profile(target)?;
         let occupied = footprint.map_or_else(|| vec![anchor.cell], Vec::from);
         let entered = match footprint {
             None => vec![next.cell],
-            Some(area) => match translated_square(area, anchor.cell, next.cell) {
+            Some(area) => match Self::translate_footprint(
+                area,
+                anchor.cell,
+                next.cell,
+                profile.connects_top_bottom,
+            ) {
                 None => return Ok(false),
                 Some(area) => Vec::from(area),
             },
         };
-        let profile = self.haul_movement_profile(target)?;
         Ok(entered.into_iter().all(|cell| {
             self.surface_location_exists(cell)
                 && (occupied.contains(&cell)
@@ -9911,8 +10040,13 @@ impl Game {
             || profile
                 .occupied_cells
                 .map_or(final_anchor.cell != pending_cell, |area| {
-                    translated_square(area, start, final_anchor.cell)
-                        .is_none_or(|cells| !cells.contains(&pending_cell))
+                    Self::translate_footprint(
+                        area,
+                        start,
+                        final_anchor.cell,
+                        profile.connects_top_bottom,
+                    )
+                    .is_none_or(|cells| !cells.contains(&pending_cell))
                 })
         {
             return Err(GameError::IllegalAction);
@@ -16327,11 +16461,17 @@ impl Game {
                 seat: enemy_seat,
             };
             let mut added = false;
+            let connects_top_bottom = self.minion_connects_top_bottom(enemy);
             for destination in self.card_effect_step_destinations(&target, from)? {
                 let destination_cells = match enemy.occupied_cells {
-                    Some(area) => translated_square(area, from.cell, destination.cell)
-                        .ok_or(GameError::IllegalAction)?
-                        .to_vec(),
+                    Some(area) => Self::translate_footprint(
+                        area,
+                        from.cell,
+                        destination.cell,
+                        connects_top_bottom,
+                    )
+                    .ok_or(GameError::IllegalAction)?
+                    .to_vec(),
                     None => vec![destination.cell],
                 };
                 if minimum_cardinal_distance(&destination_cells, source_cells) >= starting_distance
