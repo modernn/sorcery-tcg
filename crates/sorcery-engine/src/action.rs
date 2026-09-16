@@ -281,6 +281,15 @@ pub enum ActionDescriptor {
         /// Engine-issued enemy minion sharing the bearer's footprint.
         target: UnitTarget,
     },
+    /// Discard one hand card so a nearby Avatar steals the granting minion.
+    ActivateDiscardToGainControl {
+        /// Exact hand card discarded to pay for the granted ability.
+        discard_card_instance_id: IdentityHash,
+        /// Deck zone that currently holds the discarded card.
+        discard_zone: DeckZone,
+        /// Authoritative minion identity being stolen.
+        minion_instance_id: IdentityHash,
+    },
     /// Discard one Spellbook card to damage a hidden random other unit at the source's location.
     ActivateDiscardRandomDamage {
         /// Exact Spellbook card discarded to pay for the ability.
@@ -1042,6 +1051,15 @@ impl ActionDescriptor {
                 target.kind(),
                 short_identity(target.instance_id())
             )),
+            Self::ActivateDiscardToGainControl {
+                discard_card_instance_id,
+                minion_instance_id,
+                ..
+            } => Some(format!(
+                "Discard {}… to gain control of minion {}…",
+                short_identity(discard_card_instance_id),
+                short_identity(minion_instance_id)
+            )),
             Self::ActivateArtifactRollDamage {
                 direction,
                 path,
@@ -1587,6 +1605,23 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .cmp(right_discard)
                         .then_with(|| left_source.cmp(right_source)),
                     (
+                        ActionDescriptor::ActivateDiscardToGainControl {
+                            discard_card_instance_id: left_discard,
+                            discard_zone: left_zone,
+                            minion_instance_id: left_minion,
+                        },
+                        ActionDescriptor::ActivateDiscardToGainControl {
+                            discard_card_instance_id: right_discard,
+                            discard_zone: right_zone,
+                            minion_instance_id: right_minion,
+                        },
+                    ) => left_discard
+                        .cmp(right_discard)
+                        .then_with(|| {
+                            deck_zone_order(*left_zone).cmp(&deck_zone_order(*right_zone))
+                        })
+                        .then_with(|| left_minion.cmp(right_minion)),
+                    (
                         ActionDescriptor::ActivateArtifactDamage {
                             artifact_instance_id: left_artifact,
                             helper: left_helper,
@@ -2128,7 +2163,8 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ShootDamageProjectile { .. }
         | ActionDescriptor::ShootDragProjectile { .. }
         | ActionDescriptor::ShootProjectile { .. } => 7,
-        ActionDescriptor::ActivateDiscardRandomDamage { .. } => 8,
+        ActionDescriptor::ActivateDiscardRandomDamage { .. }
+        | ActionDescriptor::ActivateDiscardToGainControl { .. } => 8,
         ActionDescriptor::Defend { .. } | ActionDescriptor::MoveAndAttack { .. } => 9,
         _ => 10,
     }
@@ -2251,6 +2287,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
         ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 46,
+        ActionDescriptor::ActivateDiscardToGainControl { .. } => 47,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,

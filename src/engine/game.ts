@@ -464,6 +464,7 @@ export type GameCardDefinition =
     genesisDrawSpells?: number;
     genesisDrawSite?: boolean;
     genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
+    nearbyAvatarsMayDiscardCardToGainControlOfThis?: true;
     genesisHealController?: 2;
     genesisLoseControllerLife?: 2;
     gainsPowerRangedAndSpellcasterAtopTower?: 2;
@@ -1186,6 +1187,12 @@ type GameActionDescriptor =
     kind: 'activate-artifact-sacrifice-control';
     target: GameUnitRef;
   }>
+  | Readonly<{
+    discardCardInstanceId: StateHash;
+    discardZone: DeckZone;
+    kind: 'activate-discard-to-gain-control';
+    minionInstanceId: StateHash;
+  }>
   | Readonly<{ kind: 'decline-attack' }>
   | Readonly<{ kind: 'declare-attack'; target: CombatTarget }>
   | Readonly<{
@@ -1333,7 +1340,7 @@ const SUPPORTED_CARD_FIELDS = {
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
-    nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
+    nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
     otherNearbyAlliesPowerBonus preventsDamageFromUnitsWithPowerAtLeast provides ranged
     sacrificeMinionAtSummoningLocationForManaDiscount shootsDragProjectile siteProvidesNoThreshold
     spellcaster stealth strikesFirstWhileAttacking strikesFirstWhileDefending submerge summonToAnySite
@@ -2149,6 +2156,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.genesisGainControlOfTappedMinionsHereUntilThisLeaves !== true) {
     throw new RangeError(
       `${path}.genesisGainControlOfTappedMinionsHereUntilThisLeaves must be true when defined`,
+    );
+  }
+  if (card.nearbyAvatarsMayDiscardCardToGainControlOfThis !== undefined
+    && card.nearbyAvatarsMayDiscardCardToGainControlOfThis !== true) {
+    throw new RangeError(
+      `${path}.nearbyAvatarsMayDiscardCardToGainControlOfThis must be true when defined`,
     );
   }
   if (card.genesisMayDamageTargetAdjacentUnit !== undefined
@@ -2971,6 +2984,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisGainControlOfTappedMinionsHereUntilThisLeaves === true
               ? { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const }
+              : {}),
+            ...(card.nearbyAvatarsMayDiscardCardToGainControlOfThis === true
+              ? { nearbyAvatarsMayDiscardCardToGainControlOfThis: true as const }
               : {}),
             ...(card.genesisDrawSpells !== undefined
               ? { genesisDrawSpells: card.genesisDrawSpells }

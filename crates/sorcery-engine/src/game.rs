@@ -1570,6 +1570,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         must_attack_a_unit_if_able: _,
         must_be_cast_to_outer_column: _,
         must_be_cast_to_water_site: _,
+        nearby_avatars_may_discard_card_to_gain_control_of_this: _,
         nearby_enemies_permanently_lose_stealth: _,
         occupies_square_area_two: _,
         ordinary: _,
@@ -3745,6 +3746,7 @@ impl Game {
         }
         self.append_area_damage_actions(actions, seat);
         self.append_discard_random_damage_actions(actions, seat);
+        self.append_discard_to_gain_control_actions(actions, seat)?;
         if !player.avatar.tapped {
             self.append_unit_move_actions(
                 actions,
@@ -4291,6 +4293,80 @@ impl Game {
                 );
             }
         }
+    }
+
+    /// Offers each nearby-Avatar discard that can steal a granting enemy minion.
+    fn append_discard_to_gain_control_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        seat: Seat,
+    ) -> Result<(), GameError> {
+        for descriptor in self.discard_to_gain_control_descriptors(seat)? {
+            let label = descriptor
+                .state_independent_label()
+                .ok_or_else(|| invalid("discard-to-gain-control action requires a label"))?;
+            self.push_action(actions, descriptor, label);
+        }
+        Ok(())
+    }
+
+    fn discard_to_gain_control_descriptors(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if self.position.phase != Phase::Main
+            || self.position.active_seat != seat
+            || self.position.decision_seat != seat
+        {
+            return Ok(Vec::new());
+        }
+        let player = &self.position.players[seat_index(seat)];
+        let avatar = UnitTarget::Avatar {
+            instance_id: player.avatar.card.instance_id.clone(),
+            seat,
+        };
+        let avatar_region = self.unit_target_region(&avatar)?;
+        let avatar_cells = self.unit_target_occupied_cells(&avatar)?.to_vec();
+        let discards: Vec<_> = [
+            (DeckZone::Atlas, &player.hand_atlas),
+            (DeckZone::Spellbook, &player.hand_spellbook),
+        ]
+        .into_iter()
+        .flat_map(|(zone, hand)| {
+            hand.iter()
+                .map(move |card| (card.instance_id.clone(), zone))
+        })
+        .collect();
+        if discards.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut descriptors = Vec::new();
+        for unit in &self.position.units {
+            if unit.controller == seat || unit.region != avatar_region {
+                continue;
+            }
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                continue;
+            };
+            if !facts.nearby_avatars_may_discard_card_to_gain_control_of_this
+                || self.minion_is_disabled(unit)
+            {
+                continue;
+            }
+            if !Self::footprints_nearby(&avatar_cells, Self::unit_occupied_cells(unit)) {
+                continue;
+            }
+            for (discard_card_instance_id, discard_zone) in &discards {
+                descriptors.push(ActionDescriptor::ActivateDiscardToGainControl {
+                    discard_card_instance_id: discard_card_instance_id.clone(),
+                    discard_zone: *discard_zone,
+                    minion_instance_id: unit.card.instance_id.clone(),
+                });
+            }
+        }
+        Ok(descriptors)
     }
 
     fn damage_projectile_descriptors(
@@ -9262,6 +9338,9 @@ impl Game {
             }
             ActionDescriptor::ActivateArtifactSacrificeControl { .. } => {
                 self.apply_artifact_sacrifice_control_action(action, outcomes)
+            }
+            ActionDescriptor::ActivateDiscardToGainControl { .. } => {
+                self.apply_discard_to_gain_control_action(action, outcomes)
             }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => self
                 .apply_discard_random_damage_action(
@@ -15198,6 +15277,49 @@ impl Game {
             true,
             outcomes,
         )?;
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    /// Discards one hand card so a nearby Avatar steals the granting minion permanently.
+    /// The ability names that minion without targeting, so Ward does not absorb the transfer.
+    fn apply_discard_to_gain_control_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateDiscardToGainControl {
+            discard_card_instance_id,
+            minion_instance_id,
+            ..
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if !self
+            .discard_to_gain_control_descriptors(seat)?
+            .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let target = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *minion_instance_id)
+            .map(|unit| UnitTarget::Minion {
+                instance_id: unit.card.instance_id.clone(),
+                seat: unit.controller,
+            })
+            .ok_or(GameError::IllegalAction)?;
+        let avatar_id = self.position.players[seat_index(seat)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        self.pay_chosen_hand_discard(seat, discard_card_instance_id, &avatar_id, outcomes)?;
+        self.apply_minion_control_change(Some(&target), seat, &avatar_id, None, false, outcomes)?;
         self.position.state_version += 1;
         Ok(())
     }

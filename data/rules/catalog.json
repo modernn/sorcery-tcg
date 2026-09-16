@@ -11960,6 +11960,54 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0520_sacrifice_artifact_control_persists_until_the_bearer_leaves"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0521",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that lets nearby Avatars discard a card to gain control of it offers that paid steal only to a nearby Avatar, transfers control without targeting so Ward does not absorb, and leaves ownership unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyAvatarsMayDiscardCardToGainControlOfThis"
+      ],
+      "actionHints": [
+        "activate-discard-to-gain-control"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0521_nearby_avatar_discards_to_steal_this_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0522",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby-Avatar discard control is permanent: it survives End Phase, does not revert when the source stays in play, and is not offered to a distant Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyAvatarsMayDiscardCardToGainControlOfThis"
+      ],
+      "actionHints": [
+        "activate-discard-to-gain-control",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0522_nearby_avatar_control_is_permanent_and_distant_avatars_cannot_steal"
+      }
     }
   ]
 }

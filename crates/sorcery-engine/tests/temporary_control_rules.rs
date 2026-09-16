@@ -1,4 +1,4 @@
-//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0520).
+//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0522).
 //!
 //! Official Magic can gain control of a target enemy minion this turn and
 //! untap it, or gain control until that minion loses Stealth after tapping it
@@ -1087,5 +1087,186 @@ fn rule_catalog_0520_sacrifice_artifact_control_persists_until_the_bearer_leaves
             .iter()
             .all(|unit| unit["instanceId"] != ally_id)
     );
+    assert_exact_replay(&session);
+}
+
+fn sellsword() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "nearbyAvatarsMayDiscardCardToGainControlOfThis": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn sellsword_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "nearby-avatar-discard-control" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-nearby-avatar-discard-control-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dummy": dummy(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-sellsword": sellsword(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-dummy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-sellsword"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+/// South Sellsword at North C3, North Avatar nearby at C4, South Avatar distant at C1.
+fn sellsword_opening() -> (Session, String) {
+    let mut session = (1..=4096)
+        .map(sellsword_manifest)
+        .find_map(|candidate| {
+            let session =
+                Session::new(&candidate).expect("nearby-avatar-discard-control candidate");
+            let north = opening_spell_ids(&session, "north");
+            let south = opening_spell_ids(&session, "south");
+            (north.iter().any(|card| card == "north-dummy")
+                && south.iter().any(|card| card == "south-sellsword"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with a discard and Seasoned Sellsword");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    end_then_draw(&mut session, "spellbook");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-sellsword"
+            && descriptor["cell"] == "C3"
+    });
+    let sellsword_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("sellsword identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    (session, sellsword_id)
+}
+
+fn steal_sellsword(session: &mut Session, sellsword_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-discard-to-gain-control"
+            && descriptor["minionInstanceId"] == sellsword_id
+    });
+    receipt
+}
+
+fn sellsword_steal_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("discard-to-gain-control actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "activate-discard-to-gain-control")
+        .filter_map(|action| {
+            action.descriptor["minionInstanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0521_nearby_avatar_discards_to_steal_this_minion() {
+    let (mut session, sellsword_id) = sellsword_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &sellsword_id)["controller"], "south");
+    assert_eq!(unit(&before, &sellsword_id)["owner"], "south");
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar")
+        .to_owned();
+
+    let targets = sellsword_steal_ids(&session);
+    assert!(targets.contains(&sellsword_id), "{targets:?}");
+
+    let receipt = steal_sellsword(&mut session, &sellsword_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["card-discarded", "minion-control-changed"]
+    );
+    let changed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-control-changed")
+        .expect("control change");
+    assert_eq!(changed.payload["fromSeat"], "south");
+    assert_eq!(changed.payload["seat"], "north");
+    assert_eq!(changed.payload["instanceId"], sellsword_id);
+    assert_eq!(changed.payload["sourceInstanceId"], avatar_id);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    assert_eq!(unit(&after, &sellsword_id)["controller"], "north");
+    assert_eq!(unit(&after, &sellsword_id)["owner"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0522_nearby_avatar_control_is_permanent_and_distant_avatars_cannot_steal() {
+    let (mut session, sellsword_id) = sellsword_opening();
+    steal_sellsword(&mut session, &sellsword_id);
+    assert_eq!(unit(&state(&session), &sellsword_id)["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    assert_eq!(unit(&state(&session), &sellsword_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &sellsword_id)["owner"], "south");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    assert!(
+        sellsword_steal_ids(&session).is_empty(),
+        "distant South Avatar at C1 is not nearby C3"
+    );
+
+    end_then_draw(&mut session, "spellbook");
+    assert_eq!(unit(&state(&session), &sellsword_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &sellsword_id)["owner"], "south");
     assert_exact_replay(&session);
 }

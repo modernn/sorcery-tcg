@@ -44,6 +44,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::ActivateArtifactSacrificeControl { .. } => {
             "activate-artifact-sacrifice-control"
         }
+        ActionDescriptor::ActivateDiscardToGainControl { .. } => "activate-discard-to-gain-control",
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => "activate-discard-random-damage",
         ActionDescriptor::ActivateMana { .. } => "activate-mana",
         ActionDescriptor::ActivateSparkmage { .. } => "activate-sparkmage",

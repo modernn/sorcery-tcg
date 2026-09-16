@@ -1636,6 +1636,22 @@ fn genesis_tapped_minion_control_here_should_parse() {
 }
 
 #[test]
+fn nearby_avatar_discard_control_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "nearby-avatar-discard-control",
+        &with(
+            minion(),
+            "nearbyAvatarsMayDiscardCardToGainControlOfThis",
+            json!(true),
+        ),
+    )
+    .expect("valid nearby-Avatar discard control minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.nearby_avatars_may_discard_card_to_gain_control_of_this);
+}
+
+#[test]
 fn targeted_genesis_with_random_card_discard_payment_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "targeted-genesis-alt-payment",
