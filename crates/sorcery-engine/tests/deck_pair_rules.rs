@@ -251,3 +251,49 @@ fn rule_catalog_0378_deck_pair_batch_reproduces_transcript_hash_for_manifest_and
         sorcery_engine::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 }
+
+fn all_event_types(session: &Session) -> Vec<&str> {
+    session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter().map(|event| event.event_type.as_str()))
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0503_deck_pair_reaches_combat_with_verified_replay() {
+    let manifest = deck_pair_manifest(503);
+    let north_deck = validated_manifest_deck(&manifest, "north");
+    let south_deck = validated_manifest_deck(&manifest, "south");
+    assert_ne!(
+        north_deck.deck_id(),
+        south_deck.deck_id(),
+        "north and south must be distinct deck identities"
+    );
+    let authority = authority_hash(&manifest);
+    let north_policy = policy(&authority, north_deck.deck_id().as_str(), OPENING_FEATURES);
+    let south_policy = policy(&authority, south_deck.deck_id().as_str(), OPENING_FEATURES);
+    let game = Game::from_manifest_json(&manifest).expect("valid deck-pair game");
+    let rollout = run_game(game, &north_policy, &south_policy, 120).expect("combat rollout");
+    let session = replay_selected(&manifest, &rollout).expect("combat replay");
+    let action_kinds = committed_action_kinds(&session);
+    let event_types = all_event_types(&session);
+
+    assert!(
+        action_kinds.iter().any(|kind| kind == "declare-attack"),
+        "extended opening must commit at least one attack"
+    );
+    assert!(
+        action_kinds.iter().any(|kind| kind == "close-defend"),
+        "extended opening must resolve at least one defend choice"
+    );
+    assert!(
+        event_types.contains(&"fight-started"),
+        "extended opening must reach at least one fight"
+    );
+    assert!(
+        rollout.action_indices().len() >= 100,
+        "combat rollout should exceed the short-opening bound"
+    );
+    assert_exact_replay(&session);
+}

@@ -11540,6 +11540,28 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0502_token_genesis_draws_spell_loses_life_then_heals_controller"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0503",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Two distinct synthetic decks played by the baseline policy reach at least one committed fight within a bounded deterministic rollout, and the full transcript replays byte-identically.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "declare-attack",
+        "close-defend"
+      ],
+      "eventHints": [
+        "fight-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
+        "testName": "rule_catalog_0503_deck_pair_reaches_combat_with_verified_replay"
+      }
     }
   ]
 }
