@@ -236,6 +236,7 @@ pub enum MagicEffect {
     DestroyTargetAura,
     DestroyTargetSite,
     DestroyTargetSiteWithDamageGrid([u8; 5]),
+    DisableTargetMinionWithinTwoStepsUntilDamaged,
     DisableTargetNearbyMinionUntilNextTurn,
     DrawSites(u8),
     DrawSiteThenMayPlayLandSite,
@@ -792,6 +793,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "destroyTargetArtifact",
     "destroyTargetAura",
     "destroyTargetSite",
+    "disableTargetMinionWithinTwoStepsUntilDamaged",
     "disableTargetNearbyMinionUntilNextTurn",
     "discardCardAsAdditionalCost",
     "drawSites",
@@ -1392,6 +1394,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             true_only(object, "destroyTargetAura", path)?.then_some(MagicEffect::DestroyTargetAura),
             (destroy_site && damage_grid.is_none()).then_some(MagicEffect::DestroyTargetSite),
             damage_grid.map(MagicEffect::DestroyTargetSiteWithDamageGrid),
+            true_only(
+                object,
+                "disableTargetMinionWithinTwoStepsUntilDamaged",
+                path,
+            )?
+            .then_some(MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged),
             true_only(object, "disableTargetNearbyMinionUntilNextTurn", path)?
                 .then_some(MagicEffect::DisableTargetNearbyMinionUntilNextTurn),
             optional_bounded_integer(object, "drawSites", 1, MAX_DECK_CARDS, path)?

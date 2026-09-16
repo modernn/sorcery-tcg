@@ -1439,6 +1439,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DestroyTargetAura
         | MagicEffect::DestroyTargetSite
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
+        | MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::DrawSites(_)
         | MagicEffect::DrawSiteThenMayPlayLandSite
@@ -7046,6 +7047,9 @@ impl Game {
                 }
                 choices
             }
+            MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged => {
+                self.disable_minion_within_two_steps_choices(seat, caster_instance_id)?
+            }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
                 let (caster_location, caster_cells) =
                     self.spellcaster_occupied_cells(seat, caster_instance_id)?;
@@ -7087,6 +7091,52 @@ impl Game {
                 ));
             }
         })
+    }
+
+    fn disable_minion_within_two_steps_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+        let reach: BTreeSet<_> = self
+            .locations_within_measured_steps_from_cells(cells, origin.region, 2)
+            .into_iter()
+            .map(|location| location.cell)
+            .collect();
+        let mut targets: Vec<_> = self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.region == origin.region
+                    && (unit.controller == seat || !self.minion_has_active_stealth(unit))
+                    && Self::unit_occupied_cells(unit)
+                        .iter()
+                        .any(|cell| reach.contains(cell))
+            })
+            .map(|unit| MagicChoice {
+                target: Some(UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: unit.controller,
+                }),
+                ..MagicChoice::default()
+            })
+            .collect();
+        targets.sort_unstable_by(|left, right| {
+            left.target
+                .as_ref()
+                .expect("measured disable target")
+                .instance_id()
+                .cmp(
+                    right
+                        .target
+                        .as_ref()
+                        .expect("measured disable target")
+                        .instance_id(),
+                )
+        });
+        Ok(targets)
     }
 
     fn teleport_ally_to_site_choices(
@@ -19902,6 +19952,22 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.apply_disable_minion_until_damaged(
+                    instance_id,
+                    *target_seat,
+                    seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::DisableTargetNearbyMinionUntilNextTurn => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -21651,6 +21717,43 @@ impl Game {
                 })
             });
         }
+        Ok(())
+    }
+
+    fn apply_disable_minion_until_damaged(
+        &mut self,
+        instance_id: &IdentityHash,
+        target_seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == target_seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.warded && target_seat != caster_seat {
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": target_seat }),
+            );
+            return Ok(());
+        }
+        if unit.disabled_until_damaged {
+            return Ok(());
+        }
+        unit.disabled_until_damaged = true;
+        outcomes.push("minion-disabled", || {
+            json!({
+                "instanceId": instance_id,
+                "seat": target_seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        self.reveal_disabled_stealth(outcomes);
         Ok(())
     }
 
@@ -23950,6 +24053,10 @@ mod tests {
             (
                 MagicEffect::DrawSiteThenMayPlayWaterSite,
                 json!({ "drawSiteThenMayPlayWaterSite": true }),
+            ),
+            (
+                MagicEffect::DisableTargetMinionWithinTwoStepsUntilDamaged,
+                json!({ "disableTargetMinionWithinTwoStepsUntilDamaged": true }),
             ),
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
             (MagicEffect::MillSites(2), json!({ "millSites": 2 })),

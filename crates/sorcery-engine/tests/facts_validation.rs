@@ -283,6 +283,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("destroyTargetArtifact", json!(true)),
         ("destroyTargetAura", json!(true)),
         ("destroyTargetSite", json!(true)),
+        ("disableTargetMinionWithinTwoStepsUntilDamaged", json!(true)),
         ("disableTargetNearbyMinionUntilNextTurn", json!(true)),
         ("fightAllyWithAdjacentEnemy", json!(true)),
         ("gainControlOfTargetEnemyMinionThisTurn", json!(true)),

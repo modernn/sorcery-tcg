@@ -12107,6 +12107,54 @@
         "file": "crates/sorcery-engine/tests/filtered_site_play_rules.rs",
         "testName": "rule_catalog_0526_water_draw_excludes_land_and_decline_keeps_the_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0527",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that disables a minion within two measured steps until damaged offers only same-region minions at the caster's occupied cells or a cardinal walk of at most two steps. Avatars and a minion three steps away are not offered. The chosen minion becomes Disabled until it takes damage, cannot use printed abilities, and wakes after positive damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetMinionWithinTwoStepsUntilDamaged"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled",
+        "minion-awakened"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_until_damaged_magic_rules.rs",
+        "testName": "rule_catalog_0527_measured_disable_offers_two_steps_and_wakes_on_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0528",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Enemy Ward absorbs measured disable-until-damaged Magic and breaks without applying the disable. A successful disable lasts through the caster's next Start Phase instead of expiring like Freeze, and stays until the minion takes damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetMinionWithinTwoStepsUntilDamaged"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken",
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_until_damaged_magic_rules.rs",
+        "testName": "rule_catalog_0528_enemy_ward_absorbs_and_disable_survives_a_turn_cycle"
+      }
     }
   ]
 }

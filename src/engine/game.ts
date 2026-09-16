@@ -382,6 +382,7 @@ export type GameCardDefinition =
     damageTargetUnit?: number;
     discardCardAsAdditionalCost?: true;
     discardSiteAsAdditionalCost?: true;
+    disableTargetMinionWithinTwoStepsUntilDamaged?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
     drawSites?: number;
     drawSiteThenMayPlayLandSite?: true;
@@ -1325,7 +1326,8 @@ const SUPPORTED_CARD_FIELDS = {
   magic: new Set(`
     burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType
     damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
-    damageRandomUnitAtLocation damageTargetUnit disableTargetNearbyMinionUntilNextTurn
+    damageRandomUnitAtLocation damageTargetUnit disableTargetMinionWithinTwoStepsUntilDamaged
+    disableTargetNearbyMinionUntilNextTurn
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
     destroyTargetArtifact destroyTargetAura destroyTargetSite
@@ -1771,6 +1773,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.summonTokenToEachControlledSiteBorderingEnemySite`,
       );
     }
+    if (card.disableTargetMinionWithinTwoStepsUntilDamaged !== undefined
+      && card.disableTargetMinionWithinTwoStepsUntilDamaged !== true) {
+      throw new RangeError(
+        `${path}.disableTargetMinionWithinTwoStepsUntilDamaged must be true when defined`,
+      );
+    }
     if (card.disableTargetNearbyMinionUntilNextTurn !== undefined
       && card.disableTargetNearbyMinionUntilNextTurn !== true) {
       throw new RangeError(`${path}.disableTargetNearbyMinionUntilNextTurn must be true when defined`);
@@ -1917,6 +1925,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(simpleDestroyTargetSite)
       + Number(card.destroyTargetArtifact === true)
       + Number(card.destroyTargetAura === true)
+      + Number(card.disableTargetMinionWithinTwoStepsUntilDamaged === true)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetEnemyMinionThisTurn === true)
@@ -2802,6 +2811,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { damageRandomUnitAtLocation: card.damageRandomUnitAtLocation }
                 : card.damageTargetUnit !== undefined
                   ? { damageTargetUnit: card.damageTargetUnit }
+                  : card.disableTargetMinionWithinTwoStepsUntilDamaged === true
+                    ? { disableTargetMinionWithinTwoStepsUntilDamaged: true as const }
                   : card.disableTargetNearbyMinionUntilNextTurn === true
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.fightAllyWithAdjacentEnemy === true
