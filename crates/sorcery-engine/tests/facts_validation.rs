@@ -1758,6 +1758,30 @@ fn oversized_during_movement_and_post_ranged_step_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.ranged);
     assert!(facts.may_step_after_ranged_strike);
+
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-during-movement-ranged-and-post-step",
+        &with(
+            with(
+                with(
+                    with(minion(), "occupiesSquareArea", json!(2)),
+                    "ranged",
+                    json!(true),
+                ),
+                "mayRangedStrikeOnceDuringBasicMovement",
+                json!(true),
+            ),
+            "mayStepAfterRangedStrike",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized combined Ranged movement minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.ranged);
+    assert!(facts.may_ranged_strike_once_during_basic_movement);
+    assert!(facts.may_step_after_ranged_strike);
 }
 
 #[test]

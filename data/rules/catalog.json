@@ -8990,6 +8990,114 @@
         "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
         "testName": "rule_catalog_0404_start_turn_draw_spells_then_lure_no_ops_when_no_enemy_is_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0405",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis discard-top-spells and draw-a-spell per adjacent same-card site, playing it resolves adjacent draws first, then publicly discards the top two spells from the controller's Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0405_site_genesis_draws_per_adjacent_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0406",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same discard-plus-adjacent-draw site has no adjacent same-card site, Genesis still publicly discards the top two spells and does not draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0406_site_genesis_discard_only_when_no_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0407",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 minion that may Ranged strike once during basic movement and may step after a Ranged strike can fire from any occupied footprint cell while movement is paused, then take the optional post-strike step that translates every occupied cell before basic movement resumes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayRangedStrikeOnceDuringBasicMovement",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "shoot-projectile",
+        "resolve-ranged-step"
+      ],
+      "eventHints": [
+        "basic-movement-started",
+        "projectile-shot",
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0407_oversized_during_movement_ranged_then_post_strike_step_translates_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0408",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same 2x2 minion declines the optional post-strike step after a during-movement Ranged strike, basic movement resumes from the starting footprint and the declared path still completes normally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "ranged",
+        "mayRangedStrikeOnceDuringBasicMovement",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "shoot-projectile",
+        "resolve-ranged-step",
+        "continue-basic-movement"
+      ],
+      "eventHints": [
+        "basic-movement-started",
+        "projectile-shot",
+        "basic-movement-continued"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0408_oversized_during_movement_ranged_then_declined_step_continues_movement"
+      }
     }
   ]
 }
