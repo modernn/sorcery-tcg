@@ -5355,6 +5355,427 @@ fn rule_catalog_0470_site_genesis_conditional_mana_discards_top_spells_without_a
     assert_exact_replay(&session);
 }
 
+fn token_stealth_conditional_manifest(seed: u32, north_spellbook_count: usize) -> String {
+    let mut stealth = minion(1, 2);
+    stealth["stealth"] = json!(true);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &stealth,
+        &stealth,
+        6,
+        north_spellbook_count,
+        5,
+    );
+    let mut site_card = adjacent_combo_site(&json!({
+        "genesisEnemiesLoseStealth": true,
+        "genesisGainManaIfOnlyControlledCopy": 1,
+    }));
+    site_card["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("adjacent-combo-site".to_owned(), site_card);
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+fn heal_bottom_conditional_site() -> Value {
+    let mut card = site();
+    card.as_object_mut().expect("heal-bottom site").extend(
+        json!({
+            "genesisGainManaIfOnlyControlledCopy": 1,
+            "genesisHealNearbyAvatars": 3,
+            "genesisMayBottomNextSpell": true,
+        })
+        .as_object()
+        .expect("heal-bottom facts")
+        .clone(),
+    );
+    card
+}
+
+fn adjacent_heal_bottom_conditional_manifest(
+    seed: u32,
+    north_atlas_count: usize,
+    north_spellbook_count: usize,
+) -> String {
+    let mut loss = minion(1, 2);
+    loss["genesisLoseControllerLife"] = json!(2);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &loss,
+        &minion(1, 2),
+        north_atlas_count,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]["setup-site"] = site();
+    value["cards"]["heal-bottom-site"] = heal_bottom_conditional_site();
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    let mut north_atlas = vec!["setup-site"; north_atlas_count.saturating_sub(2)];
+    north_atlas.extend(["heal-bottom-site", "heal-bottom-site"]);
+    value["decks"]["north"]["atlas"] = json!(north_atlas);
+    value["decks"]["south"]["atlas"] = json!(vec!["setup-site"; 6]);
+    finish_manifest(value)
+}
+
+fn immobilize_reorder_conditional_genesis_facts() -> Value {
+    json!({
+        "genesisGainManaIfOnlyControlledCopy": 1,
+        "genesisImmobilizeNearbyUntilNextTurn": true,
+        "genesisReorderNextSpells": 3,
+    })
+}
+
+#[test]
+fn rule_catalog_0471_site_genesis_conditional_mana_pay_token_strip_stealth_per_adjacent() {
+    let manifest = token_stealth_conditional_manifest(471, 10);
+    let mut session =
+        Session::new(&manifest).expect("valid conditional token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = origin["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C3",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "site-played",
+            "minion-summoned",
+            "stealth-lost",
+            "spell-drawn"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload["instanceId"],
+        json!(expected_token_id)
+    );
+    assert_eq!(
+        receipt.events[2].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0472_site_genesis_conditional_mana_decline_token_strip_stealth_per_adjacent() {
+    let manifest = token_stealth_conditional_manifest(472, 10);
+    let mut session =
+        Session::new(&manifest).expect("valid conditional token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "stealth-lost", "spell-drawn"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0473_site_genesis_conditional_mana_pay_token_on_first_controlled_copy() {
+    let manifest = token_stealth_conditional_manifest(473, 6);
+    let mut session =
+        Session::new(&manifest).expect("valid conditional token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = origin["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C4",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "mana-gained", "minion-summoned"]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(
+        receipt.events[2].payload["instanceId"],
+        json!(expected_token_id)
+    );
+    assert_eq!(state(&session)["players"]["north"]["mana"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0474_site_genesis_conditional_mana_decline_token_on_first_controlled_copy() {
+    let manifest = token_stealth_conditional_manifest(474, 6);
+    let mut session =
+        Session::new(&manifest).expect("valid conditional token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 1,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["mana"], 2);
+    assert_eq!(state(&session)["realm"]["units"], json!([]));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0475_site_genesis_conditional_mana_heal_nearby_then_bottom_next_spell() {
+    let manifest = adjacent_heal_bottom_conditional_manifest(475, 6, 10);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional heal-bottom Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_heal_play(&mut session);
+    let mana_before = state(&session)["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardId"] == "heal-bottom-site"
+    });
+
+    assert_eq!(
+        event_types(&play_receipt),
+        ["site-played", "avatar-healed", "mana-gained"]
+    );
+    assert_eq!(play_receipt.events[1].payload["amount"], 2);
+    assert_eq!(play_receipt.events[2].payload["amount"], 1);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["north"]["mana"], mana_before + 2);
+    assert_eq!(state(&session)["phase"], "genesis");
+
+    let mut bottomed = session;
+    let (_, bottomed_receipt) = accept_where(&mut bottomed, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "bottom-next"
+    });
+    let mut rotated = before_spellbook
+        .as_array()
+        .expect("Spellbook cards")
+        .clone();
+    let first = rotated.remove(0);
+    rotated.push(first);
+    assert_eq!(event_types(&bottomed_receipt), ["spell-bottomed"]);
+    assert_eq!(
+        state(&bottomed)["players"]["north"]["spellbook"],
+        Value::Array(rotated)
+    );
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&bottomed_receipt.events)
+            .expect("bottomed events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&bottomed);
+}
+
+#[test]
+fn rule_catalog_0476_site_genesis_conditional_mana_heal_nearby_then_keep_next_spell() {
+    let manifest = adjacent_heal_bottom_conditional_manifest(476, 6, 10);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional heal-bottom Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_heal_play(&mut session);
+    let mana_before = state(&session)["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardId"] == "heal-bottom-site"
+    });
+
+    assert_eq!(
+        event_types(&play_receipt),
+        ["site-played", "avatar-healed", "mana-gained"]
+    );
+    assert_eq!(state(&session)["phase"], "genesis");
+    assert_eq!(state(&session)["players"]["north"]["mana"], mana_before + 2);
+
+    let mut kept = session;
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "keep-next"
+    });
+    assert_eq!(event_types(&kept_receipt), ["spell-kept"]);
+    assert_eq!(
+        state(&kept)["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(state(&kept)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&kept);
+}
+
+#[test]
+fn rule_catalog_0477_site_genesis_conditional_mana_immobilize_nearby_then_reorder_next_spells() {
+    let manifest =
+        private_site_genesis_manifest(477, &immobilize_reorder_conditional_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "mana-gained"]);
+    assert_eq!(play_receipt.events[1].payload["amount"], 1);
+    assert_eq!(state(&played)["players"]["north"]["mana"], mana_before + 2);
+    assert_eq!(
+        state(&played)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        }])
+    );
+    assert_eq!(state(&played)["phase"], "genesis");
+
+    let mut reordered = played;
+    let (_, reordered_receipt) = accept_where(&mut reordered, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([2, 1, 0])
+    });
+    assert_eq!(event_types(&reordered_receipt), ["spells-reordered"]);
+    assert_eq!(
+        state(&reordered)["players"]["north"]["spellbook"][0],
+        before_spellbook[2]
+    );
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&reordered_receipt.events)
+            .expect("reordered events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&reordered);
+}
+
+#[test]
+fn rule_catalog_0478_site_genesis_conditional_mana_immobilize_nearby_then_keep_spell_order() {
+    let manifest =
+        private_site_genesis_manifest(478, &immobilize_reorder_conditional_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "mana-gained"]);
+    assert_eq!(state(&played)["players"]["north"]["mana"], mana_before + 2);
+    assert_eq!(
+        state(&played)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        }])
+    );
+
+    let mut kept = played;
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([0, 1, 2])
+    });
+    assert_eq!(event_types(&kept_receipt), ["spells-reordered"]);
+    assert_eq!(
+        state(&kept)["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(state(&kept)["players"]["north"]["mana"], mana_before + 2);
+    assert_exact_replay(&kept);
+}
+
 #[test]
 fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
     let manifest =

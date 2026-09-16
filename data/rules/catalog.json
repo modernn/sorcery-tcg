@@ -10690,6 +10690,222 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0470_site_genesis_conditional_mana_discards_top_spells_without_adjacent_match"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0471",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, optional paid-token summon, strip-enemy-stealth, and draw-spell-per-adjacent-same-card, paying for the token on a later copy adjacent to a matching site summons the token, strips nearby enemy Stealth, and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisEnemiesLoseStealth",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "stealth-lost",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0471_site_genesis_conditional_mana_pay_token_strip_stealth_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0472",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, paid-token, strip-stealth, and adjacent-draw site is played on a later copy, declining the token still strips nearby enemy Stealth and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisEnemiesLoseStealth",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "stealth-lost",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0472_site_genesis_conditional_mana_decline_token_strip_stealth_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0473",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana and optional paid-token summon alongside strip-enemy-stealth, paying for the token on the first controlled copy grants the conditional mana net of the token payment.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisEnemiesLoseStealth"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0473_site_genesis_conditional_mana_pay_token_on_first_controlled_copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0474",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and paid-token site is played on the first controlled copy, declining the token still grants the conditional mana gain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisEnemiesLoseStealth"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0474_site_genesis_conditional_mana_decline_token_on_first_controlled_copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0475",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, heal-nearby-avatars, and may-bottom-next-spell, playing the first controlled copy publicly heals the nearby Avatar and gains the conditional mana, then enters hidden spell Genesis where the controller may bottom the next spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisHealNearbyAvatars",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "mana-gained",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0475_site_genesis_conditional_mana_heal_nearby_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0476",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, heal-nearby, and may-bottom site is played on the first controlled copy, keeping the next spell preserves Spellbook order while the heal and conditional mana gain remain resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisHealNearbyAvatars",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "mana-gained",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0476_site_genesis_conditional_mana_heal_nearby_then_keep_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0477",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, immobilize-nearby-until-next-turn, and reorder-next-spells, playing the first controlled copy creates the immobile area and gains the conditional mana, then enters hidden spell-order Genesis where the controller may reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0477_site_genesis_conditional_mana_immobilize_nearby_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0478",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, immobilize-nearby, and reorder site is played on the first controlled copy, choosing the identity order keeps Spellbook order while the immobile area and conditional mana gain remain resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0478_site_genesis_conditional_mana_immobilize_nearby_then_keep_spell_order"
+      }
     }
   ]
 }
