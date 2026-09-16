@@ -8662,11 +8662,10 @@ impl Game {
         target: Option<&UnitTarget>,
     ) -> bool {
         match (genesis_may_damage_target_adjacent_unit, choice, target) {
-            (true, Some(GenesisDamageChoice::Decline), None) => true,
             (true, Some(GenesisDamageChoice::Target), Some(target)) => self
                 .genesis_damage_targets(seat, source_instance_id, source_cells)
                 .contains(target),
-            (false, None, None) => true,
+            (true, Some(GenesisDamageChoice::Decline), None) | (false, None, None) => true,
             _ => false,
         }
     }

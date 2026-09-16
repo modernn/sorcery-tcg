@@ -1327,7 +1327,7 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.occupies_square_area_two);
-    assert_eq!(facts.genesis_damage_each_other_unit_here, true);
+    assert!(facts.genesis_damage_each_other_unit_here);
 }
 
 #[test]
@@ -1539,7 +1539,7 @@ fn genesis_disable_with_targeted_damage_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
+    assert!(facts.genesis_may_damage_target_adjacent_unit);
 }
 
 #[test]
@@ -1573,7 +1573,7 @@ fn genesis_disable_with_each_other_unit_here_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis_damage_each_other_unit_here, true);
+    assert!(facts.genesis_damage_each_other_unit_here);
 }
 
 #[test]
@@ -1623,7 +1623,7 @@ fn targeted_genesis_with_random_card_discard_payment_should_parse() {
     .expect("valid targeted Genesis with alternative payment minion") else {
         panic!("expected minion facts");
     };
-    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
+    assert!(facts.genesis_may_damage_target_adjacent_unit);
     assert_eq!(
         facts.alternative_summon_payment,
         Some(facts::AlternativeSummonPayment::DiscardRandomCardInsteadOfMana)
@@ -1643,7 +1643,7 @@ fn targeted_genesis_with_sacrifice_discount_payment_should_parse() {
     .expect("valid targeted Genesis with sacrifice payment minion") else {
         panic!("expected minion facts");
     };
-    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
+    assert!(facts.genesis_may_damage_target_adjacent_unit);
     assert_eq!(
         facts.alternative_summon_payment,
         Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)

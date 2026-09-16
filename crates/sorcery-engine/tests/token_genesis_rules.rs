@@ -1125,6 +1125,53 @@ fn rule_catalog_0491_token_genesis_disable_then_loses_controller_life() {
 }
 
 #[test]
+fn rule_catalog_0502_token_genesis_draws_spell_loses_life_then_heals_controller() {
+    let token = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDrawSpells": 1,
+        "genesisHealController": 2,
+        "genesisLoseControllerLife": 2,
+        "manaCost": 0,
+        "token": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let mut session =
+        Session::new(&manifest(502, &token)).expect("valid stacked genesis token manifest");
+    keep(&mut session);
+    keep(&mut session);
+    let spellbook_before = state(&session)["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north spellbook")
+        .len();
+    let (_, paid) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&paid),
+        [
+            "site-played",
+            "minion-summoned",
+            "spell-drawn",
+            "avatar-life-lost",
+            "avatar-healed"
+        ]
+    );
+    assert_eq!(paid.events[3].payload["amount"], 2);
+    assert_eq!(paid.events[4].payload["amount"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    let spellbook_after = state(&session)["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north spellbook")
+        .len();
+    assert_eq!(spellbook_after, spellbook_before - 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0492_spellbook_summon_genesis_disable_then_loses_controller_life() {
     let scout = json!({
         "attack": 1,

@@ -11511,6 +11511,35 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0501_spellbook_summon_draws_spell_then_heals_controller"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0502",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries stacked Genesis draw-spell, life loss, and controller heal, paid site entry resolves draw, then life loss, then healing through the shared printed-life cap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpells",
+        "genesisLoseControllerLife",
+        "genesisHealController"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "minion-summoned",
+        "spell-drawn",
+        "avatar-life-lost",
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0502_token_genesis_draws_spell_loses_life_then_heals_controller"
+      }
     }
   ]
 }
