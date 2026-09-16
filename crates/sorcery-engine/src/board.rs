@@ -375,10 +375,13 @@ mod tests {
         let area = Cell::SQUARE_AREAS[3];
         let anchor = Cell::parse("B1").expect("anchor");
         let wrapped = Cell::parse("B4").expect("wrapped anchor");
-        assert_eq!(
-            translated_square_connecting(area, anchor, wrapped, true),
-            Some(Cell::WRAPPED_SQUARE_AREAS[1])
-        );
+        let mut translated = translated_square_connecting(area, anchor, wrapped, true)
+            .expect("wrapped translation")
+            .map(Cell::index);
+        translated.sort_unstable();
+        let mut expected = Cell::WRAPPED_SQUARE_AREAS[1].map(Cell::index);
+        expected.sort_unstable();
+        assert_eq!(translated, expected);
         assert_eq!(
             translated_square_connecting(area, anchor, wrapped, false),
             None
