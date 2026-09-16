@@ -11602,6 +11602,21 @@
         "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
         "testName": "rule_catalog_0505_deck_pair_terminal_batch_reproduces_transcript_hash"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0506",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A finished synthetic demo with verified replay passes every TEST-04 gate and classifies as rules-complete but authority-unverified rather than partial-rules.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0506_finished_synthetic_game_classifies_unranked_unverified_authority"
+      }
     }
   ]
 }
