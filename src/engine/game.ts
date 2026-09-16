@@ -2147,8 +2147,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.genesisDisableSelfUntilDamaged === true
     && (card.genesisDamageEachOtherUnitHere === 1
-      || card.genesisStrikeEachEnemyHere === true
-      || card.genesisLoseControllerLife !== undefined)) {
+      || card.genesisStrikeEachEnemyHere === true)) {
     throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {

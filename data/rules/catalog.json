@@ -11220,6 +11220,58 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0490_spellbook_summon_genesis_disable_then_heals_controller"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0491",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both disable-until-damaged and controller-life-loss Genesis, paid site entry disables the token and then makes its controller lose 2 life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisLoseControllerLife"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0491_token_genesis_disable_then_loses_controller_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0492",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and controller-life-loss Genesis, summoning it disables the minion and then makes its controller lose 2 life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisLoseControllerLife"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0492_spellbook_summon_genesis_disable_then_loses_controller_life"
+      }
     }
   ]
 }
