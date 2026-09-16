@@ -11115,6 +11115,59 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0486_spellbook_summon_genesis_disable_then_draws_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0487",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both disable-until-damaged and optional adjacent Genesis damage, declining the damage disables the token without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisMayDamageTargetAdjacentUnit"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0487_token_genesis_disable_declines_adjacent_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0488",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and optional adjacent Genesis damage, choosing a legal target disables the minion and then deals the printed Genesis damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisMayDamageTargetAdjacentUnit"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "genesis-damage-allocated",
+        "damage-dealt",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0488_spellbook_summon_genesis_disable_targets_adjacent_damage"
+      }
     }
   ]
 }

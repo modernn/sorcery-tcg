@@ -10331,6 +10331,24 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       && stealthGenesisDisable.cards[alliedMinionId].stealth,
     true,
   );
+  const disableGenesisTargetedDamage = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisDisableSelfUntilDamaged: true,
+        genesisMayDamageTargetAdjacentUnit: 2,
+      } as GameCardDefinition,
+    },
+    seed: 1,
+  });
+  assert.equal(
+    disableGenesisTargetedDamage.cards[alliedMinionId]?.cardType === 'minion'
+      && disableGenesisTargetedDamage.cards[alliedMinionId].genesisDisableSelfUntilDamaged
+      && disableGenesisTargetedDamage.cards[alliedMinionId].genesisMayDamageTargetAdjacentUnit === 2,
+    true,
+  );
   const disableGenesisDrawSpells = createGameManifest({
     ...input,
     cards: {

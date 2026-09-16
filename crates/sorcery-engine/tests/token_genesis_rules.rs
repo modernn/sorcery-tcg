@@ -693,6 +693,200 @@ fn rule_catalog_0486_spellbook_summon_genesis_disable_then_draws_spell() {
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_0487_token_genesis_disable_declines_adjacent_damage() {
+    let token = disable_damage_scout();
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "token-genesis-disable-damage-decline" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-token-genesis-disable-damage-decline-v1",
+        },
+        "cards": {
+            "damage-scout": token,
+            "north-avatar": avatar(),
+            "north-gate": genesis_site("damage-scout"),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-gate"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 487,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid disable-damage decline token genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    let source_id = state(&session)["players"]["north"]["hand"]["atlas"][0]["instanceId"]
+        .as_str()
+        .expect("site identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+            && descriptor["genesisDamageChoice"] == "decline"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "minion-summoned", "minion-disabled"]
+    );
+    let token_id = receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity");
+    assert_eq!(receipt.events[2].payload["instanceId"], token_id);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == token_id)
+        .expect("summoned token");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps setup, target damage, disable state, and replay together"
+)]
+fn rule_catalog_0488_spellbook_summon_genesis_disable_targets_adjacent_damage() {
+    let scout = json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "genesisDisableSelfUntilDamaged": true,
+        "genesisMayDamageTargetAdjacentUnit": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let mut enemy = dummy();
+    enemy["summonToAnySite"] = json!(true);
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "spellbook-genesis-disable-damage" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-spellbook-genesis-disable-damage-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-scout": scout,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": enemy,
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-scout"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 488,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid spellbook disable-damage genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let before = state(&session);
+    let source_id = before["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("scout identity")
+        .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "minion-disabled",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        receipt.events[2].payload,
+        json!({
+            "amount": 2,
+            "sourceInstanceId": source_id,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    let minion_id = receipt.events[0].payload["instanceId"]
+        .as_str()
+        .expect("minion identity");
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == minion_id)
+        .expect("summoned minion");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_exact_replay(&session);
+}
+
 fn damage_scout() -> Value {
     json!({
         "attack": 1,
@@ -703,6 +897,12 @@ fn damage_scout() -> Value {
         "token": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
+}
+
+fn disable_damage_scout() -> Value {
+    let mut scout = damage_scout();
+    scout["genesisDisableSelfUntilDamaged"] = json!(true);
+    scout
 }
 
 fn magic(effect: (&str, Value), mana_cost: u8) -> Value {
