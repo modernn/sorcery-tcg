@@ -49,6 +49,19 @@ pub enum GenesisDamageChoice {
     Target,
 }
 
+/// One token's optional Genesis damage decision bundled with a Magic token summon.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct TokenGenesisDamageResolution {
+    /// Decline or select the accompanying optional Genesis damage.
+    pub genesis_damage_choice: GenesisDamageChoice,
+    /// Exact Avatar or minion selected for optional Genesis damage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genesis_damage_target: Option<UnitTarget>,
+    /// Authoritative token instance identity the decision accompanies.
+    pub token_instance_id: IdentityHash,
+}
+
 /// An engine-issued alternative payment for a minion summon.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -311,6 +324,12 @@ pub enum ActionDescriptor {
         /// Issued branch for a site with optional paid-token Genesis.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         genesis_token_choice: Option<GenesisTokenChoice>,
+        /// Decline or select optional Genesis damage on a paid site token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        /// Exact Avatar or minion selected for optional paid-token Genesis damage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_target: Option<UnitTarget>,
     },
     /// Replace adjacent Rubble with the still-hidden top Atlas site.
     ReplaceRubbleWithTopAtlasSite {
@@ -339,6 +358,12 @@ pub enum ActionDescriptor {
     ResolveGenesisToken {
         /// Decline or pay for the revealed site's token.
         choice: GenesisTokenChoice,
+        /// Decline or select optional Genesis damage on the paid token.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        /// Exact Avatar or minion selected for optional paid-token Genesis damage.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        genesis_damage_target: Option<UnitTarget>,
     },
     /// Keep or bottom a still-hidden top Spellbook card.
     ResolveGenesisSpell {
@@ -445,6 +470,9 @@ pub enum ActionDescriptor {
         /// Exact enemy minion tempted one step closer by Lure.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tempted_enemy: Option<UnitTarget>,
+        /// Optional Genesis damage decisions for one or more summoned tokens.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token_genesis_damage: Option<Box<[TokenGenesisDamageResolution]>>,
     },
     /// Conjure one supported Artifact from the player's hand.
     CastArtifact {
@@ -1188,6 +1216,8 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     cell: left_cell,
                     create_rubble_at: left_rubble,
                     genesis_token_choice: left_choice,
+                    genesis_damage_choice: left_damage_choice,
+                    genesis_damage_target: left_damage_target,
                 },
                 ActionDescriptor::PlaySite {
                     card_id: right_card,
@@ -1195,12 +1225,26 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     cell: right_cell,
                     create_rubble_at: right_rubble,
                     genesis_token_choice: right_choice,
+                    genesis_damage_choice: right_damage_choice,
+                    genesis_damage_target: right_damage_target,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_cell.cmp(right_cell))
                 .then_with(|| compare_optional_cells(*left_rubble, *right_rubble))
-                .then_with(|| compare_optional_genesis_choices(*left_choice, *right_choice)),
+                .then_with(|| compare_optional_genesis_choices(*left_choice, *right_choice))
+                .then_with(|| {
+                    compare_optional_genesis_damage_choices(
+                        *left_damage_choice,
+                        *right_damage_choice,
+                    )
+                })
+                .then_with(|| {
+                    compare_optional_unit_targets(
+                        left_damage_target.as_ref(),
+                        right_damage_target.as_ref(),
+                    )
+                }),
             (
                 ActionDescriptor::BeginChainMagic {
                     card_id: left_card,
@@ -1238,6 +1282,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target_site_instance_id: left_site,
                     tempted_destination: left_tempted_destination,
                     tempted_enemy: left_tempted_enemy,
+                    token_genesis_damage: left_token_genesis_damage,
                 },
                 ActionDescriptor::CastMagic {
                     ally: right_ally,
@@ -1258,6 +1303,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     target_site_instance_id: right_site,
                     tempted_destination: right_tempted_destination,
                     tempted_enemy: right_tempted_enemy,
+                    token_genesis_damage: right_token_genesis_damage,
                 },
             ) => compare_optional_unit_targets(left_ally.as_ref(), right_ally.as_ref())
                 .then_with(|| compare_optional_locations(*left_destination, *right_destination))
@@ -1300,6 +1346,12 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     compare_optional_unit_targets(
                         left_tempted_enemy.as_ref(),
                         right_tempted_enemy.as_ref(),
+                    )
+                })
+                .then_with(|| {
+                    compare_optional_token_genesis_damage(
+                        left_token_genesis_damage.as_deref(),
+                        right_token_genesis_damage.as_deref(),
                     )
                 }),
             (
@@ -1699,9 +1751,30 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         ActionDescriptor::ResolveGenesisSpellOrder { order: right },
                     ) => compare_json_array(left, right, u8::cmp),
                     (
-                        ActionDescriptor::ResolveGenesisToken { choice: left },
-                        ActionDescriptor::ResolveGenesisToken { choice: right },
-                    ) => left.cmp(right),
+                        ActionDescriptor::ResolveGenesisToken {
+                            choice: left_choice,
+                            genesis_damage_choice: left_damage_choice,
+                            genesis_damage_target: left_damage_target,
+                        },
+                        ActionDescriptor::ResolveGenesisToken {
+                            choice: right_choice,
+                            genesis_damage_choice: right_damage_choice,
+                            genesis_damage_target: right_damage_target,
+                        },
+                    ) => left_choice
+                        .cmp(right_choice)
+                        .then_with(|| {
+                            compare_optional_genesis_damage_choices(
+                                *left_damage_choice,
+                                *right_damage_choice,
+                            )
+                        })
+                        .then_with(|| {
+                            compare_optional_unit_targets(
+                                left_damage_target.as_ref(),
+                                right_damage_target.as_ref(),
+                            )
+                        }),
                     (
                         ActionDescriptor::ResolveRangedStep {
                             choice: left_choice,
@@ -1785,6 +1858,33 @@ fn compare_optional_genesis_damage_choices(
 ) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_token_genesis_damage(
+    left: &TokenGenesisDamageResolution,
+    right: &TokenGenesisDamageResolution,
+) -> Ordering {
+    left.token_instance_id
+        .cmp(&right.token_instance_id)
+        .then_with(|| left.genesis_damage_choice.cmp(&right.genesis_damage_choice))
+        .then_with(|| {
+            compare_optional_unit_targets(
+                left.genesis_damage_target.as_ref(),
+                right.genesis_damage_target.as_ref(),
+            )
+        })
+}
+
+fn compare_optional_token_genesis_damage(
+    left: Option<&[TokenGenesisDamageResolution]>,
+    right: Option<&[TokenGenesisDamageResolution]>,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_json_array(left, right, compare_token_genesis_damage),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,

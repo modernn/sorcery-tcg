@@ -8447,6 +8447,51 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0382_token_genesis_disables_the_token_until_damaged"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0383",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A token minion with adjacent-damage Genesis offers decline and nearby target branches when it enters through paid site Genesis.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "genesisMayDamageTargetAdjacentUnit"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0383_token_genesis_damage_should_issue_decline_and_nearby_targets_on_site_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0384",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A token minion with adjacent-damage Genesis offers decline and nearby target branches when Magic summons it to a site bordering an enemy site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "genesisMayDamageTargetAdjacentUnit",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_damage"
+      }
     }
   ]
 }

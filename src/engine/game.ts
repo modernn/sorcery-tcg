@@ -688,6 +688,8 @@ type PlaySiteDescriptor = Readonly<{
   cell: RealmCell;
   createRubbleAt?: RealmCell;
   fromTopAtlas?: true;
+  genesisDamageChoice?: 'decline' | 'target';
+  genesisDamageTarget?: GameUnitRef;
   genesisTokenChoice?: 'decline' | 'defer' | 'pay-one-mana';
   kind: 'play-site';
 }>;
@@ -993,6 +995,8 @@ type GameActionDescriptor =
   }>
   | Readonly<{
     choice: 'decline' | 'pay-one-mana';
+    genesisDamageChoice?: 'decline' | 'target';
+    genesisDamageTarget?: GameUnitRef;
     kind: 'resolve-genesis-token';
   }>
   | Readonly<{
@@ -2473,9 +2477,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   }
   if (card.token !== undefined && card.token !== true) {
     throw new RangeError(`${path}.token must be true when defined`);
-  }
-  if (card.token === true && card.genesisMayDamageTargetAdjacentUnit === 2) {
-    throw new RangeError(`${path} token adjacent Genesis damage is unsupported`);
   }
   if (card.ward !== undefined && typeof card.ward !== 'boolean') {
     throw new RangeError(`${path}.ward must be boolean`);

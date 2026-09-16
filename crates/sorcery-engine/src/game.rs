@@ -10,8 +10,8 @@ use serde_json::{Map, Value, json};
 
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisDamageChoice, GenesisSpellChoice,
-    GenesisTokenChoice, ProjectileDirection, RangedStepChoice, SummonPaymentMode, UnitTarget,
-    compare_canonical, location_label,
+    GenesisTokenChoice, ProjectileDirection, RangedStepChoice, SummonPaymentMode,
+    TokenGenesisDamageResolution, UnitTarget, compare_canonical, location_label,
 };
 use crate::board::{Cell, Location, LowerRegion, Region, SquareArea, translated_square_connecting};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
@@ -785,6 +785,8 @@ struct SiteGenesisContinuation {
     create_rubble_at: Option<Cell>,
     defer_token: bool,
     from_top_atlas: bool,
+    genesis_damage_choice: Option<GenesisDamageChoice>,
+    genesis_damage_target: Option<UnitTarget>,
     genesis_gain_mana: Option<u8>,
     genesis_spell_draw_count: usize,
     genesis_token_choice: Option<GenesisTokenChoice>,
@@ -2977,6 +2979,68 @@ impl Game {
         Ok(())
     }
 
+    fn append_pending_genesis_token_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        pending: &PendingGenesisToken,
+    ) -> Result<(), GameError> {
+        let seat = self.position.decision_seat;
+        if pending.seat != seat {
+            return Err(invalid("Genesis token choice belongs to another seat"));
+        }
+        self.push_action(
+            actions,
+            ActionDescriptor::ResolveGenesisToken {
+                choice: GenesisTokenChoice::Decline,
+                genesis_damage_choice: None,
+                genesis_damage_target: None,
+            },
+            "Decline the optional Genesis token".to_owned(),
+        );
+        if self.position.players[seat_index(pending.seat)].mana > 0 {
+            let site = self.position.sites[pending.cell.index()]
+                .as_ref()
+                .ok_or_else(|| invalid("pending Genesis token source is missing"))?;
+            let CardFacts::Site(facts) = &self.rules.cards[usize::from(site.card.card_id.0)].facts
+            else {
+                return Err(invalid("pending Genesis token source is not a site"));
+            };
+            let token_card_id = facts
+                .genesis_pay_one_mana_to_summon_token
+                .as_deref()
+                .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
+            if !self.site_abilities_lost(pending.cell)
+                && self.token_may_enter_cell(pending.seat, token_card_id, pending.cell)?
+            {
+                for (genesis_damage_choice, genesis_damage_target) in self
+                    .prospective_token_genesis_damage_branches(
+                        pending.seat,
+                        token_card_id,
+                        &pending.source_instance_id,
+                        pending.cell,
+                        0,
+                        self.position.state_version,
+                    )?
+                {
+                    let genesis_suffix = Self::genesis_damage_suffix(
+                        genesis_damage_choice,
+                        genesis_damage_target.as_ref(),
+                    );
+                    self.push_action(
+                        actions,
+                        ActionDescriptor::ResolveGenesisToken {
+                            choice: GenesisTokenChoice::PayOneMana,
+                            genesis_damage_choice,
+                            genesis_damage_target: genesis_damage_target.clone(),
+                        },
+                        format!("Pay 1 to summon {token_card_id}{genesis_suffix}"),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn append_genesis_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
         let seat = self.position.decision_seat;
         if let PendingField::Pending(pending) = &self.position.pending_genesis_spell_order {
@@ -3007,42 +3071,7 @@ impl Game {
             return Ok(());
         }
         if let PendingField::Pending(pending) = &self.position.pending_genesis_token {
-            if pending.seat != seat {
-                return Err(invalid("Genesis token choice belongs to another seat"));
-            }
-            self.push_action(
-                actions,
-                ActionDescriptor::ResolveGenesisToken {
-                    choice: GenesisTokenChoice::Decline,
-                },
-                "Decline the optional Genesis token".to_owned(),
-            );
-            if self.position.players[seat_index(pending.seat)].mana > 0 {
-                let site = self.position.sites[pending.cell.index()]
-                    .as_ref()
-                    .ok_or_else(|| invalid("pending Genesis token source is missing"))?;
-                let CardFacts::Site(facts) =
-                    &self.rules.cards[usize::from(site.card.card_id.0)].facts
-                else {
-                    return Err(invalid("pending Genesis token source is not a site"));
-                };
-                let token_card_id = facts
-                    .genesis_pay_one_mana_to_summon_token
-                    .as_deref()
-                    .ok_or_else(|| invalid("pending Genesis site lacks its token fact"))?;
-                if !self.site_abilities_lost(pending.cell)
-                    && self.token_may_enter_cell(pending.seat, token_card_id, pending.cell)?
-                {
-                    self.push_action(
-                        actions,
-                        ActionDescriptor::ResolveGenesisToken {
-                            choice: GenesisTokenChoice::PayOneMana,
-                        },
-                        format!("Pay 1 to summon {token_card_id}"),
-                    );
-                }
-            }
-            return Ok(());
+            return self.append_pending_genesis_token_actions(actions, pending);
         }
         let PendingField::Pending(pending) = &self.position.pending_genesis_spell else {
             return Err(invalid("Genesis phase lacks its pending choice"));
@@ -3181,21 +3210,52 @@ impl Game {
                             Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
                             None => "",
                         };
-                        for create_rubble_at in &rubble_choices {
-                            let rubble_suffix = create_rubble_at.map_or_else(String::new, |cell| {
-                                format!(" — create Rubble at {cell}")
-                            });
-                            self.push_action(
-                                actions,
-                                ActionDescriptor::PlaySite {
-                                    card_id: card_id.clone(),
-                                    card_instance_id: card.instance_id.clone(),
-                                    cell: *cell,
-                                    create_rubble_at: *create_rubble_at,
-                                    genesis_token_choice,
-                                },
-                                format!("Play {card_id} at {cell}{token_suffix}{rubble_suffix}"),
+                        let genesis_damage_branches = if genesis_token_choice
+                            == Some(GenesisTokenChoice::PayOneMana)
+                        {
+                            let token_card_id = site_facts
+                                .genesis_pay_one_mana_to_summon_token
+                                .as_deref()
+                                .ok_or_else(|| invalid("paid site Genesis lacks its token fact"))?;
+                            self.prospective_token_genesis_damage_branches(
+                                seat,
+                                token_card_id,
+                                &card.instance_id,
+                                *cell,
+                                0,
+                                self.position.state_version,
+                            )?
+                        } else {
+                            vec![(None, None)]
+                        };
+                        for (genesis_damage_choice, genesis_damage_target) in
+                            genesis_damage_branches
+                        {
+                            let genesis_suffix = Self::genesis_damage_suffix(
+                                genesis_damage_choice,
+                                genesis_damage_target.as_ref(),
                             );
+                            for create_rubble_at in &rubble_choices {
+                                let rubble_suffix = create_rubble_at
+                                    .map_or_else(String::new, |cell| {
+                                        format!(" — create Rubble at {cell}")
+                                    });
+                                self.push_action(
+                                    actions,
+                                    ActionDescriptor::PlaySite {
+                                        card_id: card_id.clone(),
+                                        card_instance_id: card.instance_id.clone(),
+                                        cell: *cell,
+                                        create_rubble_at: *create_rubble_at,
+                                        genesis_token_choice,
+                                        genesis_damage_choice,
+                                        genesis_damage_target: genesis_damage_target.clone(),
+                                    },
+                                    format!(
+                                        "Play {card_id} at {cell}{token_suffix}{genesis_suffix}{rubble_suffix}"
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
@@ -3337,126 +3397,170 @@ impl Game {
                 if facts.discard_card_as_additional_cost {
                     choices = self.with_chosen_hand_discard(seat, &card.instance_id, choices);
                 }
+                let token_genesis_products = match &facts.effect {
+                    MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(
+                        token_card_id,
+                    ) => self.magic_token_genesis_damage_products(
+                        seat,
+                        &card.instance_id,
+                        token_card_id,
+                    )?,
+                    _ => vec![Vec::new()],
+                };
                 for choice in choices {
-                    let descriptor = ActionDescriptor::CastMagic {
-                        ally: choice.ally,
-                        ally_destination: choice.ally_destination,
-                        ally_destination_cells: choice.ally_destination_cells,
-                        ally_strike_location: choice.ally_strike_location,
-                        card_id: definition.id.clone(),
-                        card_instance_id: card.instance_id.clone(),
-                        caster_instance_id: caster_instance_id.clone(),
-                        cemetery_minion_instance_id: choice.cemetery_minion_instance_id,
-                        discard_card_instance_id: choice.discard_card_instance_id,
-                        discard_site_instance_id: choice.discard_site_instance_id,
-                        draw_zone: choice.draw_zone,
-                        target: choice.target,
-                        target_artifact_instance_id: choice.target_artifact_instance_id,
-                        target_aura_instance_id: choice.target_aura_instance_id,
-                        target_location: choice.target_location,
-                        target_site_instance_id: choice.target_site_instance_id,
-                        tempted_destination: choice.tempted_destination,
-                        tempted_enemy: choice.tempted_enemy,
-                    };
-                    let label =
-                        (if matches!(facts.effect, MagicEffect::GrantFirstStrikeToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("First Strike grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant First Strike to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Lethal grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Lethal to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Ranged grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Ranged to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::GrantAirborneToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Airborne grant action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant Airborne to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::GrantPowerTwoToAllyThisTurn) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally), ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid("Overpower action requires an ally"));
-                            };
-                            format!(
-                                "Cast {} to grant +2 power to {} {}…",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15]
-                            )
-                        } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
-                            let ActionDescriptor::CastMagic {
-                                ally: Some(ally),
-                                ally_destination: Some(destination),
-                                ally_strike_location,
-                                ..
-                            } = &descriptor
-                            else {
-                                return Err(invalid(
-                                    "Leap Attack action requires an ally destination",
-                                ));
-                            };
-                            let from = self.unit_target_location(ally)?;
-                            let stays = from == *destination;
-                            let strike = ally_strike_location.unwrap_or(*destination);
-                            format!(
-                                "Cast {}: {} {}… {} and strikes enemies at {}",
-                                definition.id,
-                                ally.kind(),
-                                &ally.instance_id().as_str()[..15],
-                                if stays {
-                                    "stays".to_owned()
-                                } else {
-                                    format!("steps to {}", destination.cell)
-                                },
-                                strike.cell
-                            )
+                    for token_genesis_damage in &token_genesis_products {
+                        let token_genesis_damage = if token_genesis_damage.is_empty() {
+                            None
                         } else {
-                            descriptor
-                                .state_independent_label()
-                                .ok_or_else(|| invalid("cast-magic action requires a label"))?
-                        }) + &self.minion_caster_suffix(seat, caster_instance_id);
-                    self.push_action(actions, descriptor, label);
+                            Some(token_genesis_damage.clone().into_boxed_slice())
+                        };
+                        let descriptor = ActionDescriptor::CastMagic {
+                            ally: choice.ally.clone(),
+                            ally_destination: choice.ally_destination,
+                            ally_destination_cells: choice.ally_destination_cells,
+                            ally_strike_location: choice.ally_strike_location,
+                            card_id: definition.id.clone(),
+                            card_instance_id: card.instance_id.clone(),
+                            caster_instance_id: caster_instance_id.clone(),
+                            cemetery_minion_instance_id: choice.cemetery_minion_instance_id.clone(),
+                            discard_card_instance_id: choice.discard_card_instance_id.clone(),
+                            discard_site_instance_id: choice.discard_site_instance_id.clone(),
+                            draw_zone: choice.draw_zone,
+                            target: choice.target.clone(),
+                            target_artifact_instance_id: choice.target_artifact_instance_id.clone(),
+                            target_aura_instance_id: choice.target_aura_instance_id.clone(),
+                            target_location: choice.target_location,
+                            target_site_instance_id: choice.target_site_instance_id.clone(),
+                            tempted_destination: choice.tempted_destination,
+                            tempted_enemy: choice.tempted_enemy.clone(),
+                            token_genesis_damage: token_genesis_damage.clone(),
+                        };
+                        let genesis_suffix =
+                            token_genesis_damage
+                                .as_ref()
+                                .map_or_else(String::new, |resolutions| {
+                                    resolutions
+                                        .iter()
+                                        .map(|resolution| {
+                                            Self::genesis_damage_suffix(
+                                                Some(resolution.genesis_damage_choice),
+                                                resolution.genesis_damage_target.as_ref(),
+                                            )
+                                        })
+                                        .collect::<String>()
+                                });
+                        let label =
+                            (if matches!(facts.effect, MagicEffect::GrantFirstStrikeToAllyThisTurn)
+                            {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid(
+                                        "First Strike grant action requires an ally",
+                                    ));
+                                };
+                                format!(
+                                    "Cast {} to grant First Strike to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn)
+                            {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid("Lethal grant action requires an ally"));
+                                };
+                                format!(
+                                    "Cast {} to grant Lethal to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn)
+                            {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid("Ranged grant action requires an ally"));
+                                };
+                                format!(
+                                    "Cast {} to grant Ranged to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(
+                                facts.effect,
+                                MagicEffect::GrantAirborneToAllyThisTurn
+                            ) {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid("Airborne grant action requires an ally"));
+                                };
+                                format!(
+                                    "Cast {} to grant Airborne to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(
+                                facts.effect,
+                                MagicEffect::GrantPowerTwoToAllyThisTurn
+                            ) {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid("Overpower action requires an ally"));
+                                };
+                                format!(
+                                    "Cast {} to grant +2 power to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(facts.effect, MagicEffect::LeapAttackAlly) {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally),
+                                    ally_destination: Some(destination),
+                                    ally_strike_location,
+                                    ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid(
+                                        "Leap Attack action requires an ally destination",
+                                    ));
+                                };
+                                let from = self.unit_target_location(ally)?;
+                                let stays = from == *destination;
+                                let strike = ally_strike_location.unwrap_or(*destination);
+                                format!(
+                                    "Cast {}: {} {}… {} and strikes enemies at {}",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15],
+                                    if stays {
+                                        "stays".to_owned()
+                                    } else {
+                                        format!("steps to {}", destination.cell)
+                                    },
+                                    strike.cell
+                                )
+                            } else {
+                                descriptor
+                                    .state_independent_label()
+                                    .ok_or_else(|| invalid("cast-magic action requires a label"))?
+                            }) + &genesis_suffix
+                                + &self.minion_caster_suffix(seat, caster_instance_id);
+                        self.push_action(actions, descriptor, label);
+                    }
                 }
             }
         }
@@ -8569,6 +8673,161 @@ impl Game {
         }
     }
 
+    #[expect(
+        clippy::type_complexity,
+        reason = "Genesis branch tuples mirror summon-minion issuance"
+    )]
+    fn prospective_token_genesis_damage_branches(
+        &self,
+        seat: Seat,
+        token_card_id: &str,
+        source_instance_id: &IdentityHash,
+        cell: Cell,
+        ordinal: usize,
+        origin_state_version: u64,
+    ) -> Result<Vec<(Option<GenesisDamageChoice>, Option<UnitTarget>)>, GameError> {
+        let token = self.create_token_unit(
+            seat,
+            token_card_id,
+            source_instance_id,
+            cell,
+            ordinal,
+            origin_state_version,
+        )?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(token.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok(self.genesis_damage_choices(
+            seat,
+            &token.card.instance_id,
+            token.location,
+            token.occupied_cells,
+            facts.genesis,
+        ))
+    }
+
+    #[expect(
+        clippy::type_complexity,
+        reason = "per-token branch lists stay colocated with cartesian product"
+    )]
+    fn token_genesis_damage_products(
+        tokens: &[(
+            IdentityHash,
+            Vec<(Option<GenesisDamageChoice>, Option<UnitTarget>)>,
+        )],
+    ) -> Vec<Vec<TokenGenesisDamageResolution>> {
+        let mut products = vec![Vec::new()];
+        for (token_instance_id, branches) in tokens {
+            let mut next = Vec::new();
+            for product in &products {
+                for (genesis_damage_choice, genesis_damage_target) in branches {
+                    let Some(genesis_damage_choice) = *genesis_damage_choice else {
+                        continue;
+                    };
+                    let mut resolution = product.clone();
+                    resolution.push(TokenGenesisDamageResolution {
+                        token_instance_id: token_instance_id.clone(),
+                        genesis_damage_choice,
+                        genesis_damage_target: genesis_damage_target.clone(),
+                    });
+                    next.push(resolution);
+                }
+            }
+            products = next;
+        }
+        products
+    }
+
+    fn magic_token_summon_cells(
+        &self,
+        seat: Seat,
+        token_card_id: &str,
+    ) -> Result<Vec<Cell>, GameError> {
+        let enemy = other_seat(seat);
+        let mut cells = Vec::new();
+        for cell in self.controlled_site_cells(seat) {
+            let borders_enemy = cell.bordering(false).any(|bordering| {
+                self.position.sites[bordering.index()]
+                    .as_ref()
+                    .is_some_and(|site| site.controller == enemy)
+            });
+            if borders_enemy && self.token_may_enter_cell(seat, token_card_id, cell)? {
+                cells.push(cell);
+            }
+        }
+        Ok(cells)
+    }
+
+    fn magic_token_genesis_damage_products(
+        &self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        token_card_id: &str,
+    ) -> Result<Vec<Vec<TokenGenesisDamageResolution>>, GameError> {
+        let origin_state_version = self.position.state_version;
+        let mut branches = Vec::new();
+        for (ordinal, cell) in self
+            .magic_token_summon_cells(seat, token_card_id)?
+            .into_iter()
+            .enumerate()
+        {
+            let token = self.create_token_unit(
+                seat,
+                token_card_id,
+                source_instance_id,
+                cell,
+                ordinal,
+                origin_state_version,
+            )?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(token.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            let choices = self.genesis_damage_choices(
+                seat,
+                &token.card.instance_id,
+                token.location,
+                token.occupied_cells,
+                facts.genesis,
+            );
+            if choices.iter().any(|(choice, _)| choice.is_some()) {
+                branches.push((token.card.instance_id.clone(), choices));
+            }
+        }
+        Ok(Self::token_genesis_damage_products(&branches))
+    }
+
+    fn valid_token_genesis_damage_resolution(
+        &self,
+        seat: Seat,
+        token: &UnitPosition,
+        resolution: Option<&TokenGenesisDamageResolution>,
+    ) -> bool {
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(token.card.card_id.0)].facts
+        else {
+            return false;
+        };
+        if facts.genesis != Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) {
+            return resolution.is_none();
+        }
+        let Some(resolution) = resolution else {
+            return false;
+        };
+        if resolution.token_instance_id != token.card.instance_id {
+            return false;
+        }
+        self.valid_genesis_damage_choice(
+            seat,
+            &token.card.instance_id,
+            Self::summon_occupied_cells(&token.location, token.occupied_cells.as_ref()),
+            facts.genesis,
+            Some(resolution.genesis_damage_choice),
+            resolution.genesis_damage_target.as_ref(),
+        )
+    }
+
     fn push_action(
         &self,
         actions: &mut Vec<IssuedAction>,
@@ -8834,9 +9093,17 @@ impl Game {
             ActionDescriptor::ResolveGenesisSpellOrder { order } => {
                 self.apply_resolve_genesis_spell_order(action.seat, order, outcomes)
             }
-            ActionDescriptor::ResolveGenesisToken { choice } => {
-                self.apply_resolve_genesis_token(action.seat, *choice, outcomes)
-            }
+            ActionDescriptor::ResolveGenesisToken {
+                choice,
+                genesis_damage_choice,
+                genesis_damage_target,
+            } => self.apply_resolve_genesis_token(
+                action.seat,
+                *choice,
+                *genesis_damage_choice,
+                genesis_damage_target.as_ref(),
+                outcomes,
+            ),
             ActionDescriptor::ResolveRangedStep { .. } => {
                 self.apply_resolve_ranged_step(action, outcomes)
             }
@@ -12693,6 +12960,8 @@ impl Game {
             cell,
             create_rubble_at,
             genesis_token_choice,
+            genesis_damage_choice,
+            genesis_damage_target,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -12701,6 +12970,8 @@ impl Game {
         let cell = *cell;
         let create_rubble_at = *create_rubble_at;
         let genesis_token_choice = *genesis_token_choice;
+        let genesis_damage_choice = *genesis_damage_choice;
+        let genesis_damage_target = genesis_damage_target.clone();
         let origin_state_version = self.position.state_version;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
@@ -12766,6 +13037,29 @@ impl Game {
             {
                 return Err(GameError::IllegalAction);
             }
+            let token = self.create_token_unit(
+                seat,
+                token_card_id,
+                card_instance_id,
+                cell,
+                0,
+                origin_state_version,
+            )?;
+            if !self.valid_token_genesis_damage_resolution(
+                seat,
+                &token,
+                genesis_damage_choice
+                    .map(|choice| TokenGenesisDamageResolution {
+                        token_instance_id: token.card.instance_id.clone(),
+                        genesis_damage_choice: choice,
+                        genesis_damage_target: genesis_damage_target.clone(),
+                    })
+                    .as_ref(),
+            ) {
+                return Err(GameError::IllegalAction);
+            }
+        } else if genesis_damage_choice.is_some() || genesis_damage_target.is_some() {
+            return Err(GameError::IllegalAction);
         }
         let (genesis_gain_mana, genesis_spell_draw_count) =
             self.site_genesis_gain_and_draws(seat, cell, played_card_id, facts);
@@ -12812,6 +13106,8 @@ impl Game {
             create_rubble_at,
             defer_token: false,
             from_top_atlas: false,
+            genesis_damage_choice,
+            genesis_damage_target,
             genesis_gain_mana,
             genesis_spell_draw_count,
             genesis_token_choice,
@@ -12845,6 +13141,8 @@ impl Game {
             create_rubble_at,
             defer_token,
             from_top_atlas: _,
+            genesis_damage_choice,
+            genesis_damage_target,
             genesis_gain_mana,
             genesis_spell_draw_count,
             genesis_token_choice,
@@ -12926,6 +13224,8 @@ impl Game {
                 token,
                 &card_instance_id,
                 u64::from(paid_token),
+                genesis_damage_choice,
+                genesis_damage_target.as_ref(),
                 outcomes,
             )?;
         }
@@ -13088,13 +13388,19 @@ impl Game {
         })
     }
 
-    /// Places a token minion and resolves any non-choice Genesis printed on its definition.
+    /// Places a token minion and resolves its printed Genesis, including optional damage choices.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "token entry keeps placement and Genesis atomic"
+    )]
     fn finish_token_entry(
         &mut self,
         seat: Seat,
         token: UnitPosition,
         source_instance_id: &IdentityHash,
         mana_paid: u64,
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let card_id = token.card.card_id;
@@ -13107,6 +13413,19 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let genesis = facts.genesis;
+        if !self.valid_token_genesis_damage_resolution(
+            seat,
+            &token,
+            genesis_damage_choice
+                .map(|choice| TokenGenesisDamageResolution {
+                    token_instance_id: card_instance_id.clone(),
+                    genesis_damage_choice: choice,
+                    genesis_damage_target: genesis_damage_target.cloned(),
+                })
+                .as_ref(),
+        ) {
+            return Err(GameError::IllegalAction);
+        }
         let token_card_id = self.rules.cards[usize::from(card_id.0)].id.clone();
         self.position.units.push(token);
         outcomes.push("minion-summoned", || {
@@ -13135,7 +13454,14 @@ impl Game {
                 })
             });
         }
-        self.apply_minion_genesis(seat, &card_instance_id, genesis, None, None, outcomes)
+        self.apply_minion_genesis(
+            seat,
+            &card_instance_id,
+            genesis,
+            genesis_damage_choice,
+            genesis_damage_target,
+            outcomes,
+        )
     }
 
     fn apply_replace_rubble_action(
@@ -13214,6 +13540,8 @@ impl Game {
             create_rubble_at: None,
             defer_token,
             from_top_atlas: true,
+            genesis_damage_choice: None,
+            genesis_damage_target: None,
             genesis_gain_mana,
             genesis_spell_draw_count,
             genesis_token_choice: None,
@@ -13940,6 +14268,8 @@ impl Game {
         &mut self,
         seat: Seat,
         choice: GenesisTokenChoice,
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let PendingField::Pending(pending) = &self.position.pending_genesis_token else {
@@ -13982,12 +14312,38 @@ impl Game {
                 )
             })
             .transpose()?;
+        if paid {
+            let token = token.as_ref().ok_or(GameError::IllegalAction)?;
+            if !self.valid_token_genesis_damage_resolution(
+                seat,
+                token,
+                genesis_damage_choice
+                    .map(|choice| TokenGenesisDamageResolution {
+                        token_instance_id: token.card.instance_id.clone(),
+                        genesis_damage_choice: choice,
+                        genesis_damage_target: genesis_damage_target.cloned(),
+                    })
+                    .as_ref(),
+            ) {
+                return Err(GameError::IllegalAction);
+            }
+        } else if genesis_damage_choice.is_some() || genesis_damage_target.is_some() {
+            return Err(GameError::IllegalAction);
+        }
         let source_instance_id = pending.source_instance_id.clone();
         self.position.pending_genesis_token = PendingField::Resolved;
         self.position.phase = Phase::Main;
         if let Some(token) = token {
             self.position.players[seat_index(seat)].mana -= 1;
-            self.finish_token_entry(seat, token, &source_instance_id, 1, outcomes)?;
+            self.finish_token_entry(
+                seat,
+                token,
+                &source_instance_id,
+                1,
+                genesis_damage_choice,
+                genesis_damage_target,
+                outcomes,
+            )?;
         }
         self.position.state_version += 1;
         Ok(())
@@ -17666,6 +18022,7 @@ impl Game {
             target_site_instance_id,
             tempted_destination,
             tempted_enemy,
+            token_genesis_damage,
         } = &action.descriptor
         else {
             return Err(GameError::IllegalAction);
@@ -17691,11 +18048,25 @@ impl Game {
         let CardFacts::Magic(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        let token_genesis_products = match &facts.effect {
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => {
+                self.magic_token_genesis_damage_products(seat, card_instance_id, token_card_id)?
+            }
+            _ => vec![Vec::new()],
+        };
+        let token_genesis_damage_matches = token_genesis_products.iter().any(|product| {
+            if product.is_empty() {
+                token_genesis_damage.is_none()
+            } else {
+                token_genesis_damage.as_deref() == Some(product.as_slice())
+            }
+        });
         if facts.mana_cost > u64::from(player.mana)
             || !self.thresholds_met(seat, facts.thresholds)
             || facts
                 .pay_life_as_additional_cost
                 .is_some_and(|amount| player.avatar.life < u16::from(amount))
+            || !token_genesis_damage_matches
             || !{
                 let mut choices = self.magic_choices(seat, caster_instance_id, &facts.effect)?;
                 if facts.discard_card_as_additional_cost {
@@ -17735,34 +18106,21 @@ impl Game {
             })
             .transpose()?;
         let token_units = match &effect {
-            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => {
-                let enemy = other_seat(seat);
-                let mut cells = Vec::new();
-                for cell in self.controlled_site_cells(seat) {
-                    let borders_enemy = cell.bordering(false).any(|bordering| {
-                        self.position.sites[bordering.index()]
-                            .as_ref()
-                            .is_some_and(|site| site.controller == enemy)
-                    });
-                    if borders_enemy && self.token_may_enter_cell(seat, token_card_id, cell)? {
-                        cells.push(cell);
-                    }
-                }
-                cells
-                    .into_iter()
-                    .enumerate()
-                    .map(|(ordinal, cell)| {
-                        self.create_token_unit(
-                            seat,
-                            token_card_id,
-                            card_instance_id,
-                            cell,
-                            ordinal,
-                            self.position.state_version,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-            }
+            MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(token_card_id) => self
+                .magic_token_summon_cells(seat, token_card_id)?
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, cell)| {
+                    self.create_token_unit(
+                        seat,
+                        token_card_id,
+                        card_instance_id,
+                        cell,
+                        ordinal,
+                        self.position.state_version,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             _ => Vec::new(),
         };
         let duel = if effect == MagicEffect::FightAllyWithAdjacentEnemy {
@@ -18425,7 +18783,20 @@ impl Game {
             }
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 for token in token_units {
-                    self.finish_token_entry(seat, token, card_instance_id, 0, outcomes)?;
+                    let resolution = token_genesis_damage.as_deref().and_then(|resolutions| {
+                        resolutions.iter().find(|resolution| {
+                            resolution.token_instance_id == token.card.instance_id
+                        })
+                    });
+                    self.finish_token_entry(
+                        seat,
+                        token,
+                        card_instance_id,
+                        0,
+                        resolution.map(|resolution| resolution.genesis_damage_choice),
+                        resolution.and_then(|resolution| resolution.genesis_damage_target.as_ref()),
+                        outcomes,
+                    )?;
                 }
             }
             MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {
@@ -21876,6 +22247,12 @@ impl Game {
             descriptor.insert("genesisTokenChoice".to_owned(), json!("defer"));
         } else if let Some(choice) = continuation.genesis_token_choice {
             descriptor.insert("genesisTokenChoice".to_owned(), json!(choice));
+        }
+        if let Some(choice) = continuation.genesis_damage_choice {
+            descriptor.insert("genesisDamageChoice".to_owned(), json!(choice));
+        }
+        if let Some(target) = &continuation.genesis_damage_target {
+            descriptor.insert("genesisDamageTarget".to_owned(), json!(target));
         }
         json!({
             "descriptor": descriptor,

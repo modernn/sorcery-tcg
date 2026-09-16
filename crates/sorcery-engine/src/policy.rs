@@ -424,6 +424,7 @@ fn beneficial_tactic_rank(seat: Seat, descriptor: &ActionDescriptor) -> Option<u
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => Some(2),
         ActionDescriptor::ResolveGenesisToken {
             choice: GenesisTokenChoice::PayOneMana,
+            ..
         } => Some(3),
         _ => None,
     }
@@ -815,6 +816,7 @@ mod tests {
             target_site_instance_id: None,
             tempted_destination: None,
             tempted_enemy: None,
+            token_genesis_damage: None,
         };
         let enemy_magic = ActionDescriptor::CastMagic {
             ally: None,
@@ -835,6 +837,7 @@ mod tests {
             target_site_instance_id: None,
             tempted_destination: None,
             tempted_enemy: None,
+            token_genesis_damage: None,
         };
         let rubble = ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
             target_cell: Cell::parse("A1").expect("cell"),
@@ -842,9 +845,13 @@ mod tests {
         };
         let pay = ActionDescriptor::ResolveGenesisToken {
             choice: GenesisTokenChoice::PayOneMana,
+            genesis_damage_choice: None,
+            genesis_damage_target: None,
         };
         let decline = ActionDescriptor::ResolveGenesisToken {
             choice: GenesisTokenChoice::Decline,
+            genesis_damage_choice: None,
+            genesis_damage_target: None,
         };
         let actions = vec![
             projectile(false, None),

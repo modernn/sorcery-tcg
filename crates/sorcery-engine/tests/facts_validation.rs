@@ -824,19 +824,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "damage prevention",
         ),
         (
-            "token adjacent Genesis damage",
-            with(
-                with(
-                    with(minion(), "token", json!(true)),
-                    "genesisMayDamageTargetAdjacentUnit",
-                    json!(2),
-                ),
-                "attack",
-                json!(1),
-            ),
-            "token adjacent Genesis damage",
-        ),
-        (
             "start-turn draw range",
             with(minion(), "atStartOfControllerTurnDrawSpells", json!(0)),
             "must be between",
