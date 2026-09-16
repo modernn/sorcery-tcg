@@ -8889,6 +8889,55 @@
         "file": "crates/sorcery-engine/tests/start_turn_stacked_pulse_rules.rs",
         "testName": "rule_catalog_0400_start_turn_gain_then_here_damage_on_same_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0403",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and nearby-enemy lure, the Start Phase resolves them in order on a single lure-branch action: draw a spell first, then move the chosen nearby enemy one step closer. The engine still issues lure-target branch actions when a valid target exists.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0403_start_turn_draw_spells_then_lure_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0404",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same start-turn draw-plus-lure minion has no nearby enemy, the Start Phase still draws the spell on the simple resolve-start-turn-trigger action and the lure no-ops without moving any minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0404_start_turn_draw_spells_then_lure_no_ops_when_no_enemy_is_nearby"
+      }
     }
   ]
 }

@@ -16509,16 +16509,6 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
-        if lure_destination.is_some() || lure_target_instance_id.is_some() {
-            self.apply_start_turn_lure(
-                action.seat,
-                source_instance_id,
-                lure_target_instance_id.as_ref(),
-                *lure_destination,
-                outcomes,
-            )?;
-            return Ok(());
-        }
         let unit = self
             .start_turn_trigger_unit(action.seat, source_instance_id)
             .ok_or(GameError::IllegalAction)?;
@@ -16605,10 +16595,17 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        if lure_destination.is_some() || lure_target_instance_id.is_some() {
+            self.apply_start_turn_lure(
+                action.seat,
+                source_instance_id,
+                lure_target_instance_id.as_ref(),
+                *lure_destination,
+                outcomes,
+            )?;
+            return Ok(());
+        }
         if start_turn_lure {
-            if lure_destination.is_some() || lure_target_instance_id.is_some() {
-                return Err(GameError::IllegalAction);
-            }
             resolved_exclusive = true;
         }
         if !start_turn_teleport && (resolved_library_stack || resolved_exclusive) {

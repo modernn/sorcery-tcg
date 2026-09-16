@@ -1,4 +1,5 @@
-//! Direct proofs for start-turn nearby enemy lures (RULE-CATALOG-0256–0257).
+//! Direct proofs for start-turn nearby enemy lures (RULE-CATALOG-0256–0257,
+//! 0403–0404).
 //!
 //! Official cards such as Guile Sirens force a nearby same-region enemy minion
 //! to take one card-effect step toward the source. The ability is mandatory,
@@ -136,6 +137,67 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn after_draw_lure_source_summoned() -> Session {
+    let mut session = Session::new(&draw_lure_stack_manifest()).expect("valid draw-lure session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn draw_lure_stack_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-lure-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-lure-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 1,
+                "atStartOfControllerTurnLureNearbyEnemyMinion": true,
+                "defense": 4,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 403,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn event_types(receipt: &Receipt) -> Vec<&str> {
+    receipt.events.iter().map(|event| event.event_type.as_str()).collect()
+}
+
 fn after_source_summoned() -> Session {
     let mut session = Session::new(&manifest()).expect("valid lure session");
     keep(&mut session);
@@ -261,6 +323,118 @@ fn rule_catalog_0257_start_turn_lure_no_ops_when_no_enemy_is_nearby() {
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let target_id = unit_id(&session, "south-minion");
     resolve_empty_start_turn(&mut session, &source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("unmoved south minion");
+    assert_eq!(target["location"], "C1");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0403_start_turn_draw_spells_then_lure_resolves_in_order() {
+    let mut session = after_draw_lure_source_summoned();
+    let source_id = unit_id(&session, "north-source");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let target_id = unit_id(&session, "south-minion");
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let legal = session.legal_actions().expect("mandatory start-turn draw-lure");
+    assert!(
+        legal.iter().all(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+                && action.descriptor["lureTargetInstanceId"] == target_id
+        }),
+        "a nearby enemy minion keeps the lure branch mandatory"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor["lureTargetInstanceId"] == target_id
+            && descriptor["lureDestination"] == json!({ "cell": "C4", "region": "surface" })
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn", "unit-lured"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], target_id);
+    assert_eq!(
+        receipt.events[1].payload["to"],
+        json!({ "cell": "C4", "region": "surface" })
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("lured minion");
+    assert_eq!(target["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0404_start_turn_draw_spells_then_lure_no_ops_when_no_enemy_is_nearby() {
+    let mut session = after_draw_lure_source_summoned();
+    let source_id = unit_id(&session, "north-source");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let target_id = unit_id(&session, "south-minion");
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let legal = session.legal_actions().expect("empty start-turn draw-lure");
+    assert!(legal.iter().all(|action| {
+        action.descriptor["kind"] == "resolve-start-turn-trigger"
+            && action.descriptor["sourceInstanceId"] == source_id
+            && action.descriptor.get("lureTargetInstanceId").is_none()
+    }));
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor.get("lureTargetInstanceId").is_none()
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
     let target = after["realm"]["units"]
