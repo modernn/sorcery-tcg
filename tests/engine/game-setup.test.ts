@@ -64,6 +64,7 @@ type SpellFacts = Readonly<{
   genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
   nearbyAvatarsMayDiscardCardToGainControlOfThis?: true;
   genesisStrikeEachEnemyHere?: true;
+  genesisUntapAdjacentAllies?: true;
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
   lethal?: boolean;
@@ -262,6 +263,9 @@ function cardsFor(
           : {}),
         ...(facts.genesisStrikeEachEnemyHere === true
           ? { genesisStrikeEachEnemyHere: true as const }
+          : {}),
+        ...(facts.genesisUntapAdjacentAllies === true
+          ? { genesisUntapAdjacentAllies: true as const }
           : {}),
         ...(facts.genesisEachPlayerControlledByPreviousPlayerNextTurn === true
           ? { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const }
@@ -3099,6 +3103,31 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /genesisHealController must be 2/);
+  const hobManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisUntapAdjacentAllies: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    hobManifest.cards[firstSpell]?.cardType === 'minion'
+      && hobManifest.cards[firstSpell].genesisUntapAdjacentAllies,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        genesisUntapAdjacentAllies: false,
+      } as unknown as GameCardDefinition,
+    },
+  }), /genesisUntapAdjacentAllies must be true when defined/);
   const stackedHealDrawGenesis = createGameManifest({
     ...input,
     cards: {

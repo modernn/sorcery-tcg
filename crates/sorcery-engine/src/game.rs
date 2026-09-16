@@ -1593,6 +1593,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis_gain_control_of_tapped_minions_here_until_this_leaves: _,
         genesis_may_damage_target_adjacent_unit: _,
         genesis_strike_each_enemy_here: _,
+        genesis_untap_adjacent_allies: _,
         immobile: _,
         lance_count: _,
         landbound: _,
@@ -5899,6 +5900,14 @@ impl Game {
                     .bordering(false)
                     .chain(source_cell.diagonals(false))
                     .any(|cell| target.contains(&cell))
+        })
+    }
+
+    fn footprints_bordering(source: &[Cell], target: &[Cell]) -> bool {
+        source.iter().any(|source_cell| {
+            source_cell
+                .bordering(false)
+                .any(|cell| target.contains(&cell))
         })
     }
 
@@ -21505,6 +21514,7 @@ impl Game {
         let genesis_may_damage_target_adjacent_unit = facts.genesis_may_damage_target_adjacent_unit;
         let genesis_damage_each_other_unit_here = facts.genesis_damage_each_other_unit_here;
         let genesis_strike_each_enemy_here = facts.genesis_strike_each_enemy_here;
+        let genesis_untap_adjacent_allies = facts.genesis_untap_adjacent_allies;
         let genesis_each_player_controlled_by_previous_player_next_turn =
             facts.genesis_each_player_controlled_by_previous_player_next_turn;
         let genesis_gain_control_of_tapped_minions_here_until_this_leaves =
@@ -21561,6 +21571,9 @@ impl Game {
         }
         if genesis_strike_each_enemy_here {
             self.apply_genesis_here_damage(source_instance_id, true, outcomes)?;
+        }
+        if genesis_untap_adjacent_allies {
+            self.apply_genesis_untap_adjacent_allies(source_instance_id, seat, outcomes)?;
         }
         if genesis_gain_control_of_tapped_minions_here_until_this_leaves {
             self.apply_genesis_tapped_minion_control(source_instance_id, seat, outcomes)?;
@@ -22054,6 +22067,51 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
+        }
+        Ok(())
+    }
+
+    fn apply_genesis_untap_adjacent_allies(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id && unit.controller == seat)
+            .ok_or(GameError::IllegalAction)?;
+        let source_cells = Self::unit_occupied_cells(source);
+        let region = source.region;
+        let mut allies = Vec::new();
+        let avatar = &self.position.players[seat_index(seat)].avatar;
+        if avatar.tapped
+            && region == Region::Surface
+            && Self::footprints_bordering(source_cells, std::slice::from_ref(&avatar.location))
+        {
+            allies.push((true, avatar.card.instance_id.clone()));
+        }
+        for unit in &self.position.units {
+            if unit.card.instance_id == *source_instance_id
+                || unit.controller != seat
+                || !unit.tapped
+                || unit.region != region
+            {
+                continue;
+            }
+            if Self::footprints_bordering(source_cells, Self::unit_occupied_cells(unit)) {
+                allies.push((false, unit.card.instance_id.clone()));
+            }
+        }
+        allies.sort_unstable_by(|left, right| left.1.cmp(&right.1));
+        for (is_avatar, instance_id) in allies {
+            if is_avatar {
+                self.apply_untap_avatar(seat, source_instance_id, outcomes);
+            } else {
+                self.apply_untap_minion(&instance_id, seat, source_instance_id, outcomes)?;
+            }
         }
         Ok(())
     }

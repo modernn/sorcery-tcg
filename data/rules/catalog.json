@@ -12356,6 +12356,53 @@
         "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
         "testName": "rule_catalog_0536_granted_movement_then_draw_reaches_a_two_step_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0537",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis that untaps adjacent allies untaps a tapped Avatar on a bordering cell in the same region. An enemy minion two steps away is not untapped.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisUntapAdjacentAllies"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "avatar-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_untap_adjacent_rules.rs",
+        "testName": "rule_catalog_0537_genesis_untaps_an_adjacent_tapped_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0538",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis that untaps adjacent allies does not untap a tapped Avatar sharing the newcomer's cell. Same-cell is not adjacent.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisUntapAdjacentAllies"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_untap_adjacent_rules.rs",
+        "testName": "rule_catalog_0538_genesis_does_not_untap_a_same_cell_avatar"
+      }
     }
   ]
 }

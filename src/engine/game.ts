@@ -467,6 +467,7 @@ export type GameCardDefinition =
     genesisDamageEachOtherUnitHere?: 1;
     genesisDisableSelfUntilDamaged?: true;
     genesisStrikeEachEnemyHere?: true;
+    genesisUntapAdjacentAllies?: true;
     genesisMayDamageTargetAdjacentUnit?: 2;
     genesisDrawSpells?: number;
     genesisDrawSite?: boolean;
@@ -1356,7 +1357,7 @@ const SUPPORTED_CARD_FIELDS = {
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
-    genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
+    genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
@@ -2219,6 +2220,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.genesisStrikeEachEnemyHere !== true) {
     throw new RangeError(`${path}.genesisStrikeEachEnemyHere must be true when defined`);
   }
+  if (card.genesisUntapAdjacentAllies !== undefined
+    && card.genesisUntapAdjacentAllies !== true) {
+    throw new RangeError(`${path}.genesisUntapAdjacentAllies must be true when defined`);
+  }
   if (card.genesisEachPlayerControlledByPreviousPlayerNextTurn !== undefined
     && card.genesisEachPlayerControlledByPreviousPlayerNextTurn !== true) {
     throw new RangeError(
@@ -3068,6 +3073,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisStrikeEachEnemyHere === true
               ? { genesisStrikeEachEnemyHere: true as const }
+              : {}),
+            ...(card.genesisUntapAdjacentAllies === true
+              ? { genesisUntapAdjacentAllies: true as const }
               : {}),
             ...(card.genesisEachPlayerControlledByPreviousPlayerNextTurn === true
               ? { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const }

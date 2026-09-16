@@ -1659,6 +1659,18 @@ fn genesis_previous_player_control_should_parse() {
 }
 
 #[test]
+fn genesis_untap_adjacent_allies_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "genesis-untap-adjacent",
+        &with(minion(), "genesisUntapAdjacentAllies", json!(true)),
+    )
+    .expect("valid Genesis untap-adjacent-allies minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_untap_adjacent_allies);
+}
+
+#[test]
 fn nearby_avatar_discard_control_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "nearby-avatar-discard-control",

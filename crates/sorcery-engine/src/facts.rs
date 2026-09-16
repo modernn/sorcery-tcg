@@ -389,6 +389,7 @@ pub struct MinionFacts {
     pub genesis_lose_controller_life: bool,
     pub genesis_may_damage_target_adjacent_unit: bool,
     pub genesis_strike_each_enemy_here: bool,
+    pub genesis_untap_adjacent_allies: bool,
     pub immobile: bool,
     pub lance_count: Option<u8>,
     pub landbound: bool,
@@ -906,6 +907,7 @@ const MINION_FIELDS: &[&str] = &[
     "genesisLoseControllerLife",
     "genesisMayDamageTargetAdjacentUnit",
     "genesisStrikeEachEnemyHere",
+    "genesisUntapAdjacentAllies",
     "immobile",
     "lanceCount",
     "landbound",
@@ -1785,6 +1787,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let genesis_may_damage_target_adjacent_unit =
         fixed_integer(object, "genesisMayDamageTargetAdjacentUnit", 2, path)?;
     let genesis_strike_each_enemy_here = true_only(object, "genesisStrikeEachEnemyHere", path)?;
+    let genesis_untap_adjacent_allies = true_only(object, "genesisUntapAdjacentAllies", path)?;
     let may_ranged_strike_once_during_basic_movement =
         true_only(object, "mayRangedStrikeOnceDuringBasicMovement", path)?;
     let may_step_after_ranged_strike = true_only(object, "mayStepAfterRangedStrike", path)?;
@@ -1923,6 +1926,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         genesis_lose_controller_life,
         genesis_may_damage_target_adjacent_unit,
         genesis_strike_each_enemy_here,
+        genesis_untap_adjacent_allies,
         immobile: optional_bool(object, "immobile", path)?,
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
         landbound,
