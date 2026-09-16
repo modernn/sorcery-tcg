@@ -1483,6 +1483,23 @@ fn oversized_ordinary_and_sacrifice_should_parse() {
 }
 
 #[test]
+fn genesis_disable_with_heal_controller_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "disable-heal",
+        &with(
+            with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
+            "genesisHealController",
+            json!(2),
+        ),
+    )
+    .expect("valid disable plus heal minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_disable_self_until_damaged);
+    assert_eq!(facts.genesis, Some(MinionGenesis::HealControllerTwo));
+}
+
+#[test]
 fn genesis_disable_with_targeted_damage_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "disable-targeted-damage",

@@ -2148,7 +2148,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisDisableSelfUntilDamaged === true
     && (card.genesisDamageEachOtherUnitHere === 1
       || card.genesisStrikeEachEnemyHere === true
-      || card.genesisHealController !== undefined
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
