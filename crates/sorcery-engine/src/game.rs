@@ -14166,6 +14166,16 @@ impl Game {
         Ok(())
     }
 
+    fn site_genesis_reorder_next_spells(&self, source_instance_id: &IdentityHash) -> bool {
+        self.position.sites.iter().flatten().any(|site| {
+            site.card.instance_id == *source_instance_id
+                && matches!(
+                    &self.rules.cards[usize::from(site.card.card_id.0)].facts,
+                    CardFacts::Site(facts) if facts.genesis_reorder_next_spells
+                )
+        })
+    }
+
     fn begin_hidden_spell_genesis(
         &mut self,
         seat: Seat,
@@ -14220,7 +14230,6 @@ impl Game {
             player.spellbook.push(card);
         }
         self.position.pending_genesis_spell = PendingField::Resolved;
-        self.position.phase = Phase::Main;
         self.position.state_version += 1;
         outcomes.push(
             if choice == GenesisSpellChoice::BottomNext {
@@ -14235,6 +14244,14 @@ impl Game {
                 })
             },
         );
+        let reorder_next_spells = self.site_genesis_reorder_next_spells(&source_instance_id);
+        self.begin_hidden_spell_genesis(seat, &source_instance_id, false, reorder_next_spells);
+        if !matches!(
+            self.position.pending_genesis_spell_order,
+            PendingField::Pending(_)
+        ) {
+            self.position.phase = Phase::Main;
+        }
         Ok(())
     }
 

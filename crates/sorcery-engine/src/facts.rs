@@ -1044,9 +1044,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         ));
     }
     if genesis_may_bottom_next_spell
-        && (paid_token_blocked_genesis
-            || genesis_pay_one_mana_to_summon_token.is_some()
-            || genesis_reorder_next_spells)
+        && (paid_token_blocked_genesis || genesis_pay_one_mana_to_summon_token.is_some())
     {
         return Err(FactError::new(
             path,
@@ -1054,9 +1052,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         ));
     }
     if genesis_reorder_next_spells
-        && (paid_token_blocked_genesis
-            || genesis_may_bottom_next_spell
-            || genesis_pay_one_mana_to_summon_token.is_some())
+        && (paid_token_blocked_genesis || genesis_pay_one_mana_to_summon_token.is_some())
     {
         return Err(FactError::new(
             path,
