@@ -1902,12 +1902,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         path,
     )?
     .map(compact_u8);
-    if occupies_square_area_two && (connects_top_bottom || must_be_cast_to_outer_column || token) {
-        return Err(FactError::new(
-            format!("{path}.occupiesSquareArea"),
-            "has an unsupported ability combination",
-        ));
-    }
     if token && genesis.is_some() {
         return Err(FactError::new(
             path,

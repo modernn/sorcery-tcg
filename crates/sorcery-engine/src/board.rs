@@ -58,6 +58,14 @@ impl Cell {
         [Self(14), Self(15), Self(18), Self(19)],
     ];
 
+    /// Every top/bottom-wrapped two-by-two area, ordered by its file-major anchor.
+    pub const WRAPPED_SQUARE_AREAS: [SquareArea; 4] = [
+        [Self(0), Self(3), Self(4), Self(7)],
+        [Self(4), Self(7), Self(8), Self(11)],
+        [Self(8), Self(11), Self(12), Self(15)],
+        [Self(12), Self(15), Self(16), Self(19)],
+    ];
+
     /// Parses an exact uppercase cell name from A1 through E4.
     ///
     /// # Errors
@@ -182,6 +190,39 @@ pub(crate) fn translated_square(area: SquareArea, from: Cell, to: Cell) -> Optio
     ])
 }
 
+/// Translates a square footprint, falling back to rank wraparound when needed.
+#[must_use]
+pub(crate) fn translated_square_connecting(
+    area: SquareArea,
+    from: Cell,
+    to: Cell,
+    connects_top_bottom: bool,
+) -> Option<SquareArea> {
+    translated_square(area, from, to).or_else(|| {
+        if !connects_top_bottom {
+            return None;
+        }
+        let file_delta = to.file() - from.file();
+        let rank_delta = to.rank() - from.rank();
+        let mut translated = [from; 4];
+        for (index, cell) in area.into_iter().enumerate() {
+            let file = cell.file() + file_delta;
+            let mut rank = cell.rank() + rank_delta;
+            if !(0..=LAST_FILE).contains(&file) {
+                return None;
+            }
+            while rank < 0 {
+                rank += RANK_COUNT.cast_signed();
+            }
+            while rank > LAST_RANK {
+                rank -= RANK_COUNT.cast_signed();
+            }
+            translated[index] = Cell::from_coordinates(file, rank)?;
+        }
+        Some(translated)
+    })
+}
+
 impl fmt::Display for Cell {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let file = char::from(b'A' + self.0 / RANK_COUNT);
@@ -278,7 +319,7 @@ pub struct Location {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cell, translated_square};
+    use super::{Cell, translated_square, translated_square_connecting};
 
     #[test]
     fn square_areas_are_the_twelve_canonical_file_major_footprints() {
@@ -311,6 +352,38 @@ mod tests {
         );
         assert_eq!(
             translated_square(area, area[0], Cell::parse("A4").expect("cell")),
+            None
+        );
+    }
+
+    #[test]
+    fn wrapped_square_areas_are_the_four_top_bottom_wrapped_footprints() {
+        let values = Cell::WRAPPED_SQUARE_AREAS.map(|area| area.map(|cell| cell.to_string()));
+        assert_eq!(
+            values,
+            [
+                ["A1", "A4", "B1", "B4"],
+                ["B1", "B4", "C1", "C4"],
+                ["C1", "C4", "D1", "D4"],
+                ["D1", "D4", "E1", "E4"],
+            ]
+        );
+    }
+
+    #[test]
+    fn connecting_translation_wraps_a_canonical_footprint_across_the_top_edge() {
+        let area = Cell::SQUARE_AREAS[3];
+        let anchor = Cell::parse("B1").expect("anchor");
+        let wrapped = Cell::parse("B4").expect("wrapped anchor");
+        let mut translated = translated_square_connecting(area, anchor, wrapped, true)
+            .expect("wrapped translation")
+            .map(Cell::index);
+        translated.sort_unstable();
+        let mut expected = Cell::WRAPPED_SQUARE_AREAS[1].map(Cell::index);
+        expected.sort_unstable();
+        assert_eq!(translated, expected);
+        assert_eq!(
+            translated_square_connecting(area, anchor, wrapped, false),
             None
         );
     }

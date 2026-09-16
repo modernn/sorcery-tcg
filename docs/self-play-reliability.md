@@ -49,8 +49,8 @@ ordinary debug suite because running the same workload there takes several minut
 
 ## Current blockers to strong unattended self-play
 
-- Rust has direct proofs for all 370 cataloged scenarios. Ranked self-play still waits on private
-  authority verification.
+- Rust has direct proofs for all 378 cataloged scenarios on `cursor/square-token-0005` (PR #55).
+  Ranked self-play still waits on private authority verification and merge to `master`.
 - Realm Artifacts are admitted as power Artifacts, Lethal Artifacts, end-turn site-controller
   life-loss Artifacts, the Siege Ballista, the Payload Trebuchet, and the Rolling Boulder, including
   when paired with oversized minions or Cave-In.

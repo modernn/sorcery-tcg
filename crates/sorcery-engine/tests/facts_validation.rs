@@ -801,15 +801,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "requires voidwalk",
         ),
         (
-            "oversized ability",
-            with(
-                with(minion(), "occupiesSquareArea", json!(2)),
-                "connectsTopBottom",
-                json!(true),
-            ),
-            "unsupported ability combination",
-        ),
-        (
             "movement restrictions",
             with(
                 with(minion(), "movesOnlyForward", json!(true)),
@@ -1791,4 +1782,54 @@ fn oversized_during_movement_and_post_ranged_step_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.ranged);
     assert!(facts.may_step_after_ranged_strike);
+}
+
+#[test]
+fn oversized_token_should_parse() {
+    let definition = with(
+        with(minion(), "occupiesSquareArea", json!(2)),
+        "token",
+        json!(true),
+    );
+    let CardFacts::Minion(facts) = parse_card_definition("oversized-token", &definition)
+        .expect("valid oversized token minion")
+    else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.token);
+}
+
+#[test]
+fn oversized_wrap_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-wrap",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "connectsTopBottom",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized wrap minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.connects_top_bottom);
+}
+
+#[test]
+fn oversized_outer_column_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-outer-column",
+        &with(
+            with(minion(), "occupiesSquareArea", json!(2)),
+            "mustBeCastToOuterColumn",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized outer-column minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.must_be_cast_to_outer_column);
 }
