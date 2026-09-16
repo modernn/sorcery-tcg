@@ -1507,6 +1507,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::TapTargetMinion
         | MagicEffect::TeleportAllyToTargetSite
         | MagicEffect::TeleportNearbyAllyThenDrawCard
+        | MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal
         | MagicEffect::UntapTargetMinion => None,
     }
 }
@@ -7057,6 +7058,9 @@ impl Game {
                 self.teleport_ally_to_site_choices(seat, caster_instance_id)?
             }
             MagicEffect::TeleportNearbyAllyThenDrawCard => self.blink_ally_choices(seat)?,
+            MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal => {
+                self.teleport_target_one_diagonal_choices(seat, caster_instance_id)?
+            }
             MagicEffect::LureEnemyMinionOneStepCloser => {
                 let enemy_seat = other_seat(seat);
                 let tempted: Vec<UnitTarget> = self
@@ -7553,6 +7557,115 @@ impl Game {
             }
         }
         Ok(choices)
+    }
+
+    fn teleport_target_one_diagonal_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for minion in self.targeted_magic_choices(seat, caster_instance_id, false, true)? {
+            let Some(target) = minion.target.as_ref() else {
+                continue;
+            };
+            let occupied = self.unit_target_occupied_cells(target)?.to_vec();
+            let from = self.unit_target_location(target)?;
+            let power = self.unit_target_entry_power(target)?;
+            let connects_top_bottom = self.unit_target_connects_top_bottom(target);
+            for cell in occupied
+                .iter()
+                .copied()
+                .flat_map(|cell| cell.diagonals(false))
+                .collect::<BTreeSet<_>>()
+            {
+                let target_location = Location {
+                    cell,
+                    region: from.region,
+                };
+                if !self.location_exists_in_region(cell, from.region) {
+                    continue;
+                }
+                let site_instance_id = self.position.sites[cell.index()]
+                    .as_ref()
+                    .map(|site| site.card.instance_id.clone())
+                    .or_else(|| self.position.rubble[cell.index()].clone());
+                for area in
+                    self.teleport_destination_areas(&occupied, target_location, connects_top_bottom)
+                {
+                    let cells: &[Cell] = area
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&cell), |cells| cells);
+                    if !self.teleport_cells_allowed(&occupied, cells, from.region, power) {
+                        continue;
+                    }
+                    choices.push(MagicChoice {
+                        ally_destination_cells: area,
+                        target: Some(target.clone()),
+                        target_location: Some(target_location),
+                        target_site_instance_id: site_instance_id.clone(),
+                        ..MagicChoice::default()
+                    });
+                }
+            }
+        }
+        let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
+        for artifact in &self.position.artifacts {
+            let from = self.artifact_location(artifact)?;
+            if from.region != caster_location.region {
+                continue;
+            }
+            for cell in from.cell.diagonals(false) {
+                let target_location = Location {
+                    cell,
+                    region: from.region,
+                };
+                if !self.location_exists_in_region(cell, from.region) {
+                    continue;
+                }
+                choices.push(MagicChoice {
+                    target_artifact_instance_id: Some(artifact.card.instance_id.clone()),
+                    target_location: Some(target_location),
+                    ..MagicChoice::default()
+                });
+            }
+        }
+        if caster_location.region == Region::Surface {
+            for aura in &self.position.auras {
+                let Some(area) = Self::aura_covered_square(aura) else {
+                    continue;
+                };
+                for destination in Self::aura_one_diagonal_areas(area) {
+                    if !destination
+                        .iter()
+                        .all(|cell| self.location_exists_in_region(*cell, Region::Surface))
+                    {
+                        continue;
+                    }
+                    choices.push(MagicChoice {
+                        ally_destination_cells: Some(destination),
+                        target_aura_instance_id: Some(aura.card.instance_id.clone()),
+                        target_location: Some(Location {
+                            cell: destination[0],
+                            region: Region::Surface,
+                        }),
+                        ..MagicChoice::default()
+                    });
+                }
+            }
+        }
+        Ok(choices)
+    }
+
+    fn aura_one_diagonal_areas(cells: SquareArea) -> Vec<SquareArea> {
+        Cell::SQUARE_AREAS
+            .into_iter()
+            .filter(|candidate| {
+                candidate[0] != cells[0]
+                    && candidate[0].file_index().abs_diff(cells[0].file_index()) == 1
+                    && candidate[0].rank_index().abs_diff(cells[0].rank_index()) == 1
+            })
+            .collect()
     }
 
     fn blink_ally_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
@@ -20416,6 +20529,35 @@ impl Game {
                     self.finish_blink(&continuation, outcomes);
                 }
             }
+            MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal => {
+                let destination = target_location.ok_or(GameError::IllegalAction)?;
+                if let Some(target) = target.as_ref() {
+                    self.apply_ally_teleport(
+                        target,
+                        destination,
+                        *ally_destination_cells,
+                        target_site_instance_id.as_ref(),
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                } else if let Some(artifact_id) = target_artifact_instance_id.as_ref() {
+                    self.apply_teleport_artifact_one_diagonal(
+                        artifact_id,
+                        destination,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                } else if let Some(aura_id) = target_aura_instance_id.as_ref() {
+                    self.apply_teleport_aura_one_diagonal(
+                        aura_id,
+                        *ally_destination_cells,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                } else {
+                    return Err(GameError::IllegalAction);
+                }
+            }
             MagicEffect::LureEnemyMinionOneStepCloser => {
                 if let (Some(ally), Some(enemy), Some(destination)) =
                     (ally.as_ref(), tempted_enemy.as_ref(), *tempted_destination)
@@ -21419,6 +21561,87 @@ impl Game {
             return Ok(());
         }
         self.finish_leap_attack(&continuation, outcomes)
+    }
+
+    fn apply_teleport_artifact_one_diagonal(
+        &mut self,
+        artifact_instance_id: &IdentityHash,
+        destination: Location,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let artifact = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let from = self.artifact_location(artifact)?;
+        if from == destination {
+            return Ok(());
+        }
+        let artifact = self
+            .position
+            .artifacts
+            .iter_mut()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        artifact.placement = ArtifactPlacement::Loose {
+            location: destination.cell,
+            region: destination.region,
+        };
+        let instance_id = artifact_instance_id.clone();
+        let source_instance_id = source_instance_id.clone();
+        outcomes.push("artifact-teleported", || {
+            json!({
+                "from": from,
+                "instanceId": instance_id,
+                "sourceInstanceId": source_instance_id,
+                "to": destination,
+            })
+        });
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
+    fn apply_teleport_aura_one_diagonal(
+        &mut self,
+        aura_instance_id: &IdentityHash,
+        destination_cells: Option<SquareArea>,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let destination = destination_cells.ok_or(GameError::IllegalAction)?;
+        let aura = self
+            .position
+            .auras
+            .iter_mut()
+            .find(|aura| aura.card.instance_id == *aura_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let from = aura.cells.clone();
+        if from.as_slice() == destination.as_slice() {
+            return Ok(());
+        }
+        aura.cells = destination.to_vec();
+        if let Some(area) = self
+            .position
+            .immobile_areas
+            .iter_mut()
+            .find(|area| area.source_instance_id == *aura_instance_id)
+        {
+            area.cells = destination.iter().copied().collect();
+        }
+        let instance_id = aura_instance_id.clone();
+        let source_instance_id = source_instance_id.clone();
+        outcomes.push("aura-moved", || {
+            json!({
+                "cells": destination,
+                "from": from,
+                "instanceId": instance_id,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        Ok(())
     }
 
     fn apply_ally_teleport(
@@ -25411,6 +25634,10 @@ mod tests {
             (
                 MagicEffect::AllyTakesUpToTwoSteps,
                 json!({ "allyTakesUpToTwoSteps": true }),
+            ),
+            (
+                MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal,
+                json!({ "teleportTargetMinionArtifactOrAuraOneDiagonal": true }),
             ),
             (
                 MagicEffect::BurrowTargetAdjacentMinion,

@@ -285,6 +285,7 @@ pub enum MagicEffect {
     AllyStrikesEachEnemyAtItsLocation,
     AllySubmergesTargetNearbyMinion,
     AllyTakesUpToTwoSteps,
+    TeleportTargetMinionArtifactOrAuraOneDiagonal,
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
     SummonTokenToAlliedMinionThenDrawSpell(String),
@@ -877,6 +878,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "targetPlayerLosesLife",
     "teleportAllyToTargetSite",
     "teleportNearbyAllyThenDrawCard",
+    "teleportTargetMinionArtifactOrAuraOneDiagonal",
     "thresholds",
     "untapTargetMinion",
     "untapTargetMinionAfterDamage",
@@ -1569,6 +1571,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::TeleportAllyToTargetSite),
             true_only(object, "teleportNearbyAllyThenDrawCard", path)?
                 .then_some(MagicEffect::TeleportNearbyAllyThenDrawCard),
+            true_only(
+                object,
+                "teleportTargetMinionArtifactOrAuraOneDiagonal",
+                path,
+            )?
+            .then_some(MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal),
             true_only(object, "untapTargetMinion", path)?.then_some(MagicEffect::UntapTargetMinion),
         ],
         path,

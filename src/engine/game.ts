@@ -450,6 +450,7 @@ export type GameCardDefinition =
     targetPlayerLosesLife?: number;
     teleportAllyToTargetSite?: true;
     teleportNearbyAllyThenDrawCard?: true;
+    teleportTargetMinionArtifactOrAuraOneDiagonal?: true;
     thresholds: GameThresholds;
     untapTargetMinion?: true;
     untapTargetMinionAfterDamage?: true;
@@ -1360,7 +1361,7 @@ const SUPPORTED_CARD_FIELDS = {
     silenceAndTapNearbyMinionThenMayDrawSpell allyStrikesEachEnemyAtItsLocation allySubmergesTargetNearbyMinion allyTakesUpToTwoSteps submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToAlliedMinionThenDrawSpell summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSites targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
-    teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
+    teleportNearbyAllyThenDrawCard teleportTargetMinionArtifactOrAuraOneDiagonal thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
   minion: new Set(`
     airborne atEndOfControllerTurnControllerGainsLife atEndOfControllerTurnControllerLosesLife atEndOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnControllerGainsLife atStartOfControllerTurnControllerGainsMana atStartOfControllerTurnControllerLosesLife atStartOfControllerTurnDamageEachOtherUnitHere atStartOfControllerTurnDrawSites atStartOfControllerTurnDrawSpells atStartOfControllerTurnLureNearbyEnemyMinion atStartOfControllerTurnMillSites atStartOfControllerTurnMillSpells atStartOfControllerTurnTeleportToRandomSiteOrVoid attack burrowing cardType
@@ -1756,6 +1757,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.teleportNearbyAllyThenDrawCard !== true) {
       throw new RangeError(`${path}.teleportNearbyAllyThenDrawCard must be true when defined`);
     }
+    if (card.teleportTargetMinionArtifactOrAuraOneDiagonal !== undefined
+      && card.teleportTargetMinionArtifactOrAuraOneDiagonal !== true) {
+      throw new RangeError(`${path}.teleportTargetMinionArtifactOrAuraOneDiagonal must be true when defined`);
+    }
     if (card.returnMinionFromOwnCemetery !== undefined
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
@@ -2078,6 +2083,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.teleportAllyToTargetSite === true)
       + Number(card.tapTargetMinion === true)
       + Number(card.teleportNearbyAllyThenDrawCard === true)
+      + Number(card.teleportTargetMinionArtifactOrAuraOneDiagonal === true)
       + Number(card.untapTargetMinion === true);
     if (effectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
@@ -3050,6 +3056,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { tapTargetMinion: true as const }
                         : card.untapTargetMinion === true
                           ? { untapTargetMinion: true as const }
+                        : card.teleportTargetMinionArtifactOrAuraOneDiagonal === true
+                          ? { teleportTargetMinionArtifactOrAuraOneDiagonal: true as const }
                         : card.teleportNearbyAllyThenDrawCard === true
                           ? { teleportNearbyAllyThenDrawCard: true as const }
                           : { teleportAllyToTargetSite: true as const }),

@@ -363,6 +363,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("tapTargetMinion", json!(true)),
         ("teleportAllyToTargetSite", json!(true)),
         ("teleportNearbyAllyThenDrawCard", json!(true)),
+        ("teleportTargetMinionArtifactOrAuraOneDiagonal", json!(true)),
         ("untapTargetMinion", json!(true)),
     ];
     for (field, value) in magic_effects {
@@ -1812,6 +1813,24 @@ fn ally_takes_up_to_two_steps_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::AllyTakesUpToTwoSteps);
+}
+
+#[test]
+fn teleport_target_one_diagonal_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "teleport-target-one-diagonal",
+        &spell(
+            "magic",
+            ("teleportTargetMinionArtifactOrAuraOneDiagonal", json!(true)),
+        ),
+    )
+    .expect("valid teleport-target-one-diagonal Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal
+    );
 }
 
 #[test]

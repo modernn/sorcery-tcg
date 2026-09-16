@@ -1821,6 +1821,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const displaceManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        teleportTargetMinionArtifactOrAuraOneDiagonal: true,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(displaceManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 2,
+    teleportTargetMinionArtifactOrAuraOneDiagonal: true,
+    thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        teleportTargetMinionArtifactOrAuraOneDiagonal: false,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /teleportTargetMinionArtifactOrAuraOneDiagonal/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        teleportAllyToTargetSite: true,
+        teleportTargetMinionArtifactOrAuraOneDiagonal: true,
+        thresholds: { air: 2, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const adjacentBuryManifest = createGameManifest({
     ...input,
     cards: {

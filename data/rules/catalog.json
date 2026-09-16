@@ -12966,6 +12966,52 @@
         "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
         "testName": "rule_catalog_0562_ally_takes_up_to_two_steps_stay_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0563",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Teleport-target-minion-artifact-or-aura-one-diagonal Magic offers a minion paired with an existing diagonal location. After C4, D4, and D3 exist, a minion at C4 is offered D3 only. Casting teleports that minion to D3 without a step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_0563_teleport_targets_a_minion_one_diagonal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0564",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Teleport-target-minion-artifact-or-aura-one-diagonal Magic offers no cast when the only extra site is cardinal. A minion at C4 with C3 present cannot be teleported.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "play-site"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_0564_teleport_one_diagonal_is_unoffered_without_a_diagonal_site"
+      }
     }
   ]
 }
