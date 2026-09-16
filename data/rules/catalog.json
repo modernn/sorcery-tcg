@@ -9303,6 +9303,57 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0416_site_genesis_gain_mana_then_discards_only_available_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0419",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both optional paid-token summon and discard-top-spells, declining the token still publicly discards the top two spells from the controller's Spellbook after the site is played.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0419_site_genesis_decline_token_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0420",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same paid-token and discard-top-spells site is played, the token enters play first, then the top two spells are publicly discarded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "minion-summoned",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0420_site_genesis_pay_token_then_discards_top_spells"
+      }
     }
   ]
 }

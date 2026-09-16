@@ -1027,8 +1027,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     let genesis_pay_one_mana_to_summon_token =
         parse_reference(object, "genesisPayOneManaToSummonToken", path)?;
     let genesis_reorder_next_spells = fixed_integer(object, "genesisReorderNextSpells", 3, path)?;
-    let paid_token_blocked_genesis = genesis_discard_top_spells
-        || genesis_draw_spell_per_adjacent_same_card
+    let paid_token_blocked_genesis = genesis_draw_spell_per_adjacent_same_card
         || genesis_enemies_lose_stealth
         || genesis_gain_mana_if_only_controlled_copy
         || genesis_heal_nearby_avatars
@@ -1045,8 +1044,8 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     }
     if genesis_may_bottom_next_spell
         && (paid_token_blocked_genesis
-            || genesis_pay_one_mana_to_summon_token.is_some()
-            || genesis_reorder_next_spells)
+            || genesis_discard_top_spells
+            || genesis_pay_one_mana_to_summon_token.is_some())
     {
         return Err(FactError::new(
             path,
@@ -1055,7 +1054,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     }
     if genesis_reorder_next_spells
         && (paid_token_blocked_genesis
-            || genesis_may_bottom_next_spell
+            || genesis_discard_top_spells
             || genesis_pay_one_mana_to_summon_token.is_some())
     {
         return Err(FactError::new(

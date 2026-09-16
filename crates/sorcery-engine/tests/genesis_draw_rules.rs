@@ -1375,6 +1375,29 @@ fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
     assert_exact_replay(&paid);
 }
 
+fn token_discard_spell_genesis_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 1),
+        &minion(1, 1),
+        5,
+        5,
+        5,
+    );
+    value["cards"]["north-site"]["genesisDiscardTopSpells"] = json!(2);
+    value["cards"]["north-site"]["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    finish_manifest(value)
+}
+
 fn token_and_mana_genesis_manifest(seed: u32) -> String {
     let mut value = manifest_value(
         seed,
@@ -1746,6 +1769,148 @@ fn rule_catalog_0416_site_genesis_gain_mana_then_discards_only_available_spell()
 }
 
 #[test]
+fn rule_catalog_0419_site_genesis_decline_token_then_discards_top_spells() {
+    let manifest = token_discard_spell_genesis_manifest(419);
+    let mut session = Session::new(&manifest).expect("valid token-and-discard Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let spellbook_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .len();
+    let expected_discards = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .iter()
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    let source_instance_id = before["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    let after = state(&session);
+
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "spell-discarded", "spell-discarded"]
+    );
+    for (event, card) in receipt.events[1..].iter().zip(&expected_discards) {
+        assert_eq!(event.event_type, "spell-discarded");
+        assert_eq!(event.payload["cardId"], card["cardId"]);
+        assert_eq!(event.payload["instanceId"], card["instanceId"]);
+        assert_eq!(event.payload["owner"], "north");
+        assert_eq!(event.payload["seat"], "north");
+        assert_eq!(
+            event.payload["sourceInstanceId"],
+            receipt.events[0].payload["instanceId"]
+        );
+    }
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["players"]["north"]["mana"], 1);
+    assert_eq!(after["realm"]["units"], json!([]));
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .map(Vec::len),
+        Some(spellbook_before.saturating_sub(2))
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0420_site_genesis_pay_token_then_discards_top_spells() {
+    let manifest = token_discard_spell_genesis_manifest(420);
+    let mut session = Session::new(&manifest).expect("valid token-and-discard Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let spellbook_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .len();
+    let expected_discards = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .iter()
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    let source_instance_id = before["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = before["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C4",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    let after = state(&session);
+
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "site-played",
+            "minion-summoned",
+            "spell-discarded",
+            "spell-discarded"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "cardId": "foot-soldier",
+            "cell": "C4",
+            "instanceId": expected_token_id,
+            "manaPaid": 1,
+            "owner": "north",
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+            "token": true,
+        })
+    );
+    for (event, card) in receipt.events[2..].iter().zip(&expected_discards) {
+        assert_eq!(event.event_type, "spell-discarded");
+        assert_eq!(event.payload["cardId"], card["cardId"]);
+        assert_eq!(event.payload["instanceId"], card["instanceId"]);
+        assert_eq!(event.payload["owner"], "north");
+        assert_eq!(event.payload["seat"], "north");
+        assert_eq!(
+            event.payload["sourceInstanceId"],
+            receipt.events[0].payload["instanceId"]
+        );
+    }
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["players"]["north"]["mana"], 0);
+    assert_eq!(
+        after["realm"]["units"][0]["instanceId"],
+        json!(expected_token_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .map(Vec::len),
+        Some(spellbook_before.saturating_sub(2))
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0413_site_genesis_gain_mana_then_reorder_next_spells() {
     let manifest = private_site_genesis_manifest(413, &mana_reorder_spell_genesis_facts(), 6);
     let before = state(&opening_checkpoint(&manifest));
@@ -1788,9 +1953,11 @@ fn rule_catalog_0413_site_genesis_gain_mana_then_reorder_next_spells() {
     let choices = played.legal_actions().expect("private reorder choices");
     assert_checkpoint_round_trip(&played);
     assert_eq!(choices.len(), 6);
-    assert!(choices.iter().all(|choice| {
-        choice.descriptor["kind"] == "resolve-genesis-spell-order"
-    }));
+    assert!(
+        choices
+            .iter()
+            .all(|choice| { choice.descriptor["kind"] == "resolve-genesis-spell-order" })
+    );
 
     let mut reversed = played;
     let (_, reversed_receipt) = accept_where(&mut reversed, |descriptor| {

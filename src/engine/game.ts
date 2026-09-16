@@ -1442,8 +1442,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     if (card.genesisPayOneManaToSummonToken !== undefined
-      && (card.genesisDiscardTopSpells !== undefined
-        || card.genesisDrawSpellPerAdjacentSameCard
+      && (card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
