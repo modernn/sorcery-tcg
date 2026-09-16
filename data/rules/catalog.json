@@ -12155,6 +12155,55 @@
         "file": "crates/sorcery-engine/tests/disable_until_damaged_magic_rules.rs",
         "testName": "rule_catalog_0528_enemy_ward_absorbs_and_disable_survives_a_turn_cycle"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0529",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion +2 power this turn and then draws a spell offers only allied minions, never an Avatar or an enemy. The power uses the shared this-turn source list. The drawn spell stays hidden from the opponent. The power expires at End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerTwoToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted",
+        "spell-drawn",
+        "power-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_power_then_draw_rules.rs",
+        "testName": "rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0530",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-+2-this-turn then draw-spell Magic applies the power first. If the caster's Spellbook is empty, the required draw ends the game as a deck-out without a spell-drawn event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerTwoToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_power_then_draw_rules.rs",
+        "testName": "rule_catalog_0530_power_grant_then_empty_spellbook_is_a_deck_out"
+      }
     }
   ]
 }

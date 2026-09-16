@@ -1165,6 +1165,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const giftManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantPowerTwoToAllyThisTurnThenDrawSpell: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(giftManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantPowerTwoToAllyThisTurnThenDrawSpell: true,
+    manaCost: 2,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantPowerTwoToAllyThisTurnThenDrawSpell: false,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantPowerTwoToAllyThisTurnThenDrawSpell/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantPowerToAllyThisTurn: 2,
+        grantPowerTwoToAllyThisTurnThenDrawSpell: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

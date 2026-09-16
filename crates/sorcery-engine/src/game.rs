@@ -1453,6 +1453,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurn
+        | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantRangedToAllyThisTurn
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
@@ -3644,16 +3645,25 @@ impl Game {
                             } else if matches!(
                                 facts.effect,
                                 MagicEffect::GrantPowerTwoToAllyThisTurn
+                                    | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
                             ) {
                                 let ActionDescriptor::CastMagic {
                                     ally: Some(ally), ..
                                 } = &descriptor
                                 else {
-                                    return Err(invalid("Overpower action requires an ally"));
+                                    return Err(invalid("power-grant action requires an ally"));
                                 };
                                 format!(
-                                    "Cast {} to grant +2 power to {} {}…",
+                                    "Cast {} to grant +2 power{} to {} {}…",
                                     definition.id,
+                                    if matches!(
+                                        facts.effect,
+                                        MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
+                                    ) {
+                                        " and draw"
+                                    } else {
+                                        ""
+                                    },
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
@@ -6715,6 +6725,15 @@ impl Game {
             | MagicEffect::GrantRangedToAllyThisTurn => self
                 .controlled_allies(seat)
                 .into_iter()
+                .map(|ally| MagicChoice {
+                    ally: Some(ally),
+                    ..MagicChoice::default()
+                })
+                .collect(),
+            MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => self
+                .controlled_allies(seat)
+                .into_iter()
+                .filter(|ally| matches!(ally, UnitTarget::Minion { .. }))
                 .map(|ally| MagicChoice {
                     ally: Some(ally),
                     ..MagicChoice::default()
@@ -19407,6 +19426,34 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_power_sources
+                    .push(card_instance_id.clone());
+                outcomes.push("power-granted", || {
+                    json!({
+                        "amount": 2,
+                        "instanceId": instance_id,
+                        "seat": ally_seat,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::LeapAttackAlly => {
                 self.apply_leap_attack(
                     LeapAttackRequest {
@@ -24124,6 +24171,10 @@ mod tests {
             (
                 MagicEffect::GrantWardToTargetMinion,
                 json!({ "grantWardToTargetMinion": true }),
+            ),
+            (
+                MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell,
+                json!({ "grantPowerTwoToAllyThisTurnThenDrawSpell": true }),
             ),
             (
                 MagicEffect::TapTargetMinion,
