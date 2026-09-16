@@ -8,7 +8,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Event, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -196,11 +196,15 @@ fn seed_with(required: &[&str]) -> String {
         .expect("bounded seed with required opening cards")
 }
 
-fn south_plays_c1(session: &mut Session) {
+fn end_and_draw(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn south_plays_c1(session: &mut Session) {
+    end_and_draw(session);
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
@@ -208,10 +212,15 @@ fn south_plays_c1(session: &mut Session) {
 
 fn south_ends_after_c1(session: &mut Session) {
     south_plays_c1(session);
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    end_and_draw(session);
+}
+
+fn receipt_event<'a>(receipt: &'a Receipt, event_type: &str) -> &'a Event {
+    receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == event_type)
+        .unwrap_or_else(|| panic!("missing {event_type}"))
 }
 
 fn realm_artifact<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
@@ -285,10 +294,7 @@ fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
             && descriptor["cell"] == "C3"
     });
     let relic_id = artifact_at(&session, "north-relic", "C3");
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    end_and_draw(&mut session);
     let (summoned, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "south-raider"
@@ -299,10 +305,7 @@ fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
         .as_str()
         .expect("enemy instance identity")
         .to_owned();
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    end_and_draw(&mut session);
 
     let before = state(&session);
     assert_eq!(
@@ -330,11 +333,7 @@ fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
     assert!(types.contains(&"magic-damage-allocated"));
     assert!(types.contains(&"damage-dealt"));
     assert!(!types.contains(&"artifact-banished"));
-    let destroyed = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "artifact-destroyed")
-        .expect("artifact destruction");
+    let destroyed = receipt_event(&receipt, "artifact-destroyed");
     assert_eq!(destroyed.payload["cardId"], "north-relic");
     assert_eq!(destroyed.payload["instanceId"], relic_id);
     assert_eq!(destroyed.payload["owner"], "north");
@@ -342,22 +341,14 @@ fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
         destroyed.payload["sourceInstanceId"],
         cast["cardInstanceId"]
     );
-    let allocated = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "magic-damage-allocated")
-        .expect("area damage allocation");
+    let allocated = receipt_event(&receipt, "magic-damage-allocated");
     assert_eq!(allocated.payload["amount"], 3);
     assert_eq!(allocated.payload["targetInstanceId"], enemy_id);
     assert_eq!(
         allocated.payload["sourceInstanceId"],
         cast["cardInstanceId"]
     );
-    let dealt = receipt
-        .events
-        .iter()
-        .find(|event| event.event_type == "damage-dealt")
-        .expect("area damage");
+    let dealt = receipt_event(&receipt, "damage-dealt");
     assert_eq!(dealt.payload["amount"], 3);
     assert_eq!(dealt.payload["instanceId"], enemy_id);
     assert_eq!(dealt.payload["seat"], "south");
@@ -388,10 +379,7 @@ fn rule_catalog_0578_detonate_is_unoffered_without_an_own_artifact() {
             && descriptor["bearer"].is_null()
             && descriptor["cell"] == "C1"
     });
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    end_and_draw(&mut session);
     assert!(
         realm_artifact(
             &state(&session),
