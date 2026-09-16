@@ -10,7 +10,9 @@ use serde::Serialize;
 use crate::canonical::IdentityHash;
 use crate::contract::Seat;
 use crate::game::{Game, GameEndReason, GameOutcome};
-use crate::game_record::{game_record_from_session, validate_artifacts_dir, write_game_artifacts};
+use crate::game_record::{
+    game_record_from_session, session_eligibility, validate_artifacts_dir, write_game_artifacts,
+};
 use crate::policy::PolicySnapshot;
 use crate::session::{Session, SessionError};
 use crate::simulator::{SimulatorError, replay_selected, run_game};
@@ -24,12 +26,16 @@ pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 /// Existing deterministic-agent action limit for one complete game.
 pub const MAX_GAME_ACTIONS: usize = 500;
 
-/// Public result classification while supported mechanics remain incomplete.
+/// Public result classification for deterministic game reports.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchClassification {
     /// Rules are partial and raw manifests lack independently verified authority binding.
     UnrankedPartialRulesUnverifiedAuthority,
+    /// Supported rules are complete but raw manifests lack verified authority binding.
+    UnrankedUnverifiedAuthority,
+    /// Every TEST-04 gate passed with verified rules and authority.
+    Ranked,
 }
 
 /// One complete native rollout job.
@@ -501,12 +507,14 @@ fn run_job(job_index: usize, job: &BatchJob<'_>) -> Result<(BatchResult, Session
         .flat_map(|receipt| &receipt.events)
         .filter(|event| event.event_type == "fight-started")
         .count();
+    let eligibility = session_eligibility(&session, true)
+        .map_err(|_| BatchError::Invalid("session eligibility failed"))?;
     Ok((
         BatchResult {
             job_index,
             manifest_id: session.manifest_id().clone(),
             accepted_action_count: session.transcript().len(),
-            classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+            classification: eligibility.classification,
             final_state_hash: session
                 .state_hash()
                 .map_err(SessionError::from)

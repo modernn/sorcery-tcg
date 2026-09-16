@@ -12,6 +12,7 @@ use crate::batch::{
     run_batch, run_batch_to_dir_from,
 };
 use crate::contract::Seat;
+use crate::eligibility::{EligibilityGates, evaluate_eligibility};
 
 /// One deck orientation for a gauntlet seed.
 #[derive(Clone, Copy, Debug)]
@@ -253,11 +254,21 @@ fn run_gauntlet_inner(
         u32::try_from(games.len())
             .map_err(|_| GauntletError::Invalid("gauntlet game count overflowed"))?,
     );
+    let classification = evaluate_eligibility(EligibilityGates {
+        coverage: !games.is_empty(),
+        design: by_deck.len() >= 2,
+        execution: !games.is_empty(),
+        legality: true,
+        pinned_input: !pairs.is_empty(),
+        replay: games.iter().all(|game| game.result.report.replay_verified),
+        reporting: true,
+    })
+    .classification;
     Ok(GauntletReport {
         average_turns,
         by_deck,
         by_seat,
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification,
         game_count: games.len(),
         games,
         seeds: pairs.iter().map(|pair| pair.seed).collect(),

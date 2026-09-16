@@ -362,7 +362,16 @@ pub fn replay_steps_from_transcript(transcript: &[Receipt]) -> ReplayStepsReport
         .all(|pair| pair[0].post_state_hash == pair[1].pre_state_hash);
     ReplayStepsReport {
         chained,
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification: evaluate_eligibility(EligibilityGates {
+            coverage: !steps.is_empty(),
+            design: true,
+            execution: !steps.is_empty(),
+            legality: true,
+            pinned_input: true,
+            replay: chained,
+            reporting: true,
+        })
+        .classification,
         final_state_hash: steps.last().map(|step| step.post_state_hash.clone()),
         schema_version: 1,
         step_count: steps.len(),
@@ -392,17 +401,18 @@ pub fn replay_artifact_steps(dir: &Path) -> Result<ReplayStepsReport, GameRecord
 }
 
 fn mismatch_report(mismatch: ReplayMismatch) -> ArtifactReplayReport {
+    let eligibility = evaluate_eligibility(EligibilityGates {
+        coverage: false,
+        design: false,
+        execution: false,
+        legality: false,
+        pinned_input: false,
+        replay: false,
+        reporting: true,
+    });
     ArtifactReplayReport {
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
-        eligibility: evaluate_eligibility(EligibilityGates {
-            coverage: false,
-            design: false,
-            execution: false,
-            legality: false,
-            pinned_input: false,
-            replay: false,
-            reporting: true,
-        }),
+        classification: eligibility.classification,
+        eligibility,
         matched: false,
         mismatch: Some(mismatch),
         replay_verified: false,
@@ -461,21 +471,22 @@ fn compare_replay(
         None
     };
     let matched = mismatch.is_none();
+    let eligibility = if matched {
+        record.eligibility.clone()
+    } else {
+        evaluate_eligibility(EligibilityGates {
+            coverage: record.eligibility.gates.coverage,
+            design: record.eligibility.gates.design,
+            execution: record.eligibility.gates.execution,
+            legality: record.eligibility.gates.legality,
+            pinned_input: record.eligibility.gates.pinned_input,
+            replay: false,
+            reporting: true,
+        })
+    };
     ArtifactReplayReport {
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
-        eligibility: if matched {
-            record.eligibility.clone()
-        } else {
-            evaluate_eligibility(EligibilityGates {
-                coverage: record.eligibility.gates.coverage,
-                design: record.eligibility.gates.design,
-                execution: record.eligibility.gates.execution,
-                legality: record.eligibility.gates.legality,
-                pinned_input: record.eligibility.gates.pinned_input,
-                replay: false,
-                reporting: true,
-            })
-        },
+        classification: eligibility.classification,
+        eligibility,
         matched,
         mismatch,
         replay_verified: matched,
@@ -551,7 +562,7 @@ pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRec
     let eligibility = finished_game_eligibility(&manifest, &coverage, true);
     Ok(GameRecord {
         accepted_action_count: session.transcript().len(),
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification: eligibility.classification,
         coverage,
         eligibility,
         event_jsonl: event_jsonl(&events)?,
@@ -570,6 +581,19 @@ pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRec
         transcript_hash: session.transcript_hash()?,
         turn_count: session.turn_number(),
     })
+}
+
+pub(crate) fn session_eligibility(
+    session: &Session,
+    replay_verified: bool,
+) -> Result<EligibilityReport, GameRecordError> {
+    let coverage = coverage_from_session(session)?;
+    let manifest: Value = serde_json::from_str(session.manifest_json())?;
+    Ok(finished_game_eligibility(
+        &manifest,
+        &coverage,
+        replay_verified,
+    ))
 }
 
 fn finished_game_eligibility(
@@ -773,10 +797,11 @@ mod tests {
         assert!(record.eligibility.gates.all_passed());
         assert_eq!(
             record.eligibility.reasons,
-            [
-                crate::eligibility::EligibilityReason::PartialRules,
-                crate::eligibility::EligibilityReason::UnverifiedAuthority
-            ]
+            [crate::eligibility::EligibilityReason::UnverifiedAuthority]
+        );
+        assert_eq!(
+            record.classification,
+            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
         );
         assert_eq!(record.accepted_action_count, 230);
         assert_eq!(record.fight_count, 6);
@@ -864,10 +889,7 @@ mod tests {
         assert_eq!(outcome["finalStateHash"], record.final_state_hash.as_str());
         assert_eq!(outcome["transcriptHash"], record.transcript_hash.as_str());
         assert_eq!(outcome["eventsHash"], record.events_hash.as_str());
-        assert_eq!(
-            outcome["classification"],
-            "unranked_partial_rules_unverified_authority"
-        );
+        assert_eq!(outcome["classification"], "unranked_unverified_authority");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -886,7 +908,7 @@ mod tests {
         assert!(report.eligibility.gates.all_passed());
         assert_eq!(
             report.classification,
-            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
         );
         let _ = fs::remove_dir_all(&dir);
     }

@@ -1,4 +1,9 @@
-import { parseEligibilityReport, type EligibilityReport } from '../engine/eligibility.ts';
+import {
+  parseBatchClassification,
+  parseEligibilityReport,
+  type BatchClassification,
+  type EligibilityReport,
+} from '../engine/eligibility.ts';
 import {
   parseReplaySteps,
   runRustEngineCommand,
@@ -20,7 +25,7 @@ export type ReplayMismatch =
   | 'transcript-hash';
 
 export type ArtifactReplayReport = Readonly<{
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   eligibility: EligibilityReport;
   matched: boolean;
   mismatch?: ReplayMismatch;
@@ -41,18 +46,18 @@ const MISMATCHES = new Set<ReplayMismatch>([
 
 function parseReplay(value: unknown): ArtifactReplayReport {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || value.schemaVersion !== 1
     || (value.matched !== true && value.matched !== false)
     || (value.replayVerified !== true && value.replayVerified !== false)) {
     throw new Error('Rust artifact replay report did not match the expected contract');
   }
+  const classification = parseBatchClassification(value.classification);
   if (value.matched) {
     if (value.mismatch !== undefined || value.replayVerified !== true) {
       throw new Error('matched artifact replay must be replay-verified and have no mismatch');
     }
     return Object.freeze({
-      classification: 'unranked_partial_rules_unverified_authority',
+      classification,
       eligibility: parseEligibilityReport(value.eligibility),
       matched: true,
       replayVerified: true,
@@ -64,7 +69,7 @@ function parseReplay(value: unknown): ArtifactReplayReport {
     throw new Error('mismatched artifact replay must name a classified mismatch');
   }
   return Object.freeze({
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     eligibility: parseEligibilityReport(value.eligibility),
     matched: false,
     mismatch: value.mismatch as ReplayMismatch,

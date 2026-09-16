@@ -254,4 +254,4 @@
 - State-based outcomes beyond the supported region death/void-banishment model, and continuous ability-loss interactions beyond supported Disable. Token Genesis (draw-site, disable-until-damaged, adjacent-damage choice) is bound at `RULE-CATALOG-0381`–`0384`; oversized start-turn random teleport is bound at `RULE-CATALOG-0379`–`0380`; 2×2 Voidwalk is bound at `RULE-CATALOG-0316`–`0317`; token occupancy, wraparound, and outer-column casts are bound at `RULE-CATALOG-0371`–`0376`.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
-The runner is intentionally classified `unranked_partial_rules`; it proves the real engine loop and replay contract without claiming complete Sorcery behavior.
+The runner classifies finished games with passing gates as `unranked_unverified_authority` (505 catalog rules complete; authority still unverified). Full ranked waits on verified authority binding.

@@ -562,11 +562,11 @@ fn heldout_tie_should_keep_the_replay_verified_champion_deterministically() {
     assert_eq!(first, second);
     assert_eq!(
         first.classification,
-        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        BatchClassification::UnrankedUnverifiedAuthority
     );
     assert_eq!(
         serde_json::to_value(first.classification).expect("classification JSON"),
-        "unranked_partial_rules_unverified_authority"
+        "unranked_unverified_authority"
     );
     assert!(!first.promoted);
     assert_eq!(first.policy, champion);
@@ -809,7 +809,7 @@ fn underpowered_gain_should_replay_but_not_promote_or_start_a_campaign() {
     assert!(!result.promoted, "{result:#?}");
     assert_eq!(
         result.classification,
-        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        BatchClassification::UnrankedUnverifiedAuthority
     );
     assert_eq!(result.policy, champion);
     assert!(

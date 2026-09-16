@@ -10,7 +10,7 @@ test('SIM-04 seed-31 schedule runs both seat orientations', () => {
   const report = runGameSchedule([31], 2);
   assert.equal(report.status, 'completed');
   assert.equal(report.failurePolicy, 'abort');
-  assert.equal(report.classification, 'unranked_partial_rules_unverified_authority');
+  assert.equal(report.classification, 'unranked_unverified_authority');
   assert.deepEqual(report.plannedSeeds, [31]);
   assert.deepEqual(report.completedSeeds, [31]);
   assert.equal(report.gameCount, 2);
@@ -19,9 +19,9 @@ test('SIM-04 seed-31 schedule runs both seat orientations', () => {
 test('SIM-05 seed-31 schedule reports integer W/D/L, seat effect, and eligibility', () => {
   const report = runGameSchedule([31], 2);
   const { summary } = report;
-  assert.equal(summary.eligibility, 'unranked_partial_rules_unverified_authority');
+  assert.equal(summary.eligibility, 'unranked_unverified_authority');
   assert.equal(summary.ranked, false);
-  assert.deepEqual(summary.reasons, ['partial-rules', 'unverified-authority']);
+  assert.deepEqual(summary.reasons, ['unverified-authority']);
   assert.equal(summary.gates.coverage, true);
   assert.equal(summary.gates.design, true);
   assert.equal(summary.gates.execution, true);

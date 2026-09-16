@@ -19,8 +19,13 @@ export type EligibilityReason =
   | 'reporting-failed'
   | 'unverified-authority';
 
+export type BatchClassification =
+  | 'unranked_partial_rules_unverified_authority'
+  | 'unranked_unverified_authority'
+  | 'ranked';
+
 export type EligibilityReport = Readonly<{
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   gates: EligibilityGates;
   ranked: boolean;
   reasons: readonly EligibilityReason[];
@@ -38,6 +43,12 @@ const REASONS = new Set<EligibilityReason>([
   'unverified-authority',
 ]);
 
+const CLASSIFICATIONS = new Set<BatchClassification>([
+  'unranked_partial_rules_unverified_authority',
+  'unranked_unverified_authority',
+  'ranked',
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -49,15 +60,48 @@ function parseGate(value: unknown, label: string): boolean {
   return value;
 }
 
-/** Parses a TEST-04 eligibility report and rejects a ranked claim. */
+/** Parses one public batch or eligibility classification string. */
+export function parseBatchClassification(value: unknown): BatchClassification {
+  if (typeof value !== 'string' || !CLASSIFICATIONS.has(value as BatchClassification)) {
+    throw new Error('batch classification was invalid');
+  }
+  return value as BatchClassification;
+}
+
+function validateEligibilityContract(
+  classification: BatchClassification,
+  ranked: boolean,
+  reasons: readonly EligibilityReason[],
+): void {
+  if (ranked) {
+    if (classification !== 'ranked' || reasons.length > 0) {
+      throw new Error('ranked eligibility did not match the expected contract');
+    }
+    return;
+  }
+  if (classification === 'ranked') {
+    throw new Error('ranked classification requires ranked true');
+  }
+  if (classification === 'unranked_partial_rules_unverified_authority') {
+    if (!reasons.includes('partial-rules') || !reasons.includes('unverified-authority')) {
+      throw new Error('partial-rules classification was missing blocking reasons');
+    }
+    return;
+  }
+  if (reasons.includes('partial-rules')) {
+    throw new Error('rules-complete classification must not include partial-rules');
+  }
+}
+
+/** Parses a TEST-04 eligibility report and rejects an unexpected ranked claim. */
 export function parseEligibilityReport(value: unknown): EligibilityReport {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || !isRecord(value.gates)
     || !Array.isArray(value.reasons)
     || (value.ranked !== true && value.ranked !== false)) {
     throw new Error('eligibility report did not match the expected contract');
   }
+  const classification = parseBatchClassification(value.classification);
   const gates = Object.freeze({
     coverage: parseGate(value.gates.coverage, 'coverage'),
     design: parseGate(value.gates.design, 'design'),
@@ -73,15 +117,11 @@ export function parseEligibilityReport(value: unknown): EligibilityReport {
     }
     return reason as EligibilityReason;
   }));
-  if (value.ranked === true
-    || !reasons.includes('partial-rules')
-    || !reasons.includes('unverified-authority')) {
-    throw new Error('eligibility must stay unranked while rules and authority are unverified');
-  }
+  validateEligibilityContract(classification, value.ranked, reasons);
   return Object.freeze({
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     gates,
-    ranked: false,
+    ranked: value.ranked,
     reasons,
   });
 }

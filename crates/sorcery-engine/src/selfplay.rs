@@ -12,6 +12,7 @@ use crate::canonical::{
 };
 use crate::contract::Seat;
 use crate::deck::{CanonicalDeck, DeckCost, DeckValidation};
+use crate::eligibility::{EligibilityGates, evaluate_eligibility};
 use crate::game::{Game, GameOutcome};
 use crate::policy::{
     PolicyError, PolicySnapshot, parse_policy_snapshot, serialize_policy_snapshot,
@@ -700,7 +701,16 @@ impl SelfPlayCampaign {
             ));
         }
         let audit = SelfPlayAudit {
-            classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+            classification: evaluate_eligibility(EligibilityGates {
+                coverage: true,
+                design: true,
+                execution: true,
+                legality: true,
+                pinned_input: true,
+                replay: true,
+                reporting: true,
+            })
+            .classification,
             policy_id: self.champion().policy_id().clone(),
             baseline_score,
             score,
@@ -1326,7 +1336,16 @@ pub fn compare_decks(
     }
 
     Ok(DeckComparisonResult {
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification: evaluate_eligibility(EligibilityGates {
+            coverage: true,
+            design: true,
+            execution: true,
+            legality: true,
+            pinned_input: true,
+            replay: true,
+            reporting: true,
+        })
+        .classification,
         selected_score,
         standings: ranked.into_iter().map(|(_, standing)| standing).collect(),
     })
@@ -1415,7 +1434,16 @@ fn train_and_promote_at_significance(
     );
     let nominee_policy_id = nominee.policy_id().clone();
     Ok(PromotionResult {
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification: evaluate_eligibility(EligibilityGates {
+            coverage: true,
+            design: true,
+            execution: true,
+            legality: true,
+            pinned_input: true,
+            replay: true,
+            reporting: true,
+        })
+        .classification,
         policy: if promoted { nominee } else { champion.clone() },
         promoted,
         nominee_policy_id,

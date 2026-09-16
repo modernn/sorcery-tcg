@@ -26,10 +26,10 @@ test('SIM-03 seed-31 record writes manifest, transcript, events, coverage, and o
   });
 
   assert.equal(record.schemaVersion, 1);
-  assert.equal(record.classification, 'unranked_partial_rules_unverified_authority');
+  assert.equal(record.classification, 'unranked_unverified_authority');
   assert.equal(record.replayVerified, true);
   assert.equal(record.eligibility.ranked, false);
-  assert.deepEqual(record.eligibility.reasons, ['partial-rules', 'unverified-authority']);
+  assert.deepEqual(record.eligibility.reasons, ['unverified-authority']);
   assert.equal(record.eligibility.gates.replay, true);
   assert.equal(record.acceptedActionCount, report.acceptedActionCount);
   assert.equal(record.fightCount, report.fightCount);
@@ -99,10 +99,10 @@ test('SIM-06 seed-31 artifacts replay and detect engine and hash mismatches', ()
     const matched = replayGameArtifacts(dir);
     assert.equal(matched.matched, true);
     assert.equal(matched.replayVerified, true);
-    assert.equal(matched.classification, 'unranked_partial_rules_unverified_authority');
+    assert.equal(matched.classification, 'unranked_unverified_authority');
     assert.equal(matched.mismatch, undefined);
     assert.equal(matched.eligibility.ranked, false);
-    assert.deepEqual(matched.eligibility.reasons, ['partial-rules', 'unverified-authority']);
+    assert.deepEqual(matched.eligibility.reasons, ['unverified-authority']);
 
     const manifestPath = join(dir, 'manifest.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
@@ -134,7 +134,7 @@ test('WEB-04 seed-31 artifacts expose a chained 230-step replay', () => {
     const compact = runGameDemo(31, dir);
     const steps = replayGameArtifactSteps(dir);
     assert.equal(steps.schemaVersion, 1);
-    assert.equal(steps.classification, 'unranked_partial_rules_unverified_authority');
+    assert.equal(steps.classification, 'unranked_unverified_authority');
     assert.equal(steps.stepCount, 230);
     assert.equal(steps.chained, true);
     assert.equal(steps.finalStateHash, compact.finalStateHash);

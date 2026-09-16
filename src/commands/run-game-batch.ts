@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import { deepFreeze } from '../engine/contract.ts';
+import { parseBatchClassification, type BatchClassification } from '../engine/eligibility.ts';
 import type { GameDeckSpec, GameManifest } from '../engine/game.ts';
 import type { DeterministicGameReport } from './run-game-demo.ts';
 
@@ -15,7 +16,7 @@ const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 type RustGameReport = Readonly<Omit<DeterministicGameReport, 'classification'> & {
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
 }>;
 
 export type GameBatchResult = Readonly<{
@@ -169,9 +170,12 @@ export async function runGameBatch(
       || result.jobIndex !== jobIndex
       || result.manifestId !== manifests[jobIndex]?.manifestId
       || !isRecord(result.report)
-      || result.report.classification !== 'unranked_partial_rules_unverified_authority'
       || result.report.replayVerified !== true)) {
     throw new Error('game batch results do not match the declared jobs');
   }
+  results.forEach((result) => {
+    if (!isRecord(result) || !isRecord(result.report)) return;
+    parseBatchClassification(result.report.classification);
+  });
   return deepFreeze(results as unknown as readonly GameBatchResult[]);
 }

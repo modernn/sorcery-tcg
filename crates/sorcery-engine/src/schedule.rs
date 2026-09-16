@@ -367,7 +367,7 @@ pub fn run_declared_pairs(
     let gauntlet = merge_gauntlet_reports(&completed)?;
     let summary = schedule_summary(&gauntlet, pairs.len())?;
     Ok(ScheduleReport {
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification: summary.eligibility,
         completed_seeds: planned_seeds
             .iter()
             .copied()
@@ -684,11 +684,21 @@ fn average_report(
         u32::try_from(games.len())
             .map_err(|_| ScheduleError::Invalid("schedule game count overflowed"))?,
     );
+    let classification = evaluate_eligibility(EligibilityGates {
+        coverage: !games.is_empty(),
+        design: by_deck.len() >= 2,
+        execution: !games.is_empty(),
+        legality: true,
+        pinned_input: !seeds.is_empty(),
+        replay: games.iter().all(|game| game.result.report.replay_verified),
+        reporting: true,
+    })
+    .classification;
     Ok(GauntletReport {
         average_turns,
         by_deck,
         by_seat,
-        classification: BatchClassification::UnrankedPartialRulesUnverifiedAuthority,
+        classification,
         game_count: games.len(),
         games,
         seeds,
@@ -766,16 +776,13 @@ mod tests {
         assert_eq!(report.summary.games, 2);
         assert_eq!(
             report.summary.eligibility,
-            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
         );
         assert!(!report.summary.ranked);
         assert!(report.summary.gates.all_passed());
         assert_eq!(
             report.summary.reasons,
-            [
-                crate::eligibility::EligibilityReason::PartialRules,
-                crate::eligibility::EligibilityReason::UnverifiedAuthority
-            ]
+            [crate::eligibility::EligibilityReason::UnverifiedAuthority]
         );
         assert_eq!(report.summary.by_seat.north.wins, 0);
         assert_eq!(report.summary.by_seat.north.draws, 0);

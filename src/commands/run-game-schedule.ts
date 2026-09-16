@@ -1,5 +1,7 @@
 import {
+  parseBatchClassification,
   parseEligibilityReport,
+  type BatchClassification,
   type EligibilityGates,
   type EligibilityReason,
 } from '../engine/eligibility.ts';
@@ -41,7 +43,7 @@ export type ScheduleSummary = Readonly<{
     north: OutcomeCounts;
     south: OutcomeCounts;
   }>;
-  eligibility: 'unranked_partial_rules_unverified_authority';
+  eligibility: BatchClassification;
   games: number;
   gates: EligibilityGates;
   ranked: false;
@@ -71,7 +73,7 @@ export type ScheduleSummary = Readonly<{
 }>;
 
 export type SyntheticScheduleReport = Readonly<{
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   completedSeeds: readonly number[];
   failurePolicy: 'abort';
   gameCount: number;
@@ -145,7 +147,6 @@ function parseSummary(value: unknown, gameCount: number, plannedTrials: number):
     || !isRecord(value.reliability)
     || !isRecord(value.trials)
     || !isRecord(value.uncertainty)
-    || value.eligibility !== 'unranked_partial_rules_unverified_authority'
     || !Number.isSafeInteger(value.seatEffect)) {
     throw new Error('Rust schedule summary did not match the expected contract');
   }
@@ -186,8 +187,9 @@ function parseSummary(value: unknown, gameCount: number, plannedTrials: number):
     || value.seatEffect !== bySeat.north.wins - bySeat.south.wins) {
     throw new Error('schedule uncertainty or seat effect did not match W/D/L');
   }
+  const classification = parseBatchClassification(value.eligibility);
   const eligibility = parseEligibilityReport({
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     gates: value.gates,
     ranked: value.ranked,
     reasons: value.reasons,
@@ -195,7 +197,7 @@ function parseSummary(value: unknown, gameCount: number, plannedTrials: number):
   return Object.freeze({
     byDeck,
     bySeat,
-    eligibility: 'unranked_partial_rules_unverified_authority',
+    eligibility: classification,
     games,
     gates: eligibility.gates,
     length: Object.freeze({
@@ -214,7 +216,6 @@ function parseSummary(value: unknown, gameCount: number, plannedTrials: number):
 
 function parseSchedule(value: unknown): SyntheticScheduleReport {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || value.failurePolicy !== 'abort'
     || value.status !== 'completed'
     || value.schemaVersion !== 1
@@ -225,8 +226,9 @@ function parseSchedule(value: unknown): SyntheticScheduleReport {
     || !/^sha256:[0-9a-f]{64}$/u.test(value.scheduleId)) {
     throw new Error('Rust schedule report did not match the expected contract');
   }
+  const classification = parseBatchClassification(value.classification);
   return Object.freeze({
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     completedSeeds: Object.freeze(
       value.completedSeeds.map((seed) => {
         if (!Number.isSafeInteger(seed)) throw new Error('schedule completedSeeds was invalid');

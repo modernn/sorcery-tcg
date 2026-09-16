@@ -248,7 +248,7 @@ fn rule_catalog_0378_deck_pair_batch_reproduces_transcript_hash_for_manifest_and
     assert!(first[0].report.accepted_action_count > 0);
     assert_eq!(
         first[0].report.classification,
-        sorcery_engine::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        sorcery_engine::batch::BatchClassification::UnrankedUnverifiedAuthority
     );
 }
 
@@ -363,6 +363,6 @@ fn rule_catalog_0505_deck_pair_terminal_batch_reproduces_transcript_hash() {
     assert!(first[0].report.accepted_action_count >= 200);
     assert_eq!(
         first[0].report.classification,
-        sorcery_engine::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        sorcery_engine::batch::BatchClassification::UnrankedUnverifiedAuthority
     );
 }

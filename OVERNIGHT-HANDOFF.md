@@ -90,7 +90,7 @@ Still TypeScript (not a second legality, observation, or agent engine):
 ## Next exact step
 
 1. Continue remaining Phase 3 rule families listed in `03-PROGRESS.md` §Still required.
-2. `pnpm game:check-private` and `pnpm game:selfplay-acceptance` are green on `master` with local `.local/authority/`. `pnpm authority:verify-private` still fails the production boundary-scan tests on this machine; that is an environment gap, not a rules regression. Ranked results still stay `unranked_partial_rules`.
+2. `pnpm game:check-private` and `pnpm game:selfplay-acceptance` are green on `master` with local `.local/authority/`. `pnpm authority:verify-private` still fails the production boundary-scan tests on this machine; that is an environment gap, not a rules regression. Finished games with passing TEST-04 gates now classify `unranked_unverified_authority` (rules-complete, authority still unverified). Full ranked waits on verified authority binding.
 3. Retire this handoff when ranked-ready gates and private authority verification are both green.
 
 ## Do not

@@ -21,7 +21,7 @@ test('one and many workers produce byte-identical ordered game reports', async (
   assert.equal(oneWorker.every(({ report }) =>
     report.replayVerified && report.terminal.status === 'finished'), true);
   assert.equal(oneWorker.every(({ report }) =>
-    report.classification === 'unranked_partial_rules_unverified_authority'), true);
+    report.classification === 'unranked_unverified_authority'), true);
 
   const source = manifests[1]!;
   const cardId = Object.keys(source.cards)[0]!;

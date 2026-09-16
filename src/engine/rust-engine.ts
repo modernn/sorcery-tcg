@@ -9,7 +9,12 @@ import {
   parseJsonWithDuplicateKeyCheck,
   type JsonValue,
 } from '../authority/canonical-json.ts';
-import { parseEligibilityReport, type EligibilityReport } from './eligibility.ts';
+import {
+  parseBatchClassification,
+  parseEligibilityReport,
+  type BatchClassification,
+  type EligibilityReport,
+} from './eligibility.ts';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const MAX_OUTPUT_BYTES = 16 * 1_048_576;
@@ -34,7 +39,7 @@ export type Sha256Hash = `sha256:${string}`;
 
 export type RustDeterministicGameReport = Readonly<{
   acceptedActionCount: number;
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   fightCount: number;
   finalStateHash: Sha256Hash;
   replayVerified: boolean;
@@ -50,7 +55,7 @@ export type RustDeterministicGameReport = Readonly<{
 
 export type RustGameRecord = Readonly<{
   acceptedActionCount: number;
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   coverage: Readonly<{
     committedActionKinds: readonly string[];
     committedEventTypes: readonly string[];
@@ -104,7 +109,7 @@ export type RustReplayStep = Readonly<{
 
 export type RustReplayStepsReport = Readonly<{
   chained: boolean;
-  classification: 'unranked_partial_rules_unverified_authority';
+  classification: BatchClassification;
   finalStateHash?: Sha256Hash;
   schemaVersion: 1;
   stepCount: number;
@@ -222,7 +227,6 @@ function parseReplayStep(value: unknown, expectedIndex: number): RustReplayStep 
 
 export function parseReplaySteps(value: unknown): RustReplayStepsReport {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || value.schemaVersion !== 1
     || typeof value.chained !== 'boolean'
     || !Number.isSafeInteger(value.stepCount)
@@ -233,6 +237,7 @@ export function parseReplaySteps(value: unknown): RustReplayStepsReport {
   if (stepCount < 0 || stepCount !== value.steps.length) {
     throw new Error('Rust replay steps report did not match the expected contract');
   }
+  const classification = parseBatchClassification(value.classification);
   const steps = Object.freeze(value.steps.map((step, index) => parseReplayStep(step, index)));
   if (stepCount === 0) {
     if (value.finalStateHash !== undefined) {
@@ -240,7 +245,7 @@ export function parseReplaySteps(value: unknown): RustReplayStepsReport {
     }
     return Object.freeze({
       chained: value.chained,
-      classification: 'unranked_partial_rules_unverified_authority',
+      classification,
       schemaVersion: 1 as const,
       stepCount: 0,
       steps,
@@ -252,7 +257,7 @@ export function parseReplaySteps(value: unknown): RustReplayStepsReport {
   }
   return Object.freeze({
     chained: value.chained,
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     finalStateHash,
     schemaVersion: 1 as const,
     stepCount,
@@ -280,7 +285,6 @@ function parseLegalAction(action: unknown): RustLegalAction {
 
 function parseRustReport(value: unknown): RustDeterministicGameReport {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || value.replayVerified !== true
     || !Number.isSafeInteger(value.acceptedActionCount)
     || !Number.isSafeInteger(value.fightCount)
@@ -294,7 +298,7 @@ function parseRustReport(value: unknown): RustDeterministicGameReport {
   }
   return Object.freeze({
     acceptedActionCount: value.acceptedActionCount as number,
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification: parseBatchClassification(value.classification),
     fightCount: value.fightCount as number,
     finalStateHash: requireHash(value.finalStateHash, 'finalStateHash'),
     replayVerified: true,
@@ -345,7 +349,6 @@ export function runRustSyntheticDemo(
 
 function parseRustRecord(value: unknown): RustGameRecord {
   if (!isRecord(value)
-    || value.classification !== 'unranked_partial_rules_unverified_authority'
     || value.replayVerified !== true
     || value.schemaVersion !== 1
     || typeof value.eventJsonl !== 'string'
@@ -364,9 +367,10 @@ function parseRustRecord(value: unknown): RustGameRecord {
     || typeof value.terminal.reason !== 'string') {
     throw new Error('Rust engine record did not match the expected contract');
   }
+  const classification = parseBatchClassification(value.classification);
   return Object.freeze({
     acceptedActionCount: value.acceptedActionCount as number,
-    classification: 'unranked_partial_rules_unverified_authority',
+    classification,
     coverage: Object.freeze({
       committedActionKinds: Object.freeze(
         [...value.coverage.committedActionKinds] as string[],
