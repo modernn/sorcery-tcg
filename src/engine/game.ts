@@ -2146,8 +2146,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
   }
   if (card.genesisDisableSelfUntilDamaged === true
-    && (card.genesisDrawSpells !== undefined
-      || card.genesisDamageEachOtherUnitHere === 1
+    && (card.genesisDamageEachOtherUnitHere === 1
       || card.genesisMayDamageTargetAdjacentUnit === 2
       || card.genesisStrikeEachEnemyHere === true
       || card.genesisHealController !== undefined

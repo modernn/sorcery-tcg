@@ -11063,6 +11063,58 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0484_spellbook_summon_genesis_disable_then_draws_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0485",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both disable-until-damaged and draw-spell Genesis, paid site entry disables the token and then draws one hidden Spellbook card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisDrawSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0485_token_genesis_disable_then_draws_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0486",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and draw-spell Genesis, summoning it disables the minion and then draws one hidden Spellbook card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisDrawSpells"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0486_spellbook_summon_genesis_disable_then_draws_spell"
+      }
     }
   ]
 }
