@@ -9098,6 +9098,57 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0408_oversized_during_movement_ranged_then_declined_step_continues_movement"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0409",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis gain mana and optional paid-token summon, declining the token still grants the printed mana after the site is played.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0409_site_genesis_decline_token_still_grants_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0410",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same site pays 1 mana for its Genesis token, the controller still receives the printed mana net of the token payment before the token enters play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "mana-gained",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0410_site_genesis_pay_token_and_gain_mana_net"
+      }
     }
   ]
 }

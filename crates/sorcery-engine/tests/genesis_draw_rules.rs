@@ -1375,6 +1375,129 @@ fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
     assert_exact_replay(&paid);
 }
 
+fn token_and_mana_genesis_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 1),
+        &minion(1, 1),
+        5,
+        5,
+        5,
+    );
+    value["cards"]["north-site"]["genesisGainMana"] = json!(1);
+    value["cards"]["north-site"]["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    finish_manifest(value)
+}
+
+#[test]
+fn rule_catalog_0409_site_genesis_decline_token_still_grants_mana() {
+    let manifest = token_and_mana_genesis_manifest(409);
+    let mut session = Session::new(&manifest).expect("valid token-and-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 1,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["mana"], 2);
+    assert_eq!(state(&session)["realm"]["units"], json!([]));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0410_site_genesis_pay_token_and_gain_mana_net() {
+    let manifest = token_and_mana_genesis_manifest(410);
+    let mut session = Session::new(&manifest).expect("valid token-and-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = origin["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C4",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "mana-gained", "minion-summoned"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 1,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert_eq!(
+        receipt.events[2].payload,
+        json!({
+            "cardId": "foot-soldier",
+            "cell": "C4",
+            "instanceId": expected_token_id,
+            "manaPaid": 1,
+            "owner": "north",
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+            "token": true,
+        })
+    );
+    let final_state = state(&session);
+    assert_eq!(final_state["players"]["north"]["mana"], 1);
+    assert_eq!(
+        final_state["realm"]["units"][0],
+        json!({
+            "cardId": "foot-soldier",
+            "controller": "north",
+            "damage": 0,
+            "instanceId": expected_token_id,
+            "location": "C4",
+            "owner": "north",
+            "region": "surface",
+            "source": "token",
+            "stealthed": false,
+            "summoningSickness": true,
+            "tapped": false,
+            "warded": false,
+        })
+    );
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
     let manifest =
