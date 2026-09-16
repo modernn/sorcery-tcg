@@ -21787,7 +21787,7 @@ impl Game {
                     seat,
                     target_artifact_instance_id,
                     *target_location,
-                    *amount,
+                    amount,
                     card_instance_id,
                     outcomes,
                 )?;

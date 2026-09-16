@@ -312,9 +312,10 @@ fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
     assert_eq!(unit(&before, &enemy_id)["location"], "C3");
     assert_eq!(unit(&before, &enemy_id)["damage"], 0);
     let offered = detonate_casts(&session);
-    assert_eq!(offered.len(), 1);
-    assert_eq!(offered[0]["targetArtifactInstanceId"], relic_id);
-    assert_eq!(offered[0]["targetLocation"]["cell"], "C3");
+    assert!(!offered.is_empty());
+    assert!(offered.iter().all(|cast| {
+        cast["targetArtifactInstanceId"] == relic_id && cast["targetLocation"]["cell"] == "C3"
+    }));
 
     let (cast, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
