@@ -1,12 +1,12 @@
 # Overnight handoff
 
-Live line: `cursor/lucky-charm-occupy-0005`. Stack this on current `master` (`eab1f7d`). Do not grow already-merged landings.
+Canonical line: `master` @ `e5a7e04`. Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
 
-This branch makes Lucky Charm extra-random for discard-funded damage use a 2×2 source’s whole footprint and honor the chosen outcome. Sparkmage and Aramos random discards now honor that same committed choice. A B3 occupant of an A3-anchored square is offered and takes the damage; a C1 minion is not. Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
+Lucky Charm extra-random discard-here damage, Sparkmage/Aramos random-discard honor, and the 2×2 occupy proofs through `RULE-CATALOG-0370` are merged on `master` (#54). Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
-2×2 Voidwalk is bound. Tokens, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
+2×2 Voidwalk is bound (`RULE-CATALOG-0316`–`0317`). Token occupancy, wraparound, and outer-column casts stay fail-closed with a 2×2 footprint.
 
-`cursor/phase3-drown-bury-artifacts-36d3` was identical to `master` with PR #1 closed. It is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`).
+Stale cutover branches were retired locally. `cursor/phase3-drown-bury-artifacts-36d3` is archived as `archive/cursor/phase3-drown-bury-artifacts-36d3` (`git tag -l 'archive/*'`). Do not branch from `codex/rust-cutover` or other superseded cutover lines.
 
 Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with authority fixtures and `pwsh`.
 
@@ -79,19 +79,24 @@ Still TypeScript (not a second legality, observation, or agent engine):
 - `run-private-novelty-gauntlet.ts` still orchestrates four private lesson jobs and writes authority-private reports. Single-root frontier search is `runNoveltyFrontierSearch`.
 - Production agents call `selectPolicyAction` on the live Rust session.
 
-## Gate status on this branch
+## Gate status on master
 
 - `pnpm typecheck` / `pnpm lint` — green.
 - Monument playthrough (`RULE-04 a Monument cannot be conjured onto a unit or picked up`), catalog `0314`–`0315`, and the catalog linker — green.
-- Belfry playthrough remains green on this stack.
-- Remaining `pnpm test` engine and ingestion files — green. Full `pnpm verify` still fails authority-collector / some DATA-01 bundle cases (`pwsh` missing, no private authority bundle). Those are environment gaps, not this family.
+- Belfry playthrough remains green.
+- Remaining `pnpm test` engine and ingestion files — green. Full `pnpm verify` still fails authority-collector / some DATA-01 bundle cases (`pwsh` missing, no private authority bundle). Those are environment gaps, not rules gaps.
 - PR #2 stays frozen. Rebuild `session-json` after engine fact changes.
 
 ## Next exact step
 
-1. Keep later official-rules work on new `cursor/<one-family>-0005` branches. Leftover 2×2 fail-closed combinations are token, wraparound, and outer-column. Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not invent MTG keywords.
-2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`.
-3. Retire this handoff and fast-forward `master` only after that private-check run is green.
+1. Run four exclusive parallel lanes from `master`. Reserve catalog IDs `RULE-CATALOG-0371`–`0378` only; rebase if another lane lands first.
+   - `cursor/square-token-0005` — admit 2×2 token occupy (`0371`–`0372`); split the combined `facts.rs` reject first; token Genesis stays fail-closed.
+   - `cursor/square-wrap-0005` — admit 2×2 wrap occupy (`0373`–`0374`); rebase after the token split; do not edit `readiness_affinity_rules.rs`.
+   - `cursor/square-outer-column-0005` — admit 2×2 outer-column occupy (`0375`–`0376`); rebase after the token split; do not edit `voidwalk_rules.rs`.
+   - `cursor/deck-pair-0005` — synthetic 30/60 deck-pair harness (`0377`–`0378`); no `facts.rs` changes; can start immediately.
+   Deathrite and start-turn/target-player **draw** empty is a deck-out; start-turn, target-player, and Deathrite **mill** empty is a no-op. Do not invent MTG keywords.
+2. Run `pnpm verify` and `pnpm game:check-private` on a machine that has `.local/authority/` and `pwsh`. That is the fastest path to real-card deck-vs-deck testing; ranked results still stay `unranked_partial_rules`.
+3. Retire this handoff only after that private-check run is green.
 
 ## Do not
 
