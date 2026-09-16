@@ -195,7 +195,11 @@ fn draw_lure_stack_manifest() -> String {
 }
 
 fn event_types(receipt: &Receipt) -> Vec<&str> {
-    receipt.events.iter().map(|event| event.event_type.as_str()).collect()
+    receipt
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect()
 }
 
 fn after_source_summoned() -> Session {
@@ -348,6 +352,7 @@ fn rule_catalog_0403_start_turn_draw_spells_then_lure_resolves_in_order() {
             && descriptor["cell"] == "C1"
     });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    resolve_empty_start_turn(&mut session, &source_id);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
@@ -368,7 +373,9 @@ fn rule_catalog_0403_start_turn_draw_spells_then_lure_resolves_in_order() {
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let target_id = unit_id(&session, "south-minion");
     assert_eq!(state(&session)["phase"], "start-turn");
-    let legal = session.legal_actions().expect("mandatory start-turn draw-lure");
+    let legal = session
+        .legal_actions()
+        .expect("mandatory start-turn draw-lure");
     assert!(
         legal.iter().all(|action| {
             action.descriptor["kind"] == "resolve-start-turn-trigger"
