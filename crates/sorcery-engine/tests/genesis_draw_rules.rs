@@ -1398,6 +1398,29 @@ fn token_bottom_spell_genesis_manifest(seed: u32) -> String {
     finish_manifest(value)
 }
 
+fn token_reorder_spell_genesis_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 1),
+        &minion(1, 1),
+        5,
+        6,
+        5,
+    );
+    value["cards"]["north-site"]["genesisReorderNextSpells"] = json!(3);
+    value["cards"]["north-site"]["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    finish_manifest(value)
+}
+
 fn token_discard_spell_genesis_manifest(seed: u32) -> String {
     let mut value = manifest_value(
         seed,
@@ -2268,6 +2291,185 @@ fn rule_catalog_0422_site_genesis_keep_then_reorder_next_spells() {
         })
     );
     assert_exact_replay(&reordered);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct scenario compares paid-token and hidden reorder Genesis"
+)]
+fn rule_catalog_0423_site_genesis_pay_token_then_reorder_next_spells() {
+    let manifest = token_reorder_spell_genesis_manifest(423);
+    let mut session = Session::new(&manifest).expect("valid token-and-reorder Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let source_instance_id = before["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = before["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C4",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    let played_state = state(&session);
+
+    assert_eq!(
+        event_types(&play_receipt),
+        ["site-played", "minion-summoned"]
+    );
+    assert_eq!(
+        play_receipt.events[1].payload,
+        json!({
+            "cardId": "foot-soldier",
+            "cell": "C4",
+            "instanceId": expected_token_id,
+            "manaPaid": 1,
+            "owner": "north",
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+            "token": true,
+        })
+    );
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["stateVersion"], before_version + 1);
+    assert_eq!(played_state["players"]["north"]["mana"], 0);
+    assert_eq!(
+        played_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(played_state["pendingGenesisSpell"], Value::Null);
+    assert_eq!(
+        played_state["pendingGenesisSpellOrder"],
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert_eq!(
+        played_state["realm"]["units"][0]["instanceId"],
+        json!(expected_token_id)
+    );
+
+    let (_, reordered_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([2, 1, 0])
+    });
+    let reordered_state = state(&session);
+    let before_cards = before_spellbook.as_array().expect("Spellbook cards");
+
+    assert_eq!(reordered_state["phase"], "main");
+    assert_eq!(reordered_state["stateVersion"], before_version + 2);
+    assert_eq!(reordered_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(reordered_state["players"]["north"]["mana"], 0);
+    assert_eq!(
+        reordered_state["players"]["north"]["spellbook"][0],
+        before_cards[2]
+    );
+    assert_eq!(
+        reordered_state["players"]["north"]["spellbook"][1],
+        before_cards[1]
+    );
+    assert_eq!(
+        reordered_state["players"]["north"]["spellbook"][2],
+        before_cards[0]
+    );
+    assert_eq!(event_types(&reordered_receipt), ["spells-reordered"]);
+    assert_eq!(
+        reordered_receipt.events[0].payload,
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&reordered_receipt.events)
+            .expect("reordered events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0424_site_genesis_decline_token_then_reorder_next_spells() {
+    let manifest = token_reorder_spell_genesis_manifest(424);
+    let mut session = Session::new(&manifest).expect("valid token-and-reorder Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let source_instance_id = before["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    let played_state = state(&session);
+
+    assert_eq!(event_types(&play_receipt), ["site-played"]);
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["stateVersion"], before_version + 1);
+    assert_eq!(played_state["players"]["north"]["mana"], 1);
+    assert_eq!(
+        played_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(played_state["realm"]["units"], json!([]));
+    assert_eq!(played_state["pendingGenesisSpell"], Value::Null);
+    assert_eq!(
+        played_state["pendingGenesisSpellOrder"],
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+
+    let (_, reordered_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([0, 1, 2])
+    });
+    let reordered_state = state(&session);
+
+    assert_eq!(reordered_state["phase"], "main");
+    assert_eq!(reordered_state["stateVersion"], before_version + 2);
+    assert_eq!(reordered_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(reordered_state["players"]["north"]["mana"], 1);
+    assert_eq!(
+        reordered_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(event_types(&reordered_receipt), ["spells-reordered"]);
+    assert_eq!(
+        reordered_receipt.events[0].payload,
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert!(reordered_receipt.random_draws.is_empty());
+    assert_exact_replay(&session);
 }
 
 #[test]

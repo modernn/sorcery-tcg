@@ -1446,8 +1446,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
-        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisReorderNextSpells !== undefined)) {
+        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
@@ -1483,8 +1482,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
-        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisPayOneManaToSummonToken !== undefined)) {
+        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
       throw new RangeError(`${path} simultaneous spell-order and another site Genesis are unsupported`);
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {

@@ -1032,24 +1032,19 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         || genesis_gain_mana_if_only_controlled_copy
         || genesis_heal_nearby_avatars
         || genesis_immobilize_nearby_until_next_turn;
-    if genesis_pay_one_mana_to_summon_token.is_some()
-        && (paid_token_blocked_genesis || genesis_reorder_next_spells)
-    {
+    if genesis_pay_one_mana_to_summon_token.is_some() && paid_token_blocked_genesis {
         return Err(FactError::new(
             path,
             "simultaneous paid-token and another site Genesis are unsupported",
         ));
     }
-    if genesis_may_bottom_next_spell && paid_token_blocked_genesis
-    {
+    if genesis_may_bottom_next_spell && paid_token_blocked_genesis {
         return Err(FactError::new(
             path,
             "simultaneous next-spell and another site Genesis are unsupported",
         ));
     }
-    if genesis_reorder_next_spells
-        && (paid_token_blocked_genesis || genesis_pay_one_mana_to_summon_token.is_some())
-    {
+    if genesis_reorder_next_spells && paid_token_blocked_genesis {
         return Err(FactError::new(
             path,
             "simultaneous spell-order and another site Genesis are unsupported",

@@ -9463,6 +9463,59 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0422_site_genesis_keep_then_reorder_next_spells"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0423",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both optional paid-token summon and reorder-next-spells, paying for the token resolves first, then the controller enters hidden reorder Genesis where they may privately reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "site-played",
+        "minion-summoned",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0423_site_genesis_pay_token_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0424",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same paid-token and reorder site is played, declining the token still enters hidden reorder Genesis where the controller may confirm the unchanged top-three order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "site-played",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0424_site_genesis_decline_token_then_reorder_next_spells"
+      }
     }
   ]
 }
