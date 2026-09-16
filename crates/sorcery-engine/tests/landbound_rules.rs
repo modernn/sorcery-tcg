@@ -256,6 +256,53 @@ fn square_flood_manifest(seed: u32) -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+fn square_drought_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "landbound-square-drought" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-landbound-square-drought-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-square-landbound": square_landbound(),
+            "north-water": site(&["water"]),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(&["earth"]),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-drought",
+                    "north-drought",
+                    "north-drought",
+                    "north-drought"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -612,5 +659,35 @@ fn rule_catalog_0508_square_landbound_is_disabled_when_flood_covers_its_whole_fo
     assert_eq!(after["disabled"], true);
     assert_eq!(after["location"], "B3");
     assert!(!offers(&session, activates_mana(&bound_id)));
+    assert_exact_replay(&session);
+}
+
+fn square_drought_opening() -> Session {
+    (1..=4096)
+        .map(square_drought_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("2x2 Landbound Drought candidate");
+            let spells = opening_spell_ids(&session);
+            (spells.iter().any(|card| card == "north-square-landbound")
+                && spells.iter().any(|card| card == "north-drought"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with 2x2 Landbound and Drought")
+}
+
+#[test]
+fn rule_catalog_0511_square_landbound_is_enabled_when_drought_covers_its_whole_water_footprint() {
+    let mut session = square_drought_opening();
+    let bound_id = summon_square_landbound_at_b3(&mut session);
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], true);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && cells_include(descriptor, "B3")
+            && cells_include(descriptor, "C4")
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], false);
+    assert_eq!(after["location"], "B3");
     assert_exact_replay(&session);
 }

@@ -11713,6 +11713,54 @@
         "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
         "testName": "rule_catalog_0510_square_waterbound_is_disabled_when_drought_covers_its_whole_footprint"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0511",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Landbound minion is Disabled on an all-Water footprint and becomes enabled in place when Drought covers every occupied cell, because Drought makes those sites land again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "occupiesSquareArea",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-aura"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0511_square_landbound_is_enabled_when_drought_covers_its_whole_water_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0512",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Waterbound minion is Disabled on an all-land footprint and becomes enabled in place when Flood covers every occupied cell, because Flood makes those sites Water.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "occupiesSquareArea",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-aura"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_0512_square_waterbound_is_enabled_when_flood_covers_its_whole_land_footprint"
+      }
     }
   ]
 }

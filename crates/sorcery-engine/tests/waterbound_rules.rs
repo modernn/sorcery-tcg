@@ -594,6 +594,15 @@ fn drought() -> Value {
     })
 }
 
+fn flood() -> Value {
+    json!({
+        "affectedSitesAreFlooded": true,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn square_waterbound() -> Value {
     json!({
         "attack": 2,
@@ -637,6 +646,53 @@ fn square_drought_manifest(seed: u32) -> String {
                     "north-drought",
                     "north-drought",
                     "north-drought"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-plain"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn square_flood_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "waterbound-square-flood" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-waterbound-square-flood-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-flood": flood(),
+            "north-land": site(false),
+            "north-square-waterbound": square_waterbound(),
+            "south-avatar": avatar(),
+            "south-plain": plain(),
+            "south-site": site(false),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-land"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-flood",
+                    "north-flood",
+                    "north-flood",
+                    "north-flood"
                 ],
             },
             "south": {
@@ -753,6 +809,36 @@ fn rule_catalog_0510_square_waterbound_is_disabled_when_drought_covers_its_whole
     });
     let after = observed_unit(&session, &bound_id);
     assert_eq!(after["disabled"], true);
+    assert_eq!(after["location"], "B3");
+    assert_exact_replay(&session);
+}
+
+fn square_flood_opening() -> Session {
+    (1..=4096)
+        .map(square_flood_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("2x2 Waterbound Flood candidate");
+            let spells = opening_spell_ids(&session);
+            (spells.iter().any(|card| card == "north-square-waterbound")
+                && spells.iter().any(|card| card == "north-flood"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with 2x2 Waterbound and Flood")
+}
+
+#[test]
+fn rule_catalog_0512_square_waterbound_is_enabled_when_flood_covers_its_whole_land_footprint() {
+    let mut session = square_flood_opening();
+    let bound_id = summon_square_waterbound_at_b3(&mut session);
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], true);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-flood"
+            && cells_include(descriptor, "B3")
+            && cells_include(descriptor, "C4")
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], false);
     assert_eq!(after["location"], "B3");
     assert_exact_replay(&session);
 }
