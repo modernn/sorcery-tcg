@@ -3082,17 +3082,6 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       ...cards,
       [firstSite]: {
         ...cards[firstSite]!,
-        genesisDiscardTopSpells: 2,
-        genesisDrawSpellPerAdjacentSameCard: true,
-      } as GameCardDefinition,
-    },
-  }), /simultaneous Genesis spell discard and draw/);
-  assert.throws(() => createGameManifest({
-    ...input,
-    cards: {
-      ...cards,
-      [firstSite]: {
-        ...cards[firstSite]!,
         genesisDrawSpellPerAdjacentSameCard: 'yes',
       } as unknown as GameCardDefinition,
     },

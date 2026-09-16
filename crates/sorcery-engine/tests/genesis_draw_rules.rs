@@ -1000,6 +1000,46 @@ fn adjacent_draw_manifest(seed: u32) -> String {
     finish_manifest(value)
 }
 
+fn stacked_spell_genesis_site() -> Value {
+    json!({
+        "cardType": "site",
+        "elements": ["earth"],
+        "genesisDiscardTopSpells": 2,
+        "genesisDrawSpellPerAdjacentSameCard": true,
+    })
+}
+
+fn stacked_spell_genesis_manifest(
+    seed: u32,
+    north_atlas_count: usize,
+    north_spellbook_count: usize,
+) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 2),
+        &minion(1, 2),
+        north_atlas_count,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("stacked-site".to_owned(), stacked_spell_genesis_site());
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["stacked-site"; north_atlas_count]);
+    value["decks"]["south"]["atlas"] = json!(vec!["stacked-site"; 6]);
+    finish_manifest(value)
+}
+
 #[test]
 fn adjacent_matching_site_genesis_should_draw_each_then_partially_deck_out() {
     let manifest = adjacent_draw_manifest(74);
@@ -1048,6 +1088,115 @@ fn adjacent_matching_site_genesis_should_draw_each_then_partially_deck_out() {
             .as_array()
             .expect("Spellbook hand")
             .contains(&last_spell)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0406_site_genesis_discard_only_when_no_adjacent_same_card() {
+    let manifest = stacked_spell_genesis_manifest(405, 5, 5);
+    let mut session = Session::new(&manifest).expect("valid stacked site Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let expected_discards = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .iter()
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "spell-discarded", "spell-discarded"]
+    );
+    for (event, card) in receipt.events[1..].iter().zip(&expected_discards) {
+        assert_eq!(event.event_type, "spell-discarded");
+        assert_eq!(event.payload["cardId"], card["cardId"]);
+        assert_eq!(event.payload["instanceId"], card["instanceId"]);
+        assert_eq!(event.payload["owner"], "north");
+        assert_eq!(event.payload["seat"], "north");
+        assert_eq!(
+            event.payload["sourceInstanceId"],
+            receipt.events[0].payload["instanceId"]
+        );
+    }
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0405_site_genesis_draws_per_adjacent_then_discards_top_spells() {
+    let manifest = stacked_spell_genesis_manifest(406, 6, 10);
+    let mut session = Session::new(&manifest).expect("valid stacked site Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let before = state(&session);
+    let spellbook = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook");
+    let drawn_id = spellbook[0]["instanceId"].clone();
+    let first_discard_id = spellbook[1]["instanceId"].clone();
+    let second_discard_id = spellbook[2]["instanceId"].clone();
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "site-played",
+            "spell-drawn",
+            "spell-discarded",
+            "spell-discarded"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_ne!(drawn_id, first_discard_id);
+    assert_ne!(first_discard_id, second_discard_id);
+    assert_eq!(receipt.events[2].payload["instanceId"], first_discard_id);
+    assert_eq!(receipt.events[3].payload["instanceId"], second_discard_id);
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
     );
     assert_exact_replay(&session);
 }

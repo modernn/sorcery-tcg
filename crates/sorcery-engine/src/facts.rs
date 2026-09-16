@@ -1018,12 +1018,6 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     let genesis_discard_top_spells = fixed_integer(object, "genesisDiscardTopSpells", 2, path)?;
     let genesis_draw_spell_per_adjacent_same_card =
         optional_bool(object, "genesisDrawSpellPerAdjacentSameCard", path)?;
-    if genesis_discard_top_spells && genesis_draw_spell_per_adjacent_same_card {
-        return Err(FactError::new(
-            path,
-            "simultaneous Genesis spell discard and draw are unsupported",
-        ));
-    }
 
     let genesis_enemies_lose_stealth = true_only(object, "genesisEnemiesLoseStealth", path)?;
     let genesis_heal_nearby_avatars = fixed_integer(object, "genesisHealNearbyAvatars", 3, path)?;

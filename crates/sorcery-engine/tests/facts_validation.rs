@@ -725,19 +725,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "paid-token",
         ),
         (
-            "site discard and draw",
-            with(
-                with(
-                    json!({ "cardType": "site", "elements": [] }),
-                    "genesisDiscardTopSpells",
-                    json!(2),
-                ),
-                "genesisDrawSpellPerAdjacentSameCard",
-                json!(true),
-            ),
-            "discard and draw",
-        ),
-        (
             "alternative payments",
             with(
                 with(minion(), "discardRandomCardInsteadOfMana", json!(true)),
@@ -1110,6 +1097,23 @@ fn typed_effects_should_retain_only_normalized_values() {
         facts.at_end_of_controller_turn_damage_each_other_unit_here,
         Some(1)
     );
+    let CardFacts::Site(facts) = parse_card_definition(
+        "site-discard-draw-stack",
+        &with(
+            with(
+                json!({ "cardType": "site", "elements": [] }),
+                "genesisDiscardTopSpells",
+                json!(2),
+            ),
+            "genesisDrawSpellPerAdjacentSameCard",
+            json!(true),
+        ),
+    )
+    .expect("valid stacked site Genesis discard and draw") else {
+        panic!("expected site facts");
+    };
+    assert!(facts.genesis_discard_top_spells);
+    assert!(facts.genesis_draw_spell_per_adjacent_same_card);
     let CardFacts::Minion(facts) = parse_card_definition(
         "deathrite-draw-spells",
         &with(minion(), "deathriteDrawSpells", json!(true)),

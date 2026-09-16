@@ -8990,6 +8990,55 @@
         "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
         "testName": "rule_catalog_0404_start_turn_draw_spells_then_lure_no_ops_when_no_enemy_is_nearby"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0405",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis discard-top-spells and draw-a-spell per adjacent same-card site, playing it resolves adjacent draws first, then publicly discards the top two spells from the controller's Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0405_site_genesis_draws_per_adjacent_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0406",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same discard-plus-adjacent-draw site has no adjacent same-card site, Genesis still publicly discards the top two spells and does not draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0406_site_genesis_discard_only_when_no_adjacent_same_card"
+      }
     }
   ]
 }

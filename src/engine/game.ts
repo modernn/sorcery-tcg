@@ -1460,9 +1460,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.genesisDiscardTopSpells !== undefined && card.genesisDiscardTopSpells !== 2) {
       throw new RangeError(`${path}.genesisDiscardTopSpells must be 2`);
     }
-    if (card.genesisDiscardTopSpells !== undefined && card.genesisDrawSpellPerAdjacentSameCard) {
-      throw new RangeError(`${path} simultaneous Genesis spell discard and draw are unsupported`);
-    }
     if (card.genesisEnemiesLoseStealth !== undefined && card.genesisEnemiesLoseStealth !== true) {
       throw new RangeError(`${path}.genesisEnemiesLoseStealth must be true`);
     }
