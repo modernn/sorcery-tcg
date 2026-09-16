@@ -8638,6 +8638,56 @@
         "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
         "testName": "rule_catalog_0390_end_turn_gain_then_here_damage_on_same_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0391",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and Spellbook draw, the Start Phase resolves them in order on a single trigger: draw a site first, then draw a spell. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0391_start_turn_draw_sites_then_draw_spells_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0392",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and mill, the Start Phase resolves them in order on a single trigger: draw the top site, then mill the new top site into the cemetery. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0392_start_turn_draw_sites_then_mill_sites_resolves_in_order"
+      }
     }
   ]
 }
