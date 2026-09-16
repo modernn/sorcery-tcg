@@ -1495,6 +1495,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetAuraToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::ReturnTargetSiteToOwnerHand
+        | MagicEffect::AllySubmergesTargetNearbyMinion
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TargetPlayerDiscardsCards(_)
@@ -7327,6 +7328,9 @@ impl Game {
             MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell => {
                 self.silence_and_tap_nearby_then_may_draw_choices(seat, caster_instance_id)?
             }
+            MagicEffect::AllySubmergesTargetNearbyMinion => {
+                self.ally_submerges_target_nearby_minion_choices(seat)?
+            }
             MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell => {
                 self.pull_adjacent_aboveground_to_water_site_choices(seat, caster_instance_id)?
             }
@@ -7789,6 +7793,37 @@ impl Game {
             return Ok(false);
         }
         self.unit_is_adjacent_to_cell(unit, location.cell)
+    }
+
+    fn ally_submerges_target_nearby_minion_choices(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for ally in self.controlled_allies(seat) {
+            let ally_cells = self.unit_target_occupied_cells(&ally)?;
+            let ally_region = self.unit_target_region(&ally)?;
+            for unit in &self.position.units {
+                if unit.card.instance_id == *ally.instance_id() || unit.region != ally_region {
+                    continue;
+                }
+                if unit.controller != seat && self.minion_has_active_stealth(unit) {
+                    continue;
+                }
+                if !Self::footprints_nearby(ally_cells, Self::unit_occupied_cells(unit)) {
+                    continue;
+                }
+                choices.push(MagicChoice {
+                    ally: Some(ally.clone()),
+                    target: Some(UnitTarget::Minion {
+                        instance_id: unit.card.instance_id.clone(),
+                        seat: unit.controller,
+                    }),
+                    ..MagicChoice::default()
+                });
+            }
+        }
+        Ok(choices)
     }
 
     fn pull_adjacent_aboveground_to_water_site_choices(
@@ -20551,45 +20586,23 @@ impl Game {
                 }
             }
             MagicEffect::SubmergeTargetMinion => {
-                let Some(UnitTarget::Minion {
-                    instance_id,
-                    seat: target_seat,
-                }) = target
-                else {
+                self.apply_submerge_from_magic_target(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::AllySubmergesTargetNearbyMinion => {
+                if ally.is_none() {
                     return Err(GameError::IllegalAction);
-                };
-                let target_index = self
-                    .position
-                    .units
-                    .iter()
-                    .position(|unit| {
-                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
-                    })
-                    .ok_or(GameError::IllegalAction)?;
-                if self.position.units[target_index].warded && *target_seat != seat {
-                    self.position.units[target_index].warded = false;
-                    outcomes.push(
-                        "ward-broken",
-                        || json!({ "instanceId": instance_id, "seat": target_seat }),
-                    );
-                } else {
-                    let can_move = self.position.units[target_index].region == Region::Surface
-                        && Self::unit_occupied_cells(&self.position.units[target_index])
-                            .iter()
-                            .all(|cell| self.location_exists_in_region(*cell, Region::Underwater));
-                    if can_move {
-                        self.position.units[target_index].region = Region::Underwater;
-                        let cell = self.position.units[target_index].location;
-                        outcomes.push("minion-submerged", || {
-                            json!({
-                                "cell": cell,
-                                "instanceId": instance_id,
-                                "seat": target_seat,
-                                "sourceInstanceId": card_instance_id,
-                            })
-                        });
-                    }
                 }
+                self.apply_submerge_from_magic_target(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
             }
             MagicEffect::DamageRandomUnitAtLocation(amount) => {
                 let location = target_location.ok_or(GameError::IllegalAction)?;
@@ -22670,6 +22683,72 @@ impl Game {
             });
         }
         Ok(false)
+    }
+
+    fn apply_submerge_from_magic_target(
+        &mut self,
+        target: Option<&UnitTarget>,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let Some(UnitTarget::Minion {
+            instance_id,
+            seat: target_seat,
+        }) = target
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        self.apply_submerge_target_minion(
+            instance_id,
+            *target_seat,
+            caster_seat,
+            source_instance_id,
+            outcomes,
+        )
+    }
+
+    fn apply_submerge_target_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        target_seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| {
+                unit.card.instance_id == *instance_id && unit.controller == target_seat
+            })
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.units[target_index].warded && target_seat != caster_seat {
+            self.position.units[target_index].warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": target_seat }),
+            );
+            return Ok(());
+        }
+        let can_move = self.position.units[target_index].region == Region::Surface
+            && Self::unit_occupied_cells(&self.position.units[target_index])
+                .iter()
+                .all(|cell| self.location_exists_in_region(*cell, Region::Underwater));
+        if can_move {
+            self.position.units[target_index].region = Region::Underwater;
+            let cell = self.position.units[target_index].location;
+            outcomes.push("minion-submerged", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": instance_id,
+                    "seat": target_seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
     }
 
     fn apply_tap_minion(
@@ -25151,6 +25230,10 @@ mod tests {
             (
                 MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell,
                 json!({ "silenceAndTapNearbyMinionThenMayDrawSpell": true }),
+            ),
+            (
+                MagicEffect::AllySubmergesTargetNearbyMinion,
+                json!({ "allySubmergesTargetNearbyMinion": true }),
             ),
             (
                 MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,

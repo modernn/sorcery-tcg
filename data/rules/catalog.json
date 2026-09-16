@@ -12782,6 +12782,52 @@
         "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
         "testName": "rule_catalog_0554_insult_still_silences_and_taps_when_the_draw_is_declined"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0555",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-submerges-target-nearby-minion Magic offers each controlled ally paired with each other minion nearby that ally, including an enemy on the ally's cell. A far minion is not offered. Choosing an ally and a nearby minion on a Water site submerges that minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_0555_ally_submerges_a_nearby_minion_on_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0556",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-submerges-target-nearby-minion Magic still offers a nearby pair on an Earth site, then resolves as a paid no-op because no Underwater layer exists.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_0556_ally_submerge_is_a_paid_noop_on_earth"
+      }
     }
   ]
 }

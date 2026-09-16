@@ -342,6 +342,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("returnTargetMinionToOwnerHand", json!(true)),
         ("returnTargetSiteFromOwnCemetery", json!(true)),
         ("returnTargetSiteToOwnerHand", json!(true)),
+        ("allySubmergesTargetNearbyMinion", json!(true)),
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
         (
@@ -1760,6 +1761,18 @@ fn ward_nearby_minion_or_site_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::WardNearbyMinionOrSite);
+}
+
+#[test]
+fn ally_submerges_target_nearby_minion_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "ally-submerges-target-nearby-minion",
+        &spell("magic", ("allySubmergesTargetNearbyMinion", json!(true))),
+    )
+    .expect("valid ally-submerges-target-nearby-minion Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(facts.effect, MagicEffect::AllySubmergesTargetNearbyMinion);
 }
 
 #[test]

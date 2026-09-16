@@ -428,6 +428,7 @@ export type GameCardDefinition =
     returnTargetMinionToOwnerHand?: true;
     returnTargetSiteFromOwnCemetery?: true;
     returnTargetSiteToOwnerHand?: true;
+    allySubmergesTargetNearbyMinion?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToAlliedMinionThenDrawSpell?: string;
@@ -1353,7 +1354,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
-    silenceAndTapNearbyMinionThenMayDrawSpell submergeTargetMinion
+    silenceAndTapNearbyMinionThenMayDrawSpell allySubmergesTargetNearbyMinion submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToAlliedMinionThenDrawSpell summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSites targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
@@ -1729,6 +1730,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.burrowTargetMinionOrArtifact !== true) {
       throw new RangeError(`${path}.burrowTargetMinionOrArtifact must be true when defined`);
     }
+    if (card.allySubmergesTargetNearbyMinion !== undefined && card.allySubmergesTargetNearbyMinion !== true) {
+      throw new RangeError(`${path}.allySubmergesTargetNearbyMinion must be true when defined`);
+    }
     if (card.submergeTargetMinion !== undefined && card.submergeTargetMinion !== true) {
       throw new RangeError(`${path}.submergeTargetMinion must be true when defined`);
     }
@@ -1990,6 +1994,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     }
     const effectCount = Number(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true)
       + Number(card.burrowTargetMinionOrArtifact === true)
+      + Number(card.allySubmergesTargetNearbyMinion === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageChainNearbyUnits === true)
       + Number(card.damageEachAbovegroundMinion === 1)
@@ -2891,6 +2896,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { destroyTargetAura: true as const }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
+                : card.allySubmergesTargetNearbyMinion === true
+                  ? { allySubmergesTargetNearbyMinion: true as const }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
                 : card.damageChainNearbyUnits === true

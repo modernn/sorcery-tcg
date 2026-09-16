@@ -1692,6 +1692,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const trialManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allySubmergesTargetNearbyMinion: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      },
+    },
+  });
+  assert.deepEqual(trialManifest.cards[firstSpell], {
+    cardType: 'magic',
+    allySubmergesTargetNearbyMinion: true,
+    manaCost: 3,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allySubmergesTargetNearbyMinion: false,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /allySubmergesTargetNearbyMinion/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allySubmergesTargetNearbyMinion: true,
+        manaCost: 3,
+        submergeTargetMinion: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 1 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
