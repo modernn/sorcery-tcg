@@ -463,6 +463,7 @@ export type GameCardDefinition =
     genesisMayDamageTargetAdjacentUnit?: 2;
     genesisDrawSpells?: number;
     genesisDrawSite?: boolean;
+    genesisEachPlayerControlledByPreviousPlayerNextTurn?: true;
     genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
     nearbyAvatarsMayDiscardCardToGainControlOfThis?: true;
     genesisHealController?: 2;
@@ -1333,7 +1334,7 @@ const SUPPORTED_CARD_FIELDS = {
     charge connectsTopBottom deathriteDamageEachUnitHere deathriteDrawSite deathriteDrawSpells deathriteHeal deathriteMillSites deathriteMillSpells
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
-    genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
+    genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
@@ -2151,6 +2152,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.genesisStrikeEachEnemyHere !== undefined
     && card.genesisStrikeEachEnemyHere !== true) {
     throw new RangeError(`${path}.genesisStrikeEachEnemyHere must be true when defined`);
+  }
+  if (card.genesisEachPlayerControlledByPreviousPlayerNextTurn !== undefined
+    && card.genesisEachPlayerControlledByPreviousPlayerNextTurn !== true) {
+    throw new RangeError(
+      `${path}.genesisEachPlayerControlledByPreviousPlayerNextTurn must be true when defined`,
+    );
   }
   if (card.genesisGainControlOfTappedMinionsHereUntilThisLeaves !== undefined
     && card.genesisGainControlOfTappedMinionsHereUntilThisLeaves !== true) {
@@ -2981,6 +2988,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               : {}),
             ...(card.genesisStrikeEachEnemyHere === true
               ? { genesisStrikeEachEnemyHere: true as const }
+              : {}),
+            ...(card.genesisEachPlayerControlledByPreviousPlayerNextTurn === true
+              ? { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const }
               : {}),
             ...(card.genesisGainControlOfTappedMinionsHereUntilThisLeaves === true
               ? { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const }

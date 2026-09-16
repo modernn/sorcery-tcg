@@ -126,7 +126,7 @@ pub fn probe_novelty(
     if actions.is_empty() {
         return Err(SimulatorError::InvalidLimit);
     }
-    let seat = game.position().decision_seat();
+    let seat = game.acting_controller();
     let fallback = policy.select_action(&game.observe(seat), &actions)?;
     let fallback_index = actions
         .iter()

@@ -60,6 +60,7 @@ type SpellFacts = Readonly<{
   genesisLoseControllerLife?: 2;
   genesisMayDamageTargetAdjacentUnit?: 2;
   genesisDisableSelfUntilDamaged?: true;
+  genesisEachPlayerControlledByPreviousPlayerNextTurn?: true;
   genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
   nearbyAvatarsMayDiscardCardToGainControlOfThis?: true;
   genesisStrikeEachEnemyHere?: true;
@@ -261,6 +262,9 @@ function cardsFor(
           : {}),
         ...(facts.genesisStrikeEachEnemyHere === true
           ? { genesisStrikeEachEnemyHere: true as const }
+          : {}),
+        ...(facts.genesisEachPlayerControlledByPreviousPlayerNextTurn === true
+          ? { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const }
           : {}),
         ...(facts.genesisGainControlOfTappedMinionsHereUntilThisLeaves === true
           ? { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const }
@@ -10402,6 +10406,17 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       ...cards,
       [titanId]: {
         ...cards[titanId]!,
+        genesisEachPlayerControlledByPreviousPlayerNextTurn: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /genesisEachPlayerControlledByPreviousPlayerNextTurn must be true when defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [titanId]: {
+        ...cards[titanId]!,
         genesisGainControlOfTappedMinionsHereUntilThisLeaves: false,
       } as unknown as GameCardDefinition,
     },
@@ -11942,6 +11957,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { deathriteDamageEachUnitHere: 1 },
     { genesisDamageEachOtherUnitHere: 1 as const },
     { genesisStrikeEachEnemyHere: true as const },
+    { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const },
     { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const },
     { nearbyAvatarsMayDiscardCardToGainControlOfThis: true as const },
     { genesisMayDamageTargetAdjacentUnit: 2 as const },

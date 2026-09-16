@@ -161,7 +161,7 @@ impl SessionJsonService {
         let Ok(seat) = parse_seat_param(params, id) else {
             return error_response(id, "legalActions requires seat north or south");
         };
-        if seat != session.decision_seat() {
+        if seat != session.acting_controller() {
             return ok_response(id, json!({ "actions": [] }));
         }
         match session.legal_actions() {

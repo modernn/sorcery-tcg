@@ -239,7 +239,7 @@ fn apply_and_verify(mut session: Session, rollout: &Rollout) -> Result<Session, 
         if matches!(
             session.step(ActionRequest {
                 action_id: action.action_id.to_string(),
-                seat: session.decision_seat(),
+                seat: session.acting_controller(),
                 state_version: session.state_version(),
             })?,
             crate::session::StepResult::Rejected(_)
@@ -267,7 +267,7 @@ fn continue_game(
         if game.is_terminal() {
             break;
         }
-        let seat = game.position().decision_seat();
+        let seat = game.acting_controller();
         let actions = game.legal_actions()?;
         let selected = policy_for(seat, north_policy, south_policy)
             .select_action(&game.observe(seat), &actions)?;

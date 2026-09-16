@@ -67,6 +67,7 @@ pub struct Position {
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
     pending_end_turn_aura: Option<PendingEndTurnAura>,
+    pending_player_controllers: [Option<PendingPlayerControl>; 2],
     pending_random_outcome: Option<PendingRandomOutcome>,
     pending_ranged_step: PendingField<PendingRangedStep>,
     pending_start_turn: Option<PendingStartTurn>,
@@ -78,8 +79,15 @@ pub struct Position {
     state_version: u64,
     temporary_controls: Vec<TemporaryControl>,
     terminal: Option<TerminalResult>,
+    turn_controller: Option<Seat>,
     turn_number: u64,
     units: Vec<UnitPosition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingPlayerControl {
+    controller: Seat,
+    source_instance_id: IdentityHash,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1552,6 +1560,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis_disable_self_until_damaged: _,
         genesis_draw_site: _,
         genesis_draw_spells: _,
+        genesis_each_player_controlled_by_previous_player_next_turn: _,
         genesis_heal_controller: _,
         genesis_lose_controller_life: _,
         genesis_gain_control_of_tapped_minions_here_until_this_leaves: _,
@@ -1641,6 +1650,15 @@ const fn other_seat(seat: Seat) -> Seat {
     }
 }
 
+fn pending_player_control_value(pending: Option<&PendingPlayerControl>) -> Value {
+    pending.map_or(Value::Null, |pending| {
+        json!({
+            "controller": pending.controller,
+            "sourceInstanceId": pending.source_instance_id,
+        })
+    })
+}
+
 impl Game {
     /// Validates a canonical manifest and creates its deterministic opening position.
     ///
@@ -1715,6 +1733,7 @@ impl Game {
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
                 pending_end_turn_aura: None,
+                pending_player_controllers: [None, None],
                 pending_random_outcome: None,
                 pending_ranged_step: PendingField::Absent,
                 pending_start_turn: None,
@@ -1726,6 +1745,7 @@ impl Game {
                 state_version: 0,
                 temporary_controls: Vec::new(),
                 terminal: None,
+                turn_controller: None,
                 turn_number: 0,
                 units: Vec::new(),
             },
@@ -1744,6 +1764,15 @@ impl Game {
         &self.position
     }
 
+    /// Returns the seat that may submit the current decision.
+    ///
+    /// During a player's own turn this is [`Position::turn_controller`] when a
+    /// previous-player control is active; combat respondents still act as themselves.
+    #[must_use]
+    pub fn acting_controller(&self) -> Seat {
+        self.position.acting_controller()
+    }
+
     pub(crate) fn into_position(self) -> Position {
         self.position
     }
@@ -1758,16 +1787,26 @@ impl Game {
     }
 
     /// Builds the compact public policy view for `seat` without exposing hidden identities.
+    ///
+    /// When `seat` is controlling another player's current turn, the observation keeps
+    /// that acting seat but reports the controlled player's public resources.
     #[must_use]
     pub fn observe(&self, seat: Seat) -> SeatObservation {
-        let player = &self.position.players[seat_index(seat)];
-        let enemy = &self.position.players[seat_index(other_seat(seat))];
+        let resource_seat = if self.position.turn_controller == Some(seat)
+            && self.position.decision_seat == self.position.active_seat
+        {
+            self.position.active_seat
+        } else {
+            seat
+        };
+        let player = &self.position.players[seat_index(resource_seat)];
+        let enemy = &self.position.players[seat_index(other_seat(resource_seat))];
         let mut powered_unit_instance_ids = Vec::new();
         if !player.avatar.temporary_power_sources.is_empty() {
             powered_unit_instance_ids.push(player.avatar.card.instance_id.clone());
         }
         for unit in &self.position.units {
-            if unit.controller == seat && !unit.temporary_power_sources.is_empty() {
+            if unit.controller == resource_seat && !unit.temporary_power_sources.is_empty() {
                 powered_unit_instance_ids.push(unit.card.instance_id.clone());
             }
         }
@@ -2013,7 +2052,9 @@ impl Game {
                 "instanceId": card.instance_id,
             })
         };
-        let own = owner == viewer;
+        let own = owner == viewer
+            || (self.position.turn_controller == Some(viewer)
+                && owner == self.position.active_seat);
         let mut value = json!({
             "affinity": {
                 "air": affinity[3],
@@ -9183,7 +9224,7 @@ impl Game {
         descriptor: ActionDescriptor,
         label: String,
     ) {
-        let seat = self.position.decision_seat;
+        let seat = self.acting_controller();
         actions.push(IssuedAction {
             descriptor,
             label,
@@ -9258,11 +9299,21 @@ impl Game {
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
         forced_random_outcome: Option<&IdentityHash>,
     ) -> Result<(), GameError> {
-        if action.seat != self.position.decision_seat
+        if action.seat != self.acting_controller()
             || action.state_version != self.position.state_version
         {
             return Err(GameError::IllegalAction);
         }
+        let rewritten_action;
+        let action = if action.seat == self.position.decision_seat {
+            action
+        } else {
+            rewritten_action = IssuedAction {
+                seat: self.position.decision_seat,
+                ..action.clone()
+            };
+            &rewritten_action
+        };
         if let ActionDescriptor::ResolveRandomOutcome {
             outcome_instance_id,
         } = &action.descriptor
@@ -20997,6 +21048,8 @@ impl Game {
         let genesis_may_damage_target_adjacent_unit = facts.genesis_may_damage_target_adjacent_unit;
         let genesis_damage_each_other_unit_here = facts.genesis_damage_each_other_unit_here;
         let genesis_strike_each_enemy_here = facts.genesis_strike_each_enemy_here;
+        let genesis_each_player_controlled_by_previous_player_next_turn =
+            facts.genesis_each_player_controlled_by_previous_player_next_turn;
         let genesis_gain_control_of_tapped_minions_here_until_this_leaves =
             facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves;
 
@@ -21055,7 +21108,34 @@ impl Game {
         if genesis_gain_control_of_tapped_minions_here_until_this_leaves {
             self.apply_genesis_tapped_minion_control(source_instance_id, seat, outcomes)?;
         }
+        if genesis_each_player_controlled_by_previous_player_next_turn {
+            self.apply_genesis_previous_player_control(source_instance_id);
+        }
         Ok(())
+    }
+
+    fn apply_genesis_previous_player_control(&mut self, source_instance_id: &IdentityHash) {
+        for seat in [Seat::North, Seat::South] {
+            self.position.pending_player_controllers[seat_index(seat)] =
+                Some(PendingPlayerControl {
+                    controller: other_seat(seat),
+                    source_instance_id: source_instance_id.clone(),
+                });
+        }
+    }
+
+    fn activate_pending_player_control(&mut self, seat: Seat, outcomes: &mut OutcomeLog<'_>) {
+        let pending = self.position.pending_player_controllers[seat_index(seat)].take();
+        self.position.turn_controller = pending.as_ref().map(|pending| pending.controller);
+        if let Some(pending) = pending {
+            outcomes.push("player-controlled", || {
+                json!({
+                    "controller": pending.controller,
+                    "seat": seat,
+                    "sourceInstanceId": pending.source_instance_id,
+                })
+            });
+        }
     }
 
     fn apply_genesis_tapped_minion_control(
@@ -22277,6 +22357,7 @@ impl Game {
         self.position.turn_number += 1;
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
+        self.activate_pending_player_control(next_seat, outcomes);
         for (instance_id, controller, source_instance_id) in expired_airborne_sources {
             outcomes.push("airborne-expired", || {
                 json!({
@@ -22485,6 +22566,29 @@ impl Game {
                         "sourceCardId": pending.source_card_id,
                         "sourceInstanceId": pending.source_instance_id,
                         "sourceOwner": pending.source_owner,
+                    }),
+                );
+            }
+            if self.position.turn_controller.is_some()
+                || self
+                    .position
+                    .pending_player_controllers
+                    .iter()
+                    .any(Option::is_some)
+            {
+                object.insert(
+                    "turnController".to_owned(),
+                    json!(self.position.turn_controller),
+                );
+                object.insert(
+                    "pendingPlayerControllers".to_owned(),
+                    json!({
+                        "north": pending_player_control_value(
+                            self.position.pending_player_controllers[0].as_ref(),
+                        ),
+                        "south": pending_player_control_value(
+                            self.position.pending_player_controllers[1].as_ref(),
+                        ),
                     }),
                 );
             }
@@ -23177,6 +23281,16 @@ impl Position {
     #[must_use]
     pub const fn decision_seat(&self) -> Seat {
         self.decision_seat
+    }
+
+    /// Returns the seat that may submit the current decision.
+    #[must_use]
+    pub fn acting_controller(&self) -> Seat {
+        if self.decision_seat == self.active_seat {
+            self.turn_controller.unwrap_or(self.decision_seat)
+        } else {
+            self.decision_seat
+        }
     }
 }
 

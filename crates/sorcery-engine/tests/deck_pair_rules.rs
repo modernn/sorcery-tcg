@@ -157,7 +157,7 @@ fn committed_action_kinds(session: &Session) -> Vec<String> {
         let StepResult::Accepted(replay_step) = replay
             .step(ActionRequest {
                 action_id: receipt.action_id.to_string(),
-                seat: replay.decision_seat(),
+                seat: replay.acting_controller(),
                 state_version: replay.state_version(),
             })
             .expect("replay step")

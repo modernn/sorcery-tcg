@@ -4633,6 +4633,7 @@ function gameDefinition(
   genesisGainControlOfTappedMinionsHereUntilThisLeaves = false,
   sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves = false,
   nearbyAvatarsMayDiscardCardToGainControlOfThis = false,
+  genesisEachPlayerControlledByPreviousPlayerNextTurn = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4960,6 +4961,9 @@ function gameDefinition(
         : {}),
       ...(nearbyAvatarsMayDiscardCardToGainControlOfThis
         ? { nearbyAvatarsMayDiscardCardToGainControlOfThis: true as const }
+        : {}),
+      ...(genesisEachPlayerControlledByPreviousPlayerNextTurn
+        ? { genesisEachPlayerControlledByPreviousPlayerNextTurn: true as const }
         : {}),
       ...(genesisDisableSelfUntilDamaged
         ? { genesisDisableSelfUntilDamaged: true as const }

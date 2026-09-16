@@ -12008,6 +12008,54 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0522_nearby_avatar_control_is_permanent_and_distant_avatars_cannot_steal"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0523",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis that lets the previous player control each player during their next turn schedules that swap immediately, then the previous player submits the opponent's next turn, sees that player's hidden hand, and spends that player's resources while the controlled player cannot act.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisEachPlayerControlledByPreviousPlayerNextTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn",
+        "play-site"
+      ],
+      "eventHints": [
+        "player-controlled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0523_genesis_schedules_previous_player_control_of_the_next_turns"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0524",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Previous-player turn control applies to each player's next turn once, then expires: after both scheduled turns resolve, each player submits their own decisions again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisEachPlayerControlledByPreviousPlayerNextTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "player-controlled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0524_previous_player_control_covers_each_next_turn_then_expires"
+      }
     }
   ]
 }

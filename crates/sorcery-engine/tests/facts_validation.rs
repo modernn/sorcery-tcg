@@ -1636,6 +1636,22 @@ fn genesis_tapped_minion_control_here_should_parse() {
 }
 
 #[test]
+fn genesis_previous_player_control_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "genesis-previous-player-control",
+        &with(
+            minion(),
+            "genesisEachPlayerControlledByPreviousPlayerNextTurn",
+            json!(true),
+        ),
+    )
+    .expect("valid Genesis previous-player control minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_each_player_controlled_by_previous_player_next_turn);
+}
+
+#[test]
 fn nearby_avatar_discard_control_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "nearby-avatar-discard-control",

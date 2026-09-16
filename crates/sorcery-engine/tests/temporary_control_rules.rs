@@ -1,4 +1,4 @@
-//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0522).
+//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0524).
 //!
 //! Official Magic can gain control of a target enemy minion this turn and
 //! untap it, or gain control until that minion loses Stealth after tapping it
@@ -9,7 +9,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -1268,5 +1268,235 @@ fn rule_catalog_0522_nearby_avatar_control_is_permanent_and_distant_avatars_cann
     end_then_draw(&mut session, "spellbook");
     assert_eq!(unit(&state(&session), &sellsword_id)["controller"], "north");
     assert_eq!(unit(&state(&session), &sellsword_id)["owner"], "south");
+    assert_exact_replay(&session);
+}
+
+fn thais() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 0,
+        "genesisEachPlayerControlledByPreviousPlayerNextTurn": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn thais_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "previous-player-control" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-previous-player-control-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-thais": thais(),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-thais"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+/// North has summoned the Genesis source at C4 and still holds priority.
+fn thais_opening() -> (Session, String) {
+    let mut session = (1..=4096)
+        .map(thais_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("previous-player-control candidate");
+            opening_spell_ids(&session, "north")
+                .iter()
+                .any(|card| card == "north-thais")
+                .then_some(session)
+        })
+        .expect("bounded seed opening with previous-player-control Genesis");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-thais"
+            && descriptor["cell"] == "C4"
+    });
+    let thais_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("thais identity")
+        .to_owned();
+    (session, thais_id)
+}
+
+fn reject_wrong_seat(session: &mut Session, seat: Seat) {
+    let action = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .next()
+        .expect("issued action");
+    let StepResult::Rejected(rejection) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat,
+            state_version: action.state_version,
+        })
+        .expect("wrong-seat step")
+    else {
+        panic!("the controlled player must not submit the current decision");
+    };
+    assert_eq!(rejection.code, RejectionCode::WrongSeat);
+}
+
+fn assert_acting_seat(session: &Session, seat: Seat) {
+    let actions = session.legal_actions().expect("legal actions");
+    assert!(!actions.is_empty());
+    assert!(
+        actions.iter().all(|action| action.seat == seat),
+        "expected every issued action for {seat:?}, got {:?}",
+        actions.iter().map(|action| action.seat).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn rule_catalog_0523_genesis_schedules_previous_player_control_of_the_next_turns() {
+    let (mut session, thais_id) = thais_opening();
+    let scheduled = state(&session);
+    assert_eq!(
+        scheduled["pendingPlayerControllers"]["south"]["controller"],
+        "north"
+    );
+    assert_eq!(
+        scheduled["pendingPlayerControllers"]["south"]["sourceInstanceId"],
+        thais_id
+    );
+    assert_eq!(
+        scheduled["pendingPlayerControllers"]["north"]["controller"],
+        "south"
+    );
+    assert_eq!(scheduled["turnController"], Value::Null);
+    assert_eq!(unit(&scheduled, &thais_id)["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let controlled = ended
+        .events
+        .iter()
+        .find(|event| event.event_type == "player-controlled")
+        .expect("player control starts on the next turn");
+    assert_eq!(controlled.payload["seat"], "south");
+    assert_eq!(controlled.payload["controller"], "north");
+    assert_eq!(controlled.payload["sourceInstanceId"], thais_id);
+
+    let hijacked = state(&session);
+    assert_eq!(hijacked["activeSeat"], "south");
+    assert_eq!(hijacked["decisionSeat"], "south");
+    assert_eq!(hijacked["turnController"], "north");
+    assert_eq!(hijacked["pendingPlayerControllers"]["south"], Value::Null);
+    assert_eq!(
+        hijacked["pendingPlayerControllers"]["north"]["controller"],
+        "south"
+    );
+
+    assert_acting_seat(&session, Seat::North);
+    reject_wrong_seat(&mut session, Seat::South);
+
+    let north_view = session.public_view(Seat::North).expect("north public view");
+    assert!(north_view["players"]["north"]["hand"]["atlas"].is_array());
+    assert!(north_view["players"]["south"]["hand"]["atlas"].is_array());
+    let south_view = session.public_view(Seat::South).expect("south public view");
+    assert!(south_view["players"]["south"]["hand"]["atlas"].is_array());
+    assert!(south_view["players"]["north"]["hand"]["atlas"].is_number());
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["controller"],
+        "south"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0524_previous_player_control_covers_each_next_turn_then_expires() {
+    let (mut session, thais_id) = thais_opening();
+    let (_, south_started) =
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(south_started.events.iter().any(|event| {
+        event.event_type == "player-controlled"
+            && event.payload["seat"] == "south"
+            && event.payload["controller"] == "north"
+            && event.payload["sourceInstanceId"] == thais_id
+    }));
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (_, north_started) =
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let north_control = north_started
+        .events
+        .iter()
+        .find(|event| event.event_type == "player-controlled")
+        .expect("North's next turn is controlled by South");
+    assert_eq!(north_control.payload["seat"], "north");
+    assert_eq!(north_control.payload["controller"], "south");
+    assert_eq!(north_control.payload["sourceInstanceId"], thais_id);
+
+    let north_hijacked = state(&session);
+    assert_eq!(north_hijacked["activeSeat"], "north");
+    assert_eq!(north_hijacked["turnController"], "south");
+    assert_eq!(
+        north_hijacked["pendingPlayerControllers"]["north"],
+        Value::Null
+    );
+    assert_eq!(
+        north_hijacked["pendingPlayerControllers"]["south"],
+        Value::Null
+    );
+    assert_acting_seat(&session, Seat::South);
+    reject_wrong_seat(&mut session, Seat::North);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (_, expired) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !expired
+            .events
+            .iter()
+            .any(|event| event.event_type == "player-controlled")
+    );
+
+    let after = state(&session);
+    assert_eq!(after["activeSeat"], "south");
+    assert!(after.get("turnController").is_none());
+    assert!(after.get("pendingPlayerControllers").is_none());
+    assert_acting_seat(&session, Seat::South);
+    reject_wrong_seat(&mut session, Seat::North);
     assert_exact_replay(&session);
 }

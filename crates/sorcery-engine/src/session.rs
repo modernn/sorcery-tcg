@@ -152,7 +152,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] when observation, legal actions, or policy selection fails.
     pub fn select_baseline_policy_action(&self) -> Result<LegalAction, SessionError> {
-        let seat = self.decision_seat();
+        let seat = self.acting_controller();
         let observation = self.game.observe(seat);
         let actions = self.game.legal_actions()?;
         let policy = baseline_policy_snapshot(
@@ -271,7 +271,7 @@ impl Session {
                 RejectionCode::StaleVersion,
             );
         }
-        if request.seat != self.game.position().decision_seat() {
+        if request.seat != self.game.acting_controller() {
             return self.reject(request, state_version, state_hash, RejectionCode::WrongSeat);
         }
         let mut selected = None;
@@ -348,7 +348,7 @@ impl Session {
         for action_id in action_ids {
             let request = ActionRequest {
                 action_id: action_id.to_string(),
-                seat: session.game.position().decision_seat(),
+                seat: session.acting_controller(),
                 state_version: session.game.position().state_version(),
             };
             if let StepResult::Rejected(rejection) = session.step(request)? {
@@ -405,6 +405,12 @@ impl Session {
     #[must_use]
     pub const fn decision_seat(&self) -> Seat {
         self.game.position().decision_seat()
+    }
+
+    /// Returns the seat that may submit the current decision.
+    #[must_use]
+    pub fn acting_controller(&self) -> Seat {
+        self.game.acting_controller()
     }
 
     /// Returns the public result after the game finishes.

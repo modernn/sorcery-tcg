@@ -725,7 +725,7 @@ fn coverage_from_session(session: &Session) -> Result<GameCoverage, GameRecordEr
         }
         match replay.step(ActionRequest {
             action_id: receipt.action_id.to_string(),
-            seat: replay.decision_seat(),
+            seat: replay.acting_controller(),
             state_version: replay.state_version(),
         })? {
             StepResult::Accepted(stepped) if stepped.receipt_id == receipt.receipt_id => {}
