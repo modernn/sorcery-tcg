@@ -827,6 +827,175 @@ fn rule_catalog_0482_targeted_genesis_alt_payment_target_deals_damage() {
     assert_exact_replay(&session);
 }
 
+fn targeted_genesis_sacrifice_manifest(seed: u32) -> String {
+    let mut sacrificer = minion(2, 2);
+    sacrificer["genesisMayDamageTargetAdjacentUnit"] = json!(2);
+    sacrificer["sacrificeMinionAtSummoningLocationForManaDiscount"] = json!(2);
+    sacrificer["manaCost"] = json!(2);
+    let local = minion(0, 1);
+    let mut warded_enemy = minion(1, 2);
+    warded_enemy["summonToAnySite"] = json!(true);
+    warded_enemy["ward"] = json!(true);
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "genesis-sacrifice-targeted" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-genesis-sacrifice-targeted-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(false, 20),
+            "north-local": local,
+            "north-sacrificer": sacrificer,
+            "north-site": site(),
+            "south-avatar": avatar(false, 20),
+            "south-minion": warded_enemy,
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec![
+                    "north-sacrificer",
+                    "north-local",
+                    "north-sacrificer",
+                    "north-sacrificer",
+                    "north-sacrificer",
+                    "north-sacrificer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn targeted_genesis_sacrifice_checkpoint() -> (Session, String, String, String) {
+    let manifest = targeted_genesis_sacrifice_manifest(499);
+    let mut checkpoint = first_main(&manifest);
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-local"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let before = state(&checkpoint);
+    let source_id = before["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("sacrificer identity")
+        .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let local_id = before["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-local")
+        .expect("local sacrifice minion")["instanceId"]
+        .as_str()
+        .expect("local identity")
+        .to_owned();
+    (checkpoint, source_id, avatar_id, local_id)
+}
+
+#[test]
+fn rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons() {
+    let (checkpoint, source_id, _, local_id) = targeted_genesis_sacrifice_checkpoint();
+    let sacrifice_summons: Vec<_> = checkpoint
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardInstanceId"] == source_id
+                && action.descriptor["cell"] == "C4"
+                && action.descriptor["sacrificedMinionInstanceIds"] == json!([local_id.clone()])
+        })
+        .collect();
+    assert!(
+        sacrifice_summons
+            .iter()
+            .any(|action| action.descriptor["genesisDamageChoice"] == "decline")
+    );
+    let mut session = checkpoint;
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
+            && descriptor["genesisDamageChoice"] == "decline"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["minion-sacrificed", "minion-died", "minion-summoned"]
+    );
+    assert_eq!(receipt.events[2].payload["manaPaid"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage() {
+    let (checkpoint, source_id, avatar_id, local_id) = targeted_genesis_sacrifice_checkpoint();
+    let mut session = checkpoint;
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["sacrificedMinionInstanceIds"] == json!([local_id])
+            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-sacrificed",
+            "minion-died",
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        receipt.events[3].payload,
+        json!({
+            "amount": 2,
+            "sourceInstanceId": source_id,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
     let mut value = manifest_value(
@@ -6750,7 +6919,10 @@ fn rule_catalog_0498_site_genesis_mixed_mana_grants_only_unconditional_on_later_
             && descriptor["cell"] == "C4"
     });
     assert_eq!(event_types(&first_play), ["site-played", "mana-gained"]);
-    assert_eq!(first_play.events[1].payload["amount"], json!(3));
+    assert_eq!(
+        first_play.events[1].payload["amount"],
+        json!(3)
+    );
     assert_eq!(state(&session)["players"]["north"]["mana"], 4);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");

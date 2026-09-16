@@ -1635,6 +1635,29 @@ fn targeted_genesis_with_random_card_discard_payment_should_parse() {
 }
 
 #[test]
+fn targeted_genesis_with_sacrifice_discount_payment_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "targeted-genesis-sacrifice-payment",
+        &with(
+            with(minion(), "genesisMayDamageTargetAdjacentUnit", json!(2)),
+            "sacrificeMinionAtSummoningLocationForManaDiscount",
+            json!(2),
+        ),
+    )
+    .expect("valid targeted Genesis with sacrifice payment minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.genesis,
+        Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
+    );
+    assert_eq!(
+        facts.alternative_summon_payment,
+        Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
+    );
+}
+
+#[test]
 fn oversized_water_site_cast_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "oversized-water-cast",

@@ -11428,6 +11428,61 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0498_site_genesis_mixed_mana_grants_only_unconditional_on_later_copy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0499",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and local-minion sacrifice summon payment, the engine offers sacrifice-payment branches with decline and target choices; declining sacrifices one controlled minion at the summoning location and summons without Genesis damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayDamageTargetAdjacentUnit",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0499_targeted_genesis_sacrifice_decline_sacrifices_and_summons"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0500",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and local-minion sacrifice summon payment, choosing a legal adjacent target sacrifices one controlled minion at the summoning location, summons the minion, and deals the printed Genesis damage through the shared damage pipeline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayDamageTargetAdjacentUnit",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned",
+        "genesis-damage-allocated",
+        "damage-dealt",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage"
+      }
     }
   ]
 }
