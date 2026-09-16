@@ -410,6 +410,7 @@ export type GameCardDefinition =
     killTargetWoundedMinion?: true;
     leapAttackAlly?: true;
     lureEnemyMinionOneStepCloser?: true;
+    pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell?: true;
     manaCost: number;
     millSites?: number;
     millSpells?: number;
@@ -1344,7 +1345,7 @@ const SUPPORTED_CARD_FIELDS = {
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
     grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
-    lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
+    lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
@@ -1890,6 +1891,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.lureEnemyMinionOneStepCloser !== true) {
       throw new RangeError(`${path}.lureEnemyMinionOneStepCloser must be true when defined`);
     }
+    if (card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell !== undefined
+      && card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell !== true) {
+      throw new RangeError(`${path}.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell must be true when defined`);
+    }
     if (card.grantStealthToTargetMinion !== undefined
       && card.grantStealthToTargetMinion !== true) {
       throw new RangeError(`${path}.grantStealthToTargetMinion must be true when defined`);
@@ -2012,6 +2017,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.killTargetWoundedMinion === true)
       + Number(card.leapAttackAlly === true)
       + Number(card.lureEnemyMinionOneStepCloser === true)
+      + Number(card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell === true)
       + Number(card.millSites !== undefined)
       + Number(card.millSpells !== undefined)
       + Number(card.targetPlayerDrawsSites !== undefined)
@@ -2986,6 +2992,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { grantWardToTargetMinion: true as const }
                         : card.wardEachAlliedMinionAtTargetWaterSite === true
                           ? { wardEachAlliedMinionAtTargetWaterSite: true as const }
+                        : card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell === true
+                          ? { pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true as const }
                         : card.tapTargetMinion === true
                           ? { tapTargetMinion: true as const }
                         : card.untapTargetMinion === true

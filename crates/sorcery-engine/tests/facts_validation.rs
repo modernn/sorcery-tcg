@@ -320,6 +320,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("killTargetWoundedMinion", json!(true)),
         ("leapAttackAlly", json!(true)),
         ("lureEnemyMinionOneStepCloser", json!(true)),
+        (
+            "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell",
+            json!(true),
+        ),
         ("millSites", json!(2)),
         ("millSpells", json!(2)),
         ("targetPlayerDrawsSites", json!(1)),
@@ -1678,6 +1682,27 @@ fn genesis_untap_adjacent_allies_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_untap_adjacent_allies);
+}
+
+#[test]
+fn pull_adjacent_aboveground_unit_to_target_water_site_then_draw_spell_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "pull-adjacent-to-water-then-draw",
+        &spell(
+            "magic",
+            (
+                "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid pull-adjacent-to-water-site then draw-spell Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell
+    );
 }
 
 #[test]

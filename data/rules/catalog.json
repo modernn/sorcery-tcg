@@ -12590,6 +12590,53 @@
         "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
         "testName": "rule_catalog_0546_baptize_ignores_earth_sites_and_empty_water"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0547",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Pull-adjacent-aboveground-unit-to-target-water-site then draw-spell Magic offers a Water site and an aboveground unit bordering that site, pulls that unit onto the site, and then draws one hidden spell. A unit occupying the site is not adjacent. Earth sites are not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_0547_riptide_pulls_an_adjacent_unit_onto_a_water_site_then_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0548",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Pull-adjacent-aboveground-unit-to-target-water-site then draw-spell Magic still draws one hidden spell when no aboveground unit borders a Water site. No unit is moved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_0548_riptide_still_draws_without_an_adjacent_unit"
+      }
     }
   ]
 }

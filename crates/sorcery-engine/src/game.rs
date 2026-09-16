@@ -1478,6 +1478,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
+        | MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell
         | MagicEffect::MillSites(_)
         | MagicEffect::MillSpells(_)
         | MagicEffect::TargetPlayerDrawsSites(_)
@@ -7165,6 +7166,9 @@ impl Game {
                         .is_some_and(|location| self.is_water_site(location.cell))
                 })
                 .collect(),
+            MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell => {
+                self.pull_adjacent_aboveground_to_water_site_choices(seat, caster_instance_id)?
+            }
             MagicEffect::DestroyTargetSite | MagicEffect::ReturnTargetSiteToOwnerHand => {
                 self.destroy_target_site_choices(seat, caster_instance_id)?
             }
@@ -7579,6 +7583,82 @@ impl Game {
             }
         }
         Ok(hosts)
+    }
+
+    fn aboveground_unit_targets(&self) -> Vec<UnitTarget> {
+        let mut units = [Seat::North, Seat::South]
+            .into_iter()
+            .map(|seat| {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                UnitTarget::Avatar {
+                    instance_id: avatar.card.instance_id.clone(),
+                    seat,
+                }
+            })
+            .collect::<Vec<_>>();
+        units.extend(
+            self.position
+                .units
+                .iter()
+                .filter(|unit| unit.region == Region::Surface && unit.occupied_cells.is_none())
+                .map(|unit| UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: unit.controller,
+                }),
+        );
+        units
+    }
+
+    fn unit_is_adjacent_to_cell(&self, unit: &UnitTarget, cell: Cell) -> Result<bool, GameError> {
+        Ok(Self::footprints_bordering(
+            &[cell],
+            self.unit_target_occupied_cells(unit)?,
+        ))
+    }
+
+    fn unit_may_be_pulled_to_water_site(
+        &self,
+        unit: &UnitTarget,
+        location: Location,
+    ) -> Result<bool, GameError> {
+        if location.region != Region::Surface || !self.is_water_site(location.cell) {
+            return Ok(false);
+        }
+        if self.unit_target_location(unit)?.region != Region::Surface {
+            return Ok(false);
+        }
+        self.unit_is_adjacent_to_cell(unit, location.cell)
+    }
+
+    fn pull_adjacent_aboveground_to_water_site_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for site_choice in self.destroy_target_site_choices(seat, caster_instance_id)? {
+            let Some(location) = site_choice.target_location else {
+                continue;
+            };
+            if location.region != Region::Surface || !self.is_water_site(location.cell) {
+                continue;
+            }
+            for unit in self.aboveground_unit_targets() {
+                if self.unit_is_adjacent_to_cell(&unit, location.cell)? {
+                    choices.push(MagicChoice {
+                        target: Some(unit),
+                        target_location: Some(location),
+                        target_site_instance_id: site_choice.target_site_instance_id.clone(),
+                        ..MagicChoice::default()
+                    });
+                }
+            }
+        }
+        if choices.is_empty() {
+            Ok(vec![MagicChoice::default()])
+        } else {
+            Ok(choices)
+        }
     }
 
     fn unit_occupies_enemy_site(&self, unit: &UnitPosition) -> bool {
@@ -19375,6 +19455,31 @@ impl Game {
                     self.apply_grant_ward_minion(instance_id, seat, card_instance_id, outcomes)?;
                 }
             }
+            MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell => {
+                if let (Some(pulled), Some(location), Some(site_instance_id)) = (
+                    target.as_ref(),
+                    target_location.as_ref(),
+                    target_site_instance_id.as_ref(),
+                ) {
+                    if !self.unit_may_be_pulled_to_water_site(pulled, *location)? {
+                        return Err(GameError::IllegalAction);
+                    }
+                    self.apply_ally_teleport(
+                        pulled,
+                        *location,
+                        None,
+                        Some(site_instance_id),
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                } else if target.is_some()
+                    || target_location.is_some()
+                    || target_site_instance_id.is_some()
+                {
+                    return Err(GameError::IllegalAction);
+                }
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::TapTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -24664,6 +24769,10 @@ mod tests {
             (
                 MagicEffect::WardEachAlliedMinionAtTargetWaterSite,
                 json!({ "wardEachAlliedMinionAtTargetWaterSite": true }),
+            ),
+            (
+                MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,
+                json!({ "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell": true }),
             ),
             (
                 MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell,

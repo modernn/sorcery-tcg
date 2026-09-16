@@ -267,6 +267,7 @@ pub enum MagicEffect {
     KillTargetWoundedMinion,
     LeapAttackAlly,
     LureEnemyMinionOneStepCloser,
+    PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,
     MillSites(u8),
     MillSpells(u8),
     ReturnMinionFromOwnCemetery,
@@ -839,6 +840,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "millSites",
     "millSpells",
     "payLifeAsAdditionalCost",
+    "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell",
     "returnMinionFromOwnCemetery",
     "returnTargetArtifactFromOwnCemetery",
     "returnTargetAuraFromOwnCemetery",
@@ -1486,6 +1488,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             true_only(object, "leapAttackAlly", path)?.then_some(MagicEffect::LeapAttackAlly),
             true_only(object, "lureEnemyMinionOneStepCloser", path)?
                 .then_some(MagicEffect::LureEnemyMinionOneStepCloser),
+            true_only(
+                object,
+                "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell",
+                path,
+            )?
+            .then_some(MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell),
             optional_bounded_integer(object, "millSites", 1, MAX_DECK_CARDS, path)?
                 .map(|count| MagicEffect::MillSites(compact_u8(count))),
             optional_bounded_integer(object, "millSpells", 1, MAX_DECK_CARDS, path)?

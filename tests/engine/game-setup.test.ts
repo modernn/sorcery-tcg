@@ -1520,6 +1520,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const riptideManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(riptideManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 2,
+    pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: false,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        lureEnemyMinionOneStepCloser: true,
+        manaCost: 2,
+        pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
