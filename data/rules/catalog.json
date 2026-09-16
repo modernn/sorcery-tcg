@@ -12056,6 +12056,57 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0524_previous_player_control_covers_each_next_turn_then_expires"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0525",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that draws a site and then may play a land site draws one hidden Atlas card, then offers an extra play of a printed land site plus a decline. The extra play is legal while the Avatar is already tapped and does not tap the Avatar. Printed water sites are not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSiteThenMayPlayLandSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "decline-filtered-site-play"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/filtered_site_play_rules.rs",
+        "testName": "rule_catalog_0525_land_draw_offers_an_extra_untapped_land_site_play"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0526",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that draws a site and then may play a water site offers only printed water sites after the draw. Declining leaves the drawn water site in hand and returns to the main phase without tapping the Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSiteThenMayPlayWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "decline-filtered-site-play"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/filtered_site_play_rules.rs",
+        "testName": "rule_catalog_0526_water_draw_excludes_land_and_decline_keeps_the_site"
+      }
     }
   ]
 }

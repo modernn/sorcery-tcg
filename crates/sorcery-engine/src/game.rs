@@ -60,6 +60,7 @@ pub struct Position {
     pending_basic_movement: PendingField<PendingBasicMovement>,
     pending_cemetery_summon: Option<PendingCemeterySummon>,
     pending_discard_cards: Option<PendingDiscardCards>,
+    pending_filtered_site_play: Option<PendingFilteredSitePlay>,
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
@@ -921,6 +922,16 @@ struct PendingDiscardCards {
     source_owner: Seat,
 }
 
+/// Extra land or water site play after a successful Atlas draw.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingFilteredSitePlay {
+    seat: Seat,
+    source_card_id: CardId,
+    source_instance_id: IdentityHash,
+    source_owner: Seat,
+    water: bool,
+}
+
 /// The free placement a cemetery summon owes after its public random selection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PendingCemeterySummon {
@@ -971,6 +982,7 @@ enum Phase {
     DiscardCard,
     Draw,
     EndTurnAura,
+    FilteredSitePlay,
     Genesis,
     Intercept,
     Main,
@@ -1017,6 +1029,7 @@ impl Phase {
             Self::DiscardCard => "discard-card",
             Self::Draw => "draw",
             Self::EndTurnAura => "end-turn-aura",
+            Self::FilteredSitePlay => "filtered-site-play",
             Self::Genesis => "genesis",
             Self::Intercept => "intercept",
             Self::Main => "main",
@@ -1428,6 +1441,8 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::DestroyTargetSiteWithDamageGrid(_)
         | MagicEffect::DisableTargetNearbyMinionUntilNextTurn
         | MagicEffect::DrawSites(_)
+        | MagicEffect::DrawSiteThenMayPlayLandSite
+        | MagicEffect::DrawSiteThenMayPlayWaterSite
         | MagicEffect::DrawSpells(_)
         | MagicEffect::FightAllyWithAdjacentEnemy
         | MagicEffect::LeapAttackAlly
@@ -1726,6 +1741,7 @@ impl Game {
                 pending_basic_movement: PendingField::Absent,
                 pending_cemetery_summon: None,
                 pending_discard_cards: None,
+                pending_filtered_site_play: None,
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
@@ -2192,6 +2208,7 @@ impl Game {
             Phase::DiscardCard => self.append_discard_card_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
             Phase::EndTurnAura => self.append_end_turn_aura_actions(&mut actions)?,
+            Phase::FilteredSitePlay => self.append_filtered_site_play_actions(&mut actions)?,
             Phase::Genesis => self.append_genesis_actions(&mut actions)?,
             Phase::Intercept => self.append_intercept_actions(&mut actions)?,
             Phase::Mulligan => self.append_mulligan_actions(&mut actions)?,
@@ -3214,76 +3231,104 @@ impl Game {
         Ok(())
     }
 
+    fn append_filtered_site_play_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_filtered_site_play
+            .as_ref()
+            .ok_or_else(|| invalid("filtered-site-play phase lacks a pending Magic"))?;
+        if pending.seat != self.position.decision_seat {
+            return Err(invalid("filtered-site-play choice belongs to another seat"));
+        }
+        self.append_play_site_actions(actions, pending.seat, Some(pending.water))?;
+        self.push_action(
+            actions,
+            ActionDescriptor::DeclineFilteredSitePlay,
+            "Decline the extra site play".to_owned(),
+        );
+        Ok(())
+    }
+
     #[expect(
         clippy::too_many_lines,
-        reason = "main-phase legality keeps each engine-issued action filter together"
+        reason = "site-play issuance keeps rubble, token, and Genesis branches together"
     )]
-    fn append_main_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
-        let seat = self.position.decision_seat;
+    fn append_play_site_actions(
+        &self,
+        actions: &mut Vec<IssuedAction>,
+        seat: Seat,
+        water: Option<bool>,
+    ) -> Result<(), GameError> {
         let player = &self.position.players[seat_index(seat)];
         let CardFacts::Avatar(avatar) =
             &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
         else {
             return Err(invalid("player Avatar lacks Avatar facts"));
         };
-        if !player.avatar.tapped {
-            let cells = self.legal_site_cells(seat);
-            for card in &player.hand_atlas {
-                let definition = &self.rules.cards[usize::from(card.card_id.0)];
-                let card_id = &definition.id;
-                let CardFacts::Site(site_facts) = &definition.facts else {
-                    return Err(invalid("Atlas hand card lacks Site facts"));
+        let cells = self.legal_site_cells(seat);
+        for card in &player.hand_atlas {
+            let definition = &self.rules.cards[usize::from(card.card_id.0)];
+            let card_id = &definition.id;
+            let CardFacts::Site(site_facts) = &definition.facts else {
+                return Err(invalid("Atlas hand card lacks Site facts"));
+            };
+            if water.is_some_and(|want_water| {
+                site_facts.elements.contains(Element::Water) != want_water
+            }) {
+                continue;
+            }
+            let creates_rubble = avatar.earth_site_play_creates_adjacent_rubble
+                && site_facts.elements.contains(Element::Earth);
+            for cell in &cells {
+                let rubble_choices: Vec<_> = if creates_rubble {
+                    let candidates: Vec<_> = player
+                        .avatar
+                        .location
+                        .bordering(false)
+                        .filter(|candidate| {
+                            candidate != cell
+                                && self.position.sites[candidate.index()].is_none()
+                                && self.position.rubble[candidate.index()].is_none()
+                        })
+                        .map(Some)
+                        .collect();
+                    if candidates.is_empty() {
+                        vec![None]
+                    } else {
+                        candidates
+                    }
+                } else {
+                    vec![None]
                 };
-                let creates_rubble = avatar.earth_site_play_creates_adjacent_rubble
-                    && site_facts.elements.contains(Element::Earth);
-                for cell in &cells {
-                    let rubble_choices: Vec<_> = if creates_rubble {
-                        let candidates: Vec<_> = player
-                            .avatar
-                            .location
-                            .bordering(false)
-                            .filter(|candidate| {
-                                candidate != cell
-                                    && self.position.sites[candidate.index()].is_none()
-                                    && self.position.rubble[candidate.index()].is_none()
-                            })
-                            .map(Some)
-                            .collect();
-                        if candidates.is_empty() {
-                            vec![None]
-                        } else {
-                            candidates
-                        }
-                    } else {
-                        vec![None]
-                    };
-                    let token_choices = if let Some(token_card_id) =
-                        site_facts.genesis_pay_one_mana_to_summon_token.as_deref()
+                let token_choices = if let Some(token_card_id) =
+                    site_facts.genesis_pay_one_mana_to_summon_token.as_deref()
+                {
+                    let mut choices = vec![Some(GenesisTokenChoice::Decline)];
+                    if (site_facts.ordinary || !self.fate_covers_cell(*cell))
+                        && self.token_may_enter_played_site(
+                            seat,
+                            token_card_id,
+                            *cell,
+                            site_facts,
+                        )?
                     {
-                        let mut choices = vec![Some(GenesisTokenChoice::Decline)];
-                        if (site_facts.ordinary || !self.fate_covers_cell(*cell))
-                            && self.token_may_enter_played_site(
-                                seat,
-                                token_card_id,
-                                *cell,
-                                site_facts,
-                            )?
-                        {
-                            choices.push(Some(GenesisTokenChoice::PayOneMana));
-                        }
-                        choices
-                    } else {
-                        vec![None]
+                        choices.push(Some(GenesisTokenChoice::PayOneMana));
+                    }
+                    choices
+                } else {
+                    vec![None]
+                };
+                for genesis_token_choice in token_choices {
+                    let token_suffix = match genesis_token_choice {
+                        Some(GenesisTokenChoice::Decline) => " (decline Genesis)",
+                        Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
+                        None => "",
                     };
-                    for genesis_token_choice in token_choices {
-                        let token_suffix = match genesis_token_choice {
-                            Some(GenesisTokenChoice::Decline) => " (decline Genesis)",
-                            Some(GenesisTokenChoice::PayOneMana) => " (pay 1 for Genesis)",
-                            None => "",
-                        };
-                        let genesis_damage_branches = if genesis_token_choice
-                            == Some(GenesisTokenChoice::PayOneMana)
-                        {
+                    let genesis_damage_branches =
+                        if genesis_token_choice == Some(GenesisTokenChoice::PayOneMana) {
                             let token_card_id = site_facts
                                 .genesis_pay_one_mana_to_summon_token
                                 .as_deref()
@@ -3299,38 +3344,52 @@ impl Game {
                         } else {
                             vec![(None, None)]
                         };
-                        for (genesis_damage_choice, genesis_damage_target) in
-                            genesis_damage_branches
-                        {
-                            let genesis_suffix = Self::genesis_damage_suffix(
-                                genesis_damage_choice,
-                                genesis_damage_target.as_ref(),
+                    for (genesis_damage_choice, genesis_damage_target) in genesis_damage_branches {
+                        let genesis_suffix = Self::genesis_damage_suffix(
+                            genesis_damage_choice,
+                            genesis_damage_target.as_ref(),
+                        );
+                        for create_rubble_at in &rubble_choices {
+                            let rubble_suffix = create_rubble_at.map_or_else(String::new, |cell| {
+                                format!(" — create Rubble at {cell}")
+                            });
+                            self.push_action(
+                                actions,
+                                ActionDescriptor::PlaySite {
+                                    card_id: card_id.clone(),
+                                    card_instance_id: card.instance_id.clone(),
+                                    cell: *cell,
+                                    create_rubble_at: *create_rubble_at,
+                                    genesis_token_choice,
+                                    genesis_damage_choice,
+                                    genesis_damage_target: genesis_damage_target.clone(),
+                                },
+                                format!(
+                                    "Play {card_id} at {cell}{token_suffix}{genesis_suffix}{rubble_suffix}"
+                                ),
                             );
-                            for create_rubble_at in &rubble_choices {
-                                let rubble_suffix = create_rubble_at
-                                    .map_or_else(String::new, |cell| {
-                                        format!(" — create Rubble at {cell}")
-                                    });
-                                self.push_action(
-                                    actions,
-                                    ActionDescriptor::PlaySite {
-                                        card_id: card_id.clone(),
-                                        card_instance_id: card.instance_id.clone(),
-                                        cell: *cell,
-                                        create_rubble_at: *create_rubble_at,
-                                        genesis_token_choice,
-                                        genesis_damage_choice,
-                                        genesis_damage_target: genesis_damage_target.clone(),
-                                    },
-                                    format!(
-                                        "Play {card_id} at {cell}{token_suffix}{genesis_suffix}{rubble_suffix}"
-                                    ),
-                                );
-                            }
                         }
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "main-phase legality keeps each engine-issued action filter together"
+    )]
+    fn append_main_actions(&self, actions: &mut Vec<IssuedAction>) -> Result<(), GameError> {
+        let seat = self.position.decision_seat;
+        let player = &self.position.players[seat_index(seat)];
+        let CardFacts::Avatar(avatar) =
+            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+        else {
+            return Err(invalid("player Avatar lacks Avatar facts"));
+        };
+        if !player.avatar.tapped {
+            self.append_play_site_actions(actions, seat, None)?;
             if avatar.replace_adjacent_rubble_with_top_atlas_site && !player.atlas.is_empty() {
                 for target_cell in player.avatar.location.bordering(false) {
                     let Some(target_rubble_instance_id) =
@@ -6510,6 +6569,68 @@ impl Game {
         Ok(())
     }
 
+    fn begin_filtered_site_play(
+        &mut self,
+        seat: Seat,
+        water: bool,
+        source_card_id: CardId,
+        source_instance_id: &IdentityHash,
+        source_owner: Seat,
+    ) -> bool {
+        if self.position.terminal.is_some() {
+            return false;
+        }
+        self.position.pending_filtered_site_play = Some(PendingFilteredSitePlay {
+            seat,
+            source_card_id,
+            source_instance_id: source_instance_id.clone(),
+            source_owner,
+            water,
+        });
+        self.position.phase = Phase::FilteredSitePlay;
+        self.position.decision_seat = seat;
+        true
+    }
+
+    fn apply_decline_filtered_site_play(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = self
+            .position
+            .pending_filtered_site_play
+            .take()
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.phase != Phase::FilteredSitePlay || pending.seat != action.seat {
+            self.position.pending_filtered_site_play = Some(pending);
+            return Err(GameError::IllegalAction);
+        }
+        self.position.decision_seat = self.position.active_seat;
+        self.position.phase = if self.position.terminal.is_some() {
+            Phase::Terminal
+        } else {
+            Phase::Main
+        };
+        self.emit_filtered_magic_resolved(&pending, outcomes);
+        self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn emit_filtered_magic_resolved(
+        &self,
+        pending: &PendingFilteredSitePlay,
+        outcomes: &mut OutcomeLog<'_>,
+    ) {
+        let card_id = &self.rules.cards[usize::from(pending.source_card_id.0)].id;
+        Self::emit_continuation_magic_resolved(
+            card_id,
+            &pending.source_instance_id,
+            pending.source_owner,
+            outcomes,
+        );
+    }
+
     fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
         let choices: Vec<_> = self.position.players[seat_index(seat)]
             .cemetery
@@ -6577,6 +6698,8 @@ impl Game {
         Ok(match effect {
             MagicEffect::HealController(_)
             | MagicEffect::DrawSites(_)
+            | MagicEffect::DrawSiteThenMayPlayLandSite
+            | MagicEffect::DrawSiteThenMayPlayWaterSite
             | MagicEffect::DrawSpells(_)
             | MagicEffect::DamageEachAbovegroundMinionOne
             | MagicEffect::SummonRandomMinionFromAnyCemetery
@@ -9466,6 +9589,9 @@ impl Game {
                 spellbook_order,
             } => self.apply_mulligan_action(action.seat, atlas_order, spellbook_order, outcomes),
             ActionDescriptor::PlaySite { .. } => self.apply_play_site_action(action, outcomes),
+            ActionDescriptor::DeclineFilteredSitePlay => {
+                self.apply_decline_filtered_site_play(action, outcomes)
+            }
             ActionDescriptor::ReplaceRubbleWithTopAtlasSite {
                 target_cell,
                 target_rubble_instance_id,
@@ -9588,6 +9714,7 @@ impl Game {
         // Magic that owns its own resolution event resumes through its continuation instead.
         let continuing_cast = self.position.pending_cemetery_summon.is_some()
             || self.position.pending_discard_cards.is_some()
+            || self.position.pending_filtered_site_play.is_some()
             || matches!(
                 action.descriptor,
                 ActionDescriptor::CastMagic {
@@ -13046,6 +13173,7 @@ impl Game {
         self.position.pending_basic_movement = PendingField::Absent;
         self.position.pending_cemetery_summon = None;
         self.position.pending_discard_cards = None;
+        self.position.pending_filtered_site_play = None;
         self.position.pending_chain_magic = PendingField::Absent;
         self.position.pending_ranged_step = PendingField::Absent;
         self.position.pending_combat = None;
@@ -13401,10 +13529,19 @@ impl Game {
         let origin_state_version = self.position.state_version;
         let player_index = seat_index(seat);
         let player = &self.position.players[player_index];
-        if self.position.phase != Phase::Main
-            || player.avatar.tapped
-            || !self.legal_site_cells(seat).contains(&cell)
+        let extra_site_play = self
+            .position
+            .pending_filtered_site_play
+            .as_ref()
+            .filter(|pending| {
+                self.position.phase == Phase::FilteredSitePlay && pending.seat == seat
+            })
+            .cloned();
+        if extra_site_play.is_none() && (self.position.phase != Phase::Main || player.avatar.tapped)
         {
+            return Err(GameError::IllegalAction);
+        }
+        if !self.legal_site_cells(seat).contains(&cell) {
             return Err(GameError::IllegalAction);
         }
         let hand_index = player
@@ -13420,6 +13557,12 @@ impl Game {
         let CardFacts::Site(facts) = &definition.facts else {
             return Err(GameError::IllegalAction);
         };
+        if extra_site_play
+            .as_ref()
+            .is_some_and(|pending| facts.elements.contains(Element::Water) != pending.water)
+        {
+            return Err(GameError::IllegalAction);
+        }
         let CardFacts::Avatar(avatar_facts) =
             &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
         else {
@@ -13497,7 +13640,9 @@ impl Game {
             .remove(hand_index);
         let replaced_rubble = self.position.rubble[cell.index()].take();
         let player = &mut self.position.players[player_index];
-        player.avatar.tapped = true;
+        if extra_site_play.is_none() {
+            player.avatar.tapped = true;
+        }
         player.domain_established = true;
         player.mana = ordinary_mana;
         self.position.sites[cell.index()] = Some(SitePosition {
@@ -13541,14 +13686,33 @@ impl Game {
             seat,
         };
         self.settle_region_occupancy(outcomes)?;
+        if extra_site_play.is_some() {
+            self.position.pending_filtered_site_play = None;
+        }
         if let Some(pending) = &mut self.position.pending_deathrites {
             pending.continuation = Some(DeathriteContinuation::SiteGenesis(continuation));
+            if let Some(source) = extra_site_play
+                && pending.deferred_magic_resolved.is_none()
+            {
+                pending.deferred_magic_resolved = Some(DeferredMagicResolved {
+                    card_id: source.source_card_id,
+                    instance_id: source.source_instance_id,
+                    owner: source.source_owner,
+                });
+            }
             return Ok(());
         }
         if self.position.terminal.is_some() {
+            if let Some(source) = extra_site_play {
+                self.emit_filtered_magic_resolved(&source, outcomes);
+            }
             return Ok(());
         }
-        self.finish_site_genesis(continuation, outcomes)
+        self.finish_site_genesis(continuation, outcomes)?;
+        if let Some(source) = extra_site_play {
+            self.emit_filtered_magic_resolved(&source, outcomes);
+        }
+        Ok(())
     }
 
     #[expect(
@@ -18932,6 +19096,26 @@ impl Game {
             MagicEffect::DrawSites(count) => {
                 self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, count, outcomes);
             }
+            MagicEffect::DrawSiteThenMayPlayLandSite => {
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, 1, outcomes);
+                raising = self.begin_filtered_site_play(
+                    seat,
+                    false,
+                    compact_card_id,
+                    card_instance_id,
+                    owner,
+                );
+            }
+            MagicEffect::DrawSiteThenMayPlayWaterSite => {
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Atlas, 1, outcomes);
+                raising = self.begin_filtered_site_play(
+                    seat,
+                    true,
+                    compact_card_id,
+                    card_instance_id,
+                    owner,
+                );
+            }
             MagicEffect::DrawSpells(count) => {
                 self.apply_genesis_draws(
                     seat,
@@ -22569,6 +22753,18 @@ impl Game {
                     }),
                 );
             }
+            if let Some(pending) = &self.position.pending_filtered_site_play {
+                object.insert(
+                    "pendingFilteredSitePlay".to_owned(),
+                    json!({
+                        "seat": pending.seat,
+                        "sourceCardId": self.rules.cards[usize::from(pending.source_card_id.0)].id,
+                        "sourceInstanceId": pending.source_instance_id,
+                        "sourceOwner": pending.source_owner,
+                        "water": pending.water,
+                    }),
+                );
+            }
             if self.position.turn_controller.is_some()
                 || self
                     .position
@@ -23747,6 +23943,14 @@ mod tests {
                 json!({ "leapAttackAlly": true }),
             ),
             (MagicEffect::DrawSites(2), json!({ "drawSites": 2 })),
+            (
+                MagicEffect::DrawSiteThenMayPlayLandSite,
+                json!({ "drawSiteThenMayPlayLandSite": true }),
+            ),
+            (
+                MagicEffect::DrawSiteThenMayPlayWaterSite,
+                json!({ "drawSiteThenMayPlayWaterSite": true }),
+            ),
             (MagicEffect::DrawSpells(2), json!({ "drawSpells": 2 })),
             (MagicEffect::MillSites(2), json!({ "millSites": 2 })),
             (MagicEffect::MillSpells(2), json!({ "millSpells": 2 })),

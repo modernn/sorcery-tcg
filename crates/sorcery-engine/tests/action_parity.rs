@@ -73,6 +73,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::SummonMinion { .. } => "summon-minion",
         ActionDescriptor::MoveAndAttack { .. } => "move-and-attack",
         ActionDescriptor::ContinueBasicMovement { .. } => "continue-basic-movement",
+        ActionDescriptor::DeclineFilteredSitePlay => "decline-filtered-site-play",
         ActionDescriptor::DeclineAttack => "decline-attack",
         ActionDescriptor::DeclareAttack { .. } => "declare-attack",
         ActionDescriptor::Defend { .. } => "defend",

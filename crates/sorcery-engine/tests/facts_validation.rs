@@ -302,6 +302,8 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("healController", json!(2)),
         ("healTargetMinion", json!(1)),
         ("drawSites", json!(2)),
+        ("drawSiteThenMayPlayLandSite", json!(true)),
+        ("drawSiteThenMayPlayWaterSite", json!(true)),
         ("drawSpells", json!(2)),
         ("killTargetMinion", json!(true)),
         ("killTargetWoundedMinion", json!(true)),

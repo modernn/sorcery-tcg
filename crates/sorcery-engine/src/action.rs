@@ -617,6 +617,8 @@ pub enum ActionDescriptor {
         /// Authoritative Ranged minion identity.
         unit_instance_id: IdentityHash,
     },
+    /// Decline the extra land or water site play granted after drawing a site.
+    DeclineFilteredSitePlay,
     /// Decline to attack after moving or tapping in place.
     DeclineAttack,
     /// Attack one engine-issued target.
@@ -950,6 +952,7 @@ impl ActionDescriptor {
                 projectile_target_label(hit.as_ref()),
                 if *fight_on_arrival { " and fight" } else { "" }
             )),
+            Self::DeclineFilteredSitePlay => Some("Decline the extra site play".to_owned()),
             Self::DeclineAttack => Some("Decline attack".to_owned()),
             Self::ResolveRangedStep {
                 choice,
@@ -2288,6 +2291,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
         ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 46,
         ActionDescriptor::ActivateDiscardToGainControl { .. } => 47,
+        ActionDescriptor::DeclineFilteredSitePlay => 48,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,

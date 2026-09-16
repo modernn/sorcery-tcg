@@ -1356,6 +1356,73 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   });
   assert.equal(drawnSites.cards[firstSpell]?.cardType === 'magic'
     && drawnSites.cards[firstSpell].drawSites, 2);
+  const landmass = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSiteThenMayPlayLandSite: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(landmass.cards[firstSpell]?.cardType === 'magic'
+    && landmass.cards[firstSpell].drawSiteThenMayPlayLandSite, true);
+  const overflow = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSiteThenMayPlayWaterSite: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.equal(overflow.cards[firstSpell]?.cardType === 'magic'
+    && overflow.cards[firstSpell].drawSiteThenMayPlayWaterSite, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSiteThenMayPlayLandSite: false,
+        drawSites: 1,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /drawSiteThenMayPlayLandSite must be true when defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSiteThenMayPlayWaterSite: false,
+        drawSites: 1,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /drawSiteThenMayPlayWaterSite must be true when defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        drawSites: 1,
+        drawSiteThenMayPlayLandSite: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

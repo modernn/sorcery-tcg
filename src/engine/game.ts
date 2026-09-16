@@ -384,6 +384,8 @@ export type GameCardDefinition =
     discardSiteAsAdditionalCost?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
     drawSites?: number;
+    drawSiteThenMayPlayLandSite?: true;
+    drawSiteThenMayPlayWaterSite?: true;
     drawSpells?: number;
     fightAllyWithAdjacentEnemy?: true;
     gainControlOfTargetEnemyMinionThisTurn?: true;
@@ -688,6 +690,14 @@ type PendingDiscardCards = Readonly<{
   sourceOwner: GameSeat;
 }>;
 
+type PendingFilteredSitePlay = Readonly<{
+  seat: GameSeat;
+  sourceCardId: string;
+  sourceInstanceId: StateHash;
+  sourceOwner: GameSeat;
+  water: boolean;
+}>;
+
 type PendingDeathriteSource = Readonly<{
   controller: GameSeat;
   currentPower: number;
@@ -705,7 +715,7 @@ type PendingDeathriteBatch = Readonly<{
   stage: 'active-order' | 'non-active-order' | 'resolve';
 }>;
 
-type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
 type LeapAttackContinuation = Readonly<{
   ally: GameUnitRef;
@@ -875,6 +885,7 @@ export type GameState = Readonly<{
   pendingCombat: PendingCombat | null;
   pendingDeathrites?: PendingDeathrites | null;
   pendingDiscardCards?: PendingDiscardCards;
+  pendingFilteredSitePlay?: PendingFilteredSitePlay;
   pendingEndTurnAura?: PendingEndTurnAura | null;
   pendingGenesisSpell?: PendingGenesisSpell | null;
   pendingGenesisSpellOrder?: PendingGenesisSpellOrder | null;
@@ -1238,6 +1249,9 @@ type GameActionDescriptor =
     zone: DeckZone;
   }>
   | Readonly<{
+    kind: 'decline-filtered-site-play';
+  }>
+  | Readonly<{
     kind: 'order-deathrites';
     sourceInstanceId: StateHash;
   }>
@@ -1317,7 +1331,7 @@ const SUPPORTED_CARD_FIELDS = {
     destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn grantRangedToAllyThisTurn
-    grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
+    grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
@@ -1919,6 +1933,8 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.healController !== undefined)
       + Number(card.healTargetMinion !== undefined)
       + Number(card.drawSites !== undefined)
+      + Number(card.drawSiteThenMayPlayLandSite === true)
+      + Number(card.drawSiteThenMayPlayWaterSite === true)
       + Number(card.drawSpells !== undefined)
       + Number(card.killTargetMinion === true)
       + Number(card.killTargetWoundedMinion === true)
@@ -1999,6 +2015,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.drawSites < 1
       || card.drawSites > MAX_DECK_CARDS)) {
       throw new RangeError(`${path}.drawSites must be a safe integer between 1 and ${MAX_DECK_CARDS}`);
+    }
+    if (card.drawSiteThenMayPlayLandSite !== undefined
+      && card.drawSiteThenMayPlayLandSite !== true) {
+      throw new RangeError(`${path}.drawSiteThenMayPlayLandSite must be true when defined`);
+    }
+    if (card.drawSiteThenMayPlayWaterSite !== undefined
+      && card.drawSiteThenMayPlayWaterSite !== true) {
+      throw new RangeError(`${path}.drawSiteThenMayPlayWaterSite must be true when defined`);
     }
     if (card.drawSpells !== undefined && (!Number.isSafeInteger(card.drawSpells)
       || card.drawSpells < 1
@@ -2814,6 +2838,10 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { healTargetMinion: card.healTargetMinion }
                   : card.drawSites !== undefined
                     ? { drawSites: card.drawSites }
+                  : card.drawSiteThenMayPlayLandSite === true
+                    ? { drawSiteThenMayPlayLandSite: true as const }
+                  : card.drawSiteThenMayPlayWaterSite === true
+                    ? { drawSiteThenMayPlayWaterSite: true as const }
                   : card.drawSpells !== undefined
                     ? { drawSpells: card.drawSpells }
                   : card.millSites !== undefined
