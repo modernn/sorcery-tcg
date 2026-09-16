@@ -9516,6 +9516,60 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0424_site_genesis_decline_token_then_reorder_next_spells"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0425",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both discard-top-spells and may-bottom-next-spell, playing it publicly discards the top two spells first, then enters hidden spell Genesis where the controller may bottom the new top spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-discarded",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0425_site_genesis_discard_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0426",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same discard-top and may-bottom site is played, keeping the new top spell after the two public discards completes Genesis without reordering the remaining spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDiscardTopSpells",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-discarded",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0426_site_genesis_discard_then_keep_next_spell"
+      }
     }
   ]
 }
