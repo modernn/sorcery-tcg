@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Canonical line: `master` @ `0b4a385`. Lanes through `RULE-CATALOG-0510` are merged. TypeScript admits 2×2 token/wrap/outer-column (`0371`–`0376`); 2×2 Landbound composes with Flood (`0507`–`0508`); 2×2 Waterbound composes with Drought (`0509`–`0510`). Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
+Canonical line: `master` @ `c82ef54`. Lanes through `RULE-CATALOG-0510` are merged. TypeScript admits 2×2 token/wrap/outer-column (`0371`–`0376`); 2×2 Landbound composes with Flood (`0507`–`0508`); 2×2 Waterbound composes with Drought (`0509`–`0510`). Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
 
 Lucky Charm extra-random discard-here damage, Sparkmage/Aramos random-discard honor, and the 2×2 occupy proofs through `RULE-CATALOG-0370` are merged on `master` (#54). Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
