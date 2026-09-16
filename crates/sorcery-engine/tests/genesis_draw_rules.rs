@@ -3477,6 +3477,312 @@ fn rule_catalog_0436_site_genesis_decline_token_then_draw_per_adjacent_same_card
     assert_exact_replay(&session);
 }
 
+fn adjacent_stealth_manifest(seed: u32, north_spellbook_count: usize) -> String {
+    let mut stealth = minion(1, 2);
+    stealth["stealth"] = json!(true);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &stealth,
+        &stealth,
+        6,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert(
+            "adjacent-combo-site".to_owned(),
+            adjacent_combo_site(&json!({ "genesisEnemiesLoseStealth": true })),
+        );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+fn setup_adjacent_stealth_minions(session: &mut Session) -> Value {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (north_summon, _) =
+        accept_where(session, |descriptor| descriptor["kind"] == "summon-minion");
+    let north_id = north_summon["cardInstanceId"].clone();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (south_summon, _) =
+        accept_where(session, |descriptor| descriptor["kind"] == "summon-minion");
+    let south_id = south_summon["cardInstanceId"].clone();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    assert_ne!(north_id, south_id);
+    south_id
+}
+
+fn adjacent_heal_manifest(
+    seed: u32,
+    north_atlas_count: usize,
+    north_spellbook_count: usize,
+) -> String {
+    let mut loss = minion(1, 2);
+    loss["genesisLoseControllerLife"] = json!(2);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &loss,
+        &minion(1, 2),
+        north_atlas_count,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert(
+            "adjacent-combo-site".to_owned(),
+            adjacent_combo_site(&json!({ "genesisHealNearbyAvatars": 3 })),
+        );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; north_atlas_count]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+#[test]
+fn rule_catalog_0437_site_genesis_strip_stealth_then_draw_per_adjacent_same_card() {
+    let manifest = adjacent_stealth_manifest(437, 10);
+    let mut session = Session::new(&manifest).expect("valid adjacent stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "stealth-lost", "spell-drawn"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["controller"] == "south" && unit["stealthed"] == false)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0438_site_genesis_strip_stealth_only_without_adjacent_same_card() {
+    let manifest = adjacent_stealth_manifest(438, 6);
+    let mut session = Session::new(&manifest).expect("valid adjacent stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played"]);
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_eq!(after["realm"]["units"], json!([]));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0439_site_genesis_heal_nearby_then_draw_per_adjacent_same_card() {
+    let manifest = adjacent_heal_manifest(439, 6, 10);
+    let mut session = Session::new(&manifest).expect("valid adjacent heal Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "avatar-healed", "spell-drawn"]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 2);
+    assert_eq!(receipt.events[1].payload["attemptedAmount"], 3);
+    assert_eq!(receipt.events[1].payload["life"], 20);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0440_site_genesis_heal_nearby_only_without_adjacent_same_card() {
+    let manifest = adjacent_combo_manifest(440, &json!({ "genesisHealNearbyAvatars": 3 }), 6, 5);
+    let mut session = Session::new(&manifest).expect("valid adjacent heal Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played"]);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0441_site_genesis_immobilize_nearby_then_draw_per_adjacent_same_card() {
+    let manifest = adjacent_combo_manifest(
+        441,
+        &json!({ "genesisImmobilizeNearbyUntilNextTurn": true }),
+        6,
+        10,
+    );
+    let mut session = Session::new(&manifest).expect("valid adjacent immobilize Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_combo_play(&mut session, AdjacentSetupGenesis::None);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "spell-drawn"]);
+    let after = state(&session);
+    let north_area = after["realm"]["immobileAreas"]
+        .as_array()
+        .expect("immobile areas")
+        .iter()
+        .find(|area| {
+            area["expiresAtSeat"] == "north"
+                && area["cells"]
+                    .as_array()
+                    .is_some_and(|cells| cells.contains(&json!("C3")))
+        })
+        .cloned()
+        .expect("north immobile area at C3");
+    assert_eq!(north_area["cells"], json!(["C3", "C4"]));
+    assert_eq!(
+        north_area["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0442_site_genesis_immobilize_nearby_only_without_adjacent_same_card() {
+    let manifest = adjacent_combo_manifest(
+        442,
+        &json!({ "genesisImmobilizeNearbyUntilNextTurn": true }),
+        5,
+        5,
+    );
+    let mut session = Session::new(&manifest).expect("valid adjacent immobilize Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played"]);
+    assert_eq!(
+        state(&session)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        }])
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
     let manifest =

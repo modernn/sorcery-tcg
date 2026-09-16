@@ -9826,6 +9826,152 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0436_site_genesis_decline_token_then_draw_per_adjacent_same_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0437",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both draw-spell-per-adjacent-same-card and enemies-lose-stealth, playing it adjacent to a matching site strips enemy Stealth first, then draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisEnemiesLoseStealth"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "stealth-lost",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0437_site_genesis_strip_stealth_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0438",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same adjacent-draw and stealth-strip site is played with no bordering matching site and no stealthed enemies, only the site-played event resolves and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisEnemiesLoseStealth"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0438_site_genesis_strip_stealth_only_without_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0439",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both draw-spell-per-adjacent-same-card and heal-nearby-avatars, playing it adjacent to a matching site heals nearby avatars first, then draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisHealNearbyAvatars"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0439_site_genesis_heal_nearby_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0440",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same adjacent-draw and heal-nearby site is played with no bordering matching site and nearby avatars already at maximum life, only the site-played event resolves and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisHealNearbyAvatars"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0440_site_genesis_heal_nearby_only_without_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0441",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both draw-spell-per-adjacent-same-card and immobilize-nearby-until-next-turn, playing it adjacent to a matching site creates the immobile area first, then draws one spell for each bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisImmobilizeNearbyUntilNextTurn"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0441_site_genesis_immobilize_nearby_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0442",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same adjacent-draw and immobilize-nearby site is played with no bordering matching site, the immobile area resolves and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisImmobilizeNearbyUntilNextTurn"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0442_site_genesis_immobilize_nearby_only_without_adjacent_same_card"
+      }
     }
   ]
 }
