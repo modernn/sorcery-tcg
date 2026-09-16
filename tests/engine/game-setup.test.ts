@@ -1993,6 +1993,62 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const unravelManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(unravelManifest.cards[firstSpell], {
+    cardType: 'magic',
+    destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: true,
+    manaCost: 2,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: false,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyArtifactsAndAurasAtLocationWithinTwoSteps: true,
+        destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: true,
+        killMortalMinionsAtLocationWithinTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const adjacentBuryManifest = createGameManifest({
     ...input,
     cards: {
@@ -8520,6 +8576,19 @@ test('RULE-04 controlled Mortal power follows current control and settles deaths
       firstSeat: 'north',
       seed,
     }), /mortal must be true/);
+    assert.throws(() => createGameManifest({
+      authority,
+      cards: {
+        ...cards,
+        [northMortalCard.cardId]: {
+          ...baseCards[northMortalCard.cardId]!,
+          undead: false,
+        } as unknown as GameCardDefinition,
+      },
+      decks,
+      firstSeat: 'north',
+      seed,
+    }), /undead must be true/);
     assert.throws(() => createGameManifest({
       authority,
       cards: {

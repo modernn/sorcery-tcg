@@ -13151,6 +13151,54 @@
         "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
         "testName": "rule_catalog_0570_destroy_relics_here_empty_location_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0575",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-a-location-within-two-steps Magic offers locations within two measured steps of the caster. After C4 and C3 exist, choosing C3 kills an Undead minion and destroys a loose Artifact there, and leaves a non-Undead beast at C4 unwounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_0575_destroy_undead_relics_here_destroys_undead_and_artifact_and_spares_beast"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0576",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-a-location-within-two-steps Magic still offers a location with no Undead minion or Artifact. Choosing that location resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_0576_destroy_undead_relics_here_empty_location_is_a_paid_noop"
+      }
     }
   ]
 }

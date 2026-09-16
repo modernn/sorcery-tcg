@@ -285,6 +285,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
             json!(true),
         ),
+        (
+            "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+            json!(true),
+        ),
         ("destroyTargetArtifact", json!(true)),
         ("destroyTargetAura", json!(true)),
         ("destroyTargetSite", json!(true)),
@@ -1876,6 +1880,67 @@ fn destroy_artifacts_and_auras_at_location_within_two_steps_should_parse() {
         facts.effect,
         MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
     );
+}
+
+#[test]
+fn destroy_undead_minions_and_artifacts_at_location_within_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "destroy-undead-minions-and-artifacts-at-location",
+        &spell(
+            "magic",
+            (
+                "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid destroy-undead-minions-and-artifacts-at-location Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
+    );
+}
+
+#[test]
+fn destroy_undead_minions_and_artifacts_must_not_combine_with_destroy_artifacts_and_auras() {
+    let error = parse_card_definition(
+        "unravel-plus-unmake",
+        &with(
+            spell(
+                "magic",
+                (
+                    "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+                    json!(true),
+                ),
+            ),
+            "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
+            json!(true),
+        ),
+    )
+    .expect_err("Unravel stays exclusive of destroyArtifactsAndAurasAtLocationWithinTwoSteps");
+    assert!(error.to_string().contains("exactly one"), "{error}");
+}
+
+#[test]
+fn destroy_undead_minions_and_artifacts_must_not_combine_with_kill_mortal() {
+    let error = parse_card_definition(
+        "unravel-plus-mortality",
+        &with(
+            spell(
+                "magic",
+                (
+                    "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+                    json!(true),
+                ),
+            ),
+            "killMortalMinionsAtLocationWithinTwoSteps",
+            json!(true),
+        ),
+    )
+    .expect_err("Unravel stays exclusive of killMortalMinionsAtLocationWithinTwoSteps");
+    assert!(error.to_string().contains("exactly one"), "{error}");
 }
 
 #[test]

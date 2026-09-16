@@ -439,6 +439,7 @@ export type GameCardDefinition =
     summonTokenToAlliedMinionThenDrawSpell?: string;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyArtifactsAndAurasAtLocationWithinTwoSteps?: true;
+    destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps?: true;
     destroyTargetArtifact?: true;
     destroyTargetAura?: true;
     destroyTargetSite?: true;
@@ -516,6 +517,7 @@ export type GameCardDefinition =
     mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
     mortal?: true;
+    undead?: true;
     movementBonus?: 1 | 2;
     movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
@@ -1352,6 +1354,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
     destroyArtifactsAndAurasAtLocationWithinTwoSteps
+    destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
     destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantDoubleDamageToAllyNextStrikeThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
@@ -1377,7 +1380,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
-    manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
+    manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
     nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
@@ -1997,6 +2000,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.destroyArtifactsAndAurasAtLocationWithinTwoSteps !== true) {
       throw new RangeError(`${path}.destroyArtifactsAndAurasAtLocationWithinTwoSteps must be true when defined`);
     }
+    if (card.destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps !== undefined
+      && card.destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps !== true) {
+      throw new RangeError(`${path}.destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps must be true when defined`);
+    }
     if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
       throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
     }
@@ -2043,6 +2050,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(targetSiteEffectFacts === 3)
       + Number(simpleDestroyTargetSite)
       + Number(card.destroyArtifactsAndAurasAtLocationWithinTwoSteps === true)
+      + Number(card.destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps === true)
       + Number(card.destroyTargetArtifact === true)
       + Number(card.destroyTargetAura === true)
       + Number(card.disableTargetMinionWithinTwoStepsUntilDamaged === true)
@@ -2511,6 +2519,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.mortal !== undefined && card.mortal !== true) {
     throw new RangeError(`${path}.mortal must be true when defined`);
   }
+  if (card.undead !== undefined && card.undead !== true) {
+    throw new RangeError(`${path}.undead must be true when defined`);
+  }
   if (card.nearbyEnemiesPermanentlyLoseStealth !== undefined
     && card.nearbyEnemiesPermanentlyLoseStealth !== true) {
     throw new RangeError(`${path}.nearbyEnemiesPermanentlyLoseStealth must be true when defined`);
@@ -2935,6 +2946,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { destroyTargetSite: true as const }
                 : card.destroyArtifactsAndAurasAtLocationWithinTwoSteps === true
                   ? { destroyArtifactsAndAurasAtLocationWithinTwoSteps: true as const }
+                : card.destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps === true
+                  ? { destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps: true as const }
                 : card.destroyTargetArtifact === true
                   ? { destroyTargetArtifact: true as const }
                 : card.destroyTargetAura === true
@@ -3248,6 +3261,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
               ? { mayStepAfterRangedStrike: true as const }
               : {}),
             ...(card.mortal === true ? { mortal: true as const } : {}),
+            ...(card.undead === true ? { undead: true as const } : {}),
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlyForward === true ? { movesOnlyForward: true } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
