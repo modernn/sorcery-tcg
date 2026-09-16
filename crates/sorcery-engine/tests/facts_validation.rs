@@ -335,6 +335,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
         (
+            "summonTokenToAlliedMinionThenDrawSpell",
+            json!("frog-token"),
+        ),
+        (
             "summonTokenToEachControlledSiteBorderingEnemySite",
             json!("foot-soldier"),
         ),
@@ -1673,6 +1677,27 @@ fn genesis_untap_adjacent_allies_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_untap_adjacent_allies);
+}
+
+#[test]
+fn summon_token_to_allied_minion_then_draw_spell_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "summon-token-to-ally-then-draw",
+        &spell(
+            "magic",
+            (
+                "summonTokenToAlliedMinionThenDrawSpell",
+                json!("frog-token"),
+            ),
+        ),
+    )
+    .expect("valid summon-token-to-ally then draw-spell Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::SummonTokenToAlliedMinionThenDrawSpell("frog-token".into())
+    );
 }
 
 #[test]

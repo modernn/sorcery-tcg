@@ -279,6 +279,7 @@ pub enum MagicEffect {
     ReturnTargetSiteToOwnerHand,
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
+    SummonTokenToAlliedMinionThenDrawSpell(String),
     SummonTokenToEachControlledSiteBorderingEnemySite(String),
     TargetPlayerDiscardsCards(u8),
     TargetPlayerDrawsSites(u8),
@@ -847,6 +848,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "returnTargetSiteToOwnerHand",
     "submergeTargetMinion",
     "summonRandomMinionFromAnyCemetery",
+    "summonTokenToAlliedMinionThenDrawSpell",
     "summonTokenToEachControlledSiteBorderingEnemySite",
     "tapTargetMinion",
     "targetNearby",
@@ -1367,6 +1369,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         ));
     }
 
+    let allied_token_reference =
+        parse_reference(object, "summonTokenToAlliedMinionThenDrawSpell", path)?;
     let token_reference = parse_reference(
         object,
         "summonTokenToEachControlledSiteBorderingEnemySite",
@@ -1508,6 +1512,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::SubmergeTargetMinion),
             true_only(object, "summonRandomMinionFromAnyCemetery", path)?
                 .then_some(MagicEffect::SummonRandomMinionFromAnyCemetery),
+            allied_token_reference.map(MagicEffect::SummonTokenToAlliedMinionThenDrawSpell),
             token_reference.map(MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite),
             optional_bounded_integer(object, "targetPlayerDiscardsCards", 1, MAX_DECK_CARDS, path)?
                 .map(|count| MagicEffect::TargetPlayerDiscardsCards(compact_u8(count))),

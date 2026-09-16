@@ -428,6 +428,7 @@ export type GameCardDefinition =
     returnTargetSiteToOwnerHand?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
+    summonTokenToAlliedMinionThenDrawSpell?: string;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyTargetArtifact?: true;
     destroyTargetAura?: true;
@@ -1348,7 +1349,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetAuraToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
     submergeTargetMinion
-    summonRandomMinionFromAnyCemetery summonTokenToEachControlledSiteBorderingEnemySite
+    summonRandomMinionFromAnyCemetery summonTokenToAlliedMinionThenDrawSpell summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSites targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
   `.trim().split(/\s+/)),
@@ -1775,6 +1776,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.summonRandomMinionFromAnyCemetery must be true when defined`,
       );
     }
+    if (card.summonTokenToAlliedMinionThenDrawSpell !== undefined) {
+      requireCardId(
+        card.summonTokenToAlliedMinionThenDrawSpell,
+        `${path}.summonTokenToAlliedMinionThenDrawSpell`,
+      );
+    }
     if (card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined) {
       requireCardId(
         card.summonTokenToEachControlledSiteBorderingEnemySite,
@@ -2013,6 +2020,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.returnTargetSiteFromOwnCemetery === true)
       + Number(card.returnTargetSiteToOwnerHand === true)
       + Number(card.summonRandomMinionFromAnyCemetery === true)
+      + Number(card.summonTokenToAlliedMinionThenDrawSpell !== undefined)
       + Number(card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined)
       + Number(card.targetPlayerDiscardsCards !== undefined)
       + Number(card.targetPlayerGainsLife !== undefined)
@@ -2634,7 +2642,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
   for (const cardId of referencedCardIds) {
     const definition = input.cards[cardId];
     const tokenCardId = definition?.cardType === 'magic'
-      ? definition.summonTokenToEachControlledSiteBorderingEnemySite
+      ? definition.summonTokenToAlliedMinionThenDrawSpell
+        ?? definition.summonTokenToEachControlledSiteBorderingEnemySite
       : definition?.cardType === 'site'
         ? definition.genesisPayOneManaToSummonToken
         : undefined;
@@ -2949,6 +2958,11 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                       ? { returnTargetMagicFromOwnCemetery: true as const }
                       : card.summonRandomMinionFromAnyCemetery === true
                         ? { summonRandomMinionFromAnyCemetery: true as const }
+                        : card.summonTokenToAlliedMinionThenDrawSpell !== undefined
+                        ? {
+                          summonTokenToAlliedMinionThenDrawSpell:
+                            card.summonTokenToAlliedMinionThenDrawSpell,
+                        }
                         : card.summonTokenToEachControlledSiteBorderingEnemySite !== undefined
                         ? {
                           summonTokenToEachControlledSiteBorderingEnemySite:

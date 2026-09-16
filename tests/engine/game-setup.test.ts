@@ -1427,6 +1427,56 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const frogTokenId = 'synthetic-frog-token';
+  const frogManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        summonTokenToAlliedMinionThenDrawSpell: frogTokenId,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+      [frogTokenId]: {
+        attack: 0,
+        cardType: 'minion',
+        defense: 0,
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        token: true,
+      },
+    },
+  });
+  assert.deepEqual(frogManifest.cards[firstSpell], {
+    cardType: 'magic',
+    manaCost: 2,
+    summonTokenToAlliedMinionThenDrawSpell: frogTokenId,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  assert.equal(frogManifest.cards[frogTokenId]?.cardType === 'minion'
+    && frogManifest.cards[frogTokenId].token, true);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        manaCost: 2,
+        summonTokenToAlliedMinionThenDrawSpell: frogTokenId,
+        summonTokenToEachControlledSiteBorderingEnemySite: frogTokenId,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+      [frogTokenId]: {
+        attack: 0,
+        cardType: 'minion',
+        defense: 0,
+        manaCost: 0,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+        token: true,
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

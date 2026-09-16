@@ -12497,6 +12497,53 @@
         "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
         "testName": "rule_catalog_0542_fade_still_draws_when_no_ally_occupies_an_enemy_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0543",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-token-to-allied-minion then draw-spell Magic summons one source-linked token onto an allied minion's surface cell and then draws one hidden spell. Avatars and enemy minions are not hosts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_0543_token_then_draw_summons_on_an_allied_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0544",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-token-to-allied-minion then draw-spell Magic still draws one hidden spell when no allied minion is in play. No token is summoned.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_0544_token_then_draw_still_draws_without_an_allied_minion"
+      }
     }
   ]
 }
