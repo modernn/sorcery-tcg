@@ -1483,6 +1483,23 @@ fn oversized_ordinary_and_sacrifice_should_parse() {
 }
 
 #[test]
+fn genesis_disable_with_draw_site_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "disable-draw-site",
+        &with(
+            with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
+            "genesisDrawSite",
+            json!(true),
+        ),
+    )
+    .expect("valid disable plus draw-site minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_disable_self_until_damaged);
+    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSite));
+}
+
+#[test]
 fn targeted_genesis_with_random_card_discard_payment_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "targeted-genesis-alt-payment",

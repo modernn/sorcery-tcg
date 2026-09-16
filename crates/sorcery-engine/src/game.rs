@@ -1457,7 +1457,6 @@ fn unsupported_selfplay_minion_genesis(genesis: Option<MinionGenesis>) -> Option
         None
         | Some(
             MinionGenesis::DamageEachOtherUnitHereOne
-            | MinionGenesis::DisableSelfUntilDamaged
             | MinionGenesis::DrawSite
             | MinionGenesis::DrawSpells(_)
             | MinionGenesis::HealControllerTwo
@@ -1549,6 +1548,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         end_turn_stealth: _,
         gains_power_ranged_and_spellcaster_atop_tower: _,
         genesis: _,
+        genesis_disable_self_until_damaged: _,
         immobile: _,
         lance_count: _,
         landbound: _,
@@ -13477,6 +13477,7 @@ impl Game {
         self.apply_minion_genesis(
             seat,
             &card_instance_id,
+            facts.genesis_disable_self_until_damaged,
             genesis,
             genesis_damage_choice,
             genesis_damage_target,
@@ -20352,6 +20353,7 @@ impl Game {
         self.apply_minion_genesis(
             seat,
             &card_instance_id,
+            facts.genesis_disable_self_until_damaged,
             genesis,
             genesis_damage_choice,
             genesis_damage_target.as_ref(),
@@ -20505,15 +20507,39 @@ impl Game {
         self.finish_summon(continuation, Some(pending), outcomes)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Genesis entry keeps disable, optional damage choice, and outcomes atomic"
+    )]
     fn apply_minion_genesis(
         &mut self,
         seat: Seat,
         source_instance_id: &IdentityHash,
+        genesis_disable_self_until_damaged: bool,
         genesis: Option<MinionGenesis>,
         genesis_damage_choice: Option<GenesisDamageChoice>,
         genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if genesis_disable_self_until_damaged {
+            let unit = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| {
+                    unit.card.instance_id == *source_instance_id && unit.controller == seat
+                })
+                .ok_or(GameError::IllegalAction)?;
+            unit.disabled_until_damaged = true;
+            outcomes.push("minion-disabled", || {
+                json!({
+                    "instanceId": source_instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.reveal_disabled_stealth(outcomes);
+        }
         match genesis {
             None => {}
             Some(MinionGenesis::DrawSite) => {
@@ -20533,25 +20559,6 @@ impl Game {
             }
             Some(MinionGenesis::LoseControllerLifeTwo) => {
                 self.apply_avatar_life_loss(seat, 2, source_instance_id, outcomes);
-            }
-            Some(MinionGenesis::DisableSelfUntilDamaged) => {
-                let unit = self
-                    .position
-                    .units
-                    .iter_mut()
-                    .find(|unit| {
-                        unit.card.instance_id == *source_instance_id && unit.controller == seat
-                    })
-                    .ok_or(GameError::IllegalAction)?;
-                unit.disabled_until_damaged = true;
-                outcomes.push("minion-disabled", || {
-                    json!({
-                        "instanceId": source_instance_id,
-                        "seat": seat,
-                        "sourceInstanceId": source_instance_id,
-                    })
-                });
-                self.reveal_disabled_stealth(outcomes);
             }
             Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) => {
                 match (genesis_damage_choice, genesis_damage_target) {

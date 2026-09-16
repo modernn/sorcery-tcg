@@ -293,7 +293,6 @@ pub struct MagicFacts {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MinionGenesis {
     DamageEachOtherUnitHereOne,
-    DisableSelfUntilDamaged,
     DrawSite,
     DrawSpells(u8),
     HealControllerTwo,
@@ -383,6 +382,7 @@ pub struct MinionFacts {
     pub end_turn_stealth: Option<EndTurnStealth>,
     pub gains_power_ranged_and_spellcaster_atop_tower: bool,
     pub genesis: Option<MinionGenesis>,
+    pub genesis_disable_self_until_damaged: bool,
     pub immobile: bool,
     pub lance_count: Option<u8>,
     pub landbound: bool,
@@ -1488,8 +1488,6 @@ fn parse_minion_genesis(
         [
             fixed_integer(object, "genesisDamageEachOtherUnitHere", 1, path)?
                 .then_some(MinionGenesis::DamageEachOtherUnitHereOne),
-            true_only(object, "genesisDisableSelfUntilDamaged", path)?
-                .then_some(MinionGenesis::DisableSelfUntilDamaged),
             optional_bool(object, "genesisDrawSite", path)?.then_some(MinionGenesis::DrawSite),
             optional_bounded_integer(object, "genesisDrawSpells", 1, MAX_DECK_CARDS, path)?
                 .map(|count| MinionGenesis::DrawSpells(compact_u8(count))),
@@ -1738,6 +1736,8 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let gains_power_ranged_and_spellcaster_atop_tower =
         fixed_integer(object, "gainsPowerRangedAndSpellcasterAtopTower", 2, path)?;
     let genesis = parse_minion_genesis(object, path)?;
+    let genesis_disable_self_until_damaged =
+        true_only(object, "genesisDisableSelfUntilDamaged", path)?;
     let may_ranged_strike_once_during_basic_movement =
         true_only(object, "mayRangedStrikeOnceDuringBasicMovement", path)?;
     let may_step_after_ranged_strike = true_only(object, "mayStepAfterRangedStrike", path)?;
@@ -1867,6 +1867,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         end_turn_stealth,
         gains_power_ranged_and_spellcaster_atop_tower,
         genesis,
+        genesis_disable_self_until_damaged,
         immobile: optional_bool(object, "immobile", path)?,
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
         landbound,
