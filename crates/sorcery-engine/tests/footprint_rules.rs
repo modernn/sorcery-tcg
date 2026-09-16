@@ -622,6 +622,15 @@ fn freeze() -> Value {
     })
 }
 
+fn chain_magic() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageChainNearbyUnits": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn zap() -> Value {
     json!({
         "cardType": "magic",
@@ -655,6 +664,9 @@ fn composition_manifest(
     }
     if north_spells.contains(&"north-freeze") {
         cards["north-freeze"] = freeze();
+    }
+    if north_spells.contains(&"north-chain") {
+        cards["north-chain"] = chain_magic();
     }
     if south_spells.contains(&"south-zap") {
         cards["south-zap"] = zap();
@@ -2278,5 +2290,243 @@ fn rule_catalog_0195_oversized_post_ranged_step_translates_the_whole_footprint()
         json!(["C3", "C4", "D3", "D4"]),
         "the post-shot step must translate every occupied cell, not only the B3 anchor"
     );
+    assert_exact_replay(&session);
+}
+
+fn draw_chain_magic_to_hand(session: &mut Session) -> String {
+    loop {
+        let chain_id = state(session)["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook hand")
+            .iter()
+            .find(|card| card["cardId"] == "north-chain")
+            .map(|card| {
+                card["instanceId"]
+                    .as_str()
+                    .expect("Chain Magic identity")
+                    .to_owned()
+            });
+        if let Some(chain_id) = chain_id {
+            return chain_id;
+        }
+        end_and_draw(session);
+    }
+}
+
+fn chain_spellbook() -> [&'static str; 10] {
+    [
+        "north-giant",
+        "north-giant",
+        "north-giant",
+        "north-giant",
+        "north-chain",
+        "north-chain",
+        "north-chain",
+        "north-chain",
+        "north-fodder",
+        "north-fodder",
+    ]
+}
+
+#[test]
+fn rule_catalog_0385_oversized_spellcaster_begins_chain_magic_from_footprint_nearby_only() {
+    let mut session = composition_session(
+        &json!({ "spellcaster": true }),
+        &json!({}),
+        &chain_spellbook(),
+        &["south-minion"; 8],
+        &["north-giant", "north-chain"],
+    );
+    let enemy = establish_north_square_and_south_d2(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    assert_eq!(
+        unit(&state(&session), &giant)["occupiedCells"],
+        json!(["B3", "B4", "C3", "C4"])
+    );
+    let chain_id = draw_chain_magic_to_hand(&mut session);
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar_id = before["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let begins: Vec<_> = session
+        .legal_actions()
+        .expect("Chain Magic begins")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardInstanceId"] == chain_id
+        })
+        .collect();
+    assert!(
+        begins.iter().any(|action| {
+            action.descriptor["casterInstanceId"] == giant
+                && action.descriptor["target"]["instanceId"] == enemy
+        }),
+        "D2 is nearby to a footprint cell, not only to the C4 Avatar"
+    );
+    assert!(
+        !begins.iter().any(|action| {
+            action.descriptor["casterInstanceId"] == avatar_id
+                && action.descriptor["target"]["instanceId"] == enemy
+        }),
+        "the Avatar at C4 alone does not originate Nearby Magic to D2"
+    );
+    assert!(
+        !begins.iter().any(|action| {
+            action.descriptor["casterInstanceId"] == giant
+                && action.descriptor["target"]["instanceId"] == south_avatar_id
+        }),
+        "the South Avatar at C1 is not nearby to the oversized footprint"
+    );
+    assert!(
+        begins
+            .iter()
+            .any(|action| action.descriptor["casterInstanceId"] == giant),
+        "the B3-anchored Spellcaster must be able to begin Chain Magic"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one Chain Magic footprint proof keeps staged extension, rejection, and resolution together"
+)]
+fn rule_catalog_0386_oversized_spellcaster_extends_chain_magic_from_hop_footprint_and_rejects_distant()
+ {
+    let mut session = composition_session(
+        &json!({ "spellcaster": true }),
+        &json!({}),
+        &chain_spellbook(),
+        &["south-minion"; 8],
+        &["north-giant", "north-chain"],
+    );
+    let enemy = establish_north_square_and_south_d2(&mut session);
+    end_and_draw(&mut session);
+    let (extension, _) = summon_at(&mut session, "south-minion", "C2");
+    end_and_draw(&mut session);
+    let (giant, _) = summon_at(&mut session, "north-giant", "B3");
+    let chain_id = draw_chain_magic_to_hand(&mut session);
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let before_mana = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("North mana");
+    let transcript_before = session.transcript().len();
+
+    let begin = session
+        .legal_actions()
+        .expect("Chain Magic begins")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardInstanceId"] == chain_id
+                && action.descriptor["casterInstanceId"] == giant
+                && action.descriptor["target"]["instanceId"] == enemy
+        })
+        .expect("engine-issued first hop to the footprint-nearby enemy");
+    let StepResult::Accepted(begin_receipt) = session
+        .step(ActionRequest {
+            action_id: begin.action_id.to_string(),
+            seat: begin.seat,
+            state_version: begin.state_version,
+        })
+        .expect("begin Chain Magic")
+    else {
+        panic!("engine-issued first hop must be accepted");
+    };
+    assert!(begin_receipt.events.is_empty());
+    assert_eq!(state(&session)["phase"], "chain-magic");
+
+    let extend_target_ids: Vec<_> = session
+        .legal_actions()
+        .expect("staged Chain Magic actions")
+        .iter()
+        .filter(|action| action.descriptor["kind"] == "extend-chain-magic")
+        .map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .expect("extension target identity")
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        extend_target_ids.contains(&extension),
+        "C2 is nearby to the D2 hop, not to the oversized footprint anchor alone"
+    );
+    assert!(
+        !extend_target_ids.contains(&avatar_id),
+        "the North Avatar at C4 is nearby to the oversized footprint but not to the staged D2 hop"
+    );
+    assert!(
+        !extend_target_ids.contains(&enemy),
+        "Chain Magic must not re-offer an already chosen target"
+    );
+
+    let extend = session
+        .legal_actions()
+        .expect("staged Chain Magic actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "extend-chain-magic"
+                && action.descriptor["target"]["instanceId"] == extension
+        })
+        .expect("engine-issued second hop to the nearby extension target");
+    let StepResult::Accepted(extend_receipt) = session
+        .step(ActionRequest {
+            action_id: extend.action_id.to_string(),
+            seat: extend.seat,
+            state_version: extend.state_version,
+        })
+        .expect("extend Chain Magic")
+    else {
+        panic!("engine-issued second hop must be accepted");
+    };
+    assert!(extend_receipt.events.is_empty());
+    assert_eq!(state(&session)["players"]["north"]["mana"], before_mana);
+
+    let finish = session
+        .legal_actions()
+        .expect("final Chain Magic actions")
+        .into_iter()
+        .find(|action| action.descriptor["kind"] == "resolve-chain-magic")
+        .expect("engine-issued Chain Magic resolution");
+    let StepResult::Accepted(resolved) = session
+        .step(ActionRequest {
+            action_id: finish.action_id.to_string(),
+            seat: finish.seat,
+            state_version: finish.state_version,
+        })
+        .expect("resolve Chain Magic")
+    else {
+        panic!("engine-issued Chain Magic resolution must be accepted");
+    };
+    assert_eq!(
+        resolved
+            .events
+            .iter()
+            .filter(|event| event.event_type == "magic-damage-allocated")
+            .map(|event| event.payload["targetInstanceId"].as_str().expect("target"))
+            .collect::<Vec<_>>(),
+        vec![enemy.as_str(), extension.as_str()]
+    );
+    assert_eq!(
+        resolved
+            .events
+            .last()
+            .map(|event| event.event_type.as_str()),
+        Some("magic-resolved")
+    );
+    assert_eq!(state(&session)["phase"], "main");
+    assert!(state(&session)["pendingChainMagic"].is_null());
+    assert_eq!(session.transcript().len(), transcript_before + 3);
     assert_exact_replay(&session);
 }
