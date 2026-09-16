@@ -9,8 +9,8 @@ use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 mod facts;
 
 use facts::{
-    ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, MinionGenesis,
-    RequiredCastRegion, Thresholds, parse_card_definition,
+    ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, RequiredCastRegion,
+    Thresholds, parse_card_definition,
 };
 
 fn thresholds() -> Value {
@@ -728,15 +728,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "alternative summon payments",
         ),
         (
-            "Genesis effects",
-            with(
-                with(minion(), "genesisDrawSite", json!(true)),
-                "genesisHealController",
-                json!(2),
-            ),
-            "Genesis effects",
-        ),
-        (
             "end-turn Stealth modes",
             with(
                 with(minion(), "gainsStealthAtEndOfTurn", json!(true)),
@@ -949,7 +940,7 @@ fn typed_effects_should_retain_only_normalized_values() {
     else {
         panic!("expected minion facts");
     };
-    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(2)));
+    assert_eq!(facts.genesis_draw_spells, Some(2));
     let CardFacts::Minion(facts) = parse_card_definition(
         "start-turn-draw",
         &with(minion(), "atStartOfControllerTurnDrawSpells", json!(2)),
@@ -1294,7 +1285,7 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.occupies_square_area_two);
-    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(1)));
+    assert_eq!(facts.genesis_draw_spells, Some(1));
 
     let CardFacts::Minion(facts) = parse_card_definition(
         "oversized-caster",
@@ -1336,10 +1327,7 @@ fn typed_effects_should_retain_only_normalized_values() {
         panic!("expected minion facts");
     };
     assert!(facts.occupies_square_area_two);
-    assert_eq!(
-        facts.genesis,
-        Some(MinionGenesis::DamageEachOtherUnitHereOne)
-    );
+    assert_eq!(facts.genesis_damage_each_other_unit_here, true);
 }
 
 #[test]
@@ -1500,7 +1488,24 @@ fn genesis_disable_with_lose_controller_life_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis, Some(MinionGenesis::LoseControllerLifeTwo));
+    assert!(facts.genesis_lose_controller_life);
+}
+
+#[test]
+fn genesis_draw_spells_with_heal_controller_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "draw-heal",
+        &with(
+            with(minion(), "genesisDrawSpells", json!(1)),
+            "genesisHealController",
+            json!(2),
+        ),
+    )
+    .expect("valid stacked draw-spell and heal minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.genesis_draw_spells, Some(1));
+    assert!(facts.genesis_heal_controller);
 }
 
 #[test]
@@ -1517,7 +1522,7 @@ fn genesis_disable_with_heal_controller_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis, Some(MinionGenesis::HealControllerTwo));
+    assert!(facts.genesis_heal_controller);
 }
 
 #[test]
@@ -1534,10 +1539,7 @@ fn genesis_disable_with_targeted_damage_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(
-        facts.genesis,
-        Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
-    );
+    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
 }
 
 #[test]
@@ -1554,7 +1556,7 @@ fn genesis_disable_with_draw_spells_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSpells(1)));
+    assert_eq!(facts.genesis_draw_spells, Some(1));
 }
 
 #[test]
@@ -1571,10 +1573,7 @@ fn genesis_disable_with_each_other_unit_here_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(
-        facts.genesis,
-        Some(MinionGenesis::DamageEachOtherUnitHereOne)
-    );
+    assert_eq!(facts.genesis_damage_each_other_unit_here, true);
 }
 
 #[test]
@@ -1591,7 +1590,7 @@ fn genesis_disable_with_draw_site_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSite));
+    assert!(facts.genesis_draw_site);
 }
 
 #[test]
@@ -1608,7 +1607,7 @@ fn genesis_disable_with_strike_here_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_disable_self_until_damaged);
-    assert_eq!(facts.genesis, Some(MinionGenesis::StrikeEachEnemyHere));
+    assert!(facts.genesis_strike_each_enemy_here);
 }
 
 #[test]
@@ -1624,10 +1623,7 @@ fn targeted_genesis_with_random_card_discard_payment_should_parse() {
     .expect("valid targeted Genesis with alternative payment minion") else {
         panic!("expected minion facts");
     };
-    assert_eq!(
-        facts.genesis,
-        Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
-    );
+    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
     assert_eq!(
         facts.alternative_summon_payment,
         Some(facts::AlternativeSummonPayment::DiscardRandomCardInsteadOfMana)
@@ -1647,10 +1643,7 @@ fn targeted_genesis_with_sacrifice_discount_payment_should_parse() {
     .expect("valid targeted Genesis with sacrifice payment minion") else {
         panic!("expected minion facts");
     };
-    assert_eq!(
-        facts.genesis,
-        Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
-    );
+    assert_eq!(facts.genesis_may_damage_target_adjacent_unit, true);
     assert_eq!(
         facts.alternative_summon_payment,
         Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
@@ -2004,7 +1997,7 @@ fn token_genesis_draw_site_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.token);
-    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSite));
+    assert!(facts.genesis_draw_site);
 }
 
 #[test]

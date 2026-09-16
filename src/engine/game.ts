@@ -2108,39 +2108,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     && card.diesAtEndOfControllerTurn !== true) {
     throw new RangeError(`${path}.diesAtEndOfControllerTurn must be true when defined`);
   }
-  if (card.genesisDrawSite && card.genesisDrawSpells !== undefined) {
-    throw new RangeError(`${path} simultaneous Genesis site and spell draws are unsupported`);
-  }
-  if (card.genesisLoseControllerLife !== undefined
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined)) {
-    throw new RangeError(`${path} simultaneous Genesis life loss and draw are unsupported`);
-  }
-  if (card.genesisHealController !== undefined
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
-      || card.genesisLoseControllerLife !== undefined)) {
-    throw new RangeError(`${path} simultaneous Genesis healing and another effect are unsupported`);
-  }
-  if (card.genesisDamageEachOtherUnitHere === 1
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
-      || card.genesisMayDamageTargetAdjacentUnit !== undefined
-      || card.genesisStrikeEachEnemyHere === true
-      || card.genesisHealController !== undefined
-      || card.genesisLoseControllerLife !== undefined)) {
-    throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
-  }
-  if (card.genesisMayDamageTargetAdjacentUnit === 2
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
-      || card.genesisStrikeEachEnemyHere === true
-      || card.genesisHealController !== undefined
-      || card.genesisLoseControllerLife !== undefined)) {
-    throw new RangeError(`${path} simultaneous Genesis damage and another effect are unsupported`);
-  }
-  if (card.genesisStrikeEachEnemyHere === true
-    && (card.genesisDrawSite || card.genesisDrawSpells !== undefined
-      || card.genesisHealController !== undefined
-      || card.genesisLoseControllerLife !== undefined)) {
-    throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
-  }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }

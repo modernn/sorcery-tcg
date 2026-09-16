@@ -2667,7 +2667,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && oversizedDiscard.cards[firstSpell].discardSpellToDamageRandomOtherUnitHere,
     3,
   );
-  assert.throws(() => createGameManifest({
+  const stackedDrawGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2677,7 +2677,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         genesisDrawSpells: 1,
       } as GameCardDefinition,
     },
-  }), /simultaneous Genesis/);
+  });
+  assert.equal(
+    stackedDrawGenesis.cards[firstSpell]?.cardType === 'minion'
+      && stackedDrawGenesis.cards[firstSpell].genesisDrawSite
+      && stackedDrawGenesis.cards[firstSpell].genesisDrawSpells === 1,
+    true,
+  );
   const bloodDemonManifest = createGameManifest({
     ...input,
     cards: {
@@ -2700,7 +2706,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /genesisLoseControllerLife must be 2/);
-  assert.throws(() => createGameManifest({
+  const stackedLossDrawGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2710,7 +2716,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         genesisLoseControllerLife: 2,
       } as GameCardDefinition,
     },
-  }), /simultaneous Genesis life loss and draw/);
+  });
+  assert.equal(
+    stackedLossDrawGenesis.cards[firstSpell]?.cardType === 'minion'
+      && stackedLossDrawGenesis.cards[firstSpell].genesisDrawSite
+      && stackedLossDrawGenesis.cards[firstSpell].genesisLoseControllerLife === 2,
+    true,
+  );
   const grainSparrowManifest = createGameManifest({
     ...input,
     cards: {
@@ -2733,7 +2745,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /genesisHealController must be 2/);
-  assert.throws(() => createGameManifest({
+  const stackedHealDrawGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2743,7 +2755,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         genesisHealController: 2,
       } as GameCardDefinition,
     },
-  }), /simultaneous Genesis healing/);
+  });
+  assert.equal(
+    stackedHealDrawGenesis.cards[firstSpell]?.cardType === 'minion'
+      && stackedHealDrawGenesis.cards[firstSpell].genesisDrawSite
+      && stackedHealDrawGenesis.cards[firstSpell].genesisHealController === 2,
+    true,
+  );
   const waterboundHealGenesis = createGameManifest({
     ...input,
     cards: {
@@ -10529,7 +10547,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       && waterboundGenesisDisable.cards[alliedMinionId].waterbound,
     true,
   );
-  assert.throws(() => createGameManifest({
+  const stackedHereDrawGenesis = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -10539,7 +10557,13 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       } as unknown as GameCardDefinition,
     },
     seed: 1,
-  }), /simultaneous Genesis/);
+  });
+  assert.equal(
+    stackedHereDrawGenesis.cards[staticId]?.cardType === 'minion'
+      && stackedHereDrawGenesis.cards[staticId].genesisDamageEachOtherUnitHere === 1
+      && stackedHereDrawGenesis.cards[staticId].genesisDrawSpells === 1,
+    true,
+  );
   const gameManifest = await findOpeningManifest(
     (seed) => createGameManifest({ ...input, seed }),
     (session) => {

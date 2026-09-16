@@ -11483,6 +11483,34 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0501",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries stacked Genesis draw-spell, life loss, and controller heal, summoning it resolves draw, then life loss, then healing through the shared printed-life cap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpells",
+        "genesisLoseControllerLife",
+        "genesisHealController"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn",
+        "avatar-life-lost",
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0501_spellbook_summon_draws_spell_then_heals_controller"
+      }
     }
   ]
 }

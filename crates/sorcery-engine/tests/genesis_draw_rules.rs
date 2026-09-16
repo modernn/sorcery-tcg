@@ -997,6 +997,42 @@ fn rule_catalog_0500_targeted_genesis_sacrifice_target_deals_damage() {
 }
 
 #[test]
+fn rule_catalog_0501_spellbook_summon_draws_spell_then_heals_controller() {
+    let mut scout = minion(1, 1);
+    scout["genesisDrawSpells"] = json!(1);
+    scout["genesisLoseControllerLife"] = json!(2);
+    scout["genesisHealController"] = json!(2);
+    scout["summonToAnySite"] = json!(true);
+    scout["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+    let manifest = scenario_manifest(501, &avatar(false, 20), &scout, &minion(1, 1), 8, 8, 8);
+    let mut session = opening_checkpoint(&manifest);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "spell-drawn",
+            "avatar-life-lost",
+            "avatar-healed"
+        ]
+    );
+    assert_eq!(receipt.events[2].payload["amount"], 2);
+    assert_eq!(receipt.events[3].payload["amount"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
     let mut value = manifest_value(
         61,
@@ -6919,10 +6955,7 @@ fn rule_catalog_0498_site_genesis_mixed_mana_grants_only_unconditional_on_later_
             && descriptor["cell"] == "C4"
     });
     assert_eq!(event_types(&first_play), ["site-played", "mana-gained"]);
-    assert_eq!(
-        first_play.events[1].payload["amount"],
-        json!(3)
-    );
+    assert_eq!(first_play.events[1].payload["amount"], json!(3));
     assert_eq!(state(&session)["players"]["north"]["mana"], 4);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");

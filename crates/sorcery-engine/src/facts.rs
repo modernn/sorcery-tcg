@@ -289,18 +289,6 @@ pub struct MagicFacts {
     pub thresholds: Thresholds,
 }
 
-/// A minion's mutually exclusive Genesis effect.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MinionGenesis {
-    DamageEachOtherUnitHereOne,
-    DrawSite,
-    DrawSpells(u8),
-    HealControllerTwo,
-    LoseControllerLifeTwo,
-    MayDamageTargetAdjacentUnitTwo,
-    StrikeEachEnemyHere,
-}
-
 /// A minion's alternative summon payment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlternativeSummonPayment {
@@ -381,8 +369,14 @@ pub struct MinionFacts {
     pub discard_spell_to_damage_random_other_unit_here: Option<u8>,
     pub end_turn_stealth: Option<EndTurnStealth>,
     pub gains_power_ranged_and_spellcaster_atop_tower: bool,
-    pub genesis: Option<MinionGenesis>,
+    pub genesis_damage_each_other_unit_here: bool,
     pub genesis_disable_self_until_damaged: bool,
+    pub genesis_draw_site: bool,
+    pub genesis_draw_spells: Option<u8>,
+    pub genesis_heal_controller: bool,
+    pub genesis_lose_controller_life: bool,
+    pub genesis_may_damage_target_adjacent_unit: bool,
+    pub genesis_strike_each_enemy_here: bool,
     pub immobile: bool,
     pub lance_count: Option<u8>,
     pub landbound: bool,
@@ -1474,31 +1468,6 @@ fn at_most_one<T>(
     Ok(effect)
 }
 
-fn parse_minion_genesis(
-    object: &Map<String, Value>,
-    path: &str,
-) -> Result<Option<MinionGenesis>, FactError> {
-    at_most_one(
-        [
-            fixed_integer(object, "genesisDamageEachOtherUnitHere", 1, path)?
-                .then_some(MinionGenesis::DamageEachOtherUnitHereOne),
-            optional_bool(object, "genesisDrawSite", path)?.then_some(MinionGenesis::DrawSite),
-            optional_bounded_integer(object, "genesisDrawSpells", 1, MAX_DECK_CARDS, path)?
-                .map(|count| MinionGenesis::DrawSpells(compact_u8(count))),
-            fixed_integer(object, "genesisHealController", 2, path)?
-                .then_some(MinionGenesis::HealControllerTwo),
-            fixed_integer(object, "genesisLoseControllerLife", 2, path)?
-                .then_some(MinionGenesis::LoseControllerLifeTwo),
-            fixed_integer(object, "genesisMayDamageTargetAdjacentUnit", 2, path)?
-                .then_some(MinionGenesis::MayDamageTargetAdjacentUnitTwo),
-            true_only(object, "genesisStrikeEachEnemyHere", path)?
-                .then_some(MinionGenesis::StrikeEachEnemyHere),
-        ],
-        path,
-        "simultaneous Genesis effects are unsupported",
-    )
-}
-
 fn parse_alternative_summon_payment(
     object: &Map<String, Value>,
     path: &str,
@@ -1729,9 +1698,19 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let end_turn_stealth = parse_end_turn_stealth(object, path)?;
     let gains_power_ranged_and_spellcaster_atop_tower =
         fixed_integer(object, "gainsPowerRangedAndSpellcasterAtopTower", 2, path)?;
-    let genesis = parse_minion_genesis(object, path)?;
+    let genesis_damage_each_other_unit_here =
+        fixed_integer(object, "genesisDamageEachOtherUnitHere", 1, path)?;
     let genesis_disable_self_until_damaged =
         true_only(object, "genesisDisableSelfUntilDamaged", path)?;
+    let genesis_draw_site = optional_bool(object, "genesisDrawSite", path)?;
+    let genesis_draw_spells =
+        optional_bounded_integer(object, "genesisDrawSpells", 1, MAX_DECK_CARDS, path)?
+            .map(compact_u8);
+    let genesis_heal_controller = fixed_integer(object, "genesisHealController", 2, path)?;
+    let genesis_lose_controller_life = fixed_integer(object, "genesisLoseControllerLife", 2, path)?;
+    let genesis_may_damage_target_adjacent_unit =
+        fixed_integer(object, "genesisMayDamageTargetAdjacentUnit", 2, path)?;
+    let genesis_strike_each_enemy_here = true_only(object, "genesisStrikeEachEnemyHere", path)?;
     let may_ranged_strike_once_during_basic_movement =
         true_only(object, "mayRangedStrikeOnceDuringBasicMovement", path)?;
     let may_step_after_ranged_strike = true_only(object, "mayStepAfterRangedStrike", path)?;
@@ -1860,8 +1839,14 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         discard_spell_to_damage_random_other_unit_here,
         end_turn_stealth,
         gains_power_ranged_and_spellcaster_atop_tower,
-        genesis,
+        genesis_damage_each_other_unit_here,
         genesis_disable_self_until_damaged,
+        genesis_draw_site,
+        genesis_draw_spells,
+        genesis_heal_controller,
+        genesis_lose_controller_life,
+        genesis_may_damage_target_adjacent_unit,
+        genesis_strike_each_enemy_here,
         immobile: optional_bool(object, "immobile", path)?,
         lance_count: optional_bounded_integer(object, "lanceCount", 1, 3, path)?.map(compact_u8),
         landbound,
