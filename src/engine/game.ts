@@ -1477,8 +1477,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.genesisReorderNextSpells must be 3`);
     }
     if (card.genesisReorderNextSpells === 3
-      && (card.genesisDiscardTopSpells !== undefined
-        || card.genesisDrawSpellPerAdjacentSameCard
+      && (card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
