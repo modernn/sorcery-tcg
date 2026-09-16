@@ -9201,6 +9201,58 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0412_site_genesis_gain_mana_then_decline_bottom_next_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0413",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both Genesis gain-mana and reorder-next-spells, playing it publicly gains mana first, then enters hidden spell-order Genesis where the controller may reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0413_site_genesis_gain_mana_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0414",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same gain-mana and reorder site is played, choosing the identity order keeps the Spellbook order while the mana gain remains resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0414_site_genesis_gain_mana_then_keep_spell_order"
+      }
     }
   ]
 }

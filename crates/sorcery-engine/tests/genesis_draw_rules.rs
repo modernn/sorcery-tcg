@@ -1505,6 +1505,13 @@ fn mana_bottom_spell_genesis_facts() -> Value {
     })
 }
 
+fn mana_reorder_spell_genesis_facts() -> Value {
+    json!({
+        "genesisGainMana": 2,
+        "genesisReorderNextSpells": 3,
+    })
+}
+
 #[test]
 fn rule_catalog_0411_site_genesis_gain_mana_then_bottom_next_spell() {
     let manifest = private_site_genesis_manifest(411, &mana_bottom_spell_genesis_facts(), 6);
@@ -1620,6 +1627,141 @@ fn rule_catalog_0412_site_genesis_gain_mana_then_decline_bottom_next_spell() {
     assert_eq!(
         kept_receipt.events[0].payload,
         json!({ "seat": "north", "sourceInstanceId": source_instance_id })
+    );
+    assert!(kept_receipt.random_draws.is_empty());
+    assert_exact_replay(&kept);
+}
+
+#[test]
+fn rule_catalog_0413_site_genesis_gain_mana_then_reorder_next_spells() {
+    let manifest = private_site_genesis_manifest(413, &mana_reorder_spell_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+    let played_state = state(&played);
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "mana-gained"]);
+    assert_eq!(
+        play_receipt.events[1].payload,
+        json!({
+            "amount": 2,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert!(play_receipt.random_draws.is_empty());
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["stateVersion"], before_version + 1);
+    assert_eq!(played_state["players"]["north"]["mana"], mana_before + 3);
+    assert_eq!(
+        played_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(
+        played_state["pendingGenesisSpellOrder"],
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+
+    let choices = played.legal_actions().expect("private reorder choices");
+    assert_checkpoint_round_trip(&played);
+    assert_eq!(choices.len(), 6);
+    assert!(choices.iter().all(|choice| {
+        choice.descriptor["kind"] == "resolve-genesis-spell-order"
+    }));
+
+    let mut reversed = played;
+    let (_, reversed_receipt) = accept_where(&mut reversed, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([2, 1, 0])
+    });
+    let reversed_state = state(&reversed);
+    let before_cards = before_spellbook.as_array().expect("Spellbook cards");
+
+    assert_eq!(reversed_state["phase"], "main");
+    assert_eq!(reversed_state["stateVersion"], before_version + 2);
+    assert_eq!(reversed_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(reversed_state["players"]["north"]["mana"], mana_before + 3);
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][0],
+        before_cards[2]
+    );
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][1],
+        before_cards[1]
+    );
+    assert_eq!(
+        reversed_state["players"]["north"]["spellbook"][2],
+        before_cards[0]
+    );
+    assert_eq!(event_types(&reversed_receipt), ["spells-reordered"]);
+    assert_eq!(
+        reversed_receipt.events[0].payload,
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert!(reversed_receipt.random_draws.is_empty());
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&reversed_receipt.events)
+            .expect("reordered events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&reversed);
+}
+
+#[test]
+fn rule_catalog_0414_site_genesis_gain_mana_then_keep_spell_order() {
+    let manifest = private_site_genesis_manifest(414, &mana_reorder_spell_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+    let played_state = state(&played);
+    let before_version = before["stateVersion"].as_u64().expect("state version");
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "mana-gained"]);
+    assert_eq!(played_state["phase"], "genesis");
+    assert_eq!(played_state["players"]["north"]["mana"], mana_before + 3);
+
+    let mut kept = played;
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([0, 1, 2])
+    });
+    let kept_state = state(&kept);
+
+    assert_eq!(kept_state["phase"], "main");
+    assert_eq!(kept_state["stateVersion"], before_version + 2);
+    assert_eq!(kept_state["pendingGenesisSpellOrder"], Value::Null);
+    assert_eq!(kept_state["players"]["north"]["mana"], mana_before + 3);
+    assert_eq!(
+        kept_state["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(event_types(&kept_receipt), ["spells-reordered"]);
+    assert_eq!(
+        kept_receipt.events[0].payload,
+        json!({
+            "count": 3,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
     );
     assert!(kept_receipt.random_draws.is_empty());
     assert_exact_replay(&kept);
