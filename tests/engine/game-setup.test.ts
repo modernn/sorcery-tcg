@@ -672,6 +672,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantRangedToAllyThisTurn/);
+  const temporaryControlManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        gainControlOfTargetEnemyMinionThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(temporaryControlManifest.cards[firstSpell], {
+    cardType: 'magic',
+    gainControlOfTargetEnemyMinionThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        gainControlOfTargetEnemyMinionThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /gainControlOfTargetEnemyMinionThisTurn/);
   const lethalGrantManifest = createGameManifest({
     ...input,
     cards: {

@@ -76,9 +76,17 @@ pub struct Position {
     rubble: [Option<IdentityHash>; 20],
     sites: [Option<SitePosition>; 20],
     state_version: u64,
+    temporary_controls: Vec<TemporaryControl>,
     terminal: Option<TerminalResult>,
     turn_number: u64,
     units: Vec<UnitPosition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TemporaryControl {
+    instance_id: IdentityHash,
+    revert_to: Seat,
+    source_instance_id: IdentityHash,
 }
 
 /// Public information required by a deterministic policy for one acting seat.
@@ -1414,6 +1422,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantRangedToAllyThisTurn
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
+        | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetNearbyMinion
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
@@ -1702,6 +1711,7 @@ impl Game {
                 rubble: std::array::from_fn(|_| None),
                 sites: std::array::from_fn(|_| None),
                 state_version: 0,
+                temporary_controls: Vec::new(),
                 terminal: None,
                 turn_number: 0,
                 units: Vec::new(),
@@ -5048,6 +5058,118 @@ impl Game {
             .collect()
     }
 
+    fn apply_minion_control_change(
+        &mut self,
+        target: Option<&UnitTarget>,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        temporary: bool,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let Some(UnitTarget::Minion {
+            instance_id,
+            seat: target_seat,
+        }) = target
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let unit = self
+            .position
+            .units
+            .iter_mut()
+            .find(|unit| unit.card.instance_id == *instance_id && unit.controller == *target_seat)
+            .ok_or(GameError::IllegalAction)?;
+        if unit.controller == seat {
+            return Ok(());
+        }
+        if unit.warded {
+            unit.warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": target_seat }),
+            );
+            return Ok(());
+        }
+        let from_seat = *target_seat;
+        let transferred_id = instance_id.clone();
+        unit.controller = seat;
+        if temporary {
+            self.position
+                .temporary_controls
+                .retain(|effect| effect.instance_id != transferred_id);
+            self.position.temporary_controls.push(TemporaryControl {
+                instance_id: transferred_id.clone(),
+                revert_to: from_seat,
+                source_instance_id: source_instance_id.clone(),
+            });
+        } else {
+            self.position
+                .temporary_controls
+                .retain(|effect| effect.instance_id != transferred_id);
+        }
+        outcomes.push("minion-control-changed", || {
+            json!({
+                "fromSeat": from_seat,
+                "instanceId": instance_id,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+            })
+        });
+        self.retarget_carried_minion_artifacts(&transferred_id, from_seat, seat);
+        if temporary {
+            self.apply_untap_minion(&transferred_id, seat, source_instance_id, outcomes)?;
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        Ok(())
+    }
+
+    fn revert_temporary_controls(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let pending = std::mem::take(&mut self.position.temporary_controls);
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let mut changed = false;
+        for effect in pending {
+            let Some(unit) = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == effect.instance_id)
+            else {
+                continue;
+            };
+            if unit.controller == effect.revert_to {
+                continue;
+            }
+            let from_seat = unit.controller;
+            unit.controller = effect.revert_to;
+            changed = true;
+            let instance_id = effect.instance_id.clone();
+            let revert_to = effect.revert_to;
+            let source_instance_id = effect.source_instance_id.clone();
+            outcomes.push("minion-control-changed", || {
+                json!({
+                    "fromSeat": from_seat,
+                    "instanceId": instance_id,
+                    "seat": revert_to,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+            self.retarget_carried_minion_artifacts(
+                &effect.instance_id,
+                from_seat,
+                effect.revert_to,
+            );
+        }
+        if changed {
+            self.settle_static_power_deaths(outcomes)?;
+        }
+        Ok(())
+    }
+
     /// Keeps carried Artifact bearer seats aligned with a minion's new controller.
     fn retarget_carried_minion_artifacts(
         &mut self,
@@ -6432,6 +6554,16 @@ impl Game {
             MagicEffect::GainControlOfTargetNearbyMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, true, true)?
             }
+            MagicEffect::GainControlOfTargetEnemyMinionThisTurn => self
+                .targeted_magic_choices(seat, caster_instance_id, false, true)?
+                .into_iter()
+                .filter(|choice| {
+                    choice
+                        .target
+                        .as_ref()
+                        .is_some_and(|target| target.seat() != seat)
+                })
+                .collect(),
             MagicEffect::KillTargetWoundedMinion => self
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
                 .into_iter()
@@ -19025,44 +19157,22 @@ impl Game {
                 }
             }
             MagicEffect::GainControlOfTargetNearbyMinion => {
-                let Some(UnitTarget::Minion {
-                    instance_id,
-                    seat: target_seat,
-                }) = target
-                else {
-                    return Err(GameError::IllegalAction);
-                };
-                let unit = self
-                    .position
-                    .units
-                    .iter_mut()
-                    .find(|unit| {
-                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
-                    })
-                    .ok_or(GameError::IllegalAction)?;
-                if unit.controller != seat {
-                    if unit.warded {
-                        unit.warded = false;
-                        outcomes.push(
-                            "ward-broken",
-                            || json!({ "instanceId": instance_id, "seat": target_seat }),
-                        );
-                    } else {
-                        let from_seat = *target_seat;
-                        let transferred_id = instance_id.clone();
-                        unit.controller = seat;
-                        outcomes.push("minion-control-changed", || {
-                            json!({
-                                "fromSeat": target_seat,
-                                "instanceId": instance_id,
-                                "seat": seat,
-                                "sourceInstanceId": card_instance_id,
-                            })
-                        });
-                        self.retarget_carried_minion_artifacts(&transferred_id, from_seat, seat);
-                        self.settle_static_power_deaths(outcomes)?;
-                    }
-                }
+                self.apply_minion_control_change(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    false,
+                    outcomes,
+                )?;
+            }
+            MagicEffect::GainControlOfTargetEnemyMinionThisTurn => {
+                self.apply_minion_control_change(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    true,
+                    outcomes,
+                )?;
             }
             MagicEffect::ReturnTargetMinionToOwnerHand => {
                 let Some(UnitTarget::Minion {
@@ -21669,6 +21779,7 @@ impl Game {
             });
         }
         self.resolve_end_of_controller_turn_untap_nearby_allies(seat, outcomes)?;
+        self.revert_temporary_controls(outcomes)?;
         let stay_tapped: BTreeSet<_> = self
             .position
             .units

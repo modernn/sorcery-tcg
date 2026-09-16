@@ -357,6 +357,7 @@ export type GameCardDefinition =
     drawSites?: number;
     drawSpells?: number;
     fightAllyWithAdjacentEnemy?: true;
+    gainControlOfTargetEnemyMinionThisTurn?: true;
     gainControlOfTargetNearbyMinion?: true;
     grantAirborneToAllyThisTurn?: true;
     grantChargeToAllyThisTurn?: true;
@@ -1269,7 +1270,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
     destroyTargetArtifact destroyTargetAura destroyTargetSite
-    fightAllyWithAdjacentEnemy gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
+    fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
@@ -1739,6 +1740,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.fightAllyWithAdjacentEnemy !== true) {
       throw new RangeError(`${path}.fightAllyWithAdjacentEnemy must be true when defined`);
     }
+    if (card.gainControlOfTargetEnemyMinionThisTurn !== undefined
+      && card.gainControlOfTargetEnemyMinionThisTurn !== true) {
+      throw new RangeError(`${path}.gainControlOfTargetEnemyMinionThisTurn must be true when defined`);
+    }
     if (card.gainControlOfTargetNearbyMinion !== undefined
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
@@ -1844,6 +1849,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.destroyTargetAura === true)
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
+      + Number(card.gainControlOfTargetEnemyMinionThisTurn === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
       + Number(card.grantAirborneToAllyThisTurn === true)
       + Number(card.grantChargeToAllyThisTurn === true)
@@ -2695,6 +2701,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { disableTargetNearbyMinionUntilNextTurn: true as const }
                   : card.fightAllyWithAdjacentEnemy === true
                     ? { fightAllyWithAdjacentEnemy: true as const }
+                  : card.gainControlOfTargetEnemyMinionThisTurn === true
+                    ? { gainControlOfTargetEnemyMinionThisTurn: true as const }
                   : card.gainControlOfTargetNearbyMinion === true
                     ? { gainControlOfTargetNearbyMinion: true as const }
                   : card.grantAirborneToAllyThisTurn === true

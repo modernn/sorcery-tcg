@@ -11761,6 +11761,54 @@
         "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
         "testName": "rule_catalog_0512_square_waterbound_is_enabled_when_flood_covers_its_whole_land_footprint"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0513",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that gains control of a target enemy minion this turn may choose a distant enemy, transfers control without changing ownership, and untaps that minion so its new controller can use it immediately.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0513_temporary_control_takes_a_distant_tapped_enemy_minion_this_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0514",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Temporary enemy-minion control expires at the current End Phase and restores the previous controller without changing ownership.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0514_temporary_control_reverts_at_end_of_turn"
+      }
     }
   ]
 }
