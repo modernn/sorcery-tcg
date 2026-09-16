@@ -8891,6 +8891,58 @@
       }
     },
     {
+      "ruleId": "RULE-CATALOG-0401",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and random teleport, the Start Phase resolves the hidden Spellbook draw first, then the random teleport on a single resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0401_start_turn_draw_spells_then_teleport_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0402",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and random teleport, Lucky Charm defers the teleport choice first; resolving that choice applies the hidden Atlas draw and then the chosen teleport on the deferred resolve-start-turn-trigger action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "bearerControllerChoosesExtraRandomOutcome"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "resolve-random-outcome"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0402_start_turn_draw_sites_then_teleport_resolves_through_lucky_charm"
+      }
+    },
+    {
       "ruleId": "RULE-CATALOG-0403",
       "requirementIds": [
         "RULE-02",
