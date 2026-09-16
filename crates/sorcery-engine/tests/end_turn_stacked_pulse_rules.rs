@@ -1,11 +1,5 @@
-//! Direct proofs for end-of-controller-turn Avatar life (RULE-CATALOG-0304–0307).
-//!
-//! Official minions can gain or lose their controller a printed amount of life
-//! at the end of that player's turn. The pulses reuse the shared Avatar helpers:
-//! healing is capped at printed life and cannot leave Death's Door, and life
-//! loss can open Death's Door without ending the game. Disabled minions do not
-//! pulse. Stacked end-turn pulses on one minion resolve gain, then loss, then
-//! here-area damage; Ignited is not a pulse.
+//! Direct proofs for stacked end-of-controller-turn pulses on one minion
+//! (RULE-CATALOG-0389–0390).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -26,9 +20,10 @@ fn site() -> Value {
     json!({ "cardType": "site", "elements": ["earth"] })
 }
 
-fn gainer() -> Value {
+fn stacked_life() -> Value {
     json!({
-        "atEndOfControllerTurnControllerGainsLife": 2,
+        "atEndOfControllerTurnControllerGainsLife": 3,
+        "atEndOfControllerTurnControllerLosesLife": 2,
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
@@ -37,9 +32,10 @@ fn gainer() -> Value {
     })
 }
 
-fn loser() -> Value {
+fn stacked_gain_here_damage() -> Value {
     json!({
-        "atEndOfControllerTurnControllerLosesLife": 2,
+        "atEndOfControllerTurnControllerGainsLife": 2,
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
@@ -57,28 +53,29 @@ fn drain() -> Value {
     })
 }
 
-fn dummy() -> Value {
+fn visitor(defense: u8) -> Value {
     json!({
-        "attack": 1,
+        "attack": 0,
         "cardType": "minion",
-        "defense": 2,
+        "defense": defense,
         "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
 
-fn gain_manifest(north_life: u8) -> String {
+fn life_stack_manifest() -> String {
     let mut value = json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "end-turn-controller-life-gain" }))
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-stacked-life" }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-end-turn-controller-life-gain-v1",
+            "revisionId": "synthetic-end-turn-stacked-life-v1",
         },
         "cards": {
-            "north-avatar": avatar(north_life),
+            "north-avatar": avatar(20),
             "north-site": site(),
-            "north-source": gainer(),
+            "north-source": stacked_life(),
             "south-avatar": avatar(20),
             "south-drain": drain(),
             "south-site": site(),
@@ -104,32 +101,40 @@ fn gain_manifest(north_life: u8) -> String {
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn loss_manifest(north_life: u8) -> String {
+fn gain_here_damage_manifest() -> String {
     let mut value = json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "end-turn-controller-life-loss" }))
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-gain-here-damage" }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-end-turn-controller-life-loss-v1",
+            "revisionId": "synthetic-end-turn-gain-here-damage-v1",
         },
         "cards": {
-            "north-avatar": avatar(north_life),
+            "north-avatar": avatar(20),
+            "north-pulser": stacked_gain_here_damage(),
             "north-site": site(),
-            "north-source": loser(),
             "south-avatar": avatar(20),
-            "south-dummy": dummy(),
+            "south-drain": drain(),
             "south-site": site(),
+            "south-visitor": visitor(2),
         },
         "decks": {
             "north": {
                 "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
-                "spellbook": vec!["north-source"; 6],
+                "spellbook": vec!["north-pulser"; 6],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-dummy"; 6],
+                "spellbook": [
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                ],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -199,22 +204,13 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn summon_north_source(session: &mut Session) {
-    keep(session);
-    keep(session);
-    accept_where(session, |descriptor| {
+fn after_north_source_ready_to_end_turn() -> Session {
+    let mut session = Session::new(&life_stack_manifest()).expect("valid stacked life session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "north-source"
-            && descriptor["cell"] == "C4"
-    });
-}
-
-fn after_south_drains_north(north_life: u8) -> Session {
-    let mut session = Session::new(&gain_manifest(north_life)).expect("valid life-gain session");
-    summon_north_source(&mut session);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -231,85 +227,87 @@ fn after_south_drains_north(north_life: u8) -> Session {
             && descriptor["target"]["seat"] == "north"
     });
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
     session
 }
 
-fn end_north_second_turn(session: &mut Session) -> Receipt {
-    let before = state(session);
-    assert_eq!(before["phase"], "draw");
-    assert_eq!(before["activeSeat"], "north");
-    accept_where(session, |descriptor| {
+fn after_north_ready_to_end_turn_with_visitor() -> Session {
+    let mut session =
+        Session::new(&gain_here_damage_manifest()).expect("valid gain-here-damage session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn").1
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn event_index(receipt: &Receipt, event_type: &str) -> Option<usize> {
+    receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == event_type)
 }
 
 #[test]
-fn rule_catalog_0304_end_turn_controller_life_gain_heals_the_controller_avatar() {
-    let mut session = after_south_drains_north(20);
+fn rule_catalog_0389_end_turn_gain_then_loss_applies_net_avatar_life() {
+    let mut session = after_north_source_ready_to_end_turn();
     let source_id = unit_id(&session, "north-source");
     let before = state(&session);
     assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
-    assert!(before["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
-    let receipt = end_north_second_turn(&mut session);
+    assert_eq!(before["phase"], "main");
+    assert_eq!(before["activeSeat"], "north");
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let loss_index = event_index(&receipt, "avatar-life-lost").expect("life loss event");
+    assert!(
+        heal_index < loss_index,
+        "end-turn life gain must resolve before life loss on the same minion"
+    );
     assert!(receipt.events.iter().any(|event| {
         event.event_type == "avatar-healed"
             && event.payload["amount"] == 2
-            && event.payload["attemptedAmount"] == 2
+            && event.payload["attemptedAmount"] == 3
             && event.payload["life"] == 20
             && event.payload["seat"] == "north"
             && event.payload["sourceInstanceId"] == source_id
     }));
-    let after = state(&session);
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("units")
-            .iter()
-            .any(|unit| unit["cardId"] == "north-source" && unit["instanceId"] == source_id)
-    );
-    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
-    assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
-    assert_eq!(after["terminal"]["status"], "active");
-    assert_exact_replay(&session);
-}
-
-#[test]
-fn rule_catalog_0305_end_turn_controller_life_gain_cannot_leave_deaths_door() {
-    let mut session = after_south_drains_north(2);
-    let source_id = unit_id(&session, "north-source");
-    let before = state(&session);
-    assert_eq!(before["players"]["north"]["avatar"]["life"], 0);
-    assert_eq!(before["players"]["north"]["avatar"]["deathDoorTurn"], 2);
-    let receipt = end_north_second_turn(&mut session);
-    assert!(
-        receipt
-            .events
-            .iter()
-            .all(|event| event.event_type != "avatar-healed"),
-        "Death's Door blocks end-turn life gain"
-    );
-    let after = state(&session);
-    assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
-    assert_eq!(after["players"]["north"]["avatar"]["deathDoorTurn"], 2);
-    assert_eq!(after["turnNumber"], 4);
-    assert_eq!(after["terminal"]["status"], "active");
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("units")
-            .iter()
-            .any(|unit| unit["cardId"] == "north-source" && unit["instanceId"] == source_id)
-    );
-    assert_exact_replay(&session);
-}
-
-#[test]
-fn rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar() {
-    let mut session = Session::new(&loss_manifest(20)).expect("valid life-loss session");
-    summon_north_source(&mut session);
-    let source_id = unit_id(&session, "north-source");
-    let receipt = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn").1;
     assert!(receipt.events.iter().any(|event| {
         event.event_type == "avatar-life-lost"
             && event.payload["amount"] == 2
@@ -318,13 +316,6 @@ fn rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar
             && event.payload["sourceInstanceId"] == source_id
     }));
     let after = state(&session);
-    assert!(
-        after["realm"]["units"]
-            .as_array()
-            .expect("units")
-            .iter()
-            .any(|unit| unit["cardId"] == "north-source" && unit["instanceId"] == source_id)
-    );
     assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
     assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
     assert_eq!(after["terminal"]["status"], "active");
@@ -332,39 +323,51 @@ fn rule_catalog_0306_end_turn_controller_life_loss_reduces_the_controller_avatar
 }
 
 #[test]
-fn rule_catalog_0307_end_turn_controller_life_loss_can_open_deaths_door() {
-    let mut session =
-        Session::new(&loss_manifest(2)).expect("valid Death's Door life-loss session");
-    summon_north_source(&mut session);
-    let source_id = unit_id(&session, "north-source");
-    let receipt = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn").1;
+fn rule_catalog_0390_end_turn_gain_then_here_damage_on_same_minion() {
+    let mut session = after_north_ready_to_end_turn_with_visitor();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let damage_index =
+        event_index(&receipt, "end-turn-damage-allocated").expect("here damage event");
+    assert!(
+        heal_index < damage_index,
+        "end-turn life gain must resolve before here-area damage on the same minion"
+    );
     assert!(receipt.events.iter().any(|event| {
-        event.event_type == "avatar-life-lost"
+        event.event_type == "avatar-healed"
             && event.payload["amount"] == 2
-            && event.payload["life"] == 0
+            && event.payload["attemptedAmount"] == 2
+            && event.payload["life"] == 20
             && event.payload["seat"] == "north"
             && event.payload["sourceInstanceId"] == source_id
     }));
-    assert!(
-        receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "avatar-reached-deaths-door"
-                && event.payload["seat"] == "north"
-                && event.payload["sourceInstanceId"] == source_id
-                && event.payload["turnNumber"] == 1)
-    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "end-turn-damage-allocated"
+            && event.payload["amount"] == 1
+            && event.payload["sourceInstanceId"] == source_id
+            && event.payload["targetInstanceId"] == visitor_id
+    }));
     let after = state(&session);
-    assert_eq!(after["players"]["north"]["avatar"]["life"], 0);
-    assert_eq!(after["players"]["north"]["avatar"]["deathDoorTurn"], 1);
-    assert_eq!(after["turnNumber"], 2);
-    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
     assert!(
         after["realm"]["units"]
             .as_array()
             .expect("units")
             .iter()
-            .any(|unit| unit["cardId"] == "north-source" && unit["instanceId"] == source_id)
+            .any(|unit| unit["cardId"] == "north-pulser" && unit["instanceId"] == source_id)
     );
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["cardId"] == "south-visitor" && unit["instanceId"] == visitor_id)
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
     assert_exact_replay(&session);
 }

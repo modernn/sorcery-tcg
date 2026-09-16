@@ -21327,19 +21327,18 @@ impl Game {
                 else {
                     return None;
                 };
-                if let Some(amount) = facts.at_end_of_controller_turn_controller_gains_life {
-                    Some((unit.card.instance_id.clone(), amount, true))
-                } else {
-                    facts
-                        .at_end_of_controller_turn_controller_loses_life
-                        .map(|amount| (unit.card.instance_id.clone(), amount, false))
-                }
+                Some((
+                    unit.card.instance_id.clone(),
+                    facts.at_end_of_controller_turn_controller_gains_life,
+                    facts.at_end_of_controller_turn_controller_loses_life,
+                ))
             })
             .collect();
-        for (instance_id, amount, gain) in sources {
-            if gain {
+        for (instance_id, gain, loss) in sources {
+            if let Some(amount) = gain {
                 self.heal_avatar(seat, u16::from(amount), &instance_id, outcomes)?;
-            } else {
+            }
+            if let Some(amount) = loss {
                 self.apply_avatar_life_loss(seat, u16::from(amount), &instance_id, outcomes);
             }
         }

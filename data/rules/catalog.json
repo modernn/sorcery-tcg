@@ -5704,7 +5704,7 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A persistent 2×2 Aura can flood affected sites. Those sites become Water sites and still provide their other elemental affinities. The Aura does not immobilize, does not use the 3-turn duration machine, and remains after the controller's next turn starts.",
+      "plainLanguage": "A persistent 2\u00d72 Aura can flood affected sites. Those sites become Water sites and still provide their other elemental affinities. The Aura does not immobilize, does not use the 3-turn duration machine, and remains after the controller's next turn starts.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedSitesAreFlooded"
@@ -5726,7 +5726,7 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A later-entered persistent 2×2 Drought Aura covering the same site wins the timestamp: the site is no longer a Water site and provides no Water threshold, while its other affinities remain. Flood entered first stays in the realm.",
+      "plainLanguage": "A later-entered persistent 2\u00d72 Drought Aura covering the same site wins the timestamp: the site is no longer a Water site and provides no Water threshold, while its other affinities remain. Flood entered first stays in the realm.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
@@ -6671,7 +6671,7 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 Aura can flood only non-Ordinary sites. Those sites become Water sites and provide only Water threshold. Ordinary sites under the same area keep their printed elements and are not flooded.",
+      "plainLanguage": "A 2\u00d72 Aura can flood only non-Ordinary sites. Those sites become Water sites and provide only Water threshold. Ordinary sites under the same area keep their printed elements and are not flooded.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
@@ -7575,7 +7575,7 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "Return-site Magic remaps every unit that occupies the returned cell, not only a unit whose anchor is that cell. A 2×2 surface minion anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
+      "plainLanguage": "Return-site Magic remaps every unit that occupies the returned cell, not only a unit whose anchor is that cell. A 2\u00d72 surface minion anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "occupiesSquareArea",
@@ -7603,7 +7603,7 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "Return-site Magic remaps a 2×2 underground occupant the same way. A Burrowing square anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
+      "plainLanguage": "Return-site Magic remaps a 2\u00d72 underground occupant the same way. A Burrowing square anchored at B3 that occupies C3 is banished when C3 is returned. It does not die as if stranded on missing terrain.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "burrowing",
@@ -7729,7 +7729,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Cave-In burrows every surface minion that occupies the target land site. A 2×2 square that occupies that cell and also covers Water is still hit. Occupancy then kills the illegal underground footprint. The minion does not stay on the surface unharmed.",
+      "plainLanguage": "Cave-In burrows every surface minion that occupies the target land site. A 2\u00d72 square that occupies that cell and also covers Water is still hit. Occupancy then kills the illegal underground footprint. The minion does not stay on the surface unharmed.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "burrowAllMinionsAndArtifactsAtTargetLandSite",
@@ -7756,7 +7756,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Cave-In burrows a 2×2 that occupies the target land cell even when its anchor is another cell. An all-land Burrowing square anchored at B3 that occupies C4 goes underground and stays in play when C4 is Cave-In'd.",
+      "plainLanguage": "Cave-In burrows a 2\u00d72 that occupies the target land cell even when its anchor is another cell. An all-land Burrowing square anchored at B3 that occupies C4 goes underground and stays in play when C4 is Cave-In'd.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "burrowAllMinionsAndArtifactsAtTargetLandSite",
@@ -7782,7 +7782,7 @@
         "RULE-02",
         "RULE-05"
       ],
-      "plainLanguage": "Fate Genesis submerges every surface minion that occupies an affected non-Ordinary site. A 2×2 square that occupies that cell and also covers land is still hit. Occupancy then kills the illegal underwater footprint. The minion does not stay on the surface unharmed.",
+      "plainLanguage": "Fate Genesis submerges every surface minion that occupies an affected non-Ordinary site. A 2\u00d72 square that occupies that cell and also covers land is still hit. Occupancy then kills the illegal underwater footprint. The minion does not stay on the surface unharmed.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
@@ -7808,7 +7808,7 @@
         "RULE-02",
         "RULE-05"
       ],
-      "plainLanguage": "Fate Genesis submerges a 2×2 that occupies an affected non-Ordinary site even when its anchor is another cell. An all-Water Submerge square anchored at B3 that occupies C3 stays underwater when Fate covers C3 and leaves C4 uncovered.",
+      "plainLanguage": "Fate Genesis submerges a 2\u00d72 that occupies an affected non-Ordinary site even when its anchor is another cell. An all-Water Submerge square anchored at B3 that occupies C3 stays underwater when Fate covers C3 and leaves C4 uncovered.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities",
@@ -7835,7 +7835,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Secret Tunnel connects a burrowed 2×2 that occupies the controller's tunnel, even when the square's anchor is another cell. A B3-anchored underground square that occupies C4 hops to a far controlled land site. Occupancy, not the anchor cell, decides whether the square is at that tunnel.",
+      "plainLanguage": "Secret Tunnel connects a burrowed 2\u00d72 that occupies the controller's tunnel, even when the square's anchor is another cell. A B3-anchored underground square that occupies C4 hops to a far controlled land site. Occupancy, not the anchor cell, decides whether the square is at that tunnel.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "connectsBurrowedAllies",
@@ -7859,7 +7859,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A burrowed 2×2 that occupies no Secret Tunnel cannot hop to a far controlled land site. Ordinary underground steps still require adjacent land. The same B3-anchored square without a tunnel under it stays local.",
+      "plainLanguage": "A burrowed 2\u00d72 that occupies no Secret Tunnel cannot hop to a far controlled land site. Ordinary underground steps still require adjacent land. The same B3-anchored square without a tunnel under it stays local.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "connectsBurrowedAllies",
@@ -7883,7 +7883,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Measured-range Magic walks from every cell a 2×2 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C4 can Minor-Explosion D4, which is one cardinal step from C4 and three from B3.",
+      "plainLanguage": "Measured-range Magic walks from every cell a 2\u00d72 Spellcaster occupies, not only the anchor. A B3-anchored square occupying C4 can Minor-Explosion D4, which is one cardinal step from C4 and three from B3.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "damageEachUnitAtLocationWithinTwoSteps",
@@ -7910,7 +7910,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Measured-range Magic still stops at two cardinal steps. A B3-anchored 2×2 Spellcaster cannot Minor-Explosion E3, because that site is three steps from every occupied cell.",
+      "plainLanguage": "Measured-range Magic still stops at two cardinal steps. A B3-anchored 2\u00d72 Spellcaster cannot Minor-Explosion E3, because that site is three steps from every occupied cell.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "damageEachUnitAtLocationWithinTwoSteps",
@@ -7934,7 +7934,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Updraft Ridge frees the first departure of an Airborne minion that occupies the Ridge, not only one whose path anchor stands there. A B3-anchored 2×2 occupying a Ridge at C4 can take two surface steps to B1.",
+      "plainLanguage": "Updraft Ridge frees the first departure of an Airborne minion that occupies the Ridge, not only one whose path anchor stands there. A B3-anchored 2\u00d72 occupying a Ridge at C4 can take two surface steps to B1.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "airborneMinionsAtopMoveFreelyAway",
@@ -7960,7 +7960,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "An Airborne 2×2 that occupies no Updraft Ridge cannot take two surface steps. Ordinary one-step departure from the same B3-anchored square remains legal.",
+      "plainLanguage": "An Airborne 2\u00d72 that occupies no Updraft Ridge cannot take two surface steps. Ordinary one-step departure from the same B3-anchored square remains legal.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "airborneMinionsAtopMoveFreelyAway",
@@ -8035,7 +8035,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A 2×2 bearer that occupies a helper stands with that helper for a tap-pair Artifact. A B3-anchored square carrying a Siege Ballista remembered at C4 can tap a ready ally on B3 for the second cost.",
+      "plainLanguage": "A 2\u00d72 bearer that occupies a helper stands with that helper for a tap-pair Artifact. A B3-anchored square carrying a Siege Ballista remembered at C4 can tap a ready ally on B3 for the second cost.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
@@ -8062,7 +8062,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A helper that shares no occupied cell with a 2×2 bearer cannot pay a tap-pair Artifact's second tap. An ally on B2 does not stand with a B3-anchored square occupying B3, B4, C3, and C4.",
+      "plainLanguage": "A helper that shares no occupied cell with a 2\u00d72 bearer cannot pay a tap-pair Artifact's second tap. An ally on B2 does not stand with a B3-anchored square occupying B3, B4, C3, and C4.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
@@ -8086,7 +8086,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "A tap-pair Artifact measures range from every cell its 2×2 bearer occupies. A B3-anchored square carrying a Siege Ballista remembered at B3 can shoot a unit on D4, which is three steps from B3 and one step from occupied C4.",
+      "plainLanguage": "A tap-pair Artifact measures range from every cell its 2\u00d72 bearer occupies. A B3-anchored square carrying a Siege Ballista remembered at B3 can shoot a unit on D4, which is three steps from B3 and one step from occupied C4.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
@@ -8137,7 +8137,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Lucky Charm extra-random for discard-funded damage uses every cell a 2×2 source occupies. A B3 occupant of an A3-anchored square is offered, and resolving that outcome deals the printed damage to that unit.",
+      "plainLanguage": "Lucky Charm extra-random for discard-funded damage uses every cell a 2\u00d72 source occupies. A B3 occupant of an A3-anchored square is offered, and resolving that outcome deals the printed damage to that unit.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "bearerControllerChoosesExtraRandomOutcome",
@@ -8188,7 +8188,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 token created by Genesis paid entry occupies its whole footprint on the realm grid.",
+      "plainLanguage": "A 2\u00d72 token created by Genesis paid entry occupies its whole footprint on the realm grid.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "genesisPayOneManaToSummonToken",
@@ -8212,7 +8212,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "When a 2×2 token dies in combat it banishes instead of entering a cemetery.",
+      "plainLanguage": "When a 2\u00d72 token dies in combat it banishes instead of entering a cemetery.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "occupiesSquareArea",
@@ -8238,7 +8238,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 minion with top/bottom wraparound can be summoned onto a wrapped footprint that spans rank 1 and rank 4 across two adjacent files.",
+      "plainLanguage": "A 2\u00d72 minion with top/bottom wraparound can be summoned onto a wrapped footprint that spans rank 1 and rank 4 across two adjacent files.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "connectsTopBottom",
@@ -8261,7 +8261,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 minion with top/bottom wraparound translates its whole footprint when the anchor steps across the connected edge, from a canonical square to the wrapped occupancy.",
+      "plainLanguage": "A 2\u00d72 minion with top/bottom wraparound translates its whole footprint when the anchor steps across the connected edge, from a canonical square to the wrapped occupancy.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "connectsTopBottom",
@@ -8284,7 +8284,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 minion with an outer-column cast restriction can be summoned legally when its anchor sits in column A or E and occupies the full canonical footprint.",
+      "plainLanguage": "A 2\u00d72 minion with an outer-column cast restriction can be summoned legally when its anchor sits in column A or E and occupies the full canonical footprint.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "mustBeCastToOuterColumn",
@@ -8307,7 +8307,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "An outer-column cast restriction on a 2×2 minion filters summons only; after it enters play the whole footprint may step into inner columns.",
+      "plainLanguage": "An outer-column cast restriction on a 2\u00d72 minion filters summons only; after it enters play the whole footprint may step into inner columns.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "mustBeCastToOuterColumn",
@@ -8373,7 +8373,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Start-turn random teleports move a 2×2 Voidwalk minion's whole footprint to an all-void or all-surface square.",
+      "plainLanguage": "Start-turn random teleports move a 2\u00d72 Voidwalk minion's whole footprint to an all-void or all-surface square.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "voidwalk"
@@ -8394,7 +8394,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "Start-turn random teleports for a 2×2 Voidwalk minion resolve blocked footprints through Lucky Charm without moving the unit.",
+      "plainLanguage": "Start-turn random teleports for a 2\u00d72 Voidwalk minion resolve blocked footprints through Lucky Charm without moving the unit.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "voidwalk"
@@ -8587,6 +8587,56 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0388_start_turn_mill_spells_is_a_no_op_after_draw_empties_the_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0389",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both end-of-controller-turn Avatar life gain and life loss, the End Phase resolves them in order on that minion before here-area damage: gain first, then loss. Both pulses apply to the controller Avatar and net together.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0389_end_turn_gain_then_loss_applies_net_avatar_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0390",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both end-of-controller-turn Avatar life gain and here-area damage, the End Phase resolves life gain first, then here-area damage through the existing end-turn continuation path.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0390_end_turn_gain_then_here_damage_on_same_minion"
       }
     }
   ]

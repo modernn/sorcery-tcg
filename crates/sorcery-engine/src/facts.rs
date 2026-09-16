@@ -1872,17 +1872,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "competing start-turn triggers are unsupported",
         ));
     }
-    let end_turn_pulse_count =
-        usize::from(at_end_of_controller_turn_controller_gains_life.is_some())
-            + usize::from(at_end_of_controller_turn_controller_loses_life.is_some())
-            + usize::from(at_end_of_controller_turn_damage_each_other_unit_here.is_some());
-    if end_turn_pulse_count > 1 {
-        return Err(FactError::new(
-            path,
-            "competing end-turn pulses are unsupported",
-        ));
-    }
-
     let deathrite_damage_each_unit_here = optional_bounded_integer(
         object,
         "deathriteDamageEachUnitHere",

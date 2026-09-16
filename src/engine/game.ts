@@ -2320,12 +2320,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atEndOfControllerTurnControllerLosesLife must be a safe integer between 1 and ${MAX_COMBAT_STAT}`,
     );
   }
-  const endTurnPulseCount = Number(card.atEndOfControllerTurnDamageEachOtherUnitHere !== undefined)
-    + Number(card.atEndOfControllerTurnControllerGainsLife !== undefined)
-    + Number(card.atEndOfControllerTurnControllerLosesLife !== undefined);
-  if (endTurnPulseCount > 1) {
-    throw new RangeError(`${path} competing end-turn pulses are unsupported`);
-  }
   if (card.atStartOfControllerTurnDamageEachOtherUnitHere !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDamageEachOtherUnitHere)
       || card.atStartOfControllerTurnDamageEachOtherUnitHere < 1

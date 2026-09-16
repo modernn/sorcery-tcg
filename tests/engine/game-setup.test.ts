@@ -2453,7 +2453,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && endTurnLifeLossManifest.cards[firstSpell].atEndOfControllerTurnControllerLosesLife,
     2,
   );
-  assert.throws(() => createGameManifest({
+  const endTurnLifeGainLossManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2463,8 +2463,18 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         atEndOfControllerTurnControllerLosesLife: 2,
       } as GameCardDefinition,
     },
-  }), /competing end-turn pulses are unsupported/);
-  assert.throws(() => createGameManifest({
+  });
+  assert.equal(
+    endTurnLifeGainLossManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeGainLossManifest.cards[firstSpell].atEndOfControllerTurnControllerGainsLife,
+    2,
+  );
+  assert.equal(
+    endTurnLifeGainLossManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeGainLossManifest.cards[firstSpell].atEndOfControllerTurnControllerLosesLife,
+    2,
+  );
+  const endTurnLifeGainHereDamageManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2474,7 +2484,17 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         atEndOfControllerTurnDamageEachOtherUnitHere: 1,
       } as GameCardDefinition,
     },
-  }), /competing end-turn pulses are unsupported/);
+  });
+  assert.equal(
+    endTurnLifeGainHereDamageManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeGainHereDamageManifest.cards[firstSpell].atEndOfControllerTurnControllerGainsLife,
+    2,
+  );
+  assert.equal(
+    endTurnLifeGainHereDamageManifest.cards[firstSpell]?.cardType === 'minion'
+      && endTurnLifeGainHereDamageManifest.cards[firstSpell].atEndOfControllerTurnDamageEachOtherUnitHere,
+    1,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

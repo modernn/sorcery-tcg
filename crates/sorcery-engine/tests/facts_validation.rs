@@ -979,32 +979,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "must be between",
         ),
         (
-            "competing end-turn life pulses",
-            with(
-                with(
-                    minion(),
-                    "atEndOfControllerTurnControllerGainsLife",
-                    json!(2),
-                ),
-                "atEndOfControllerTurnControllerLosesLife",
-                json!(2),
-            ),
-            "competing end-turn",
-        ),
-        (
-            "competing end-turn here damage and life gain",
-            with(
-                with(
-                    minion(),
-                    "atEndOfControllerTurnDamageEachOtherUnitHere",
-                    json!(1),
-                ),
-                "atEndOfControllerTurnControllerGainsLife",
-                json!(2),
-            ),
-            "competing end-turn",
-        ),
-        (
             "start-turn lure flag",
             with(
                 minion(),
@@ -1120,6 +1094,52 @@ fn typed_effects_should_retain_only_normalized_values() {
     };
     assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(1));
     assert_eq!(facts.at_start_of_controller_turn_mill_spells, Some(1));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-gain-loss-stack",
+        &with(
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(1),
+        ),
+    )
+    .expect("valid stacked end-turn life gain and loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_loses_life,
+        Some(1)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "end-turn-gain-here-damage-stack",
+        &with(
+            with(
+                minion(),
+                "atEndOfControllerTurnControllerGainsLife",
+                json!(2),
+            ),
+            "atEndOfControllerTurnDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid stacked end-turn life gain and here damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.at_end_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    assert_eq!(
+        facts.at_end_of_controller_turn_damage_each_other_unit_here,
+        Some(1)
+    );
     let CardFacts::Minion(facts) = parse_card_definition(
         "deathrite-draw-spells",
         &with(minion(), "deathriteDrawSpells", json!(true)),
