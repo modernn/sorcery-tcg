@@ -12941,16 +12941,21 @@ impl Game {
         if self.fate_covers_cell(cell) && !facts.ordinary {
             return (None, 0);
         }
-        let genesis_gain_mana = facts.genesis_gain_mana.or_else(|| {
-            (facts.genesis_gain_mana_if_only_controlled_copy
-                && !self
-                    .position
-                    .sites
-                    .iter()
-                    .flatten()
-                    .any(|site| site.controller == seat && site.card.card_id == card_id))
-            .then_some(1)
-        });
+        let only_controlled_copy = facts.genesis_gain_mana_if_only_controlled_copy
+            && !self
+                .position
+                .sites
+                .iter()
+                .flatten()
+                .any(|site| site.controller == seat && site.card.card_id == card_id);
+        let genesis_gain_mana = match (facts.genesis_gain_mana, only_controlled_copy.then_some(1)) {
+            (Some(unconditional), Some(conditional)) => {
+                Some(unconditional.saturating_add(conditional))
+            }
+            (Some(unconditional), None) => Some(unconditional),
+            (None, Some(conditional)) => Some(conditional),
+            (None, None) => None,
+        };
         let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
             cell.bordering(false)
                 .filter(|neighbor| {

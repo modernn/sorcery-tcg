@@ -1412,10 +1412,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.genesisGainManaIfOnlyControlledCopy !== 1) {
       throw new RangeError(`${path}.genesisGainManaIfOnlyControlledCopy must be 1`);
     }
-    if (card.genesisGainMana !== undefined
-      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
-      throw new RangeError(`${path} simultaneous unconditional and conditional Genesis mana are unsupported`);
-    }
     if (card.genesisHealNearbyAvatars !== undefined
       && card.genesisHealNearbyAvatars !== 3) {
       throw new RangeError(`${path}.genesisHealNearbyAvatars must be 3`);

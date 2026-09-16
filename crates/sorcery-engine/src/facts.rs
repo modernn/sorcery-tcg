@@ -1004,12 +1004,6 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             .map(compact_u8);
     let genesis_gain_mana_if_only_controlled_copy =
         fixed_integer(object, "genesisGainManaIfOnlyControlledCopy", 1, path)?;
-    if genesis_gain_mana.is_some() && genesis_gain_mana_if_only_controlled_copy {
-        return Err(FactError::new(
-            path,
-            "simultaneous unconditional and conditional Genesis mana are unsupported",
-        ));
-    }
 
     let genesis_discard_top_spells = fixed_integer(object, "genesisDiscardTopSpells", 2, path)?;
     let genesis_draw_spell_per_adjacent_same_card =

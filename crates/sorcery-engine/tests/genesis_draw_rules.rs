@@ -6666,3 +6666,124 @@ fn rubble_replacement_should_strip_enemy_stealth_like_play_site() {
     );
     assert_exact_replay(&session);
 }
+
+fn single_copy_mixed_mana_manifest(seed: u32) -> String {
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &minion(1, 2),
+        &minion(1, 2),
+        8,
+        8,
+        8,
+    );
+    let mut mixed = site();
+    mixed["genesisGainMana"] = json!(2);
+    mixed["genesisGainManaIfOnlyControlledCopy"] = json!(1);
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("mixed-mana-site".to_owned(), mixed);
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("north-filler-site".to_owned(), site());
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["decks"]["north"]["atlas"] = json!([
+        "mixed-mana-site",
+        "north-filler-site",
+        "mixed-mana-site",
+        "north-filler-site",
+        "mixed-mana-site",
+        "north-filler-site",
+        "mixed-mana-site",
+        "north-filler-site",
+    ]);
+    finish_manifest(value)
+}
+
+#[test]
+fn rule_catalog_0497_site_genesis_mixed_mana_grants_unconditional_and_conditional_on_first_copy() {
+    let manifest = single_copy_mixed_mana_manifest(497);
+    let mut session = Session::new(&manifest).expect("valid mixed-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (_, first_play) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "mixed-mana-site"
+            && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&first_play), ["site-played", "mana-gained"]);
+    assert_eq!(
+        first_play.events[1].payload,
+        json!({
+            "amount": 3,
+            "seat": "north",
+            "sourceInstanceId": first_play.events[0].payload["instanceId"],
+        })
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 4
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0498_site_genesis_mixed_mana_grants_only_unconditional_on_later_copy() {
+    let manifest = single_copy_mixed_mana_manifest(498);
+    let mut session = Session::new(&manifest).expect("valid mixed-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (_, first_play) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "mixed-mana-site"
+            && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&first_play), ["site-played", "mana-gained"]);
+    assert_eq!(first_play.events[1].payload["amount"], json!(3));
+    assert_eq!(state(&session)["players"]["north"]["mana"], 4);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, filler_play) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-filler-site"
+            && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&filler_play), ["site-played"]);
+    assert_eq!(state(&session)["players"]["north"]["mana"], 2);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+
+    let (_, second_play) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "mixed-mana-site"
+            && descriptor["cell"] == "B3"
+    });
+    assert_eq!(event_types(&second_play), ["site-played", "mana-gained"]);
+    assert_eq!(
+        second_play.events[1].payload,
+        json!({
+            "amount": 2,
+            "seat": "north",
+            "sourceInstanceId": second_play.events[0].payload["instanceId"],
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["mana"], 5);
+    assert_exact_replay(&session);
+}

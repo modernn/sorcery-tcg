@@ -3043,17 +3043,23 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   }), /shootsDragProjectile/);
   const firstSite = decks.north.atlas[0];
   assert.ok(firstSite);
-  assert.throws(() => createGameManifest({
+  const mixedGenesisManaManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
       [firstSite]: {
         ...cards[firstSite]!,
-        genesisGainMana: 1,
+        genesisGainMana: 2,
         genesisGainManaIfOnlyControlledCopy: 1,
       } as GameCardDefinition,
     },
-  }), /simultaneous unconditional and conditional Genesis mana/);
+  });
+  assert.deepEqual(mixedGenesisManaManifest.cards[firstSite], {
+    cardType: 'site',
+    elements: ['earth'],
+    genesisGainMana: 2,
+    genesisGainManaIfOnlyControlledCopy: 1,
+  });
   const shallowGraveManifest = createGameManifest({
     ...input,
     cards: {
@@ -10473,6 +10479,24 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
     targetedGenesisAltPayment.cards[alliedMinionId]?.cardType === 'minion'
       && targetedGenesisAltPayment.cards[alliedMinionId].discardRandomCardInsteadOfMana
       && targetedGenesisAltPayment.cards[alliedMinionId].genesisMayDamageTargetAdjacentUnit === 2,
+    true,
+  );
+  const targetedGenesisSacrificePayment = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisMayDamageTargetAdjacentUnit: 2,
+        sacrificeMinionAtSummoningLocationForManaDiscount: 2,
+      } as GameCardDefinition,
+    },
+    seed: 1,
+  });
+  assert.equal(
+    targetedGenesisSacrificePayment.cards[alliedMinionId]?.cardType === 'minion'
+      && targetedGenesisSacrificePayment.cards[alliedMinionId].genesisMayDamageTargetAdjacentUnit === 2
+      && targetedGenesisSacrificePayment.cards[alliedMinionId].sacrificeMinionAtSummoningLocationForManaDiscount === 2,
     true,
   );
   assert.throws(() => createGameManifest({

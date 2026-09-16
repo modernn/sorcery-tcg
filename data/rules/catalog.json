@@ -11378,6 +11378,56 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0496_spellbook_summon_genesis_disable_then_damages_other_units_here"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0497",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a site carries both unconditional and first-copy-only Genesis mana, playing the first controlled copy grants both amounts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisGainManaIfOnlyControlledCopy"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0497_site_genesis_mixed_mana_grants_unconditional_and_conditional_on_first_copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0498",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a site carries both unconditional and first-copy-only Genesis mana, playing a later controlled copy grants only the unconditional amount.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainMana",
+        "genesisGainManaIfOnlyControlledCopy"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0498_site_genesis_mixed_mana_grants_only_unconditional_on_later_copy"
+      }
     }
   ]
 }

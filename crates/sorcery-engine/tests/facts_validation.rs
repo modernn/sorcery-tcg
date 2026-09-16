@@ -110,6 +110,23 @@ fn parse_should_accept_each_typed_card_kind() {
 }
 
 #[test]
+fn parse_should_accept_site_with_mixed_genesis_mana() {
+    let definition = json!({
+        "cardType": "site",
+        "elements": ["earth"],
+        "genesisGainMana": 2,
+        "genesisGainManaIfOnlyControlledCopy": 1,
+    });
+    let CardFacts::Site(facts) =
+        parse_card_definition("mixed-mana-site", &definition).expect("valid mixed mana site")
+    else {
+        panic!("expected site facts");
+    };
+    assert_eq!(facts.genesis_gain_mana, Some(2));
+    assert!(facts.genesis_gain_mana_if_only_controlled_copy);
+}
+
+#[test]
 fn parse_should_normalize_optional_false_and_canonical_element_order() {
     let definition = with(
         with(
@@ -701,19 +718,6 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
 )]
 fn site_and_minion_mutual_exclusions_should_fail_closed() {
     let invalid = [
-        (
-            "site mana modes",
-            with(
-                with(
-                    json!({ "cardType": "site", "elements": [] }),
-                    "genesisGainMana",
-                    json!(2),
-                ),
-                "genesisGainManaIfOnlyControlledCopy",
-                json!(1),
-            ),
-            "unconditional and conditional",
-        ),
         (
             "alternative payments",
             with(
