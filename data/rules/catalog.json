@@ -12204,6 +12204,57 @@
         "file": "crates/sorcery-engine/tests/grant_power_then_draw_rules.rs",
         "testName": "rule_catalog_0530_power_grant_then_empty_spellbook_is_a_deck_out"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0531",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion Lethal this turn and then draws a spell offers only allied minions, never an Avatar or an enemy. The Lethal mark uses the shared this-turn source list. The drawn spell stays hidden from the opponent. Lethal expires at End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "spell-drawn",
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_0531_lethal_grant_offers_allied_minions_then_draws_a_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0532",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After grant-Lethal-this-turn then draw-spell Magic resolves, one point of damage from that minion destroys a tougher minion. The same strike without the grant only wounds it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_0532_granted_lethal_then_draw_kills_a_tougher_minion"
+      }
     }
   ]
 }

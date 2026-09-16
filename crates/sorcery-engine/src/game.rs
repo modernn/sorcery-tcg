@@ -1452,6 +1452,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
+        | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantRangedToAllyThisTurn
@@ -3598,8 +3599,11 @@ impl Game {
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
-                            } else if matches!(facts.effect, MagicEffect::GrantLethalToAllyThisTurn)
-                            {
+                            } else if matches!(
+                                facts.effect,
+                                MagicEffect::GrantLethalToAllyThisTurn
+                                    | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+                            ) {
                                 let ActionDescriptor::CastMagic {
                                     ally: Some(ally), ..
                                 } = &descriptor
@@ -3607,8 +3611,16 @@ impl Game {
                                     return Err(invalid("Lethal grant action requires an ally"));
                                 };
                                 format!(
-                                    "Cast {} to grant Lethal to {} {}…",
+                                    "Cast {} to grant Lethal{} to {} {}…",
                                     definition.id,
+                                    if matches!(
+                                        facts.effect,
+                                        MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+                                    ) {
+                                        " and draw"
+                                    } else {
+                                        ""
+                                    },
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
@@ -6730,7 +6742,8 @@ impl Game {
                     ..MagicChoice::default()
                 })
                 .collect(),
-            MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => self
+            MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+            | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => self
                 .controlled_allies(seat)
                 .into_iter()
                 .filter(|ally| matches!(ally, UnitTarget::Minion { .. }))
@@ -19338,6 +19351,33 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_lethal_sources
+                    .push(card_instance_id.clone());
+                outcomes.push("lethal-granted", || {
+                    json!({
+                        "instanceId": instance_id,
+                        "seat": ally_seat,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::GrantChargeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -24175,6 +24215,10 @@ mod tests {
             (
                 MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell,
                 json!({ "grantPowerTwoToAllyThisTurnThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell,
+                json!({ "grantLethalToAllyThisTurnThenDrawSpell": true }),
             ),
             (
                 MagicEffect::TapTargetMinion,
