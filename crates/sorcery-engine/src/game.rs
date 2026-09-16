@@ -1495,6 +1495,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetAuraToOwnerHand
         | MagicEffect::ReturnTargetMinionToOwnerHand
         | MagicEffect::ReturnTargetSiteToOwnerHand
+        | MagicEffect::AllyStrikesEachEnemyAtItsLocation
         | MagicEffect::AllySubmergesTargetNearbyMinion
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
@@ -7041,6 +7042,14 @@ impl Game {
                 }
             }
             MagicEffect::LeapAttackAlly => self.leap_attack_choices(seat)?,
+            MagicEffect::AllyStrikesEachEnemyAtItsLocation => self
+                .controlled_allies(seat)
+                .into_iter()
+                .map(|ally| MagicChoice {
+                    ally: Some(ally),
+                    ..MagicChoice::default()
+                })
+                .collect(),
             MagicEffect::TeleportAllyToTargetSite => {
                 self.teleport_ally_to_site_choices(seat, caster_instance_id)?
             }
@@ -19596,7 +19605,10 @@ impl Game {
             caster_instance_id,
             outcomes,
         )?;
-        let leap_attack = effect == MagicEffect::LeapAttackAlly;
+        let leap_attack = matches!(
+            effect,
+            MagicEffect::LeapAttackAlly | MagicEffect::AllyStrikesEachEnemyAtItsLocation
+        );
         let blink = effect == MagicEffect::TeleportNearbyAllyThenDrawCard;
         // A raised minion resolves its Magic from the free placement it still owes.
         let mut raising = false;
@@ -20273,6 +20285,22 @@ impl Game {
                         owner,
                         seat,
                         strike_location: *ally_strike_location,
+                    },
+                    outcomes,
+                )?;
+            }
+            MagicEffect::AllyStrikesEachEnemyAtItsLocation => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let location = self.unit_target_location(ally)?;
+                self.apply_leap_attack(
+                    LeapAttackRequest {
+                        ally,
+                        card_id,
+                        card_instance_id,
+                        destination: location,
+                        owner,
+                        seat,
+                        strike_location: Some(location),
                     },
                     outcomes,
                 )?;
@@ -25230,6 +25258,10 @@ mod tests {
             (
                 MagicEffect::SilenceAndTapNearbyMinionThenMayDrawSpell,
                 json!({ "silenceAndTapNearbyMinionThenMayDrawSpell": true }),
+            ),
+            (
+                MagicEffect::AllyStrikesEachEnemyAtItsLocation,
+                json!({ "allyStrikesEachEnemyAtItsLocation": true }),
             ),
             (
                 MagicEffect::AllySubmergesTargetNearbyMinion,

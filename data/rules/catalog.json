@@ -12828,6 +12828,52 @@
         "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
         "testName": "rule_catalog_0556_ally_submerge_is_a_paid_noop_on_earth"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0557",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic offers each controlled ally and makes that ally strike every enemy sharing its current cell and region. A far enemy is not struck. The ally does not step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_0557_ally_strikes_each_enemy_at_its_location"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0558",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic still offers each controlled ally when no enemy shares that location, then resolves as a paid no-op without a strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_0558_ally_strike_here_is_a_paid_noop_without_an_enemy"
+      }
     }
   ]
 }

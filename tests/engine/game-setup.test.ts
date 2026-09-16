@@ -1735,6 +1735,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const spinManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyStrikesEachEnemyAtItsLocation: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(spinManifest.cards[firstSpell], {
+    cardType: 'magic',
+    allyStrikesEachEnemyAtItsLocation: true,
+    manaCost: 3,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyStrikesEachEnemyAtItsLocation: false,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /allyStrikesEachEnemyAtItsLocation/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyStrikesEachEnemyAtItsLocation: true,
+        leapAttackAlly: true,
+        manaCost: 3,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

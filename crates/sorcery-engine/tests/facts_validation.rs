@@ -342,6 +342,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("returnTargetMinionToOwnerHand", json!(true)),
         ("returnTargetSiteFromOwnCemetery", json!(true)),
         ("returnTargetSiteToOwnerHand", json!(true)),
+        ("allyStrikesEachEnemyAtItsLocation", json!(true)),
         ("allySubmergesTargetNearbyMinion", json!(true)),
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
@@ -1761,6 +1762,18 @@ fn ward_nearby_minion_or_site_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::WardNearbyMinionOrSite);
+}
+
+#[test]
+fn ally_strikes_each_enemy_at_its_location_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "ally-strikes-each-enemy-at-its-location",
+        &spell("magic", ("allyStrikesEachEnemyAtItsLocation", json!(true))),
+    )
+    .expect("valid ally-strikes-each-enemy-at-its-location Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(facts.effect, MagicEffect::AllyStrikesEachEnemyAtItsLocation);
 }
 
 #[test]
