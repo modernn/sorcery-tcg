@@ -236,6 +236,7 @@ pub enum MagicEffect {
     },
     DestroyArtifactsAndAurasAtLocationWithinTwoSteps,
     DestroyMinionsAtWaterSiteWithinTwoSteps,
+    DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps,
     DestroyTargetArtifact,
     DestroyTargetAura,
     DestroyTargetSite,
@@ -822,6 +823,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
     "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
     "destroyMinionsAtWaterSiteWithinTwoSteps",
+    "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
     "destroyTargetArtifact",
     "destroyTargetAura",
     "destroyTargetSite",
@@ -1457,6 +1459,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             .then_some(MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps),
             true_only(object, "destroyMinionsAtWaterSiteWithinTwoSteps", path)?
                 .then_some(MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps),
+            true_only(
+                object,
+                "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+                path,
+            )?
+            .then_some(MagicEffect::DestroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps),
             true_only(object, "destroyTargetArtifact", path)?
                 .then_some(MagicEffect::DestroyTargetArtifact),
             true_only(object, "destroyTargetAura", path)?.then_some(MagicEffect::DestroyTargetAura),

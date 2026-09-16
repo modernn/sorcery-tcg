@@ -4983,6 +4983,7 @@ function gameDefinition(
         ? { mayRangedStrikeOnceDuringBasicMovement: true as const }
         : {}),
       ...(card.subtypes.includes('Mortal') ? { mortal: true as const } : {}),
+      ...(card.subtypes.includes('Undead') ? { undead: true as const } : {}),
       movesOnlyForward,
       mustBeCastBurrowed,
       mustBeCastSubmerged,
