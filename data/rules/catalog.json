@@ -12874,6 +12874,52 @@
         "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
         "testName": "rule_catalog_0558_ally_strike_here_is_a_paid_noop_without_an_enemy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0559",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-adjacent-minion Magic offers only a minion that borders the caster. A same-cell minion and a far minion are not offered. Choosing an adjacent minion on an Earth site burrows that minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_0559_burrow_targets_an_adjacent_minion_on_earth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0560",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-adjacent-minion Magic still offers an adjacent minion on a Water site, then resolves as a paid no-op because no Underground layer exists.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_0560_burrow_adjacent_is_a_paid_noop_on_water"
+      }
     }
   ]
 }

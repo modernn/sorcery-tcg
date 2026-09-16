@@ -1437,6 +1437,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         MagicEffect::HealController(_)
         | MagicEffect::HealTargetMinion(_)
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
+        | MagicEffect::BurrowTargetAdjacentMinion
         | MagicEffect::BurrowTargetMinionOrArtifact
         | MagicEffect::DamageChainNearbyUnits
         | MagicEffect::DamageEachAbovegroundMinionOne
@@ -7254,6 +7255,9 @@ impl Game {
             | MagicEffect::UntapTargetMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, false, true)?
             }
+            MagicEffect::BurrowTargetAdjacentMinion => {
+                self.burrow_target_adjacent_minion_choices(seat, caster_instance_id)?
+            }
             MagicEffect::BurrowTargetMinionOrArtifact => {
                 let caster_location = self.spellcaster_location(seat, caster_instance_id)?;
                 let mut choices =
@@ -7802,6 +7806,32 @@ impl Game {
             return Ok(false);
         }
         self.unit_is_adjacent_to_cell(unit, location.cell)
+    }
+
+    fn burrow_target_adjacent_minion_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let (caster_location, caster_cells) =
+            self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+        Ok(self
+            .position
+            .units
+            .iter()
+            .filter(|unit| {
+                unit.region == caster_location.region
+                    && (unit.controller == seat || !self.minion_has_active_stealth(unit))
+                    && Self::footprints_bordering(caster_cells, Self::unit_occupied_cells(unit))
+            })
+            .map(|unit| MagicChoice {
+                target: Some(UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: unit.controller,
+                }),
+                ..MagicChoice::default()
+            })
+            .collect())
     }
 
     fn ally_submerges_target_nearby_minion_choices(
@@ -20572,46 +20602,21 @@ impl Game {
                         });
                     }
                 } else {
-                    let Some(UnitTarget::Minion {
-                        instance_id,
-                        seat: target_seat,
-                    }) = target
-                    else {
-                        return Err(GameError::IllegalAction);
-                    };
-                    let target_index = self
-                        .position
-                        .units
-                        .iter()
-                        .position(|unit| {
-                            unit.card.instance_id == *instance_id && unit.controller == *target_seat
-                        })
-                        .ok_or(GameError::IllegalAction)?;
-                    if self.position.units[target_index].warded && *target_seat != seat {
-                        self.position.units[target_index].warded = false;
-                        outcomes.push(
-                            "ward-broken",
-                            || json!({ "instanceId": instance_id, "seat": target_seat }),
-                        );
-                    } else {
-                        let can_move = self.position.units[target_index].region == Region::Surface
-                            && Self::unit_occupied_cells(&self.position.units[target_index])
-                                .iter()
-                                .all(|cell| self.underground_location_exists(*cell));
-                        if can_move {
-                            self.position.units[target_index].region = Region::Underground;
-                            let cell = self.position.units[target_index].location;
-                            outcomes.push("minion-burrowed", || {
-                                json!({
-                                    "cell": cell,
-                                    "instanceId": instance_id,
-                                    "seat": target_seat,
-                                    "sourceInstanceId": card_instance_id,
-                                })
-                            });
-                        }
-                    }
+                    self.apply_burrow_from_magic_target(
+                        target.as_ref(),
+                        seat,
+                        card_instance_id,
+                        outcomes,
+                    )?;
                 }
+            }
+            MagicEffect::BurrowTargetAdjacentMinion => {
+                self.apply_burrow_from_magic_target(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    outcomes,
+                )?;
             }
             MagicEffect::SubmergeTargetMinion => {
                 self.apply_submerge_from_magic_target(
@@ -22711,6 +22716,72 @@ impl Game {
             });
         }
         Ok(false)
+    }
+
+    fn apply_burrow_from_magic_target(
+        &mut self,
+        target: Option<&UnitTarget>,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let Some(UnitTarget::Minion {
+            instance_id,
+            seat: target_seat,
+        }) = target
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        self.apply_burrow_target_minion(
+            instance_id,
+            *target_seat,
+            caster_seat,
+            source_instance_id,
+            outcomes,
+        )
+    }
+
+    fn apply_burrow_target_minion(
+        &mut self,
+        instance_id: &IdentityHash,
+        target_seat: Seat,
+        caster_seat: Seat,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let target_index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| {
+                unit.card.instance_id == *instance_id && unit.controller == target_seat
+            })
+            .ok_or(GameError::IllegalAction)?;
+        if self.position.units[target_index].warded && target_seat != caster_seat {
+            self.position.units[target_index].warded = false;
+            outcomes.push(
+                "ward-broken",
+                || json!({ "instanceId": instance_id, "seat": target_seat }),
+            );
+            return Ok(());
+        }
+        let can_move = self.position.units[target_index].region == Region::Surface
+            && Self::unit_occupied_cells(&self.position.units[target_index])
+                .iter()
+                .all(|cell| self.underground_location_exists(*cell));
+        if can_move {
+            self.position.units[target_index].region = Region::Underground;
+            let cell = self.position.units[target_index].location;
+            outcomes.push("minion-burrowed", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": instance_id,
+                    "seat": target_seat,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
     }
 
     fn apply_submerge_from_magic_target(
@@ -25266,6 +25337,10 @@ mod tests {
             (
                 MagicEffect::AllySubmergesTargetNearbyMinion,
                 json!({ "allySubmergesTargetNearbyMinion": true }),
+            ),
+            (
+                MagicEffect::BurrowTargetAdjacentMinion,
+                json!({ "burrowTargetAdjacentMinion": true }),
             ),
             (
                 MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,

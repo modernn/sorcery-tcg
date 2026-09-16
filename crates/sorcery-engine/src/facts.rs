@@ -222,6 +222,7 @@ pub struct AuraFacts {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MagicEffect {
     BurrowAllMinionsAndArtifactsAtTargetLandSite,
+    BurrowTargetAdjacentMinion,
     BurrowTargetMinionOrArtifact,
     DamageChainNearbyUnits,
     DamageEachAbovegroundMinionOne,
@@ -799,6 +800,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "allyStrikesEachEnemyAtItsLocation",
     "allySubmergesTargetNearbyMinion",
     "burrowAllMinionsAndArtifactsAtTargetLandSite",
+    "burrowTargetAdjacentMinion",
     "burrowTargetMinionOrArtifact",
     "cardType",
     "damageChainNearbyUnits",
@@ -1394,6 +1396,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
         [
             true_only(object, "burrowAllMinionsAndArtifactsAtTargetLandSite", path)?
                 .then_some(MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite),
+            true_only(object, "burrowTargetAdjacentMinion", path)?
+                .then_some(MagicEffect::BurrowTargetAdjacentMinion),
             true_only(object, "burrowTargetMinionOrArtifact", path)?
                 .then_some(MagicEffect::BurrowTargetMinionOrArtifact),
             true_only(object, "damageChainNearbyUnits", path)?

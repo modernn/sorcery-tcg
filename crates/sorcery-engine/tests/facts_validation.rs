@@ -274,6 +274,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
 
     let magic_effects = [
         ("burrowAllMinionsAndArtifactsAtTargetLandSite", json!(true)),
+        ("burrowTargetAdjacentMinion", json!(true)),
         ("burrowTargetMinionOrArtifact", json!(true)),
         ("damageChainNearbyUnits", json!(true)),
         ("damageEachAbovegroundMinion", json!(1)),
@@ -1762,6 +1763,18 @@ fn ward_nearby_minion_or_site_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::WardNearbyMinionOrSite);
+}
+
+#[test]
+fn burrow_target_adjacent_minion_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "burrow-target-adjacent-minion",
+        &spell("magic", ("burrowTargetAdjacentMinion", json!(true))),
+    )
+    .expect("valid burrow-target-adjacent-minion Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(facts.effect, MagicEffect::BurrowTargetAdjacentMinion);
 }
 
 #[test]

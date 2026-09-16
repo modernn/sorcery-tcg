@@ -372,6 +372,7 @@ export type GameCardDefinition =
   }>
   | Readonly<{
     burrowAllMinionsAndArtifactsAtTargetLandSite?: true;
+    burrowTargetAdjacentMinion?: true;
     burrowTargetMinionOrArtifact?: true;
     cardType: 'magic';
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance?: readonly [number, number, number, number, number];
@@ -1339,7 +1340,7 @@ const SUPPORTED_CARD_FIELDS = {
     tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn
   `.trim().split(/\s+/)),
   magic: new Set(`
-    burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetMinionOrArtifact cardType
+    burrowAllMinionsAndArtifactsAtTargetLandSite burrowTargetAdjacentMinion burrowTargetMinionOrArtifact cardType
     damageChainNearbyUnits damageEachAbovegroundMinion damageEachUnitAtLocationWithinTwoSteps
     damageRandomUnitAtLocation damageTargetUnit disableTargetMinionWithinTwoStepsUntilDamaged
     disableTargetNearbyMinionUntilNextTurn
@@ -1727,6 +1728,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.burrowAllMinionsAndArtifactsAtTargetLandSite must be true when defined`,
       );
     }
+    if (card.burrowTargetAdjacentMinion !== undefined
+      && card.burrowTargetAdjacentMinion !== true) {
+      throw new RangeError(`${path}.burrowTargetAdjacentMinion must be true when defined`);
+    }
     if (card.burrowTargetMinionOrArtifact !== undefined
       && card.burrowTargetMinionOrArtifact !== true) {
       throw new RangeError(`${path}.burrowTargetMinionOrArtifact must be true when defined`);
@@ -1997,6 +2002,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     const effectCount = Number(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true)
+      + Number(card.burrowTargetAdjacentMinion === true)
       + Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.allyStrikesEachEnemyAtItsLocation === true)
       + Number(card.allySubmergesTargetNearbyMinion === true)
@@ -2899,6 +2905,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { destroyTargetArtifact: true as const }
                 : card.destroyTargetAura === true
                   ? { destroyTargetAura: true as const }
+                : card.burrowTargetAdjacentMinion === true
+                  ? { burrowTargetAdjacentMinion: true as const }
                 : card.burrowTargetMinionOrArtifact === true
                   ? { burrowTargetMinionOrArtifact: true as const }
                 : card.allyStrikesEachEnemyAtItsLocation === true
