@@ -11272,6 +11272,112 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0492_spellbook_summon_genesis_disable_then_loses_controller_life"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0493",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both disable-until-damaged and strike-each-enemy-here Genesis, paid site entry disables the token and then strikes every enemy sharing its location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0493_token_genesis_disable_then_strikes_enemies_here"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0494",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and strike-each-enemy-here Genesis, summoning it disables the minion and then strikes every enemy sharing its location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0494_spellbook_summon_genesis_disable_then_strikes_enemies_here"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0495",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both disable-until-damaged and here-area Genesis damage, paid site entry disables the token and then damages each other unit sharing its site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "genesis-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0495_token_genesis_disable_then_damages_other_units_here"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0496",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both disable-until-damaged and here-area Genesis damage, summoning it disables the minion and then damages each other unit sharing its site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "genesisDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "genesis-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0496_spellbook_summon_genesis_disable_then_damages_other_units_here"
+      }
     }
   ]
 }

@@ -10367,6 +10367,42 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
       && disableGenesisLoseLife.cards[alliedMinionId].genesisLoseControllerLife === 2,
     true,
   );
+  const disableGenesisStrikeHere = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisDisableSelfUntilDamaged: true,
+        genesisStrikeEachEnemyHere: true,
+      } as GameCardDefinition,
+    },
+    seed: 1,
+  });
+  assert.equal(
+    disableGenesisStrikeHere.cards[alliedMinionId]?.cardType === 'minion'
+      && disableGenesisStrikeHere.cards[alliedMinionId].genesisDisableSelfUntilDamaged
+      && disableGenesisStrikeHere.cards[alliedMinionId].genesisStrikeEachEnemyHere,
+    true,
+  );
+  const disableGenesisDamageHere = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [alliedMinionId]: {
+        ...cards[alliedMinionId]!,
+        genesisDisableSelfUntilDamaged: true,
+        genesisDamageEachOtherUnitHere: 1,
+      } as GameCardDefinition,
+    },
+    seed: 1,
+  });
+  assert.equal(
+    disableGenesisDamageHere.cards[alliedMinionId]?.cardType === 'minion'
+      && disableGenesisDamageHere.cards[alliedMinionId].genesisDisableSelfUntilDamaged
+      && disableGenesisDamageHere.cards[alliedMinionId].genesisDamageEachOtherUnitHere === 1,
+    true,
+  );
   const disableGenesisTargetedDamage = createGameManifest({
     ...input,
     cards: {

@@ -2145,11 +2145,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} simultaneous Genesis strikes and another effect are unsupported`);
   }
-  if (card.genesisDisableSelfUntilDamaged === true
-    && (card.genesisDamageEachOtherUnitHere === 1
-      || card.genesisStrikeEachEnemyHere === true)) {
-    throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
-  }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }

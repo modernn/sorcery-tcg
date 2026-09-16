@@ -1554,6 +1554,26 @@ fn genesis_disable_with_draw_spells_should_parse() {
 }
 
 #[test]
+fn genesis_disable_with_each_other_unit_here_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "disable-here-damage",
+        &with(
+            with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
+            "genesisDamageEachOtherUnitHere",
+            json!(1),
+        ),
+    )
+    .expect("valid disable plus here-damage minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_disable_self_until_damaged);
+    assert_eq!(
+        facts.genesis,
+        Some(MinionGenesis::DamageEachOtherUnitHereOne)
+    );
+}
+
+#[test]
 fn genesis_disable_with_draw_site_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "disable-draw-site",
@@ -1568,6 +1588,23 @@ fn genesis_disable_with_draw_site_should_parse() {
     };
     assert!(facts.genesis_disable_self_until_damaged);
     assert_eq!(facts.genesis, Some(MinionGenesis::DrawSite));
+}
+
+#[test]
+fn genesis_disable_with_strike_here_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "disable-strike-here",
+        &with(
+            with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
+            "genesisStrikeEachEnemyHere",
+            json!(true),
+        ),
+    )
+    .expect("valid disable plus strike-here minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_disable_self_until_damaged);
+    assert_eq!(facts.genesis, Some(MinionGenesis::StrikeEachEnemyHere));
 }
 
 #[test]

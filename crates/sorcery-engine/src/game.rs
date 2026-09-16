@@ -16629,6 +16629,7 @@ impl Game {
                 "start-turn-damage-allocated",
                 None,
                 outcomes,
+                false,
             )?;
             self.position.state_version += 1;
             return Ok(());
@@ -20639,6 +20640,7 @@ impl Game {
                 "genesis-damage-allocated",
                 None,
                 outcomes,
+                true,
             )?;
             return Ok(());
         }
@@ -20649,9 +20651,6 @@ impl Game {
             .find(|unit| unit.card.instance_id == *source_instance_id)
             .cloned()
             .ok_or(GameError::IllegalAction)?;
-        if self.minion_is_disabled(&source) {
-            return Ok(());
-        }
         let (current_power, lethal) = self.combatant_attack_and_lethal(
             UnitKind::Minion,
             source.controller,
@@ -20721,6 +20720,7 @@ impl Game {
         allocation_event: &'static str,
         continuation: Option<DeathriteContinuation>,
         outcomes: &mut OutcomeLog<'_>,
+        ignore_source_disabled: bool,
     ) -> Result<bool, GameError> {
         let source = self
             .position
@@ -20729,7 +20729,7 @@ impl Game {
             .find(|unit| unit.card.instance_id == *source_instance_id)
             .cloned()
             .ok_or(GameError::IllegalAction)?;
-        if self.minion_is_disabled(&source) {
+        if !ignore_source_disabled && self.minion_is_disabled(&source) {
             return Ok(false);
         }
         let (current_power, lethal) = self.combatant_attack_and_lethal(
@@ -21440,6 +21440,7 @@ impl Game {
                     seat,
                 })),
                 outcomes,
+                false,
             )?;
             if began_deaths || self.position.terminal.is_some() {
                 return Ok(());

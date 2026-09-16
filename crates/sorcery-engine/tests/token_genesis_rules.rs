@@ -1206,6 +1206,674 @@ fn rule_catalog_0492_spellbook_summon_genesis_disable_then_loses_controller_life
     assert_exact_replay(&session);
 }
 
+fn try_step_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    match session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    }) {
+        Ok(StepResult::Accepted(receipt)) => Some((descriptor, receipt)),
+        _ => None,
+    }
+}
+
+fn resolve_draw_phase(session: &mut Session) {
+    while session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == "draw")
+    {
+        accept_where(session, |descriptor| descriptor["kind"] == "draw");
+    }
+}
+
+fn south_enemy() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 5,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn south_enemy_with_any_site() -> Value {
+    let mut enemy = south_enemy();
+    enemy["summonToAnySite"] = json!(true);
+    enemy
+}
+
+fn south_enemy_at(session: &mut Session, enemy_cell: &str) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C1"
+            && descriptor["cardId"] == "south-site"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == enemy_cell
+    });
+    let enemy_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    resolve_draw_phase(session);
+    enemy_id
+}
+
+fn south_enemy_at_c1(session: &mut Session) -> String {
+    south_enemy_at(session, "C1")
+}
+
+fn disable_strike_token() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "genesisStrikeEachEnemyHere": true,
+        "manaCost": 0,
+        "occupiesSquareArea": 2,
+        "token": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn disable_strike_scout() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "genesisStrikeEachEnemyHere": true,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn disable_here_token() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "genesisDamageEachOtherUnitHere": 1,
+        "manaCost": 0,
+        "occupiesSquareArea": 2,
+        "token": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn disable_here_scout() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "genesisDamageEachOtherUnitHere": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn north_ally() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn end_and_draw_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn end_and_draw_atlas(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw-site"
+            || (descriptor["kind"] == "draw" && descriptor["zone"] == "atlas")
+    });
+}
+
+fn square_token_manifest(
+    seed: u32,
+    token: &Value,
+    token_id: &str,
+    north_spellbook: &[&str],
+) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "token-genesis-square" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-token-genesis-square-v1",
+        },
+        "cards": {
+            token_id: token,
+            "north-ally": north_ally(),
+            "north-avatar": avatar(),
+            "north-gate": genesis_site(token_id),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": south_enemy_with_any_site(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 4]
+                    .into_iter()
+                    .chain(vec!["north-gate"; 4])
+                    .collect::<Vec<_>>(),
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook.to_vec(),
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical manifest")
+}
+
+fn prepare_square_token_entry_at_b3(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C4"
+    });
+    let enemy_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned();
+    end_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B4"
+    });
+    end_and_draw_spellbook(session);
+    end_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    end_and_draw_spellbook(session);
+    end_and_draw_atlas(session);
+    enemy_id
+}
+
+fn square_token_proof_manifest(
+    token: &Value,
+    token_id: &str,
+    north_spellbook: &[&str],
+    before_gate: impl Fn(&mut Session) -> Option<()>,
+) -> String {
+    (1..=8192)
+        .find_map(|seed| {
+            let manifest = square_token_manifest(seed, token, token_id, north_spellbook);
+            let mut session = Session::new(&manifest).ok()?;
+            prepare_square_token_entry_at_b3(&mut session);
+            before_gate(&mut session)?;
+            try_step_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site"
+                    && descriptor["cell"] == "B3"
+                    && descriptor["cardId"] == "north-gate"
+                    && descriptor["genesisTokenChoice"] == "pay-one-mana"
+            })?;
+            Some(manifest)
+        })
+        .expect("bounded seed for square token genesis proof")
+}
+
+fn north_ally_at_c4(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally identity")
+        .to_owned()
+}
+
+fn north_ally_at_c1(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C1"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally identity")
+        .to_owned()
+}
+
+#[test]
+fn rule_catalog_0493_token_genesis_disable_then_strikes_enemies_here() {
+    let token = disable_strike_token();
+    let manifest =
+        square_token_proof_manifest(&token, "strike-scout", &["north-ally"; 6], |_| Some(()));
+    let mut session = Session::new(&manifest).expect("valid disable-strike token genesis manifest");
+    let enemy_id = prepare_square_token_entry_at_b3(&mut session);
+    let (_, paid) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "B3"
+            && descriptor["cardId"] == "north-gate"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&paid),
+        [
+            "site-played",
+            "minion-summoned",
+            "minion-disabled",
+            "strike-damage-allocated",
+            "damage-dealt",
+        ]
+    );
+    let token_id = paid.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity");
+    assert_eq!(paid.events[2].payload["instanceId"], token_id);
+    assert_eq!(paid.events[3].payload["strikerInstanceId"], token_id);
+    assert_eq!(paid.events[3].payload["targetInstanceId"], enemy_id);
+    assert_eq!(paid.events[3].payload["amount"], 3);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == token_id)
+        .expect("summoned token");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_eq!(unit["location"], "B3");
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == enemy_id)
+            .expect("struck enemy")["damage"],
+        3
+    );
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps setup, strike genesis, disable state, and replay together"
+)]
+fn rule_catalog_0494_spellbook_summon_genesis_disable_then_strikes_enemies_here() {
+    let scout = disable_strike_scout();
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "spellbook-genesis-disable-strike" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-spellbook-genesis-disable-strike-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-scout": scout,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": south_enemy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-scout"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 494,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid spellbook disable-strike genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let enemy_id = south_enemy_at_c1(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["cardId"] == "north-scout"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "minion-disabled",
+            "strike-damage-allocated",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "avatar-life-lost",
+        ]
+    );
+    let minion_id = receipt.events[0].payload["instanceId"]
+        .as_str()
+        .expect("minion identity");
+    assert_eq!(receipt.events[1].payload["instanceId"], minion_id);
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let mut struck: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 3);
+            assert_eq!(event.payload["strikerInstanceId"], minion_id);
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("struck identity")
+                .to_owned()
+        })
+        .collect();
+    struck.sort_unstable();
+    let mut expected = vec![enemy_id.clone(), south_avatar_id];
+    expected.sort_unstable();
+    assert_eq!(struck, expected);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == minion_id)
+        .expect("summoned minion");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_eq!(unit["location"], "C1");
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == enemy_id)
+            .expect("struck enemy")["damage"],
+        3
+    );
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 17);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0495_token_genesis_disable_then_damages_other_units_here() {
+    let token = disable_here_token();
+    let manifest =
+        square_token_proof_manifest(&token, "here-scout", &["north-ally"; 6], |session| {
+            try_step_where(session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-ally"
+                    && descriptor["cell"] == "C4"
+            })?;
+            Some(())
+        });
+    let mut session = Session::new(&manifest).expect("valid disable-here token genesis manifest");
+    let enemy_id = prepare_square_token_entry_at_b3(&mut session);
+    let north_avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let ally_id = north_ally_at_c4(&mut session);
+    let (_, paid) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "B3"
+            && descriptor["cardId"] == "north-gate"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&paid),
+        [
+            "site-played",
+            "minion-summoned",
+            "minion-disabled",
+            "genesis-damage-allocated",
+            "genesis-damage-allocated",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "damage-dealt",
+            "avatar-life-lost",
+        ]
+    );
+    let token_id = paid.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity");
+    assert_eq!(paid.events[2].payload["instanceId"], token_id);
+    let mut damaged: Vec<_> = paid
+        .events
+        .iter()
+        .filter(|event| event.event_type == "genesis-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 1);
+            assert_eq!(event.payload["sourceInstanceId"], token_id);
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("damaged identity")
+                .to_owned()
+        })
+        .collect();
+    damaged.sort_unstable();
+    let mut expected = vec![ally_id.clone(), enemy_id.clone(), north_avatar_id.clone()];
+    expected.sort_unstable();
+    assert_eq!(damaged, expected);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == token_id)
+        .expect("summoned token");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_eq!(unit["location"], "B3");
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == ally_id)
+            .expect("wounded ally")["damage"],
+        1
+    );
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == enemy_id)
+            .expect("wounded enemy")["damage"],
+        1
+    );
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one catalog proof keeps setup, here damage, disable state, and replay together"
+)]
+fn rule_catalog_0496_spellbook_summon_genesis_disable_then_damages_other_units_here() {
+    let scout = disable_here_scout();
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "spellbook-genesis-disable-here" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-spellbook-genesis-disable-here-v1",
+        },
+        "cards": {
+            "north-ally": north_ally(),
+            "north-avatar": avatar(),
+            "north-scout": scout,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": south_enemy_with_any_site(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": ["north-scout", "north-ally", "north-scout", "north-ally", "north-scout", "north-ally"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 496,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid spellbook disable-here genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let enemy_id = south_enemy_at_c1(&mut session);
+    let ally_id = north_ally_at_c1(&mut session);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["cardId"] == "north-scout"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-summoned",
+            "minion-disabled",
+            "genesis-damage-allocated",
+            "genesis-damage-allocated",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "avatar-life-lost",
+            "damage-dealt",
+        ]
+    );
+    let minion_id = receipt.events[0].payload["instanceId"]
+        .as_str()
+        .expect("minion identity");
+    assert_eq!(receipt.events[1].payload["instanceId"], minion_id);
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    let mut damaged: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "genesis-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 1);
+            assert_eq!(event.payload["sourceInstanceId"], minion_id);
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("damaged identity")
+                .to_owned()
+        })
+        .collect();
+    damaged.sort_unstable();
+    let mut expected = vec![ally_id.clone(), enemy_id.clone(), south_avatar_id];
+    expected.sort_unstable();
+    assert_eq!(damaged, expected);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == minion_id)
+        .expect("summoned minion");
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_eq!(unit["location"], "C1");
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == ally_id)
+            .expect("wounded ally")["damage"],
+        1
+    );
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == enemy_id)
+            .expect("wounded enemy")["damage"],
+        1
+    );
+    assert_eq!(after["players"]["south"]["avatar"]["life"], 19);
+    assert_exact_replay(&session);
+}
+
 fn damage_scout() -> Value {
     json!({
         "attack": 1,
