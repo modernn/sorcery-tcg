@@ -11562,6 +11562,46 @@
         "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
         "testName": "rule_catalog_0503_deck_pair_reaches_combat_with_verified_replay"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0504",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Two distinct synthetic decks played by the baseline policy reach a terminal win with at least one fight, and the full transcript replays byte-identically.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "declare-attack",
+        "close-defend",
+        "end-turn"
+      ],
+      "eventHints": [
+        "fight-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
+        "testName": "rule_catalog_0504_deck_pair_completes_terminal_game_with_verified_replay"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0505",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "The terminal synthetic deck-pair batch runner reproduces the same transcript hash and verified replay across repeated native batch executions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
+        "testName": "rule_catalog_0505_deck_pair_terminal_batch_reproduces_transcript_hash"
+      }
     }
   ]
 }

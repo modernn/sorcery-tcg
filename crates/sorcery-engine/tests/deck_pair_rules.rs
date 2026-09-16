@@ -297,3 +297,72 @@ fn rule_catalog_0503_deck_pair_reaches_combat_with_verified_replay() {
     );
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0504_deck_pair_completes_terminal_game_with_verified_replay() {
+    let manifest = deck_pair_manifest(504);
+    let north_deck = validated_manifest_deck(&manifest, "north");
+    let south_deck = validated_manifest_deck(&manifest, "south");
+    assert_ne!(
+        north_deck.deck_id(),
+        south_deck.deck_id(),
+        "north and south must be distinct deck identities"
+    );
+    let authority = authority_hash(&manifest);
+    let north_policy = policy(&authority, north_deck.deck_id().as_str(), OPENING_FEATURES);
+    let south_policy = policy(&authority, south_deck.deck_id().as_str(), OPENING_FEATURES);
+    let game = Game::from_manifest_json(&manifest).expect("valid deck-pair game");
+    let rollout = run_game(game, &north_policy, &south_policy, 300).expect("terminal rollout");
+    let session = replay_selected(&manifest, &rollout).expect("terminal replay");
+
+    assert!(
+        rollout.is_terminal(),
+        "rollout must reach a terminal outcome"
+    );
+    assert_eq!(
+        rollout.outcome(),
+        Some(sorcery_engine::game::GameOutcome::Win {
+            loser: Seat::North,
+            winner: Seat::South,
+        })
+    );
+    assert!(
+        all_event_types(&session).contains(&"fight-started"),
+        "terminal deck-pair game must include at least one fight"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0505_deck_pair_terminal_batch_reproduces_transcript_hash() {
+    let manifest = deck_pair_manifest(504);
+    let north_deck = validated_manifest_deck(&manifest, "north");
+    let south_deck = validated_manifest_deck(&manifest, "south");
+    let authority = authority_hash(&manifest);
+    let north_policy = policy(&authority, north_deck.deck_id().as_str(), OPENING_FEATURES);
+    let south_policy = policy(&authority, south_deck.deck_id().as_str(), OPENING_FEATURES);
+    let job = BatchJob {
+        manifest_json: &manifest,
+        north_deck_id: north_deck.deck_id(),
+        north_policy: &north_policy,
+        south_deck_id: south_deck.deck_id(),
+        south_policy: &south_policy,
+    };
+
+    let first = run_game_batch(&[job], 1).expect("first terminal deck-pair batch");
+    let second = run_game_batch(&[job], 2).expect("second terminal deck-pair batch");
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(first, second);
+    assert!(first[0].report.replay_verified);
+    assert_eq!(first[0].report.terminal.winner(), Some(Seat::South));
+    assert_eq!(
+        first[0].report.transcript_hash,
+        second[0].report.transcript_hash
+    );
+    assert!(first[0].report.accepted_action_count >= 200);
+    assert_eq!(
+        first[0].report.classification,
+        sorcery_engine::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+    );
+}
