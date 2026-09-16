@@ -2302,8 +2302,7 @@ fn oversized_ranged_movement_combo_extra() -> Value {
 }
 
 #[test]
-fn rule_catalog_0407_oversized_during_movement_ranged_then_post_strike_step_translates_footprint(
-) {
+fn rule_catalog_0407_oversized_during_movement_ranged_then_post_strike_step_translates_footprint() {
     let mut session = composition_session(
         &oversized_ranged_movement_combo_extra(),
         &json!({
@@ -2408,7 +2407,7 @@ fn rule_catalog_0408_oversized_during_movement_ranged_then_declined_step_continu
     let (_, declined) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "resolve-ranged-step" && descriptor["choice"] == "decline"
     });
-    assert_eq!(event_types(&declined), []);
+    assert_eq!(event_types(&declined), [] as [&str; 0]);
     let after_decline = state(&session);
     assert_eq!(after_decline["phase"], "movement");
     assert_eq!(unit(&after_decline, &giant)["location"], "B3");
