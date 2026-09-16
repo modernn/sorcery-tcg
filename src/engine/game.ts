@@ -1445,7 +1445,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && (card.genesisDiscardTopSpells !== undefined
         || card.genesisDrawSpellPerAdjacentSameCard
         || card.genesisEnemiesLoseStealth
-        || card.genesisGainMana !== undefined
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
