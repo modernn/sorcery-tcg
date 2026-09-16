@@ -10313,7 +10313,7 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
     },
     seed: 1,
   }), /genesisDisableSelfUntilDamaged must be true when defined/);
-  assert.throws(() => createGameManifest({
+  const stealthGenesisDisable = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -10321,10 +10321,16 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
         ...cards[alliedMinionId]!,
         stealth: true,
         genesisDisableSelfUntilDamaged: true,
-      } as unknown as GameCardDefinition,
+      } as GameCardDefinition,
     },
     seed: 1,
-  }), /Genesis disable with Stealth is unsupported/);
+  });
+  assert.equal(
+    stealthGenesisDisable.cards[alliedMinionId]?.cardType === 'minion'
+      && stealthGenesisDisable.cards[alliedMinionId].genesisDisableSelfUntilDamaged
+      && stealthGenesisDisable.cards[alliedMinionId].stealth,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

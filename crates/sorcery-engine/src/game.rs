@@ -20551,6 +20551,7 @@ impl Game {
                         "sourceInstanceId": source_instance_id,
                     })
                 });
+                self.reveal_disabled_stealth(outcomes);
             }
             Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo) => {
                 match (genesis_damage_choice, genesis_damage_target) {

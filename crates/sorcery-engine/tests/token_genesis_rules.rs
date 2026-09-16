@@ -240,6 +240,169 @@ fn rule_catalog_0382_token_genesis_disables_the_token_until_damaged() {
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_0479_token_genesis_disable_strips_stealth_on_entry() {
+    let token = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "manaCost": 0,
+        "stealth": true,
+        "token": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "token-genesis-disable-stealth" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-token-genesis-disable-stealth-v1",
+        },
+        "cards": {
+            "disable-scout": token,
+            "north-avatar": avatar(),
+            "north-gate-disable": genesis_site("disable-scout"),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-gate-disable"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 479,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid stealthed disable token genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    let (_, paid) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&paid),
+        [
+            "site-played",
+            "minion-summoned",
+            "minion-disabled",
+            "stealth-lost"
+        ]
+    );
+    let token_id = paid.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity");
+    assert_eq!(paid.events[2].payload["instanceId"], token_id);
+    assert_eq!(paid.events[3].payload["instanceId"], token_id);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == token_id)
+        .expect("summoned token");
+    assert_eq!(unit["stealthed"], false);
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0480_spellbook_summon_genesis_disable_strips_stealth_on_entry() {
+    let scout = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "genesisDisableSelfUntilDamaged": true,
+        "manaCost": 0,
+        "stealth": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "spellbook-genesis-disable-stealth" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-spellbook-genesis-disable-stealth-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-scout": scout,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-scout"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 480,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    let manifest = canonical_json(&value).expect("canonical manifest");
+    let mut session =
+        Session::new(&manifest).expect("valid spellbook disable-stealth genesis manifest");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "C1"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["minion-summoned", "minion-disabled", "stealth-lost"]
+    );
+    let minion_id = receipt.events[0].payload["instanceId"]
+        .as_str()
+        .expect("minion identity");
+    assert_eq!(receipt.events[1].payload["instanceId"], minion_id);
+    assert_eq!(receipt.events[2].payload["instanceId"], minion_id);
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == minion_id)
+        .expect("summoned minion");
+    assert_eq!(unit["stealthed"], false);
+    assert_eq!(unit["disabledUntilDamaged"], true);
+    assert_exact_replay(&session);
+}
+
 fn damage_scout() -> Value {
     json!({
         "attack": 1,

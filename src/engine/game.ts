@@ -2154,9 +2154,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
-  if (card.genesisDisableSelfUntilDamaged === true && card.stealth === true) {
-    throw new RangeError(`${path} Genesis disable with Stealth is unsupported`);
-  }
   if (card.genesisMayDamageTargetAdjacentUnit === 2
     && (card.discardRandomCardInsteadOfMana === true
       || card.sacrificeMinionAtSummoningLocationForManaDiscount === 2)) {

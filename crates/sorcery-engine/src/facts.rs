@@ -1774,12 +1774,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         ));
     }
 
-    if matches!(genesis, Some(MinionGenesis::DisableSelfUntilDamaged)) && stealth {
-        return Err(FactError::new(
-            path,
-            "Genesis disable with Stealth is unsupported",
-        ));
-    }
     if matches!(genesis, Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo))
         && alternative_summon_payment.is_some()
     {

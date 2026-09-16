@@ -10906,6 +10906,58 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0478_site_genesis_conditional_mana_immobilize_nearby_then_keep_spell_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0479",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a token minion carries both Stealth and Genesis disable-until-damaged, entering play disables the token and permanently strips its Stealth before any other Genesis resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "stealth"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0479_token_genesis_disable_strips_stealth_on_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0480",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a spellbook minion carries both Stealth and Genesis disable-until-damaged, summoning it disables the minion and permanently strips its Stealth on entry.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "stealth"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-disabled",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0480_spellbook_summon_genesis_disable_strips_stealth_on_entry"
+      }
     }
   ]
 }

@@ -733,15 +733,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "Genesis effects",
         ),
         (
-            "Genesis disable and Stealth",
-            with(
-                with(minion(), "genesisDisableSelfUntilDamaged", json!(true)),
-                "stealth",
-                json!(true),
-            ),
-            "disable with Stealth",
-        ),
-        (
             "targeted Genesis and payment",
             with(
                 with(minion(), "genesisMayDamageTargetAdjacentUnit", json!(2)),
