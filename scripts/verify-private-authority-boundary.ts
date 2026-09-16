@@ -164,25 +164,15 @@ function commandBytes(
   }
 }
 
-function reachableHistoryCandidates(repositoryRoot: string): readonly Candidate[] {
-  const candidates: Candidate[] = [];
-  const objects = commandBytes(
-    'git',
-    ['rev-list', '--objects', '--branches', '--remotes', '--tags'],
-    repositoryRoot,
-  ).toString('utf8');
-  const records = objects.split(/\r?\n/).flatMap((record) => {
-    if (record === '') return [];
-    const separator = record.indexOf(' ');
-    return separator < 0 ? [] : [{ objectId: record.slice(0, separator), path: record.slice(separator + 1) }];
-  });
-  if (records.length === 0) return candidates;
-  const batch = commandBytes(
-    'git',
-    ['cat-file', '--batch'],
-    repositoryRoot,
-    records.map(({ objectId }) => objectId).join('\n') + '\n',
-  );
+type HistoryObjectRecord = Readonly<{ objectId: string; path: string }>;
+
+const MAX_GIT_CAT_FILE_BATCH_BYTES = Math.floor(MAX_COMMAND_BUFFER * 0.8);
+
+function appendGitCatFileBatchCandidates(
+  candidates: Candidate[],
+  batch: Buffer,
+  records: readonly HistoryObjectRecord[],
+): void {
   let offset = 0;
   for (const record of records) {
     const headerEnd = batch.indexOf(0x0a, offset);
@@ -205,6 +195,66 @@ function reachableHistoryCandidates(repositoryRoot: string): readonly Candidate[
       });
     }
     offset = contentEnd + 1;
+  }
+}
+
+function gitCatFileBatchChunks(
+  repositoryRoot: string,
+  records: readonly HistoryObjectRecord[],
+): readonly (readonly HistoryObjectRecord[])[] {
+  if (records.length === 0) return [];
+  const checks = commandBytes(
+    'git',
+    ['cat-file', '--batch-check'],
+    repositoryRoot,
+    records.map(({ objectId }) => objectId).join('\n') + '\n',
+  ).toString('utf8');
+  const sizes = new Map<string, number>();
+  for (const line of checks.split(/\r?\n/)) {
+    if (line === '') continue;
+    const match = /^([0-9a-f]+) ([a-z]+)(?: (\d+))?$/.exec(line);
+    if (match === null) throw new BoundaryViolation('Could not parse Git history batch-check record.');
+    sizes.set(match[1]!, match[2] === 'blob' ? Number.parseInt(match[3]!, 10) : 0);
+  }
+  const chunks: HistoryObjectRecord[][] = [];
+  let current: HistoryObjectRecord[] = [];
+  let currentBytes = 0;
+  for (const record of records) {
+    const size = sizes.get(record.objectId);
+    if (size === undefined) throw new BoundaryViolation('Could not resolve Git history object size.');
+    const recordBytes = size + record.objectId.length + 32;
+    if (current.length > 0 && currentBytes + recordBytes > MAX_GIT_CAT_FILE_BATCH_BYTES) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(record);
+    currentBytes += recordBytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function reachableHistoryCandidates(repositoryRoot: string): readonly Candidate[] {
+  const candidates: Candidate[] = [];
+  const objects = commandBytes(
+    'git',
+    ['rev-list', '--objects', '--branches', '--remotes', '--tags'],
+    repositoryRoot,
+  ).toString('utf8');
+  const records = objects.split(/\r?\n/).flatMap((record) => {
+    if (record === '') return [];
+    const separator = record.indexOf(' ');
+    return separator < 0 ? [] : [{ objectId: record.slice(0, separator), path: record.slice(separator + 1) }];
+  });
+  for (const chunk of gitCatFileBatchChunks(repositoryRoot, records)) {
+    const batch = commandBytes(
+      'git',
+      ['cat-file', '--batch'],
+      repositoryRoot,
+      chunk.map(({ objectId }) => objectId).join('\n') + '\n',
+    );
+    appendGitCatFileBatchCandidates(candidates, batch, chunk);
   }
   return candidates;
 }
