@@ -1489,6 +1489,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
+        | MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
         | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
@@ -1603,6 +1604,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         deathrite_mill_sites: _,
         deathrite_mill_spells: _,
         defense: _,
+        demon: _,
         dies_at_end_of_controller_turn: _,
         does_not_untap_during_controllers_start_phase: _,
         enemies_must_attack_this_if_able: _,
@@ -1655,6 +1657,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         tap_to_shoot_projectile_damage: _,
         thresholds: _,
         token: _,
+        undead: _,
         untaps_at_end_of_controller_turn: _,
         voidwalk: _,
         waterbound: _,
@@ -7236,7 +7239,8 @@ impl Game {
                 }
                 choices
             }
-            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
+            MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
+            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_)
             | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
             | MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
                 let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
@@ -21188,6 +21192,29 @@ impl Game {
                     )?;
                 }
             }
+            MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps => {
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
+                let mut victims = Vec::new();
+                for unit in &self.position.units {
+                    if unit.region != target_location.region
+                        || !Self::unit_occupies_cell(unit, target_location.cell)
+                    {
+                        continue;
+                    }
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        continue;
+                    };
+                    if facts.demon || facts.undead {
+                        victims.push(unit.card.instance_id.clone());
+                    }
+                }
+                victims.sort_unstable();
+                if !victims.is_empty() {
+                    self.banish_units(&victims, outcomes)?;
+                }
+            }
             MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
                 let target_location = target_location.ok_or(GameError::IllegalAction)?;
                 let mut victims = Vec::new();
@@ -25919,6 +25946,10 @@ mod tests {
             (
                 MagicEffect::TargetPlayerDrawsSpells(1),
                 json!({ "targetPlayerDrawsSpells": 1 }),
+            ),
+            (
+                MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps,
+                json!({ "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps": true }),
             ),
             (
                 MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps,

@@ -353,6 +353,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("allyStrikesEachEnemyAtItsLocation", json!(true)),
         ("allySubmergesTargetNearbyMinion", json!(true)),
         ("allyTakesUpToTwoSteps", json!(true)),
+        (
+            "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+            json!(true),
+        ),
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
         (
@@ -1837,6 +1841,74 @@ fn teleport_target_one_diagonal_should_parse() {
     assert_eq!(
         facts.effect,
         MagicEffect::TeleportTargetMinionArtifactOrAuraOneDiagonal
+    );
+}
+
+#[test]
+fn banish_demon_and_undead_minions_at_location_within_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "banish-demon-and-undead-minions-at-location-within-two-steps",
+        &spell(
+            "magic",
+            (
+                "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid banish-demon-and-undead-minions-at-location-within-two-steps Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps
+    );
+}
+
+#[test]
+fn banish_demon_and_undead_must_not_combine_with_kill_mortal() {
+    let error = parse_card_definition(
+        "banish-plus-kill-mortal",
+        &with(
+            spell(
+                "magic",
+                (
+                    "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+                    json!(true),
+                ),
+            ),
+            "killMortalMinionsAtLocationWithinTwoSteps",
+            json!(true),
+        ),
+    )
+    .expect_err("banish stays exclusive of kill-mortal location Magic");
+    assert!(error.to_string().contains("exactly one"), "{error}");
+}
+
+#[test]
+fn demon_and_undead_minion_flags_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "demon-undead-minion",
+        &with(with(minion(), "demon", json!(true)), "undead", json!(true)),
+    )
+    .expect("valid demon+undead minion") else {
+        panic!("expected Minion facts");
+    };
+    assert!(facts.demon);
+    assert!(facts.undead);
+}
+
+#[test]
+fn demon_and_undead_minion_flags_must_be_true_when_defined() {
+    let demon_error = parse_card_definition("false-demon", &with(minion(), "demon", json!(false)))
+        .expect_err("demon stays true-only");
+    assert!(demon_error.to_string().contains("demon"), "{demon_error}");
+    let undead_error =
+        parse_card_definition("false-undead", &with(minion(), "undead", json!(false)))
+            .expect_err("undead stays true-only");
+    assert!(
+        undead_error.to_string().contains("undead"),
+        "{undead_error}"
     );
 }
 

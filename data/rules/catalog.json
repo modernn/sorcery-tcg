@@ -13197,6 +13197,54 @@
         "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
         "testName": "rule_catalog_0572_empty_water_site_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0573",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic offers the same measured locations as Mortality: existing sites within two cardinal steps of the caster footprint. Casting at a shared site banishes every Demon or Undead minion there, leaves a living non-Demon non-Undead occupant untouched, and does not offer or banish an Undead three cardinal steps away.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_0573_banishes_demon_at_location_and_spares_beast_and_far_undead"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0574",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic still offers a location that holds only a non-Demon non-Undead minion. Casting there is a paid no-op: the occupant stays and the spell still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_0574_location_with_only_a_beast_is_a_paid_noop"
+      }
     }
   ]
 }

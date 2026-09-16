@@ -221,6 +221,7 @@ pub struct AuraFacts {
 /// The single supported effect carried by Magic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MagicEffect {
+    BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps,
     BurrowAllMinionsAndArtifactsAtTargetLandSite,
     BurrowTargetAdjacentMinion,
     BurrowTargetMinionOrArtifact,
@@ -390,6 +391,7 @@ pub struct MinionFacts {
     pub deathrite_mill_sites: bool,
     pub deathrite_mill_spells: bool,
     pub defense: u8,
+    pub demon: bool,
     pub dies_at_end_of_controller_turn: bool,
     pub does_not_untap_during_controllers_start_phase: bool,
     pub enemies_must_attack_this_if_able: bool,
@@ -442,6 +444,7 @@ pub struct MinionFacts {
     pub tap_to_shoot_projectile_damage: Option<u8>,
     pub thresholds: Thresholds,
     pub token: bool,
+    pub undead: bool,
     pub untaps_at_end_of_controller_turn: bool,
     pub voidwalk: bool,
     pub waterbound: bool,
@@ -806,6 +809,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "allyStrikesEachEnemyAtItsLocation",
     "allySubmergesTargetNearbyMinion",
     "allyTakesUpToTwoSteps",
+    "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
     "burrowAllMinionsAndArtifactsAtTargetLandSite",
     "burrowTargetAdjacentMinion",
     "burrowTargetMinionOrArtifact",
@@ -923,6 +927,7 @@ const MINION_FIELDS: &[&str] = &[
     "deathriteMillSites",
     "deathriteMillSpells",
     "defense",
+    "demon",
     "diesAtEndOfControllerTurn",
     "doesNotUntapDuringControllersStartPhase",
     "enemiesMustAttackThisIfAble",
@@ -982,6 +987,7 @@ const MINION_FIELDS: &[&str] = &[
     "tapToShootProjectileDamage",
     "thresholds",
     "token",
+    "undead",
     "untapsAtEndOfControllerTurn",
     "voidwalk",
     "ward",
@@ -1406,6 +1412,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
     )?;
     let effect = one_effect(
         [
+            true_only(
+                object,
+                "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+                path,
+            )?
+            .then_some(MagicEffect::BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps),
             true_only(object, "burrowAllMinionsAndArtifactsAtTargetLandSite", path)?
                 .then_some(MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite),
             true_only(object, "burrowTargetAdjacentMinion", path)?
@@ -1995,6 +2007,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             MAX_COMBAT_STAT,
             path,
         )?),
+        demon: true_only(object, "demon", path)?,
         dies_at_end_of_controller_turn: true_only(object, "diesAtEndOfControllerTurn", path)?,
         does_not_untap_during_controllers_start_phase: true_only(
             object,
@@ -2076,6 +2089,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         tap_to_shoot_projectile_damage,
         thresholds: parse_thresholds(object, path)?,
         token,
+        undead: true_only(object, "undead", path)?,
         untaps_at_end_of_controller_turn: true_only(object, "untapsAtEndOfControllerTurn", path)?,
         voidwalk,
         waterbound,

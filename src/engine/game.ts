@@ -408,6 +408,7 @@ export type GameCardDefinition =
     grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell?: true;
     healController?: number;
     healTargetMinion?: number;
+    banishDemonAndUndeadMinionsAtLocationWithinTwoSteps?: true;
     killMortalMinionsAtLocationWithinTwoSteps?: true;
     killTargetMinion?: true;
     killTargetWoundedMinion?: true;
@@ -516,7 +517,9 @@ export type GameCardDefinition =
     atStartOfControllerTurnTeleportToRandomSiteOrVoid?: true;
     mayRangedStrikeOnceDuringBasicMovement?: true;
     mayStepAfterRangedStrike?: true;
+    demon?: true;
     mortal?: true;
+    undead?: true;
     movementBonus?: 1 | 2;
     movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
@@ -1357,7 +1360,7 @@ const SUPPORTED_CARD_FIELDS = {
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantDoubleDamageToAllyNextStrikeThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
     grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
-    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite wardNearbyMinionOrSite healController healTargetMinion killMortalMinionsAtLocationWithinTwoSteps killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
+    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite wardNearbyMinionOrSite healController healTargetMinion banishDemonAndUndeadMinionsAtLocationWithinTwoSteps killMortalMinionsAtLocationWithinTwoSteps killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
@@ -1378,7 +1381,7 @@ const SUPPORTED_CARD_FIELDS = {
     genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
-    manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike mortal movementBonus
+    manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
     movesOnlyForward movesOnlySideways mustAttackAUnitIfAble
     mustBeCastBurrowed mustBeCastSubmerged mustBeCastToOuterColumn mustBeCastToWaterSite
     nearbyAvatarsMayDiscardCardToGainControlOfThis nearbyEnemiesPermanentlyLoseStealth occupiesSquareArea ordinary otherControlledMortalsPowerBonus
@@ -1919,6 +1922,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
     }
+    if (card.banishDemonAndUndeadMinionsAtLocationWithinTwoSteps !== undefined
+      && card.banishDemonAndUndeadMinionsAtLocationWithinTwoSteps !== true) {
+      throw new RangeError(`${path}.banishDemonAndUndeadMinionsAtLocationWithinTwoSteps must be true when defined`);
+    }
     if (card.killMortalMinionsAtLocationWithinTwoSteps !== undefined
       && card.killMortalMinionsAtLocationWithinTwoSteps !== true) {
       throw new RangeError(`${path}.killMortalMinionsAtLocationWithinTwoSteps must be true when defined`);
@@ -2081,6 +2088,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.drawSiteThenMayPlayLandSite === true)
       + Number(card.drawSiteThenMayPlayWaterSite === true)
       + Number(card.drawSpells !== undefined)
+      + Number(card.banishDemonAndUndeadMinionsAtLocationWithinTwoSteps === true)
       + Number(card.killMortalMinionsAtLocationWithinTwoSteps === true)
       + Number(card.killTargetMinion === true)
       + Number(card.killTargetWoundedMinion === true)
@@ -2514,8 +2522,14 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.movementBonus > 2)) {
     throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
   }
+  if (card.demon !== undefined && card.demon !== true) {
+    throw new RangeError(`${path}.demon must be true when defined`);
+  }
   if (card.mortal !== undefined && card.mortal !== true) {
     throw new RangeError(`${path}.mortal must be true when defined`);
+  }
+  if (card.undead !== undefined && card.undead !== true) {
+    throw new RangeError(`${path}.undead must be true when defined`);
   }
   if (card.nearbyEnemiesPermanentlyLoseStealth !== undefined
     && card.nearbyEnemiesPermanentlyLoseStealth !== true) {
@@ -3007,6 +3021,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantPowerToAllyThisTurn: 2 as const }
                   : card.grantPowerTwoToAllyThisTurnThenDrawSpell === true
                     ? { grantPowerTwoToAllyThisTurnThenDrawSpell: true as const }
+                  : card.banishDemonAndUndeadMinionsAtLocationWithinTwoSteps === true
+                    ? { banishDemonAndUndeadMinionsAtLocationWithinTwoSteps: true as const }
                   : card.killMortalMinionsAtLocationWithinTwoSteps === true
                     ? { killMortalMinionsAtLocationWithinTwoSteps: true as const }
                   : card.killTargetMinion === true
@@ -3255,7 +3271,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.mayStepAfterRangedStrike === true
               ? { mayStepAfterRangedStrike: true as const }
               : {}),
+            ...(card.demon === true ? { demon: true as const } : {}),
             ...(card.mortal === true ? { mortal: true as const } : {}),
+            ...(card.undead === true ? { undead: true as const } : {}),
             ...(card.movementBonus ? { movementBonus: card.movementBonus } : {}),
             ...(card.movesOnlyForward === true ? { movesOnlyForward: true } : {}),
             ...(card.movesOnlySideways === true ? { movesOnlySideways: true } : {}),
