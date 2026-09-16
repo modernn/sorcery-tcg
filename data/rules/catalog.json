@@ -10958,6 +10958,59 @@
         "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
         "testName": "rule_catalog_0480_spellbook_summon_genesis_disable_strips_stealth_on_entry"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0481",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and random-card alternative summon payment, the engine offers discard-payment branches with decline and target choices; declining discards one random hand card and summons without Genesis damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayDamageTargetAdjacentUnit",
+        "discardRandomCardInsteadOfMana"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0481_targeted_genesis_alt_payment_decline_discards_and_summons"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0482",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a minion carries both optional targeted adjacent Genesis damage and random-card alternative summon payment, choosing a legal adjacent target discards one random hand card, summons the minion, and deals the printed Genesis damage through the shared damage pipeline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayDamageTargetAdjacentUnit",
+        "discardRandomCardInsteadOfMana"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-summoned",
+        "genesis-damage-allocated",
+        "damage-dealt",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0482_targeted_genesis_alt_payment_target_deals_damage"
+      }
     }
   ]
 }

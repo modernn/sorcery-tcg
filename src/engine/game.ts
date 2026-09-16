@@ -2154,11 +2154,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       || card.genesisLoseControllerLife !== undefined)) {
     throw new RangeError(`${path} Genesis disable with another effect is unsupported`);
   }
-  if (card.genesisMayDamageTargetAdjacentUnit === 2
-    && (card.discardRandomCardInsteadOfMana === true
-      || card.sacrificeMinionAtSummoningLocationForManaDiscount === 2)) {
-    throw new RangeError(`${path} targeted Genesis with alternative summon payment is unsupported`);
-  }
   if (card.gainsStealthAtEndOfTurn !== undefined && typeof card.gainsStealthAtEndOfTurn !== 'boolean') {
     throw new RangeError(`${path}.gainsStealthAtEndOfTurn must be boolean`);
   }

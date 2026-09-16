@@ -1774,14 +1774,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         ));
     }
 
-    if matches!(genesis, Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo))
-        && alternative_summon_payment.is_some()
-    {
-        return Err(FactError::new(
-            path,
-            "targeted Genesis with alternative summon payment is unsupported",
-        ));
-    }
     if may_ranged_strike_once_during_basic_movement && !ranged {
         return Err(FactError::new(
             format!("{path}.mayRangedStrikeOnceDuringBasicMovement"),

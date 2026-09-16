@@ -715,6 +715,118 @@ fn optional_targeted_genesis_damage_should_issue_decline_and_nearby_unit_branche
     assert_exact_replay(&warded);
 }
 
+fn targeted_genesis_alt_payment_checkpoint() -> (Session, String, String) {
+    let mut damager = minion(2, 2);
+    damager["genesisMayDamageTargetAdjacentUnit"] = json!(2);
+    damager["discardRandomCardInsteadOfMana"] = json!(true);
+    damager["manaCost"] = json!(3);
+    let mut warded_enemy = minion(1, 2);
+    warded_enemy["summonToAnySite"] = json!(true);
+    warded_enemy["ward"] = json!(true);
+    let manifest = scenario_manifest(481, &avatar(false, 20), &damager, &warded_enemy, 5, 5, 5);
+    let mut checkpoint = first_main(&manifest);
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(&mut checkpoint, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let before = state(&checkpoint);
+    let source_id = before["players"]["north"]["hand"]["spellbook"][0]["instanceId"]
+        .as_str()
+        .expect("damager identity")
+        .to_owned();
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    (checkpoint, source_id, avatar_id)
+}
+
+#[test]
+fn rule_catalog_0481_targeted_genesis_alt_payment_decline_discards_and_summons() {
+    let (checkpoint, source_id, _) = targeted_genesis_alt_payment_checkpoint();
+    let alt_summons: Vec<_> = checkpoint
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardInstanceId"] == source_id
+                && action.descriptor["cell"] == "C4"
+                && action.descriptor["paymentMode"] == "random-card-discard"
+        })
+        .collect();
+    assert!(
+        alt_summons
+            .iter()
+            .any(|action| action.descriptor["genesisDamageChoice"] == "decline")
+    );
+    let mut session = checkpoint;
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["paymentMode"] == "random-card-discard"
+            && descriptor["genesisDamageChoice"] == "decline"
+    });
+    assert_eq!(event_types(&receipt), ["card-discarded", "minion-summoned"]);
+    assert_eq!(receipt.events[1].payload["manaPaid"], 0);
+    assert_eq!(receipt.random_draws.len(), 1);
+    assert_eq!(
+        receipt.random_draws[0]["purpose"],
+        "summon_random_card_discard_cost"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0482_targeted_genesis_alt_payment_target_deals_damage() {
+    let (checkpoint, source_id, avatar_id) = targeted_genesis_alt_payment_checkpoint();
+    let mut session = checkpoint;
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == source_id
+            && descriptor["cell"] == "C4"
+            && descriptor["paymentMode"] == "random-card-discard"
+            && descriptor["genesisDamageTarget"]["instanceId"] == avatar_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "minion-summoned",
+            "genesis-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost"
+        ]
+    );
+    assert_eq!(
+        receipt.events[2].payload,
+        json!({
+            "amount": 2,
+            "sourceInstanceId": source_id,
+            "targetInstanceId": avatar_id,
+        })
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
     let mut value = manifest_value(

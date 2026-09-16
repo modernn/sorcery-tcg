@@ -733,15 +733,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "Genesis effects",
         ),
         (
-            "targeted Genesis and payment",
-            with(
-                with(minion(), "genesisMayDamageTargetAdjacentUnit", json!(2)),
-                "discardRandomCardInsteadOfMana",
-                json!(true),
-            ),
-            "targeted Genesis",
-        ),
-        (
             "end-turn Stealth modes",
             with(
                 with(minion(), "gainsStealthAtEndOfTurn", json!(true)),
@@ -1488,6 +1479,29 @@ fn oversized_ordinary_and_sacrifice_should_parse() {
     assert_eq!(
         facts.alternative_summon_payment,
         Some(facts::AlternativeSummonPayment::SacrificeMinionAtSummoningLocationForManaDiscountTwo)
+    );
+}
+
+#[test]
+fn targeted_genesis_with_random_card_discard_payment_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "targeted-genesis-alt-payment",
+        &with(
+            with(minion(), "genesisMayDamageTargetAdjacentUnit", json!(2)),
+            "discardRandomCardInsteadOfMana",
+            json!(true),
+        ),
+    )
+    .expect("valid targeted Genesis with alternative payment minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(
+        facts.genesis,
+        Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)
+    );
+    assert_eq!(
+        facts.alternative_summon_payment,
+        Some(facts::AlternativeSummonPayment::DiscardRandomCardInsteadOfMana)
     );
 }
 
