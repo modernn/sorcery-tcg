@@ -4459,6 +4459,428 @@ fn rule_catalog_0454_site_genesis_conditional_mana_and_pay_token_net() {
     assert_exact_replay(&session);
 }
 
+fn conditional_mana_fact() -> Value {
+    json!({ "genesisGainManaIfOnlyControlledCopy": 1 })
+}
+
+fn adjacent_stealth_conditional_manifest(seed: u32, north_spellbook_count: usize) -> String {
+    let mut stealth = minion(1, 2);
+    stealth["stealth"] = json!(true);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &stealth,
+        &stealth,
+        6,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert(
+            "adjacent-combo-site".to_owned(),
+            adjacent_combo_site(&json!({
+                "genesisEnemiesLoseStealth": true,
+                "genesisGainManaIfOnlyControlledCopy": 1,
+            })),
+        );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+fn adjacent_heal_conditional_manifest(
+    seed: u32,
+    north_atlas_count: usize,
+    north_spellbook_count: usize,
+) -> String {
+    let mut loss = minion(1, 2);
+    loss["genesisLoseControllerLife"] = json!(2);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &loss,
+        &minion(1, 2),
+        north_atlas_count,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert(
+            "adjacent-combo-site".to_owned(),
+            adjacent_combo_site(&json!({
+                "genesisHealNearbyAvatars": 3,
+                "genesisGainManaIfOnlyControlledCopy": 1,
+            })),
+        );
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; north_atlas_count]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+#[test]
+fn rule_catalog_0455_site_genesis_conditional_mana_then_draw_per_adjacent_same_card() {
+    let manifest = adjacent_combo_manifest(455, &conditional_mana_fact(), 6, 10);
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_combo_play(&mut session, AdjacentSetupGenesis::None);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "spell-drawn"]);
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 1
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0456_site_genesis_conditional_mana_only_without_adjacent_same_card() {
+    let manifest = adjacent_combo_manifest(456, &conditional_mana_fact(), 5, 5);
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional-mana Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 2
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0457_site_genesis_conditional_mana_strip_stealth_then_draw_per_adjacent() {
+    let manifest = adjacent_stealth_conditional_manifest(457, 10);
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let hand_before = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "stealth-lost", "spell-drawn"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["controller"] == "south" && unit["stealthed"] == false)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0458_site_genesis_conditional_mana_strip_stealth_only_without_adjacent() {
+    let manifest = adjacent_stealth_conditional_manifest(458, 6);
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    let after = state(&session);
+    assert_eq!(
+        after["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 2
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_eq!(after["realm"]["units"], json!([]));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0459_site_genesis_conditional_mana_heal_nearby_then_draw_per_adjacent() {
+    let manifest = adjacent_heal_conditional_manifest(459, 6, 10);
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional heal Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+    });
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "avatar-healed", "spell-drawn"]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 2);
+    assert_eq!(receipt.events[1].payload["attemptedAmount"], 3);
+    assert_eq!(receipt.events[1].payload["life"], 20);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0460_site_genesis_conditional_mana_heal_nearby_only_without_adjacent() {
+    let manifest = adjacent_combo_manifest(
+        460,
+        &json!({
+            "genesisHealNearbyAvatars": 3,
+            "genesisGainManaIfOnlyControlledCopy": 1,
+        }),
+        6,
+        5,
+    );
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional heal Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(
+        after["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 2
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0461_site_genesis_conditional_mana_immobilize_nearby_then_draw_per_adjacent() {
+    let manifest = adjacent_combo_manifest(
+        461,
+        &json!({
+            "genesisImmobilizeNearbyUntilNextTurn": true,
+            "genesisGainManaIfOnlyControlledCopy": 1,
+        }),
+        6,
+        10,
+    );
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional immobilize Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_combo_play(&mut session, AdjacentSetupGenesis::None);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "spell-drawn"]);
+    let after = state(&session);
+    let north_area = after["realm"]["immobileAreas"]
+        .as_array()
+        .expect("immobile areas")
+        .iter()
+        .find(|area| {
+            area["expiresAtSeat"] == "north"
+                && area["cells"]
+                    .as_array()
+                    .is_some_and(|cells| cells.contains(&json!("C3")))
+        })
+        .cloned()
+        .expect("north immobile area at C3");
+    assert_eq!(north_area["cells"], json!(["C3", "C4"]));
+    assert_eq!(
+        north_area["sourceInstanceId"],
+        receipt.events[0].payload["instanceId"]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0462_site_genesis_conditional_mana_immobilize_nearby_only_without_adjacent() {
+    let manifest = adjacent_combo_manifest(
+        462,
+        &json!({
+            "genesisImmobilizeNearbyUntilNextTurn": true,
+            "genesisGainManaIfOnlyControlledCopy": 1,
+        }),
+        5,
+        5,
+    );
+    let mut session =
+        Session::new(&manifest).expect("valid adjacent conditional immobilize Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let before = state(&session);
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "mana-gained"]);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(
+        state(&session)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        }])
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+        mana_before + 2
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before
+    );
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
     let manifest =

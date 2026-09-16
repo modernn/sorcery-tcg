@@ -10279,6 +10279,206 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0454_site_genesis_conditional_mana_and_pay_token_net"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0455",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only Genesis gain-mana and draw-spell-per-adjacent-same-card, playing a later copy adjacent to a matching site draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0455_site_genesis_conditional_mana_then_draw_per_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0456",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and adjacent-draw site is played without a bordering matching site, only the conditional mana gain resolves on the first controlled copy and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0456_site_genesis_conditional_mana_only_without_adjacent_same_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0457",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only gain-mana, strip-enemy-stealth, and draw-spell-per-adjacent-same-card, playing a later copy adjacent to a matching site strips nearby enemy Stealth and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisEnemiesLoseStealth",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "stealth-lost",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0457_site_genesis_conditional_mana_strip_stealth_then_draw_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0458",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and strip-stealth site is played without a bordering matching site, only the conditional mana gain resolves on the first controlled copy and no Stealth is stripped.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisEnemiesLoseStealth",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0458_site_genesis_conditional_mana_strip_stealth_only_without_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0459",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only gain-mana, heal-nearby-avatars, and draw-spell-per-adjacent-same-card, playing a later copy adjacent to a matching site heals the nearby Avatar and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisHealNearbyAvatars",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0459_site_genesis_conditional_mana_heal_nearby_then_draw_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0460",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and heal-nearby site is played without a bordering matching site, only the conditional mana gain resolves on the first controlled copy and no Avatar is healed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisHealNearbyAvatars",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0460_site_genesis_conditional_mana_heal_nearby_only_without_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0461",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only gain-mana, immobilize-nearby-until-next-turn, and draw-spell-per-adjacent-same-card, playing a later copy adjacent to a matching site creates the immobile area and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0461_site_genesis_conditional_mana_immobilize_nearby_then_draw_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0462",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and immobilize-nearby site is played without a bordering matching site, the conditional mana gain and local immobile area both resolve on the first controlled copy and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0462_site_genesis_conditional_mana_immobilize_nearby_only_without_adjacent"
+      }
     }
   ]
 }
