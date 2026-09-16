@@ -1,7 +1,7 @@
 //! Direct proofs for start-turn triggers: random teleports (RULE-CATALOG-0158),
 //! controller Spellbook draws (RULE-CATALOG-0237–0238), controller Atlas
 //! draws (RULE-CATALOG-0241–0242), and stacked library triggers
-//! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392).
+//! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392, RULE-CATALOG-0393–0394).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1823,5 +1823,204 @@ fn rule_catalog_0392_start_turn_draw_sites_then_mill_sites_resolves_in_order() {
             .iter()
             .any(|card| card["instanceId"] == milled_site_id)
     );
+    assert_exact_replay(&session);
+}
+
+fn draw_spells_life_gain_stack_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-life-gain-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-life-gain-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnControllerGainsLife": 2,
+                "atStartOfControllerTurnDrawSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-drain": json!({
+                "cardType": "magic",
+                "manaCost": 0,
+                "targetPlayerLosesLife": 2,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-drain"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_spells_life_loss_stack_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-life-loss-stack" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-life-loss-stack-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnControllerLosesLife": 1,
+                "atStartOfControllerTurnDrawSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_spells_exclusive_stack_start_turn(manifest: &str) -> Session {
+    let mut session = Session::new(manifest).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn draw_spells_life_gain_stack_start_turn(seed: u32) -> Session {
+    let mut session =
+        Session::new(&draw_spells_life_gain_stack_manifest(seed)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0393_start_turn_draw_spells_then_life_gain_resolves_in_order() {
+    let mut session = draw_spells_life_gain_stack_start_turn(393);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn", "avatar-healed"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    assert_eq!(receipt.events[1].payload["amount"], 2);
+    assert_eq!(receipt.events[1].payload["life"], 20);
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0394_start_turn_draw_spells_then_life_loss_resolves_in_order() {
+    let mut session =
+        draw_spells_exclusive_stack_start_turn(&draw_spells_life_loss_stack_manifest(394));
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 20);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn", "avatar-life-lost"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    assert_eq!(receipt.events[1].payload["amount"], 1);
+    assert_eq!(receipt.events[1].payload["life"], 19);
+    assert_eq!(receipt.events[1].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
     assert_exact_replay(&session);
 }

@@ -872,37 +872,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "Landbound with Waterbound",
         ),
         (
-            "competing start-turn triggers",
-            with(
-                with(
-                    with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                    "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
-                    json!(true),
-                ),
-                "voidwalk",
-                json!(true),
-            ),
-            "competing start-turn",
-        ),
-        (
-            "competing start-turn lure",
-            with(
-                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                "atStartOfControllerTurnLureNearbyEnemyMinion",
-                json!(true),
-            ),
-            "competing start-turn",
-        ),
-        (
-            "competing start-turn life loss",
-            with(
-                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                "atStartOfControllerTurnControllerLosesLife",
-                json!(2),
-            ),
-            "competing start-turn",
-        ),
-        (
             "competing start-turn life gain",
             with(
                 with(
@@ -916,10 +885,14 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "competing start-turn",
         ),
         (
-            "competing start-turn mana gain",
+            "competing start-turn library plus two exclusive pulses",
             with(
-                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                "atStartOfControllerTurnControllerGainsMana",
+                with(
+                    with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+                    "atStartOfControllerTurnControllerGainsLife",
+                    json!(2),
+                ),
+                "atStartOfControllerTurnControllerLosesLife",
                 json!(1),
             ),
             "competing start-turn",
@@ -932,15 +905,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
                 json!(0),
             ),
             "must be between",
-        ),
-        (
-            "competing start-turn here damage",
-            with(
-                with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                "atStartOfControllerTurnDamageEachOtherUnitHere",
-                json!(1),
-            ),
-            "competing start-turn",
         ),
         (
             "start-turn here damage range",
@@ -1094,6 +1058,38 @@ fn typed_effects_should_retain_only_normalized_values() {
     };
     assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(1));
     assert_eq!(facts.at_start_of_controller_turn_mill_spells, Some(1));
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-draw-life-gain-stack",
+        &with(
+            with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+            "atStartOfControllerTurnControllerGainsLife",
+            json!(2),
+        ),
+    )
+    .expect("valid stacked start-turn draw and life gain minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(1));
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_gains_life,
+        Some(2)
+    );
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "start-turn-draw-life-loss-stack",
+        &with(
+            with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
+            "atStartOfControllerTurnControllerLosesLife",
+            json!(1),
+        ),
+    )
+    .expect("valid stacked start-turn draw and life loss minion") else {
+        panic!("expected minion facts");
+    };
+    assert_eq!(facts.at_start_of_controller_turn_draw_spells, Some(1));
+    assert_eq!(
+        facts.at_start_of_controller_turn_controller_loses_life,
+        Some(1)
+    );
     let CardFacts::Minion(facts) = parse_card_definition(
         "end-turn-gain-loss-stack",
         &with(

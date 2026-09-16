@@ -2307,7 +2307,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && startTurnDrawMillStackManifest.cards[firstSpell].atStartOfControllerTurnMillSpells === 1,
     true,
   );
-  assert.throws(() => createGameManifest({
+  const startTurnDrawTeleportStackManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2318,7 +2318,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         voidwalk: true,
       } as GameCardDefinition,
     },
-  }), /competing start-turn triggers are unsupported/);
+  });
+  assert.equal(
+    startTurnDrawTeleportStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawTeleportStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1
+      && startTurnDrawTeleportStackManifest.cards[firstSpell].atStartOfControllerTurnTeleportToRandomSiteOrVoid === true,
+    true,
+  );
   const startTurnDrawStackManifest = createGameManifest({
     ...input,
     cards: {
@@ -2351,7 +2357,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && startTurnLureManifest.cards[firstSpell].atStartOfControllerTurnLureNearbyEnemyMinion,
     true,
   );
-  assert.throws(() => createGameManifest({
+  const startTurnDrawLureStackManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2359,6 +2365,41 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         ...cards[firstSpell]!,
         atStartOfControllerTurnDrawSpells: 1,
         atStartOfControllerTurnLureNearbyEnemyMinion: true,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnDrawLureStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawLureStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1
+      && startTurnDrawLureStackManifest.cards[firstSpell].atStartOfControllerTurnLureNearbyEnemyMinion === true,
+    true,
+  );
+  const startTurnDrawLifeGainStackManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 1,
+        atStartOfControllerTurnControllerGainsLife: 2,
+      } as GameCardDefinition,
+    },
+  });
+  assert.equal(
+    startTurnDrawLifeGainStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawLifeGainStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1
+      && startTurnDrawLifeGainStackManifest.cards[firstSpell].atStartOfControllerTurnControllerGainsLife === 2,
+    true,
+  );
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        ...cards[firstSpell]!,
+        atStartOfControllerTurnDrawSpells: 1,
+        atStartOfControllerTurnControllerGainsLife: 2,
+        atStartOfControllerTurnControllerLosesLife: 1,
       } as GameCardDefinition,
     },
   }), /competing start-turn triggers are unsupported/);

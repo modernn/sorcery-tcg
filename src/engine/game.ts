@@ -2346,12 +2346,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnTeleportToRandomSiteOrVoid requires voidwalk`,
     );
   }
-  const startTurnLibraryStackCount = [
-    card.atStartOfControllerTurnDrawSites !== undefined,
-    card.atStartOfControllerTurnDrawSpells !== undefined,
-    card.atStartOfControllerTurnMillSites !== undefined,
-    card.atStartOfControllerTurnMillSpells !== undefined,
-  ].filter(Boolean).length;
   const startTurnExclusiveCount = [
     card.atStartOfControllerTurnControllerGainsLife !== undefined,
     card.atStartOfControllerTurnControllerGainsMana !== undefined,
@@ -2360,8 +2354,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     card.atStartOfControllerTurnLureNearbyEnemyMinion === true,
     card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true,
   ].filter(Boolean).length;
-  if (startTurnExclusiveCount > 1
-    || (startTurnExclusiveCount > 0 && startTurnLibraryStackCount > 0)) {
+  if (startTurnExclusiveCount > 1) {
     throw new RangeError(`${path} competing start-turn triggers are unsupported`);
   }
   if (card.movementBonus !== undefined

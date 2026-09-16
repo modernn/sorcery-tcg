@@ -8688,6 +8688,56 @@
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0392_start_turn_draw_sites_then_mill_sites_resolves_in_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0393",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and Avatar life gain, the Start Phase resolves them in order on a single trigger: draw a spell first, then heal the controller. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0393_start_turn_draw_spells_then_life_gain_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0394",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and Avatar life loss, the Start Phase resolves them in order on a single trigger: draw a spell first, then reduce the controller's life. Both effects share one resolve-start-turn-trigger action before the Draw step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0394_start_turn_draw_spells_then_life_loss_resolves_in_order"
+      }
     }
   ]
 }

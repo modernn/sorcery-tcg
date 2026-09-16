@@ -16560,11 +16560,6 @@ impl Game {
                 self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
             }
         }
-        if resolved_library_stack {
-            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
-            self.position.state_version += 1;
-            return Ok(());
-        }
         let is_lure = {
             let unit = self
                 .start_turn_trigger_unit(action.seat, source_instance_id)
@@ -16674,6 +16669,11 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
+        if resolved_library_stack {
+            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let unit_snapshot = self
             .position
             .units
@@ -16689,6 +16689,9 @@ impl Game {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit_card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
+        if !facts.at_start_of_controller_turn_teleport_to_random_site_or_void {
+            return Err(GameError::IllegalAction);
+        }
         let candidates = self.random_site_or_void_locations_for_unit(unit_snapshot, facts);
         if candidates.is_empty() {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;

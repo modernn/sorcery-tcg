@@ -1852,11 +1852,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "requires voidwalk",
         ));
     }
-    let start_turn_library_stack_count =
-        usize::from(at_start_of_controller_turn_draw_sites.is_some())
-            + usize::from(at_start_of_controller_turn_draw_spells.is_some())
-            + usize::from(at_start_of_controller_turn_mill_sites.is_some())
-            + usize::from(at_start_of_controller_turn_mill_spells.is_some());
     let start_turn_exclusive_count =
         usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
             + usize::from(at_start_of_controller_turn_controller_gains_mana.is_some())
@@ -1864,9 +1859,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
             + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
             + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
-    if start_turn_exclusive_count > 1
-        || (start_turn_exclusive_count > 0 && start_turn_library_stack_count > 0)
-    {
+    if start_turn_exclusive_count > 1 {
         return Err(FactError::new(
             path,
             "competing start-turn triggers are unsupported",
