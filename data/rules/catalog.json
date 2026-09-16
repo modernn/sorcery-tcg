@@ -12255,6 +12255,57 @@
         "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
         "testName": "rule_catalog_0532_granted_lethal_then_draw_kills_a_tougher_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0533",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion Airborne this turn and then draws a spell offers only allied minions, never an Avatar or an enemy. The Airborne mark uses the shared this-turn source list. The drawn spell stays hidden from the opponent. Airborne expires at End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "spell-drawn",
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_0533_airborne_grant_offers_allied_minions_then_draws_a_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0534",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A grounded minion cannot strike an Airborne enemy. After grant-Airborne-this-turn then draw-spell Magic resolves, that same minion can strike the Airborne enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_0534_granted_airborne_then_draw_lets_a_grounded_minion_strike_an_airborne_enemy"
+      }
     }
   ]
 }

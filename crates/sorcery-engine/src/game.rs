@@ -1449,6 +1449,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::LeapAttackAlly
         | MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_)
         | MagicEffect::GrantAirborneToAllyThisTurn
+        | MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantChargeToAllyThisTurn
         | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
@@ -3641,6 +3642,7 @@ impl Game {
                             } else if matches!(
                                 facts.effect,
                                 MagicEffect::GrantAirborneToAllyThisTurn
+                                    | MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
                             ) {
                                 let ActionDescriptor::CastMagic {
                                     ally: Some(ally), ..
@@ -3649,8 +3651,16 @@ impl Game {
                                     return Err(invalid("Airborne grant action requires an ally"));
                                 };
                                 format!(
-                                    "Cast {} to grant Airborne to {} {}…",
+                                    "Cast {} to grant Airborne{} to {} {}…",
                                     definition.id,
+                                    if matches!(
+                                        facts.effect,
+                                        MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
+                                    ) {
+                                        " and draw"
+                                    } else {
+                                        ""
+                                    },
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
@@ -6742,7 +6752,8 @@ impl Game {
                     ..MagicChoice::default()
                 })
                 .collect(),
-            MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+            MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell
+            | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
             | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell => self
                 .controlled_allies(seat)
                 .into_iter()
@@ -19301,6 +19312,33 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let UnitTarget::Minion {
+                    instance_id,
+                    seat: ally_seat,
+                } = ally
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *ally_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_airborne_sources
+                    .push(card_instance_id.clone());
+                outcomes.push("airborne-granted", || {
+                    json!({
+                        "instanceId": instance_id,
+                        "seat": ally_seat,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::GrantFirstStrikeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 if let UnitTarget::Minion {
@@ -24219,6 +24257,10 @@ mod tests {
             (
                 MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell,
                 json!({ "grantLethalToAllyThisTurnThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell,
+                json!({ "grantAirborneToAllyThisTurnThenDrawSpell": true }),
             ),
             (
                 MagicEffect::TapTargetMinion,

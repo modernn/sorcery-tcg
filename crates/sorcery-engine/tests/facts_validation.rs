@@ -293,6 +293,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ),
         ("gainControlOfTargetNearbyMinion", json!(true)),
         ("grantAirborneToAllyThisTurn", json!(true)),
+        ("grantAirborneToAllyThisTurnThenDrawSpell", json!(true)),
         ("grantChargeToAllyThisTurn", json!(true)),
         ("grantFirstStrikeToAllyThisTurn", json!(true)),
         ("grantLethalToAllyThisTurn", json!(true)),
