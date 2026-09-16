@@ -801,23 +801,10 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "requires voidwalk",
         ),
         (
-            "oversized outer column",
+            "oversized ability",
             with(
                 with(minion(), "occupiesSquareArea", json!(2)),
-                "mustBeCastToOuterColumn",
-                json!(true),
-            ),
-            "cannot combine with outer-column casting restriction",
-        ),
-        (
-            "oversized token wrap",
-            with(
-                with(
-                    with(minion(), "occupiesSquareArea", json!(2)),
-                    "connectsTopBottom",
-                    json!(true),
-                ),
-                "token",
+                "connectsTopBottom",
                 json!(true),
             ),
             "unsupported ability combination",
@@ -1807,18 +1794,18 @@ fn oversized_during_movement_and_post_ranged_step_should_parse() {
 }
 
 #[test]
-fn oversized_wrap_should_parse() {
+fn oversized_outer_column_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
-        "oversized-wrap",
+        "oversized-outer-column",
         &with(
             with(minion(), "occupiesSquareArea", json!(2)),
-            "connectsTopBottom",
+            "mustBeCastToOuterColumn",
             json!(true),
         ),
     )
-    .expect("valid oversized wrap minion") else {
+    .expect("valid oversized outer-column minion") else {
         panic!("expected minion facts");
     };
     assert!(facts.occupies_square_area_two);
-    assert!(facts.connects_top_bottom);
+    assert!(facts.must_be_cast_to_outer_column);
 }

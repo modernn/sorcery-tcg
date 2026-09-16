@@ -8182,16 +8182,16 @@
       }
     },
     {
-      "ruleId": "RULE-CATALOG-0373",
+      "ruleId": "RULE-CATALOG-0375",
       "requirementIds": [
         "RULE-02",
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 minion with top/bottom wraparound can be summoned onto a wrapped footprint that spans rank 1 and rank 4 across two adjacent files.",
+      "plainLanguage": "A 2×2 minion with an outer-column cast restriction can be summoned legally when its anchor sits in column A or E and occupies the full canonical footprint.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "connectsTopBottom",
+        "mustBeCastToOuterColumn",
         "occupiesSquareArea"
       ],
       "actionHints": [
@@ -8201,20 +8201,20 @@
         "minion-summoned"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/square_wrap_footprint_rules.rs",
-        "testName": "rule_catalog_0373_square_wrap_summons_onto_a_wrapped_footprint"
+        "file": "crates/sorcery-engine/tests/square_outer_column_footprint_rules.rs",
+        "testName": "rule_catalog_0375_outer_column_giant_summons_to_an_outer_column_anchor"
       }
     },
     {
-      "ruleId": "RULE-CATALOG-0374",
+      "ruleId": "RULE-CATALOG-0376",
       "requirementIds": [
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 minion with top/bottom wraparound translates its whole footprint when the anchor steps across the connected edge, from a canonical square to the wrapped occupancy.",
+      "plainLanguage": "An outer-column cast restriction on a 2×2 minion filters summons only; after it enters play the whole footprint may step into inner columns.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "connectsTopBottom",
+        "mustBeCastToOuterColumn",
         "occupiesSquareArea"
       ],
       "actionHints": [
@@ -8223,53 +8223,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/square_wrap_footprint_rules.rs",
-        "testName": "rule_catalog_0374_square_wrap_steps_from_canonical_to_wrapped_footprint"
-      }
-    },
-    {
-      "ruleId": "RULE-CATALOG-0377",
-      "requirementIds": [
-        "RULE-02",
-        "RULE-03",
-        "RULE-04",
-        "RULE-05"
-      ],
-      "plainLanguage": "Two distinct synthetic 30/60 decks complete a short deterministic opening: both seats keep their mulligans, establish domains, and summon at least one minion each, with byte-identical authoritative replay.",
-      "implementationStatus": "rust-supported",
-      "genericFactHints": [],
-      "actionHints": [
-        "keep-mulligan",
-        "mulligan",
-        "play-site",
-        "summon-minion"
-      ],
-      "eventHints": [
-        "minion-summoned",
-        "mulligan-completed",
-        "site-played"
-      ],
-      "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
-        "testName": "rule_catalog_0377_two_distinct_synthetic_decks_complete_short_deterministic_opening"
-      }
-    },
-    {
-      "ruleId": "RULE-CATALOG-0378",
-      "requirementIds": [
-        "RULE-02",
-        "RULE-03",
-        "RULE-04",
-        "RULE-05"
-      ],
-      "plainLanguage": "A deck-pair batch job with distinct north and south deck identities reproduces the same transcript hash when rerun with the same manifest and seed, regardless of worker count.",
-      "implementationStatus": "rust-supported",
-      "genericFactHints": [],
-      "actionHints": [],
-      "eventHints": [],
-      "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
-        "testName": "rule_catalog_0378_deck_pair_batch_reproduces_transcript_hash_for_manifest_and_seed"
+        "file": "crates/sorcery-engine/tests/square_outer_column_footprint_rules.rs",
+        "testName": "rule_catalog_0376_outer_column_giant_movement_is_not_cast_restricted"
       }
     }
   ]
