@@ -807,7 +807,7 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
                 "connectsTopBottom",
                 json!(true),
             ),
-            "unsupported ability combination",
+            "cannot combine with top/bottom wraparound",
         ),
         (
             "movement restrictions",
@@ -1791,4 +1791,43 @@ fn oversized_during_movement_and_post_ranged_step_should_parse() {
     assert!(facts.occupies_square_area_two);
     assert!(facts.ranged);
     assert!(facts.may_step_after_ranged_strike);
+}
+
+#[test]
+fn oversized_token_should_parse_while_wrap_and_outer_column_stay_fail_closed() {
+    let definition = with(
+        with(minion(), "occupiesSquareArea", json!(2)),
+        "token",
+        json!(true),
+    );
+    let CardFacts::Minion(facts) = parse_card_definition("oversized-token", &definition)
+        .expect("valid oversized token minion")
+    else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.token);
+
+    let wrap = with(
+        with(minion(), "occupiesSquareArea", json!(2)),
+        "connectsTopBottom",
+        json!(true),
+    );
+    assert!(
+        parse_card_definition("oversized-token-wrap", &wrap)
+            .expect_err("wrap combo")
+            .to_string()
+            .contains("cannot combine with top/bottom wraparound")
+    );
+    let outer_column = with(
+        with(minion(), "occupiesSquareArea", json!(2)),
+        "mustBeCastToOuterColumn",
+        json!(true),
+    );
+    assert!(
+        parse_card_definition("oversized-token-outer-column", &outer_column)
+            .expect_err("outer-column combo")
+            .to_string()
+            .contains("cannot combine with outer-column casting restriction")
+    );
 }

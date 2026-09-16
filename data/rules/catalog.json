@@ -8180,6 +8180,56 @@
         "file": "crates/sorcery-engine/tests/lucky_charm_footprint_rules.rs",
         "testName": "rule_catalog_0370_lucky_charm_excludes_unit_outside_discard_source_footprint"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0371",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 token created by Genesis paid entry occupies its whole footprint on the realm grid.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "occupiesSquareArea",
+        "token"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_footprint_rules.rs",
+        "testName": "rule_catalog_0371_square_token_occupies_its_whole_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0372",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "When a 2×2 token dies in combat it banishes instead of entering a cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "token"
+      ],
+      "actionHints": [
+        "declare-attack",
+        "close-defend"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_footprint_rules.rs",
+        "testName": "rule_catalog_0372_square_token_banishes_instead_of_entering_a_cemetery"
+      }
     }
   ]
 }

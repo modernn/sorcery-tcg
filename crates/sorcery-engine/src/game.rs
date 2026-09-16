@@ -7127,6 +7127,17 @@ impl Game {
         }
     }
 
+    fn token_anchor_footprint(facts: &MinionFacts, anchor: Cell) -> Option<SquareArea> {
+        facts
+            .occupies_square_area_two
+            .then(|| {
+                Cell::SQUARE_AREAS
+                    .into_iter()
+                    .find(|area| area[0] == anchor)
+            })
+            .flatten()
+    }
+
     fn token_may_enter_cell(
         &self,
         seat: Seat,
@@ -7134,6 +7145,19 @@ impl Game {
         cell: Cell,
     ) -> Result<bool, GameError> {
         let facts = self.token_minion_facts(token_card_id)?;
+        if let Some(area) = Self::token_anchor_footprint(facts, cell) {
+            if !area
+                .iter()
+                .all(|candidate| self.surface_location_exists(*candidate))
+            {
+                return Ok(false);
+            }
+            let power = self.prospective_minion_entry_power(seat, facts, &area);
+            return Ok(self.square_allows_power_entry(area, power));
+        }
+        if facts.occupies_square_area_two {
+            return Ok(false);
+        }
         Ok(!self.site_prevents_power_entry(
             cell,
             self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell)),
@@ -7148,6 +7172,34 @@ impl Game {
         site: &SiteFacts,
     ) -> Result<bool, GameError> {
         let facts = self.token_minion_facts(token_card_id)?;
+        if let Some(area) = Self::token_anchor_footprint(facts, cell) {
+            if !area
+                .iter()
+                .all(|candidate| *candidate == cell || self.surface_location_exists(*candidate))
+            {
+                return Ok(false);
+            }
+            let mut power = self.prospective_minion_entry_power(seat, facts, &area);
+            let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
+            if facts.gains_power_ranged_and_spellcaster_atop_tower
+                && site.is_tower
+                && !abilities_lost
+            {
+                power = u8::try_from(u16::from(power).saturating_add(2)).unwrap_or(u8::MAX);
+            }
+            if abilities_lost {
+                return Ok(true);
+            }
+            if !self.square_allows_power_entry(area, power) {
+                return Ok(false);
+            }
+            return Ok(site
+                .prevents_units_with_power_at_least_from_entering
+                .is_none_or(|threshold| power < threshold));
+        }
+        if facts.occupies_square_area_two {
+            return Ok(false);
+        }
         let mut power =
             self.prospective_minion_entry_power(seat, facts, std::slice::from_ref(&cell));
         let abilities_lost = self.fate_covers_cell(cell) && !site.ordinary;
@@ -7156,6 +7208,9 @@ impl Game {
         }
         if abilities_lost {
             return Ok(true);
+        }
+        if self.site_prevents_power_entry(cell, power) {
+            return Ok(false);
         }
         Ok(site
             .prevents_units_with_power_at_least_from_entering
@@ -12722,9 +12777,10 @@ impl Game {
                 .clone();
             let token_instance_id = token.card.instance_id.clone();
             let token_owner = token.card.owner;
+            let occupied_cells = token.occupied_cells;
             self.position.units.push(token);
             outcomes.push("minion-summoned", || {
-                json!({
+                let mut payload = json!({
                     "cardId": token_card_id,
                     "cell": cell,
                     "instanceId": token_instance_id,
@@ -12733,7 +12789,11 @@ impl Game {
                     "seat": seat,
                     "sourceInstanceId": card_instance_id,
                     "token": true,
-                })
+                });
+                if let Some(cells) = occupied_cells {
+                    payload["occupiedCells"] = json!(cells);
+                }
+                payload
             });
         }
         if !abilities_lost && facts.genesis_enemies_lose_stealth {
@@ -12838,10 +12898,17 @@ impl Game {
                 "token effect lacks its referenced token minion definition",
             ));
         }
-        if self.site_prevents_power_entry(
-            cell,
-            self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell)),
-        ) {
+        let occupied_cells = Self::token_anchor_footprint(facts, cell);
+        if facts.occupies_square_area_two && occupied_cells.is_none() {
+            return Err(GameError::IllegalAction);
+        }
+        let entry_power = match occupied_cells {
+            Some(area) => self.prospective_minion_entry_power(owner, facts, area.as_slice()),
+            None => self.prospective_minion_entry_power(owner, facts, std::slice::from_ref(&cell)),
+        };
+        if occupied_cells.is_some_and(|area| !self.square_allows_power_entry(area, entry_power))
+            || occupied_cells.is_none() && self.site_prevents_power_entry(cell, entry_power)
+        {
             return Err(GameError::IllegalAction);
         }
         let card_id = CardId(
@@ -12872,7 +12939,7 @@ impl Game {
             last_interacted_turn: None,
             last_picked_up_artifacts_turn: None,
             location: cell,
-            occupied_cells: None,
+            occupied_cells,
             planar_gate_voidwalk: false,
             region: Region::Surface,
             stealthed: facts.stealth,
