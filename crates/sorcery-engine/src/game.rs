@@ -16519,7 +16519,7 @@ impl Game {
             )?;
             return Ok(());
         }
-        let draw = {
+        let library_stack = {
             let unit = self
                 .start_turn_trigger_unit(action.seat, source_instance_id)
                 .ok_or(GameError::IllegalAction)?;
@@ -16528,37 +16528,39 @@ impl Game {
             else {
                 return Err(GameError::IllegalAction);
             };
-            facts
-                .at_start_of_controller_turn_draw_sites
-                .map(|count| (DeckZone::Atlas, count))
-                .or(facts
+            [
+                facts
+                    .at_start_of_controller_turn_draw_sites
+                    .map(|count| (DeckZone::Atlas, count)),
+                facts
                     .at_start_of_controller_turn_draw_spells
-                    .map(|count| (DeckZone::Spellbook, count)))
-        };
-        if let Some((zone, count)) = draw {
-            self.apply_genesis_draws(action.seat, source_instance_id, zone, count, outcomes);
-            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
-            self.position.state_version += 1;
-            return Ok(());
-        }
-        let mill = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts
-                .at_start_of_controller_turn_mill_sites
-                .map(|count| (DeckZone::Atlas, count))
-                .or(facts
+                    .map(|count| (DeckZone::Spellbook, count)),
+                facts
+                    .at_start_of_controller_turn_mill_sites
+                    .map(|count| (DeckZone::Atlas, count)),
+                facts
                     .at_start_of_controller_turn_mill_spells
-                    .map(|count| (DeckZone::Spellbook, count)))
+                    .map(|count| (DeckZone::Spellbook, count)),
+            ]
         };
-        if let Some((zone, count)) = mill {
-            self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
+        let mut resolved_library_stack = false;
+        for (index, effect) in library_stack.into_iter().enumerate() {
+            let Some((zone, count)) = effect else {
+                continue;
+            };
+            resolved_library_stack = true;
+            if index < 2 {
+                self.apply_genesis_draws(action.seat, source_instance_id, zone, count, outcomes);
+                if self.position.terminal.is_some() {
+                    self.finish_start_turn_trigger(source_instance_id, outcomes)?;
+                    self.position.state_version += 1;
+                    return Ok(());
+                }
+            } else {
+                self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
+            }
+        }
+        if resolved_library_stack {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());

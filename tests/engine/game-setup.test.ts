@@ -2290,7 +2290,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && startTurnAtlasMillManifest.cards[firstSpell].atStartOfControllerTurnMillSites,
     2,
   );
-  assert.throws(() => createGameManifest({
+  const startTurnDrawMillStackManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2300,7 +2300,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         atStartOfControllerTurnMillSpells: 1,
       } as GameCardDefinition,
     },
-  }), /competing start-turn triggers are unsupported/);
+  });
+  assert.equal(
+    startTurnDrawMillStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawMillStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1
+      && startTurnDrawMillStackManifest.cards[firstSpell].atStartOfControllerTurnMillSpells === 1,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {
@@ -2313,7 +2319,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as GameCardDefinition,
     },
   }), /competing start-turn triggers are unsupported/);
-  assert.throws(() => createGameManifest({
+  const startTurnDrawStackManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2323,7 +2329,13 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         atStartOfControllerTurnDrawSpells: 1,
       } as GameCardDefinition,
     },
-  }), /competing start-turn triggers are unsupported/);
+  });
+  assert.equal(
+    startTurnDrawStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSites === 1
+      && startTurnDrawStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1,
+    true,
+  );
   const startTurnLureManifest = createGameManifest({
     ...input,
     cards: {
