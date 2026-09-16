@@ -1852,12 +1852,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "requires voidwalk",
         ));
     }
-    if at_start_of_controller_turn_teleport_to_random_site_or_void && occupies_square_area_two {
-        return Err(FactError::new(
-            path,
-            "oversized start-turn random teleport is unsupported",
-        ));
-    }
     let start_turn_trigger_count =
         usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
             + usize::from(at_start_of_controller_turn_controller_gains_mana.is_some())

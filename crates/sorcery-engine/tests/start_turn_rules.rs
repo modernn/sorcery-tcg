@@ -101,7 +101,18 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         .expect("legal actions")
         .into_iter()
         .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .unwrap_or_else(|| {
+            panic!(
+                "expected engine-issued action in phase {} among {:?}",
+                state(session)["phase"],
+                session
+                    .legal_actions()
+                    .expect("legal actions")
+                    .iter()
+                    .map(|action| action.descriptor.clone())
+                    .collect::<Vec<_>>()
+            );
+        });
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -364,6 +375,390 @@ fn rule_catalog_0158_start_turn_random_teleports_resolve_through_lucky_charm() {
             })
     );
     assert!(blocked.verify_replay().expect("verified replay"));
+}
+
+const NORTH_VOID_SQUARE: [&str; 4] = ["A1", "A2", "B1", "B2"];
+const SOUTH_BLOCKED_SQUARE: [&str; 4] = ["C1", "C2", "D1", "D2"];
+
+fn oversized_source() -> Value {
+    minion(json!({
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid": true,
+        "attack": 3,
+        "occupiesSquareArea": 2,
+        "voidwalk": true,
+    }))
+}
+
+fn oversized_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "oversized-start-turn-teleport" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-oversized-start-turn-teleport-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-charm": json!({
+                "bearerControllerChoosesExtraRandomOutcome": true,
+                "cardType": "artifact",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
+            "north-open-site": site(json!({})),
+            "north-source": oversized_source(),
+            "south-avatar": avatar(),
+            "south-blocked-site": site(json!({ "preventsUnitsWithPowerAtLeastFromEntering": 3 })),
+            "south-blocker": minion(json!({ "attack": 2, "defense": 5 })),
+            "south-open-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec![
+                    "north-open-site"; 12
+                ],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-charm",
+                    "north-source",
+                    "north-source",
+                    "north-charm",
+                    "north-source",
+                    "north-source",
+                    "north-charm",
+                    "north-source",
+                    "north-source",
+                    "north-charm",
+                    "north-source",
+                    "north-source",
+                ],
+            },
+            "south": {
+                "atlas": vec![
+                    "south-blocked-site",
+                    "south-open-site",
+                    "south-open-site",
+                    "south-open-site",
+                    "south-blocked-site",
+                    "south-open-site",
+                    "south-open-site",
+                    "south-open-site",
+                    "south-blocked-site",
+                    "south-open-site",
+                    "south-open-site",
+                    "south-open-site",
+                ],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-blocker"; 12],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn end_and_draw(session: &mut Session, zone: &str) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
+    });
+}
+
+fn establish_board_for_oversized_teleport(session: &mut Session) {
+    accept_where_labeled(session, "north play C4", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-open-site"
+            && descriptor["cell"] == "C4"
+    });
+    end_and_draw(session, "spellbook");
+    accept_where_labeled(session, "south play blocked C1", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-blocked-site"
+            && descriptor["cell"] == "C1"
+    });
+    end_and_draw(session, "spellbook");
+    accept_where_labeled(session, "north play B4", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-open-site"
+            && descriptor["cell"] == "B4"
+    });
+    end_and_draw(session, "spellbook");
+    accept_where_labeled(session, "south play C2", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    end_and_draw(session, "spellbook");
+    accept_where_labeled(session, "north play C3", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-open-site"
+            && descriptor["cell"] == "C3"
+    });
+    end_and_draw(session, "spellbook");
+    accept_where_labeled(session, "south play D1", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D1"
+    });
+    end_and_draw(session, "spellbook");
+}
+
+fn accept_where_labeled(
+    session: &mut Session,
+    label: &str,
+    predicate: impl Fn(&Value) -> bool,
+) -> (Value, Receipt) {
+    let action = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .unwrap_or_else(|| {
+            panic!(
+                "{label}: phase={} among {:?}",
+                state(session)["phase"],
+                session
+                    .legal_actions()
+                    .expect("legal actions")
+                    .iter()
+                    .map(|action| action.descriptor.clone())
+                    .collect::<Vec<_>>()
+            );
+        });
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("authoritative step")
+    else {
+        panic!("{label} must be accepted");
+    };
+    (descriptor, receipt)
+}
+
+fn oversized_checkpoint(seed: u32) -> Session {
+    let mut session = Session::new(&oversized_manifest(seed)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    establish_board_for_oversized_teleport(&mut session);
+    if session
+        .legal_actions()
+        .expect("actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == "draw-site")
+    {
+        accept_where_labeled(&mut session, "draw-site", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    accept_where_labeled(&mut session, "cast charm", |descriptor| {
+        descriptor["kind"] == "cast-artifact" && descriptor["cardId"] == "north-charm"
+    });
+    accept_where_labeled(&mut session, "summon giant", |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cell"] == "A1"
+    });
+    accept_where_labeled(&mut session, "north end-turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where_labeled(&mut session, "south draw atlas", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where_labeled(&mut session, "south play D2", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
+    });
+    accept_where_labeled(&mut session, "south summon blocker", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-blocker"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where_labeled(&mut session, "south end-turn", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    session
+}
+
+fn oversized_source_id(session: &Session) -> String {
+    state(session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("oversized source")["instanceId"]
+        .as_str()
+        .expect("source identity")
+        .to_owned()
+}
+
+#[test]
+fn rule_catalog_0379_oversized_start_turn_random_teleport_moves_whole_footprint() {
+    let checkpoint = oversized_checkpoint(10);
+    let source_id = oversized_source_id(&checkpoint);
+    let before = state(&checkpoint)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == source_id)
+        .expect("source before teleport")
+        .clone();
+    assert_eq!(before["location"], "A1");
+    assert_eq!(before["region"], "void");
+    assert_eq!(before["occupiedCells"], json!(NORTH_VOID_SQUARE));
+    assert_eq!(state(&checkpoint)["phase"], "start-turn");
+
+    let trigger = checkpoint
+        .legal_actions()
+        .expect("start-turn triggers")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("oversized start-turn trigger");
+
+    let mut committed = checkpoint.clone();
+    let StepResult::Accepted(committed_receipt) = committed
+        .step(ActionRequest {
+            action_id: trigger.action_id.to_string(),
+            seat: trigger.seat,
+            state_version: trigger.state_version,
+        })
+        .expect("commit oversized trigger")
+    else {
+        panic!("oversized trigger must commit");
+    };
+    assert!(committed_receipt.events.is_empty());
+    assert_eq!(committed_receipt.random_draws.len(), 2);
+    assert_eq!(state(&committed)["phase"], "random-choice");
+
+    let moved_choice = committed
+        .legal_actions()
+        .expect("lucky charm choices")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-random-outcome")
+        .find(|action| {
+            let mut trial = committed.clone();
+            matches!(
+                trial.step(ActionRequest {
+                    action_id: action.action_id.to_string(),
+                    seat: action.seat,
+                    state_version: action.state_version,
+                }),
+                Ok(StepResult::Accepted(receipt))
+                    if receipt.events.iter().any(|event| event.event_type == "unit-teleported")
+            )
+        })
+        .expect("teleporting lucky charm choice");
+
+    accept_where(&mut committed, |descriptor| {
+        descriptor["kind"] == "resolve-random-outcome"
+            && descriptor["outcomeInstanceId"] == moved_choice.descriptor["outcomeInstanceId"]
+    });
+    let after = state(&committed)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == source_id)
+        .expect("source after teleport")
+        .clone();
+    assert_ne!(after["location"], before["location"]);
+    assert_eq!(
+        after["occupiedCells"]
+            .as_array()
+            .expect("occupied cells")
+            .len(),
+        4
+    );
+    assert!(committed.verify_replay().expect("verified replay"));
+}
+
+#[test]
+fn rule_catalog_0380_oversized_start_turn_random_teleport_fails_blocked_footprint_through_lucky_charm()
+ {
+    let checkpoint = oversized_checkpoint(10);
+    let source_id = oversized_source_id(&checkpoint);
+    assert_eq!(state(&checkpoint)["phase"], "start-turn");
+
+    let trigger = checkpoint
+        .legal_actions()
+        .expect("start-turn triggers")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "resolve-start-turn-trigger"
+                && action.descriptor["sourceInstanceId"] == source_id
+        })
+        .expect("oversized start-turn trigger")
+        .clone();
+
+    let mut committed = checkpoint.clone();
+    let StepResult::Accepted(committed_receipt) = committed
+        .step(ActionRequest {
+            action_id: trigger.action_id.to_string(),
+            seat: trigger.seat,
+            state_version: trigger.state_version,
+        })
+        .expect("commit oversized trigger")
+    else {
+        panic!("oversized trigger must commit");
+    };
+    assert!(committed_receipt.events.is_empty());
+    assert_eq!(state(&committed)["phase"], "random-choice");
+
+    let blocked_choice = committed
+        .legal_actions()
+        .expect("lucky charm choices")
+        .into_iter()
+        .find(|action| {
+            action.label
+                == format!(
+                    "Lucky Charm chooses C1 surface ({})",
+                    SOUTH_BLOCKED_SQUARE.join(", ")
+                )
+        })
+        .expect("blocked C1 surface footprint choice")
+        .clone();
+
+    let StepResult::Accepted(blocked_receipt) = committed
+        .step(ActionRequest {
+            action_id: blocked_choice.action_id.to_string(),
+            seat: blocked_choice.seat,
+            state_version: blocked_choice.state_version,
+        })
+        .expect("blocked footprint choice")
+    else {
+        panic!("blocked footprint choice must be accepted");
+    };
+    assert_eq!(blocked_receipt.events.len(), 1);
+    assert_eq!(blocked_receipt.events[0].event_type, "unit-teleport-failed");
+    assert_eq!(
+        blocked_receipt.events[0].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(
+        blocked_receipt.events[0].payload["cells"],
+        json!(SOUTH_BLOCKED_SQUARE)
+    );
+    assert_eq!(
+        state(&committed)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == source_id)
+            .expect("held source")["location"],
+        "A1"
+    );
+    assert_eq!(
+        state(&committed)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == source_id)
+            .expect("held source")["occupiedCells"],
+        json!(NORTH_VOID_SQUARE)
+    );
+    assert!(committed.verify_replay().expect("verified replay"));
 }
 
 fn draw_spells_manifest(seed: u32, north_spellbook: &[&str]) -> String {

@@ -2348,12 +2348,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       `${path}.atStartOfControllerTurnTeleportToRandomSiteOrVoid requires voidwalk`,
     );
   }
-  if (card.atStartOfControllerTurnTeleportToRandomSiteOrVoid === true
-    && card.occupiesSquareArea === 2) {
-    throw new RangeError(
-      `${path} oversized start-turn random teleport is unsupported`,
-    );
-  }
   const startTurnTriggerCount = [
     card.atStartOfControllerTurnControllerGainsLife !== undefined,
     card.atStartOfControllerTurnControllerGainsMana !== undefined,

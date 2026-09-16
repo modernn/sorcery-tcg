@@ -1801,6 +1801,28 @@ fn oversized_token_should_parse() {
 }
 
 #[test]
+fn oversized_start_turn_random_teleport_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "oversized-start-turn-teleport",
+        &with(
+            with(
+                with(minion(), "occupiesSquareArea", json!(2)),
+                "voidwalk",
+                json!(true),
+            ),
+            "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+            json!(true),
+        ),
+    )
+    .expect("valid oversized start-turn random teleport minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.occupies_square_area_two);
+    assert!(facts.voidwalk);
+    assert!(facts.at_start_of_controller_turn_teleport_to_random_site_or_void);
+}
+
+#[test]
 fn oversized_wrap_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "oversized-wrap",
