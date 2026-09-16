@@ -1034,6 +1034,12 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         || genesis_gain_mana_if_only_controlled_copy
         || genesis_heal_nearby_avatars
         || genesis_immobilize_nearby_until_next_turn;
+    let other_genesis_for_may_bottom = genesis_discard_top_spells
+        || genesis_draw_spell_per_adjacent_same_card
+        || genesis_enemies_lose_stealth
+        || genesis_gain_mana_if_only_controlled_copy
+        || genesis_heal_nearby_avatars
+        || genesis_immobilize_nearby_until_next_turn;
     if genesis_pay_one_mana_to_summon_token.is_some()
         && (other_genesis || genesis_may_bottom_next_spell || genesis_reorder_next_spells)
     {
@@ -1043,7 +1049,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         ));
     }
     if genesis_may_bottom_next_spell
-        && (other_genesis
+        && (other_genesis_for_may_bottom
             || genesis_pay_one_mana_to_summon_token.is_some()
             || genesis_reorder_next_spells)
     {
