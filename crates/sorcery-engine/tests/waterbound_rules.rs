@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -404,6 +404,16 @@ fn unit_named(session: &Session, instance_id: &str) -> Value {
         .expect("named unit")
 }
 
+fn observed_unit(session: &Session, instance_id: &str) -> Value {
+    session.public_view(Seat::North).expect("north observation")["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("named unit")
+        .clone()
+}
+
 #[test]
 fn rule_catalog_0163_waterbound_ward_still_prevents_damage_while_disabled() {
     let manifest = composed_manifest(
@@ -572,5 +582,177 @@ fn rule_catalog_0166_waterbound_stealth_token_enters_stealthed_on_water() {
     assert_eq!(token["stealthed"], true);
     assert_eq!(token["source"], "token");
     assert_eq!(token["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+fn drought() -> Value {
+    json!({
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold": true,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn square_waterbound() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "occupiesSquareArea": 2,
+        "tapForMana": 1,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "waterbound": true,
+    })
+}
+
+fn square_drought_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "waterbound-square-drought" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-waterbound-square-drought-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-square-waterbound": square_waterbound(),
+            "north-water": site(true),
+            "south-avatar": avatar(),
+            "south-plain": plain(),
+            "south-site": site(false),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-square-waterbound",
+                    "north-drought",
+                    "north-drought",
+                    "north-drought",
+                    "north-drought"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-plain"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn opening_spell_ids(session: &Session) -> Vec<String> {
+    state(session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north spellbook")
+        .iter()
+        .filter_map(|card| card["cardId"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+fn cells_include(descriptor: &Value, cell: &str) -> bool {
+    descriptor["cells"]
+        .as_array()
+        .is_some_and(|cells| cells.len() == 4 && cells.iter().any(|value| value == cell))
+}
+
+fn square_drought_opening() -> Session {
+    (1..=4096)
+        .map(square_drought_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("2x2 Waterbound Drought candidate");
+            let spells = opening_spell_ids(&session);
+            (spells.iter().any(|card| card == "north-square-waterbound")
+                && spells.iter().any(|card| card == "north-drought"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with 2x2 Waterbound and Drought")
+}
+
+fn end_then_draw(session: &mut Session, zone: &str) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
+    });
+}
+
+fn play_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn summon_square_waterbound_at_b3(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    play_site_at(session, "C4");
+    end_then_draw(session, "spellbook");
+    play_site_at(session, "C1");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "B4");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "C3");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "B3");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-square-waterbound"
+            && descriptor["cell"] == "B3"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("2x2 Waterbound identity")
+        .to_owned()
+}
+
+#[test]
+fn rule_catalog_0509_square_waterbound_stays_enabled_when_drought_covers_only_part_of_its_footprint()
+ {
+    let mut session = square_drought_opening();
+    let bound_id = summon_square_waterbound_at_b3(&mut session);
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && cells_include(descriptor, "A3")
+            && !cells_include(descriptor, "C3")
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], false);
+    assert_eq!(after["location"], "B3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0510_square_waterbound_is_disabled_when_drought_covers_its_whole_footprint() {
+    let mut session = square_drought_opening();
+    let bound_id = summon_square_waterbound_at_b3(&mut session);
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-drought"
+            && cells_include(descriptor, "B3")
+            && cells_include(descriptor, "C4")
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], true);
+    assert_eq!(after["location"], "B3");
     assert_exact_replay(&session);
 }
