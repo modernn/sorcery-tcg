@@ -1632,6 +1632,119 @@ fn rule_catalog_0412_site_genesis_gain_mana_then_decline_bottom_next_spell() {
     assert_exact_replay(&kept);
 }
 
+fn mana_discard_spell_genesis_facts() -> Value {
+    json!({
+        "genesisDiscardTopSpells": 2,
+        "genesisGainMana": 2,
+    })
+}
+
+#[test]
+fn rule_catalog_0415_site_genesis_gain_mana_then_discards_top_spells() {
+    let manifest = private_site_genesis_manifest(415, &mana_discard_spell_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let spellbook_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .len();
+    let expected_discards = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("Spellbook")
+        .iter()
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (session, play, receipt) = play_private_genesis_site(&manifest);
+    let after = state(&session);
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "site-played",
+            "mana-gained",
+            "spell-discarded",
+            "spell-discarded"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 2,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    for (event, card) in receipt.events[2..].iter().zip(&expected_discards) {
+        assert_eq!(event.event_type, "spell-discarded");
+        assert_eq!(event.payload["cardId"], card["cardId"]);
+        assert_eq!(event.payload["instanceId"], card["instanceId"]);
+        assert_eq!(event.payload["owner"], "north");
+        assert_eq!(event.payload["seat"], "north");
+        assert_eq!(
+            event.payload["sourceInstanceId"],
+            receipt.events[0].payload["instanceId"]
+        );
+    }
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["players"]["north"]["mana"], mana_before + 3);
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .map(Vec::len),
+        Some(spellbook_before.saturating_sub(2))
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0416_site_genesis_gain_mana_then_discards_only_available_spell() {
+    let manifest = private_site_genesis_manifest(416, &mana_discard_spell_genesis_facts(), 4);
+    let before = state(&opening_checkpoint(&manifest));
+    let expected_discard = before["players"]["north"]["spellbook"][0].clone();
+    let mana_before = before["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana");
+    let (session, play, receipt) = play_private_genesis_site(&manifest);
+    let after = state(&session);
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "mana-gained", "spell-discarded"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "amount": 2,
+            "seat": "north",
+            "sourceInstanceId": source_instance_id,
+        })
+    );
+    assert_eq!(receipt.events[2].event_type, "spell-discarded");
+    assert_eq!(
+        receipt.events[2].payload["cardId"],
+        expected_discard["cardId"]
+    );
+    assert_eq!(
+        receipt.events[2].payload["instanceId"],
+        expected_discard["instanceId"]
+    );
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["players"]["north"]["mana"], mana_before + 3);
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn rule_catalog_0413_site_genesis_gain_mana_then_reorder_next_spells() {
     let manifest = private_site_genesis_manifest(413, &mana_reorder_spell_genesis_facts(), 6);
