@@ -12450,6 +12450,53 @@
         "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
         "testName": "rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0541",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth-to-an-allied-minion occupying an enemy site then draw-spell Magic offers only an allied minion standing on an enemy-controlled site, stealths that minion, and then draws one hidden spell. Allies on friendly sites, Avatars, and enemy minions are not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_0541_fade_offers_only_an_ally_occupying_an_enemy_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0542",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth-to-an-allied-minion occupying an enemy site then draw-spell Magic still draws one hidden spell when no allied minion occupies an enemy site. A home-site ally is not stealthed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_0542_fade_still_draws_when_no_ally_occupies_an_enemy_site"
+      }
     }
   ]
 }

@@ -1384,6 +1384,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const fadeManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(fadeManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell: true,
+    manaCost: 2,
+    thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell: false,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell: true,
+        grantStealthToAlliedMinionsThenDrawSpell: true,
+        manaCost: 2,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

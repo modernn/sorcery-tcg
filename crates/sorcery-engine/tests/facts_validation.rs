@@ -303,6 +303,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("grantPowerToAllyThisTurn", json!(2)),
         ("grantPowerTwoToAllyThisTurnThenDrawSpell", json!(true)),
         ("grantStealthToAlliedMinionsThenDrawSpell", json!(true)),
+        (
+            "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell",
+            json!(true),
+        ),
         ("grantStealthToTargetMinion", json!(true)),
         ("grantWardToTargetMinion", json!(true)),
         ("healController", json!(2)),
@@ -1669,6 +1673,27 @@ fn genesis_untap_adjacent_allies_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_untap_adjacent_allies);
+}
+
+#[test]
+fn grant_stealth_to_allied_minion_occupying_enemy_site_then_draw_spell_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "grant-stealth-enemy-site-then-draw",
+        &spell(
+            "magic",
+            (
+                "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid grant-Stealth-on-enemy-site then draw-spell Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
+    );
 }
 
 #[test]
