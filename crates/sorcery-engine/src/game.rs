@@ -405,6 +405,8 @@ struct SitePosition {
     controller: Seat,
     /// Turn on which this site last flew, so flight stays once per turn.
     last_flight_turn: Option<u64>,
+    /// One-shot Ward: the next targeted destroy or return consumes this mark.
+    warded: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1473,6 +1475,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::WardEachAlliedMinionAtTargetWaterSite
+        | MagicEffect::WardNearbyMinionOrSite
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
         | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
@@ -1945,21 +1948,22 @@ impl Game {
                     else {
                         return Some(Err(invalid("realm site lacks Site facts")));
                     };
-                    return Some(Ok((
-                        cell.to_string(),
-                        json!({
-                            "cardId": self.rules.cards[usize::from(site.card.card_id.0)].id,
-                            "controller": site.controller,
-                            "elements": facts.elements.iter().map(|element| match element {
-                                Element::Air => "air",
-                                Element::Earth => "earth",
-                                Element::Fire => "fire",
-                                Element::Water => "water",
-                            }).collect::<Vec<_>>(),
-                            "instanceId": site.card.instance_id,
-                            "owner": site.card.owner,
-                        }),
-                    )));
+                    let mut site_value = json!({
+                        "cardId": self.rules.cards[usize::from(site.card.card_id.0)].id,
+                        "controller": site.controller,
+                        "elements": facts.elements.iter().map(|element| match element {
+                            Element::Air => "air",
+                            Element::Earth => "earth",
+                            Element::Fire => "fire",
+                            Element::Water => "water",
+                        }).collect::<Vec<_>>(),
+                        "instanceId": site.card.instance_id,
+                        "owner": site.card.owner,
+                    });
+                    if site.warded {
+                        site_value["warded"] = json!(true);
+                    }
+                    return Some(Ok((cell.to_string(), site_value)));
                 }
                 self.position.rubble[cell.index()]
                     .as_ref()
@@ -6442,6 +6446,30 @@ impl Game {
             .collect())
     }
 
+    fn ward_nearby_minion_or_site_choices(
+        &self,
+        seat: Seat,
+        caster_instance_id: &IdentityHash,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let (caster_location, caster_cells) =
+            self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+        let mut choices = self.targeted_magic_choices(seat, caster_instance_id, true, true)?;
+        choices.extend(
+            self.destroy_target_site_choices(seat, caster_instance_id)?
+                .into_iter()
+                .filter(|choice| {
+                    choice.target_location.is_some_and(|location| {
+                        location.region == caster_location.region
+                            && Self::footprints_nearby(
+                                caster_cells,
+                                std::slice::from_ref(&location.cell),
+                            )
+                    })
+                }),
+        );
+        Ok(choices)
+    }
+
     fn avatar_player_choices(&self) -> Vec<MagicChoice> {
         [Seat::North, Seat::South]
             .into_iter()
@@ -7253,6 +7281,9 @@ impl Game {
                         .is_some_and(|location| self.is_water_site(location.cell))
                 })
                 .collect(),
+            MagicEffect::WardNearbyMinionOrSite => {
+                self.ward_nearby_minion_or_site_choices(seat, caster_instance_id)?
+            }
             MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell => {
                 self.pull_adjacent_aboveground_to_water_site_choices(seat, caster_instance_id)?
             }
@@ -14081,6 +14112,7 @@ impl Game {
             card,
             controller: seat,
             last_flight_turn: None,
+            warded: false,
         });
         self.settle_covered_layers(cell, replacing_rubble_with_water);
         self.settle_overlay_layers(std::slice::from_ref(&cell));
@@ -14537,6 +14569,7 @@ impl Game {
             card,
             controller: seat,
             last_flight_turn: None,
+            warded: false,
         });
         self.settle_covered_layers(target_cell, replacing_with_water);
         self.settle_overlay_layers(std::slice::from_ref(&target_cell));
@@ -14853,6 +14886,53 @@ impl Game {
         Ok((destroyed_cards, rubble))
     }
 
+    fn consume_site_ward(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
+        let site = self.position.sites[cell.index()]
+            .as_mut()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if !site.warded {
+            return Ok(false);
+        }
+        site.warded = false;
+        outcomes.push("ward-broken", || {
+            json!({
+                "cell": cell,
+                "instanceId": target_site_instance_id,
+            })
+        });
+        Ok(true)
+    }
+
+    fn apply_grant_ward_site(
+        &mut self,
+        cell: Cell,
+        target_site_instance_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let site = self.position.sites[cell.index()]
+            .as_mut()
+            .filter(|site| site.card.instance_id == *target_site_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        if !site.warded {
+            site.warded = true;
+            outcomes.push("site-warded", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
     fn apply_destroy_target_site(
         &mut self,
         cell: Cell,
@@ -14860,6 +14940,9 @@ impl Game {
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if self.consume_site_ward(cell, target_site_instance_id, outcomes)? {
+            return Ok(());
+        }
         let target_site = self.position.sites[cell.index()]
             .as_ref()
             .filter(|site| site.card.instance_id == *target_site_instance_id)
@@ -14937,6 +15020,9 @@ impl Game {
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if self.consume_site_ward(cell, target_site_instance_id, outcomes)? {
+            return Ok(());
+        }
         let target_site = self.position.sites[cell.index()]
             .as_ref()
             .filter(|site| site.card.instance_id == *target_site_instance_id)
@@ -19520,6 +19606,31 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::WardNearbyMinionOrSite => {
+                if let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                {
+                    self.apply_grant_ward_minion(
+                        instance_id,
+                        *target_seat,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                } else {
+                    let cell = target_location.ok_or(GameError::IllegalAction)?.cell;
+                    let target_site_instance_id = target_site_instance_id
+                        .as_ref()
+                        .ok_or(GameError::IllegalAction)?;
+                    self.apply_grant_ward_site(
+                        cell,
+                        target_site_instance_id,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                }
+            }
             MagicEffect::WardEachAlliedMinionAtTargetWaterSite => {
                 let Some(Location {
                     cell,
@@ -24071,6 +24182,9 @@ impl Game {
         if let Some(turn) = site.last_flight_turn {
             value["lastFlightTurn"] = json!(turn);
         }
+        if site.warded {
+            value["warded"] = json!(true);
+        }
         value
     }
 
@@ -24664,6 +24778,7 @@ mod tests {
             card: south_site,
             controller: Seat::South,
             last_flight_turn: None,
+            warded: false,
         });
         game.position.rubble[c4.index()] = Some(
             identity_hash(&json!({ "fixture": "zero-site-recovery-rubble" }))
@@ -24874,6 +24989,10 @@ mod tests {
                 json!({ "wardEachAlliedMinionAtTargetWaterSite": true }),
             ),
             (
+                MagicEffect::WardNearbyMinionOrSite,
+                json!({ "wardNearbyMinionOrSite": true }),
+            ),
+            (
                 MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,
                 json!({ "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell": true }),
             ),
@@ -24997,6 +25116,7 @@ mod tests {
             card: site_card,
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         game.position.active_seat = Seat::North;
         game.position.decision_seat = Seat::North;
@@ -25129,6 +25249,7 @@ mod tests {
                 card,
                 controller: Seat::North,
                 last_flight_turn: None,
+                warded: false,
             });
         }
         let start = Location {
@@ -25142,6 +25263,7 @@ mod tests {
                 card,
                 controller: Seat::North,
                 last_flight_turn: None,
+                warded: false,
             });
         }
         assert_eq!(
@@ -25681,6 +25803,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         game.position.units.clear();
         let mut identities = BTreeMap::new();
@@ -25906,6 +26029,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         };
         let protected = SitePosition {
             card: CardInstance {
@@ -25916,6 +26040,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         };
         let water = SitePosition {
             card: CardInstance {
@@ -25926,6 +26051,7 @@ mod tests {
             },
             controller: Seat::South,
             last_flight_turn: None,
+            warded: false,
         };
         let c2 = Cell::parse("C2").expect("C2");
         let c3 = Cell::parse("C3").expect("C3");
@@ -26322,6 +26448,7 @@ mod tests {
                     card,
                     controller: Seat::North,
                     last_flight_turn: None,
+                    warded: false,
                 });
             }
             if rubble {
@@ -26456,6 +26583,7 @@ mod tests {
             card: site,
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         let card_id = |name: &str| {
             CardId(
@@ -26965,6 +27093,7 @@ mod tests {
                 },
                 controller: owner,
                 last_flight_turn: None,
+                warded: false,
             });
         }
 
@@ -27350,6 +27479,7 @@ mod tests {
                 card,
                 controller,
                 last_flight_turn: None,
+                warded: false,
             });
         }
         game.position.units = Vec::new();
@@ -27690,6 +27820,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         let source_id = identity_hash(&json!({ "fixture": "nimbus-source" })).expect("source");
         let ally_id = identity_hash(&json!({ "fixture": "nimbus-ally" })).expect("ally");
@@ -27797,6 +27928,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         let north = &mut game.position.players[seat_index(Seat::North)];
         north.domain_established = true;
@@ -27886,6 +28018,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         let occupant_id = identity_hash(&json!({ "fixture": "tower-occupant" })).expect("occupant");
         let mut occupant = test_minion(
@@ -27974,6 +28107,7 @@ mod tests {
                 },
                 controller: Seat::South,
                 last_flight_turn: None,
+                warded: false,
             });
         }
         game.position.sites[c4.index()] = Some(SitePosition {
@@ -27986,6 +28120,7 @@ mod tests {
             },
             controller: Seat::North,
             last_flight_turn: None,
+            warded: false,
         });
         let bearer_id = identity_hash(&json!({ "fixture": "egg-bearer" })).expect("bearer");
         let egg_id = identity_hash(&json!({ "fixture": "egg-artifact" })).expect("egg");
@@ -28117,6 +28252,7 @@ mod tests {
                 },
                 controller: Seat::North,
                 last_flight_turn: None,
+                warded: false,
             });
         }
         let bearer_id = identity_hash(&json!({ "fixture": "pickup-bearer" })).expect("bearer");

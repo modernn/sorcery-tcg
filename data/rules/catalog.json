@@ -12684,6 +12684,54 @@
         "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
         "testName": "rule_catalog_0550_nature_still_draws_when_no_cemetery_card_is_returned"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0551",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ward-nearby-minion-or-site Magic offers each nearby minion and each nearby site, including an enemy minion on the caster's cell. A far site is not offered. Choosing a minion applies the shared Ward mark.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_0551_bless_wards_a_nearby_minion_and_offers_a_nearby_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0552",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ward-nearby-minion-or-site Magic can Ward a nearby site. The next targeted destroy consumes that one-shot mark, leaves the site in play, and then a second destroy removes it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-warded",
+        "ward-broken",
+        "site-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_0552_bless_wards_a_nearby_site_until_targeted_destroy"
+      }
     }
   ]
 }

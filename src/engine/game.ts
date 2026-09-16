@@ -438,6 +438,7 @@ export type GameCardDefinition =
     grantStealthToTargetMinion?: true;
     grantWardToTargetMinion?: true;
     wardEachAlliedMinionAtTargetWaterSite?: true;
+    wardNearbyMinionOrSite?: true;
     tapTargetMinion?: true;
     targetNearby?: boolean;
     targetPlayerGainsLife?: number;
@@ -1345,7 +1346,7 @@ const SUPPORTED_CARD_FIELDS = {
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
     grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
-    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
+    grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite wardNearbyMinionOrSite healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
@@ -1911,6 +1912,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.wardEachAlliedMinionAtTargetWaterSite !== true) {
       throw new RangeError(`${path}.wardEachAlliedMinionAtTargetWaterSite must be true when defined`);
     }
+    if (card.wardNearbyMinionOrSite !== undefined && card.wardNearbyMinionOrSite !== true) {
+      throw new RangeError(`${path}.wardNearbyMinionOrSite must be true when defined`);
+    }
     if (card.tapTargetMinion !== undefined && card.tapTargetMinion !== true) {
       throw new RangeError(`${path}.tapTargetMinion must be true when defined`);
     }
@@ -2012,6 +2016,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantStealthToTargetMinion === true)
       + Number(card.grantWardToTargetMinion === true)
       + Number(card.wardEachAlliedMinionAtTargetWaterSite === true)
+      + Number(card.wardNearbyMinionOrSite === true)
       + Number(card.healController !== undefined)
       + Number(card.healTargetMinion !== undefined)
       + Number(card.drawSites !== undefined)
@@ -3000,6 +3005,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                           ? { grantWardToTargetMinion: true as const }
                         : card.wardEachAlliedMinionAtTargetWaterSite === true
                           ? { wardEachAlliedMinionAtTargetWaterSite: true as const }
+                        : card.wardNearbyMinionOrSite === true
+                          ? { wardNearbyMinionOrSite: true as const }
                         : card.pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell === true
                           ? { pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell: true as const }
                         : card.tapTargetMinion === true

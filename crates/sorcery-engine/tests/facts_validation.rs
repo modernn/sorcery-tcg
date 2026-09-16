@@ -310,6 +310,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("grantStealthToTargetMinion", json!(true)),
         ("grantWardToTargetMinion", json!(true)),
         ("wardEachAlliedMinionAtTargetWaterSite", json!(true)),
+        ("wardNearbyMinionOrSite", json!(true)),
         ("healController", json!(2)),
         ("healTargetMinion", json!(1)),
         ("drawSites", json!(2)),
@@ -1746,6 +1747,18 @@ fn ward_each_allied_minion_at_target_water_site_should_parse() {
         facts.effect,
         MagicEffect::WardEachAlliedMinionAtTargetWaterSite
     );
+}
+
+#[test]
+fn ward_nearby_minion_or_site_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "ward-nearby-minion-or-site",
+        &spell("magic", ("wardNearbyMinionOrSite", json!(true))),
+    )
+    .expect("valid ward-nearby-minion-or-site Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(facts.effect, MagicEffect::WardNearbyMinionOrSite);
 }
 
 #[test]
