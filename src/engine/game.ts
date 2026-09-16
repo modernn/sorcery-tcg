@@ -1441,10 +1441,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.genesisPayOneManaToSummonToken`,
       );
     }
-    if (card.genesisPayOneManaToSummonToken !== undefined
-      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
-      throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
-    }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
       && typeof card.genesisDrawSpellPerAdjacentSameCard !== 'boolean') {
       throw new RangeError(`${path}.genesisDrawSpellPerAdjacentSameCard must be boolean`);
@@ -1459,17 +1455,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.genesisMayBottomNextSpell !== true) {
       throw new RangeError(`${path}.genesisMayBottomNextSpell must be true`);
     }
-    if (card.genesisMayBottomNextSpell === true
-      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
-      throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
-    }
     if (card.genesisReorderNextSpells !== undefined
       && card.genesisReorderNextSpells !== 3) {
       throw new RangeError(`${path}.genesisReorderNextSpells must be 3`);
-    }
-    if (card.genesisReorderNextSpells === 3
-      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
-      throw new RangeError(`${path} simultaneous spell-order and another site Genesis are unsupported`);
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
       throw new RangeError(`${path}.connectsBurrowedAllies must be boolean`);

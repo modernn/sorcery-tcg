@@ -1023,25 +1023,6 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     let genesis_pay_one_mana_to_summon_token =
         parse_reference(object, "genesisPayOneManaToSummonToken", path)?;
     let genesis_reorder_next_spells = fixed_integer(object, "genesisReorderNextSpells", 3, path)?;
-    if genesis_pay_one_mana_to_summon_token.is_some() && genesis_gain_mana_if_only_controlled_copy {
-        return Err(FactError::new(
-            path,
-            "simultaneous paid-token and another site Genesis are unsupported",
-        ));
-    }
-    if genesis_may_bottom_next_spell && genesis_gain_mana_if_only_controlled_copy {
-        return Err(FactError::new(
-            path,
-            "simultaneous next-spell and another site Genesis are unsupported",
-        ));
-    }
-    if genesis_reorder_next_spells && genesis_gain_mana_if_only_controlled_copy {
-        return Err(FactError::new(
-            path,
-            "simultaneous spell-order and another site Genesis are unsupported",
-        ));
-    }
-
     Ok(SiteFacts {
         airborne_minions_atop_move_freely_away: true_only(
             object,

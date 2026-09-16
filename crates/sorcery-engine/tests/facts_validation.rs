@@ -700,11 +700,6 @@ fn exclusive_effects_and_magic_auxiliary_facts_should_fail_closed() {
     reason = "one visible table documents the cross-field fail-closed contract"
 )]
 fn site_and_minion_mutual_exclusions_should_fail_closed() {
-    let paid_token = with(
-        json!({ "cardType": "site", "elements": [] }),
-        "genesisPayOneManaToSummonToken",
-        json!("token"),
-    );
     let invalid = [
         (
             "site mana modes",
@@ -718,11 +713,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
                 json!(1),
             ),
             "unconditional and conditional",
-        ),
-        (
-            "paid token plus conditional mana",
-            with(paid_token, "genesisGainManaIfOnlyControlledCopy", json!(1)),
-            "paid-token",
         ),
         (
             "alternative payments",

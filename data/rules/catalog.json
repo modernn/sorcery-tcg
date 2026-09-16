@@ -10127,6 +10127,158 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0448_site_genesis_immobilize_nearby_then_keep_spell_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0449",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only Genesis gain-mana and discard-top-spells, playing it as the only controlled copy publicly gains the conditional mana first, then publicly discards the top two spells from the controller's Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0449_site_genesis_conditional_mana_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0450",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a site carries first-copy-only Genesis gain-mana, playing a second controlled copy of the same card resolves site play but does not grant the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0450_site_genesis_conditional_mana_only_on_first_controlled_copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0451",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only Genesis gain-mana and may-bottom-next-spell, playing it as the only controlled copy publicly gains the conditional mana first, then enters hidden spell Genesis where the controller may bottom the next spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0451_site_genesis_conditional_mana_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0452",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana and may-bottom site is played, declining the bottom choice keeps the Spellbook order while the conditional mana gain remains resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0452_site_genesis_conditional_mana_then_keep_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0453",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only Genesis gain-mana and reorder-next-spells, playing it as the only controlled copy publicly gains the conditional mana first, then enters hidden spell-order Genesis where the controller may reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0453_site_genesis_conditional_mana_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0454",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both first-copy-only Genesis gain-mana and optional paid-token summon, paying for the token as the only controlled copy still grants the conditional mana net of the token payment.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "mana-gained",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0454_site_genesis_conditional_mana_and_pay_token_net"
+      }
     }
   ]
 }
