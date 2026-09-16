@@ -1852,19 +1852,6 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
             "requires voidwalk",
         ));
     }
-    let start_turn_exclusive_count =
-        usize::from(at_start_of_controller_turn_controller_gains_life.is_some())
-            + usize::from(at_start_of_controller_turn_controller_gains_mana.is_some())
-            + usize::from(at_start_of_controller_turn_controller_loses_life.is_some())
-            + usize::from(at_start_of_controller_turn_damage_each_other_unit_here.is_some())
-            + usize::from(at_start_of_controller_turn_lure_nearby_enemy_minion)
-            + usize::from(at_start_of_controller_turn_teleport_to_random_site_or_void);
-    if start_turn_exclusive_count > 1 {
-        return Err(FactError::new(
-            path,
-            "competing start-turn triggers are unsupported",
-        ));
-    }
     let deathrite_damage_each_unit_here = optional_bounded_integer(
         object,
         "deathriteDamageEachUnitHere",

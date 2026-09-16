@@ -16519,30 +16519,29 @@ impl Game {
             )?;
             return Ok(());
         }
-        let library_stack = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            [
-                facts
-                    .at_start_of_controller_turn_draw_sites
-                    .map(|count| (DeckZone::Atlas, count)),
-                facts
-                    .at_start_of_controller_turn_draw_spells
-                    .map(|count| (DeckZone::Spellbook, count)),
-                facts
-                    .at_start_of_controller_turn_mill_sites
-                    .map(|count| (DeckZone::Atlas, count)),
-                facts
-                    .at_start_of_controller_turn_mill_spells
-                    .map(|count| (DeckZone::Spellbook, count)),
-            ]
+        let unit = self
+            .start_turn_trigger_unit(action.seat, source_instance_id)
+            .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
         };
+        let start_turn_draw_sites = facts.at_start_of_controller_turn_draw_sites;
+        let start_turn_draw_spells = facts.at_start_of_controller_turn_draw_spells;
+        let start_turn_mill_sites = facts.at_start_of_controller_turn_mill_sites;
+        let start_turn_mill_spells = facts.at_start_of_controller_turn_mill_spells;
+        let start_turn_gains_life = facts.at_start_of_controller_turn_controller_gains_life;
+        let start_turn_loses_life = facts.at_start_of_controller_turn_controller_loses_life;
+        let start_turn_gains_mana = facts.at_start_of_controller_turn_controller_gains_mana;
+        let start_turn_here_damage = facts.at_start_of_controller_turn_damage_each_other_unit_here;
+        let start_turn_lure = facts.at_start_of_controller_turn_lure_nearby_enemy_minion;
+        let start_turn_teleport = facts.at_start_of_controller_turn_teleport_to_random_site_or_void;
+        let library_stack = [
+            start_turn_draw_sites.map(|count| (DeckZone::Atlas, count)),
+            start_turn_draw_spells.map(|count| (DeckZone::Spellbook, count)),
+            start_turn_mill_sites.map(|count| (DeckZone::Atlas, count)),
+            start_turn_mill_spells.map(|count| (DeckZone::Spellbook, count)),
+        ];
         let mut resolved_library_stack = false;
         for (index, effect) in library_stack.into_iter().enumerate() {
             let Some((zone, count)) = effect else {
@@ -16560,76 +16559,26 @@ impl Game {
                 self.apply_mill_library(action.seat, zone, count, source_instance_id, outcomes);
             }
         }
-        let is_lure = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts.at_start_of_controller_turn_lure_nearby_enemy_minion
-        };
-        if is_lure {
-            if lure_destination.is_some() || lure_target_instance_id.is_some() {
-                return Err(GameError::IllegalAction);
-            }
+        if self.position.terminal.is_some() {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());
         }
-        let life_loss = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts.at_start_of_controller_turn_controller_loses_life
-        };
-        if let Some(amount) = life_loss {
+        let mut resolved_exclusive = false;
+        if let Some(amount) = start_turn_gains_life {
+            self.heal_avatar(action.seat, u16::from(amount), source_instance_id, outcomes)?;
+            resolved_exclusive = true;
+        }
+        if let Some(amount) = start_turn_loses_life {
             self.apply_avatar_life_loss(
                 action.seat,
                 u16::from(amount),
                 source_instance_id,
                 outcomes,
             );
-            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
-            self.position.state_version += 1;
-            return Ok(());
+            resolved_exclusive = true;
         }
-        let life_gain = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts.at_start_of_controller_turn_controller_gains_life
-        };
-        if let Some(amount) = life_gain {
-            self.heal_avatar(action.seat, u16::from(amount), source_instance_id, outcomes)?;
-            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
-            self.position.state_version += 1;
-            return Ok(());
-        }
-        let mana_gain = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts.at_start_of_controller_turn_controller_gains_mana
-        };
-        if let Some(amount) = mana_gain {
+        if let Some(amount) = start_turn_gains_mana {
             let player = &mut self.position.players[seat_index(action.seat)];
             player.mana = player
                 .mana
@@ -16642,22 +16591,9 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
-            self.finish_start_turn_trigger(source_instance_id, outcomes)?;
-            self.position.state_version += 1;
-            return Ok(());
+            resolved_exclusive = true;
         }
-        let here_damage = {
-            let unit = self
-                .start_turn_trigger_unit(action.seat, source_instance_id)
-                .ok_or(GameError::IllegalAction)?;
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            facts.at_start_of_controller_turn_damage_each_other_unit_here
-        };
-        if let Some(amount) = here_damage {
+        if let Some(amount) = start_turn_here_damage {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.apply_here_area_damage(
                 source_instance_id,
@@ -16669,7 +16605,13 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         }
-        if resolved_library_stack {
+        if start_turn_lure {
+            if lure_destination.is_some() || lure_target_instance_id.is_some() {
+                return Err(GameError::IllegalAction);
+            }
+            resolved_exclusive = true;
+        }
+        if !start_turn_teleport && (resolved_library_stack || resolved_exclusive) {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
             return Ok(());

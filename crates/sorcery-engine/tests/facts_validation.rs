@@ -872,32 +872,6 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "Landbound with Waterbound",
         ),
         (
-            "competing start-turn life gain",
-            with(
-                with(
-                    minion(),
-                    "atStartOfControllerTurnControllerLosesLife",
-                    json!(2),
-                ),
-                "atStartOfControllerTurnControllerGainsLife",
-                json!(2),
-            ),
-            "competing start-turn",
-        ),
-        (
-            "competing start-turn library plus two exclusive pulses",
-            with(
-                with(
-                    with(minion(), "atStartOfControllerTurnDrawSpells", json!(1)),
-                    "atStartOfControllerTurnControllerGainsLife",
-                    json!(2),
-                ),
-                "atStartOfControllerTurnControllerLosesLife",
-                json!(1),
-            ),
-            "competing start-turn",
-        ),
-        (
             "start-turn mana gain range",
             with(
                 minion(),

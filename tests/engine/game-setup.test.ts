@@ -2391,7 +2391,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       && startTurnDrawLifeGainStackManifest.cards[firstSpell].atStartOfControllerTurnControllerGainsLife === 2,
     true,
   );
-  assert.throws(() => createGameManifest({
+  const startTurnDrawLifeMixedStackManifest = createGameManifest({
     ...input,
     cards: {
       ...cards,
@@ -2402,7 +2402,14 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         atStartOfControllerTurnControllerLosesLife: 1,
       } as GameCardDefinition,
     },
-  }), /competing start-turn triggers are unsupported/);
+  });
+  assert.equal(
+    startTurnDrawLifeMixedStackManifest.cards[firstSpell]?.cardType === 'minion'
+      && startTurnDrawLifeMixedStackManifest.cards[firstSpell].atStartOfControllerTurnDrawSpells === 1
+      && startTurnDrawLifeMixedStackManifest.cards[firstSpell].atStartOfControllerTurnControllerGainsLife === 2
+      && startTurnDrawLifeMixedStackManifest.cards[firstSpell].atStartOfControllerTurnControllerLosesLife === 1,
+    true,
+  );
   assert.throws(() => createGameManifest({
     ...input,
     cards: {

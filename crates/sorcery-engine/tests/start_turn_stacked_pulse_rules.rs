@@ -1,0 +1,374 @@
+//! Direct proofs for stacked start-of-controller-turn exclusive pulses on one minion
+//! (RULE-CATALOG-0399–0400).
+
+use serde_json::{Value, json};
+use sorcery_engine::canonical::identity_hash;
+use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::session::{Session, StepResult};
+
+fn avatar(life: u8) -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": life,
+    })
+}
+
+fn site() -> Value {
+    json!({ "cardType": "site", "elements": ["earth"] })
+}
+
+fn stacked_life() -> Value {
+    json!({
+        "atStartOfControllerTurnControllerGainsLife": 3,
+        "atStartOfControllerTurnControllerLosesLife": 2,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn stacked_gain_here_damage() -> Value {
+    json!({
+        "atStartOfControllerTurnControllerGainsLife": 2,
+        "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drain() -> Value {
+    json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "targetPlayerLosesLife": 2,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor(defense: u8) -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": defense,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn life_stack_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-stacked-life" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-stacked-life-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-site": site(),
+            "north-source": stacked_life(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-drain"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn gain_here_damage_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-gain-here-damage" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-gain-here-damage-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-pulser": stacked_gain_here_damage(),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+            "south-visitor": visitor(2),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-pulser"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    let action = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .expect("expected engine-issued action");
+    let descriptor = action.descriptor.clone();
+    let result = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("authoritative step");
+    let StepResult::Accepted(receipt) = result else {
+        panic!("engine-issued action must be accepted");
+    };
+    (descriptor, receipt)
+}
+
+fn keep(session: &mut Session) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    });
+}
+
+fn state(session: &Session) -> Value {
+    session.replay_value().expect("session value")["state"].clone()
+}
+
+fn unit_id(session: &Session, card_id: &str) -> Value {
+    state(session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == card_id)
+        .expect("expected unit")["instanceId"]
+        .clone()
+}
+
+fn assert_exact_replay(session: &Session) {
+    let action_ids: Vec<_> = session
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect();
+    let replayed = Session::replay(session.manifest_json(), &action_ids).expect("exact replay");
+    assert_eq!(
+        replayed.replay_value().expect("replayed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_eq!(replayed.transcript(), session.transcript());
+    assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn after_north_source_ready_to_start_turn() -> Session {
+    let mut session = Session::new(&life_stack_manifest()).expect("valid stacked life session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn after_north_ready_to_start_turn_with_visitor() -> Session {
+    let mut session =
+        Session::new(&gain_here_damage_manifest()).expect("valid gain-here-damage session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+fn event_index(receipt: &Receipt, event_type: &str) -> Option<usize> {
+    receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == event_type)
+}
+
+#[test]
+fn rule_catalog_0399_start_turn_gain_then_loss_applies_net_avatar_life() {
+    let mut session = after_north_source_ready_to_start_turn();
+    let source_id = unit_id(&session, "north-source");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(before["phase"], "start-turn");
+    assert_eq!(before["activeSeat"], "north");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let loss_index = event_index(&receipt, "avatar-life-lost").expect("life loss event");
+    assert!(
+        heal_index < loss_index,
+        "start-turn life gain must resolve before life loss on the same minion"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-healed"
+            && event.payload["amount"] == 2
+            && event.payload["attemptedAmount"] == 3
+            && event.payload["life"] == 20
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-life-lost"
+            && event.payload["amount"] == 2
+            && event.payload["life"] == 18
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
+    assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0400_start_turn_gain_then_here_damage_on_same_minion() {
+    let mut session = after_north_ready_to_start_turn_with_visitor();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(before["phase"], "start-turn");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let damage_index =
+        event_index(&receipt, "start-turn-damage-allocated").expect("here damage event");
+    assert!(
+        heal_index < damage_index,
+        "start-turn life gain must resolve before here-area damage on the same minion"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-healed"
+            && event.payload["amount"] == 2
+            && event.payload["attemptedAmount"] == 2
+            && event.payload["life"] == 20
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "start-turn-damage-allocated"
+            && event.payload["amount"] == 1
+            && event.payload["sourceInstanceId"] == source_id
+            && event.payload["targetInstanceId"] == visitor_id
+    }));
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["cardId"] == "north-pulser" && unit["instanceId"] == source_id)
+    );
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["cardId"] == "south-visitor" && unit["instanceId"] == visitor_id)
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_exact_replay(&session);
+}
