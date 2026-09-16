@@ -345,6 +345,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("returnTargetSiteToOwnerHand", json!(true)),
         ("allyStrikesEachEnemyAtItsLocation", json!(true)),
         ("allySubmergesTargetNearbyMinion", json!(true)),
+        ("allyTakesUpToTwoSteps", json!(true)),
         ("submergeTargetMinion", json!(true)),
         ("summonRandomMinionFromAnyCemetery", json!(true)),
         (
@@ -1799,6 +1800,18 @@ fn ally_submerges_target_nearby_minion_should_parse() {
         panic!("expected Magic facts");
     };
     assert_eq!(facts.effect, MagicEffect::AllySubmergesTargetNearbyMinion);
+}
+
+#[test]
+fn ally_takes_up_to_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "ally-takes-up-to-two-steps",
+        &spell("magic", ("allyTakesUpToTwoSteps", json!(true))),
+    )
+    .expect("valid ally-takes-up-to-two-steps Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(facts.effect, MagicEffect::AllyTakesUpToTwoSteps);
 }
 
 #[test]

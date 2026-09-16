@@ -431,6 +431,7 @@ export type GameCardDefinition =
     returnTargetSiteToOwnerHand?: true;
     allyStrikesEachEnemyAtItsLocation?: true;
     allySubmergesTargetNearbyMinion?: true;
+    allyTakesUpToTwoSteps?: true;
     submergeTargetMinion?: true;
     summonRandomMinionFromAnyCemetery?: true;
     summonTokenToAlliedMinionThenDrawSpell?: string;
@@ -1356,7 +1357,7 @@ const SUPPORTED_CARD_FIELDS = {
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
     returnTargetMinionToOwnerHand returnTargetSiteFromOwnCemetery returnTargetSiteToOwnerHand
-    silenceAndTapNearbyMinionThenMayDrawSpell allyStrikesEachEnemyAtItsLocation allySubmergesTargetNearbyMinion submergeTargetMinion
+    silenceAndTapNearbyMinionThenMayDrawSpell allyStrikesEachEnemyAtItsLocation allySubmergesTargetNearbyMinion allyTakesUpToTwoSteps submergeTargetMinion
     summonRandomMinionFromAnyCemetery summonTokenToAlliedMinionThenDrawSpell summonTokenToEachControlledSiteBorderingEnemySite
     tapTargetMinion targetNearby targetPlayerDiscardsCards targetPlayerDrawsSites targetPlayerDrawsSpells targetPlayerGainsLife targetPlayerLosesLife teleportAllyToTargetSite
     teleportNearbyAllyThenDrawCard thresholds untapTargetMinion untapTargetMinionAfterDamage
@@ -1742,6 +1743,9 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.allySubmergesTargetNearbyMinion !== undefined && card.allySubmergesTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.allySubmergesTargetNearbyMinion must be true when defined`);
     }
+    if (card.allyTakesUpToTwoSteps !== undefined && card.allyTakesUpToTwoSteps !== true) {
+      throw new RangeError(`${path}.allyTakesUpToTwoSteps must be true when defined`);
+    }
     if (card.submergeTargetMinion !== undefined && card.submergeTargetMinion !== true) {
       throw new RangeError(`${path}.submergeTargetMinion must be true when defined`);
     }
@@ -2006,6 +2010,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.burrowTargetMinionOrArtifact === true)
       + Number(card.allyStrikesEachEnemyAtItsLocation === true)
       + Number(card.allySubmergesTargetNearbyMinion === true)
+      + Number(card.allyTakesUpToTwoSteps === true)
       + Number(card.submergeTargetMinion === true)
       + Number(card.damageChainNearbyUnits === true)
       + Number(card.damageEachAbovegroundMinion === 1)
@@ -2913,6 +2918,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { allyStrikesEachEnemyAtItsLocation: true as const }
                 : card.allySubmergesTargetNearbyMinion === true
                   ? { allySubmergesTargetNearbyMinion: true as const }
+                : card.allyTakesUpToTwoSteps === true
+                  ? { allyTakesUpToTwoSteps: true as const }
                 : card.submergeTargetMinion === true
                   ? { submergeTargetMinion: true as const }
                 : card.damageChainNearbyUnits === true

@@ -1498,6 +1498,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteToOwnerHand
         | MagicEffect::AllyStrikesEachEnemyAtItsLocation
         | MagicEffect::AllySubmergesTargetNearbyMinion
+        | MagicEffect::AllyTakesUpToTwoSteps
         | MagicEffect::SubmergeTargetMinion
         | MagicEffect::SummonRandomMinionFromAnyCemetery
         | MagicEffect::TargetPlayerDiscardsCards(_)
@@ -7051,6 +7052,7 @@ impl Game {
                     ..MagicChoice::default()
                 })
                 .collect(),
+            MagicEffect::AllyTakesUpToTwoSteps => self.ally_takes_up_to_two_steps_choices(seat)?,
             MagicEffect::TeleportAllyToTargetSite => {
                 self.teleport_ally_to_site_choices(seat, caster_instance_id)?
             }
@@ -7684,6 +7686,24 @@ impl Game {
         }
     }
 
+    fn ally_takes_up_to_two_steps_choices(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<MagicChoice>, GameError> {
+        let mut choices = Vec::new();
+        for ally in self.controlled_allies(seat) {
+            let from = self.unit_target_location(&ally)?;
+            for destination in self.card_effect_destinations_within(&ally, from, 2)? {
+                choices.push(MagicChoice {
+                    ally: Some(ally.clone()),
+                    ally_destination: Some(destination),
+                    ..MagicChoice::default()
+                });
+            }
+        }
+        Ok(choices)
+    }
+
     fn leap_attack_choices(&self, seat: Seat) -> Result<Vec<MagicChoice>, GameError> {
         let mut choices = Vec::new();
         for ally in self.controlled_allies(seat) {
@@ -7940,6 +7960,15 @@ impl Game {
         ally: &UnitTarget,
         from: Location,
     ) -> Result<Vec<Location>, GameError> {
+        self.card_effect_destinations_within(ally, from, 1)
+    }
+
+    fn card_effect_destinations_within(
+        &self,
+        ally: &UnitTarget,
+        from: Location,
+        max_cost: usize,
+    ) -> Result<Vec<Location>, GameError> {
         let (disabled, immobile, profile) = match ally {
             UnitTarget::Avatar { instance_id, seat } => {
                 let avatar = &self.position.players[seat_index(*seat)].avatar;
@@ -7953,7 +7982,7 @@ impl Game {
                         airborne: false,
                         cause: MovementCause::CardEffect,
                         connects_top_bottom: false,
-                        maximum_cost: Some(1),
+                        maximum_cost: Some(max_cost),
                         moving_minion: false,
                         occupied_cells: None,
                         power: self.avatar_entry_power(*seat),
@@ -7983,7 +8012,7 @@ impl Game {
                         airborne: self.minion_is_airborne(unit, facts),
                         cause: MovementCause::CardEffect,
                         connects_top_bottom: facts.connects_top_bottom,
-                        maximum_cost: Some(1),
+                        maximum_cost: Some(max_cost),
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
                         power: self.minion_entry_power(unit)?,
@@ -20335,6 +20364,16 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::AllyTakesUpToTwoSteps => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                let destination = ally_destination.ok_or(GameError::IllegalAction)?;
+                self.apply_ally_takes_up_to_two_steps(
+                    ally,
+                    destination,
+                    card_instance_id,
+                    outcomes,
+                )?;
+            }
             MagicEffect::TeleportAllyToTargetSite => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 let target_location = target_location.ok_or(GameError::IllegalAction)?;
@@ -21298,6 +21337,37 @@ impl Game {
             }
         }
         self.position.state_version += 1;
+        Ok(())
+    }
+
+    fn apply_ally_takes_up_to_two_steps(
+        &mut self,
+        ally: &UnitTarget,
+        destination: Location,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let from = self.unit_target_location(ally)?;
+        let stepped_to = self.move_unit_target_to(ally, destination)?;
+        if stepped_to != from {
+            let instance_id = ally.instance_id().clone();
+            let ally_seat = ally.seat();
+            let source_instance_id = source_instance_id.clone();
+            let steps = minimum_cardinal_distance(&[from.cell], &[stepped_to.cell]);
+            outcomes.push("unit-stepped", || {
+                json!({
+                    "from": from,
+                    "instanceId": instance_id,
+                    "seat": ally_seat,
+                    "sourceInstanceId": source_instance_id,
+                    "steps": steps,
+                    "to": stepped_to,
+                })
+            });
+        }
+        self.settle_region_occupancy(outcomes)?;
+        self.settle_nearby_enemy_stealth(outcomes);
+        self.settle_static_power_deaths(outcomes)?;
         Ok(())
     }
 
@@ -25337,6 +25407,10 @@ mod tests {
             (
                 MagicEffect::AllySubmergesTargetNearbyMinion,
                 json!({ "allySubmergesTargetNearbyMinion": true }),
+            ),
+            (
+                MagicEffect::AllyTakesUpToTwoSteps,
+                json!({ "allyTakesUpToTwoSteps": true }),
             ),
             (
                 MagicEffect::BurrowTargetAdjacentMinion,

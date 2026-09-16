@@ -284,6 +284,7 @@ pub enum MagicEffect {
     ReturnTargetSiteToOwnerHand,
     AllyStrikesEachEnemyAtItsLocation,
     AllySubmergesTargetNearbyMinion,
+    AllyTakesUpToTwoSteps,
     SubmergeTargetMinion,
     SummonRandomMinionFromAnyCemetery,
     SummonTokenToAlliedMinionThenDrawSpell(String),
@@ -799,6 +800,7 @@ const AURA_FIELDS: &[&str] = &[
 const MAGIC_FIELDS: &[&str] = &[
     "allyStrikesEachEnemyAtItsLocation",
     "allySubmergesTargetNearbyMinion",
+    "allyTakesUpToTwoSteps",
     "burrowAllMinionsAndArtifactsAtTargetLandSite",
     "burrowTargetAdjacentMinion",
     "burrowTargetMinionOrArtifact",
@@ -1544,6 +1546,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::ReturnTargetSiteToOwnerHand),
             true_only(object, "allyStrikesEachEnemyAtItsLocation", path)?
                 .then_some(MagicEffect::AllyStrikesEachEnemyAtItsLocation),
+            true_only(object, "allyTakesUpToTwoSteps", path)?
+                .then_some(MagicEffect::AllyTakesUpToTwoSteps),
             true_only(object, "allySubmergesTargetNearbyMinion", path)?
                 .then_some(MagicEffect::AllySubmergesTargetNearbyMinion),
             true_only(object, "submergeTargetMinion", path)?

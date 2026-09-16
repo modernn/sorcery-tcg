@@ -443,7 +443,7 @@ pub enum ActionDescriptor {
         /// Exact engine-issued ally selected by an ally-buffing Magic.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally: Option<UnitTarget>,
-        /// Optional one-step destination chosen for a Leap Attack ally.
+        /// Optional card-effect destination chosen for a Leap Attack or up-to-two-step ally.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ally_destination: Option<Location>,
         /// Exact canonical two-by-two footprint a Teleport or Blink ally occupies on arrival.

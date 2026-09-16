@@ -12920,6 +12920,52 @@
         "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
         "testName": "rule_catalog_0560_burrow_adjacent_is_a_paid_noop_on_water"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0561",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-takes-up-to-two-steps Magic offers each controlled ally paired with each card-effect destination within two cardinal steps. After C4, C3, and C2 exist, an ally at C4 is offered C2, C3, and C4, not C1. Casting to C2 emits a two-step unit-stepped event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_0561_ally_takes_up_to_two_steps_to_a_two_step_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0562",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-takes-up-to-two-steps Magic still offers the ally's current cell. Choosing to stay resolves as a paid no-op without a unit-stepped event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_0562_ally_takes_up_to_two_steps_stay_is_a_paid_noop"
+      }
     }
   ]
 }

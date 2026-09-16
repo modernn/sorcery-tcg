@@ -1778,6 +1778,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       },
     },
   }), /exactly one supported Magic effect/);
+  const tacticalManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyTakesUpToTwoSteps: true,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(tacticalManifest.cards[firstSpell], {
+    cardType: 'magic',
+    allyTakesUpToTwoSteps: true,
+    manaCost: 2,
+    thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyTakesUpToTwoSteps: false,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /allyTakesUpToTwoSteps/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        allyTakesUpToTwoSteps: true,
+        leapAttackAlly: true,
+        manaCost: 2,
+        thresholds: { air: 1, earth: 0, fire: 0, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const adjacentBuryManifest = createGameManifest({
     ...input,
     cards: {
