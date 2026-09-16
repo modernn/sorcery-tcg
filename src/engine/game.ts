@@ -439,6 +439,7 @@ export type GameCardDefinition =
     summonTokenToAlliedMinionThenDrawSpell?: string;
     summonTokenToEachControlledSiteBorderingEnemySite?: string;
     destroyArtifactsAndAurasAtLocationWithinTwoSteps?: true;
+    destroyMinionsAtWaterSiteWithinTwoSteps?: true;
     destroyTargetArtifact?: true;
     destroyTargetAura?: true;
     destroyTargetSite?: true;
@@ -1351,7 +1352,7 @@ const SUPPORTED_CARD_FIELDS = {
     disableTargetNearbyMinionUntilNextTurn
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
-    destroyArtifactsAndAurasAtLocationWithinTwoSteps
+    destroyArtifactsAndAurasAtLocationWithinTwoSteps destroyMinionsAtWaterSiteWithinTwoSteps
     destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantDoubleDamageToAllyNextStrikeThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
@@ -1997,6 +1998,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.destroyArtifactsAndAurasAtLocationWithinTwoSteps !== true) {
       throw new RangeError(`${path}.destroyArtifactsAndAurasAtLocationWithinTwoSteps must be true when defined`);
     }
+    if (card.destroyMinionsAtWaterSiteWithinTwoSteps !== undefined
+      && card.destroyMinionsAtWaterSiteWithinTwoSteps !== true) {
+      throw new RangeError(`${path}.destroyMinionsAtWaterSiteWithinTwoSteps must be true when defined`);
+    }
     if (card.destroyTargetArtifact !== undefined && card.destroyTargetArtifact !== true) {
       throw new RangeError(`${path}.destroyTargetArtifact must be true when defined`);
     }
@@ -2043,6 +2048,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(targetSiteEffectFacts === 3)
       + Number(simpleDestroyTargetSite)
       + Number(card.destroyArtifactsAndAurasAtLocationWithinTwoSteps === true)
+      + Number(card.destroyMinionsAtWaterSiteWithinTwoSteps === true)
       + Number(card.destroyTargetArtifact === true)
       + Number(card.destroyTargetAura === true)
       + Number(card.disableTargetMinionWithinTwoStepsUntilDamaged === true)
@@ -2935,6 +2941,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                   ? { destroyTargetSite: true as const }
                 : card.destroyArtifactsAndAurasAtLocationWithinTwoSteps === true
                   ? { destroyArtifactsAndAurasAtLocationWithinTwoSteps: true as const }
+                : card.destroyMinionsAtWaterSiteWithinTwoSteps === true
+                  ? { destroyMinionsAtWaterSiteWithinTwoSteps: true as const }
                 : card.destroyTargetArtifact === true
                   ? { destroyTargetArtifact: true as const }
                 : card.destroyTargetAura === true

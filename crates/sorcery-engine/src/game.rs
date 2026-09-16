@@ -1453,6 +1453,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::ReturnTargetSiteFromOwnCemetery
         | MagicEffect::DamageTargetUnit { .. }
         | MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
+        | MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps
         | MagicEffect::DestroyTargetArtifact
         | MagicEffect::DestroyTargetAura
         | MagicEffect::DestroyTargetSite
@@ -7241,6 +7242,17 @@ impl Game {
                 let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
                 self.locations_within_measured_steps_from_cells(cells, origin.region, 2)
                     .into_iter()
+                    .map(|target_location| MagicChoice {
+                        target_location: Some(target_location),
+                        ..MagicChoice::default()
+                    })
+                    .collect()
+            }
+            MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps => {
+                let (origin, cells) = self.spellcaster_occupied_cells(seat, caster_instance_id)?;
+                self.locations_within_measured_steps_from_cells(cells, origin.region, 2)
+                    .into_iter()
+                    .filter(|location| self.is_water_site(location.cell))
                     .map(|target_location| MagicChoice {
                         target_location: Some(target_location),
                         ..MagicChoice::default()
@@ -21112,6 +21124,70 @@ impl Game {
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }
+            MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps => {
+                let target_location = target_location.ok_or(GameError::IllegalAction)?;
+                if !self.is_water_site(target_location.cell) {
+                    return Err(GameError::IllegalAction);
+                }
+                let mut victims = Vec::new();
+                for unit in &self.position.units {
+                    if !Self::unit_occupies_cell(unit, target_location.cell) {
+                        continue;
+                    }
+                    let CardFacts::Minion(_) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        return Err(GameError::IllegalAction);
+                    };
+                    victims.push((
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        unit.card.owner,
+                        self.rules.cards[usize::from(unit.card.card_id.0)]
+                            .id
+                            .clone(),
+                    ));
+                }
+                victims.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+                let mut dead_minions = Vec::new();
+                for (instance_id, target_seat, owner, card_id) in victims {
+                    let unit = self
+                        .position
+                        .units
+                        .iter_mut()
+                        .find(|unit| {
+                            unit.card.instance_id == instance_id && unit.controller == target_seat
+                        })
+                        .ok_or(GameError::IllegalAction)?;
+                    if unit.warded {
+                        unit.warded = false;
+                        outcomes.push(
+                            "ward-broken",
+                            || json!({ "instanceId": instance_id, "seat": target_seat }),
+                        );
+                    } else {
+                        outcomes.push("minion-killed", || {
+                            json!({
+                                "cardId": card_id,
+                                "instanceId": instance_id,
+                                "owner": owner,
+                                "seat": target_seat,
+                                "sourceInstanceId": card_instance_id,
+                            })
+                        });
+                        dead_minions.push(instance_id);
+                    }
+                }
+                if !dead_minions.is_empty() {
+                    self.begin_minion_deaths(
+                        &dead_minions,
+                        &[],
+                        Phase::Main,
+                        self.position.active_seat,
+                        outcomes,
+                    )?;
+                }
+            }
             MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
                 let target_location = target_location.ok_or(GameError::IllegalAction)?;
                 let mut victims = Vec::new();
@@ -25787,6 +25863,10 @@ mod tests {
             (
                 MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps,
                 json!({ "destroyArtifactsAndAurasAtLocationWithinTwoSteps": true }),
+            ),
+            (
+                MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps,
+                json!({ "destroyMinionsAtWaterSiteWithinTwoSteps": true }),
             ),
             (
                 MagicEffect::DestroyTargetArtifact,

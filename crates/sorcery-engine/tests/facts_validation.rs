@@ -285,6 +285,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
             "destroyArtifactsAndAurasAtLocationWithinTwoSteps",
             json!(true),
         ),
+        ("destroyMinionsAtWaterSiteWithinTwoSteps", json!(true)),
         ("destroyTargetArtifact", json!(true)),
         ("destroyTargetAura", json!(true)),
         ("destroyTargetSite", json!(true)),
@@ -1876,6 +1877,58 @@ fn destroy_artifacts_and_auras_at_location_within_two_steps_should_parse() {
         facts.effect,
         MagicEffect::DestroyArtifactsAndAurasAtLocationWithinTwoSteps
     );
+}
+
+#[test]
+fn destroy_minions_at_water_site_within_two_steps_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "destroy-minions-at-water-site-within-two-steps",
+        &spell(
+            "magic",
+            ("destroyMinionsAtWaterSiteWithinTwoSteps", json!(true)),
+        ),
+    )
+    .expect("valid destroy-minions-at-water-site-within-two-steps Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::DestroyMinionsAtWaterSiteWithinTwoSteps
+    );
+}
+
+#[test]
+fn destroy_minions_at_water_site_must_not_combine_with_location_damage() {
+    let error = parse_card_definition(
+        "boil-plus-location-damage",
+        &with(
+            spell(
+                "magic",
+                ("destroyMinionsAtWaterSiteWithinTwoSteps", json!(true)),
+            ),
+            "damageEachUnitAtLocationWithinTwoSteps",
+            json!(3),
+        ),
+    )
+    .expect_err("Boil stays exclusive of damageEachUnitAtLocationWithinTwoSteps");
+    assert!(error.to_string().contains("exactly one"), "{error}");
+}
+
+#[test]
+fn destroy_minions_at_water_site_must_not_combine_with_kill_mortal_here() {
+    let error = parse_card_definition(
+        "boil-plus-kill-mortal-here",
+        &with(
+            spell(
+                "magic",
+                ("destroyMinionsAtWaterSiteWithinTwoSteps", json!(true)),
+            ),
+            "killMortalMinionsAtLocationWithinTwoSteps",
+            json!(true),
+        ),
+    )
+    .expect_err("Boil stays exclusive of killMortalMinionsAtLocationWithinTwoSteps");
+    assert!(error.to_string().contains("exactly one"), "{error}");
 }
 
 #[test]

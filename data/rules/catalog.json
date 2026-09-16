@@ -13151,6 +13151,52 @@
         "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
         "testName": "rule_catalog_0570_destroy_relics_here_empty_location_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0571",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic offers only Water sites within two measured cardinal steps of the caster footprint. Casting at C4 kills every minion occupying that Water site, including a non-Mortal, and leaves a Mortal three cardinal steps away at C1. An Earth site at C3 is not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_0571_boil_kills_all_minions_at_water_site_and_spares_far_mortal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0572",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic still offers an empty Water site. Casting there is a paid no-op: the spell still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_0572_empty_water_site_is_a_paid_noop"
+      }
     }
   ]
 }
