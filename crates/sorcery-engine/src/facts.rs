@@ -240,6 +240,7 @@ pub enum MagicEffect {
     DrawSpells(u8),
     FightAllyWithAdjacentEnemy,
     GainControlOfTargetEnemyMinionThisTurn,
+    GainControlOfTargetEnemyMinionUntilStealthLost,
     GainControlOfTargetNearbyMinion,
     GrantAirborneToAllyThisTurn,
     GrantChargeToAllyThisTurn,
@@ -791,6 +792,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "discardSiteAsAdditionalCost",
     "fightAllyWithAdjacentEnemy",
     "gainControlOfTargetEnemyMinionThisTurn",
+    "gainControlOfTargetEnemyMinionUntilStealthLost",
     "gainControlOfTargetNearbyMinion",
     "grantAirborneToAllyThisTurn",
     "grantChargeToAllyThisTurn",
@@ -1376,6 +1378,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::FightAllyWithAdjacentEnemy),
             true_only(object, "gainControlOfTargetEnemyMinionThisTurn", path)?
                 .then_some(MagicEffect::GainControlOfTargetEnemyMinionThisTurn),
+            true_only(
+                object,
+                "gainControlOfTargetEnemyMinionUntilStealthLost",
+                path,
+            )?
+            .then_some(MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost),
             true_only(object, "gainControlOfTargetNearbyMinion", path)?
                 .then_some(MagicEffect::GainControlOfTargetNearbyMinion),
             true_only(object, "grantAirborneToAllyThisTurn", path)?

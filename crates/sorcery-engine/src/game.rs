@@ -84,9 +84,16 @@ pub struct Position {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TemporaryControl {
+    expiry: TemporaryControlExpiry,
     instance_id: IdentityHash,
     revert_to: Seat,
     source_instance_id: IdentityHash,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TemporaryControlExpiry {
+    EndPhase,
+    UntilStealthLost,
 }
 
 /// Public information required by a deterministic policy for one acting seat.
@@ -1423,6 +1430,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::GainControlOfTargetEnemyMinionThisTurn
+        | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost
         | MagicEffect::GainControlOfTargetNearbyMinion
         | MagicEffect::KillTargetMinion
         | MagicEffect::KillTargetWoundedMinion
@@ -5063,9 +5071,9 @@ impl Game {
         target: Option<&UnitTarget>,
         seat: Seat,
         source_instance_id: &IdentityHash,
-        temporary: bool,
+        expiry: Option<TemporaryControlExpiry>,
         outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
+    ) -> Result<bool, GameError> {
         let Some(UnitTarget::Minion {
             instance_id,
             seat: target_seat,
@@ -5080,7 +5088,7 @@ impl Game {
             .find(|unit| unit.card.instance_id == *instance_id && unit.controller == *target_seat)
             .ok_or(GameError::IllegalAction)?;
         if unit.controller == seat {
-            return Ok(());
+            return Ok(false);
         }
         if unit.warded {
             unit.warded = false;
@@ -5088,24 +5096,21 @@ impl Game {
                 "ward-broken",
                 || json!({ "instanceId": instance_id, "seat": target_seat }),
             );
-            return Ok(());
+            return Ok(false);
         }
         let from_seat = *target_seat;
         let transferred_id = instance_id.clone();
         unit.controller = seat;
-        if temporary {
-            self.position
-                .temporary_controls
-                .retain(|effect| effect.instance_id != transferred_id);
+        self.position
+            .temporary_controls
+            .retain(|effect| effect.instance_id != transferred_id);
+        if let Some(expiry) = expiry {
             self.position.temporary_controls.push(TemporaryControl {
+                expiry,
                 instance_id: transferred_id.clone(),
                 revert_to: from_seat,
                 source_instance_id: source_instance_id.clone(),
             });
-        } else {
-            self.position
-                .temporary_controls
-                .retain(|effect| effect.instance_id != transferred_id);
         }
         outcomes.push("minion-control-changed", || {
             json!({
@@ -5116,40 +5121,70 @@ impl Game {
             })
         });
         self.retarget_carried_minion_artifacts(&transferred_id, from_seat, seat);
-        if temporary {
+        if expiry == Some(TemporaryControlExpiry::EndPhase) {
             self.apply_untap_minion(&transferred_id, seat, source_instance_id, outcomes)?;
         }
         self.settle_static_power_deaths(outcomes)?;
-        Ok(())
+        Ok(true)
     }
 
     fn revert_temporary_controls(
         &mut self,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        self.revert_matching_temporary_controls(outcomes, |effect, _stealthed| {
+            effect.expiry == TemporaryControlExpiry::EndPhase
+        })
+    }
+
+    fn revert_stealth_bound_controls(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        self.revert_matching_temporary_controls(outcomes, |effect, stealthed| {
+            effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+        })
+    }
+
+    fn revert_matching_temporary_controls(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+        should_revert: impl Fn(&TemporaryControl, bool) -> bool,
+    ) -> Result<(), GameError> {
         let pending = std::mem::take(&mut self.position.temporary_controls);
         if pending.is_empty() {
             return Ok(());
         }
         let mut changed = false;
+        let mut remaining = Vec::new();
         for effect in pending {
             let Some(unit) = self
                 .position
                 .units
-                .iter_mut()
+                .iter()
                 .find(|unit| unit.card.instance_id == effect.instance_id)
             else {
                 continue;
             };
+            if !should_revert(&effect, unit.stealthed) {
+                remaining.push(effect);
+                continue;
+            }
             if unit.controller == effect.revert_to {
                 continue;
             }
             let from_seat = unit.controller;
-            unit.controller = effect.revert_to;
-            changed = true;
             let instance_id = effect.instance_id.clone();
             let revert_to = effect.revert_to;
             let source_instance_id = effect.source_instance_id.clone();
+            let unit = self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.card.instance_id == instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            unit.controller = revert_to;
+            changed = true;
             outcomes.push("minion-control-changed", || {
                 json!({
                     "fromSeat": from_seat,
@@ -5158,12 +5193,9 @@ impl Game {
                     "sourceInstanceId": source_instance_id,
                 })
             });
-            self.retarget_carried_minion_artifacts(
-                &effect.instance_id,
-                from_seat,
-                effect.revert_to,
-            );
+            self.retarget_carried_minion_artifacts(&instance_id, from_seat, revert_to);
         }
+        self.position.temporary_controls = remaining;
         if changed {
             self.settle_static_power_deaths(outcomes)?;
         }
@@ -5756,6 +5788,8 @@ impl Game {
             }
             previous_source = Some(source_index);
         }
+        self.revert_stealth_bound_controls(outcomes)
+            .expect("stealth-bound control must revert after nearby stealth loss");
     }
 
     fn avatar_current_stats(&self, seat: Seat) -> Result<(u16, u16), GameError> {
@@ -6554,7 +6588,8 @@ impl Game {
             MagicEffect::GainControlOfTargetNearbyMinion => {
                 self.targeted_magic_choices(seat, caster_instance_id, true, true)?
             }
-            MagicEffect::GainControlOfTargetEnemyMinionThisTurn => self
+            MagicEffect::GainControlOfTargetEnemyMinionThisTurn
+            | MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost => self
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
                 .into_iter()
                 .filter(|choice| {
@@ -10995,6 +11030,7 @@ impl Game {
                 "stealth-lost",
                 || json!({ "instanceId": attacker_id, "seat": attacking_seat }),
             );
+            self.revert_stealth_bound_controls(outcomes)?;
         }
         Ok(())
     }
@@ -11117,6 +11153,7 @@ impl Game {
                 "stealth-lost",
                 || json!({ "instanceId": instance_id, "seat": seat }),
             );
+            self.revert_stealth_bound_controls(outcomes)?;
         }
         Ok(())
     }
@@ -11511,11 +11548,15 @@ impl Game {
                 combatant_results.push((target.clone(), result));
             }
         }
+        let lost_stealth = !stealth_losses.is_empty();
         for (instance_id, seat) in stealth_losses {
             outcomes.push(
                 "stealth-lost",
                 || json!({ "instanceId": instance_id, "seat": seat }),
             );
+        }
+        if lost_stealth {
+            self.revert_stealth_bound_controls(outcomes)?;
         }
         if attacker_can_strike && attacker.lance_count > 0 {
             self.break_lance(attacking_seat, &attacker_id, outcomes)?;
@@ -12071,6 +12112,8 @@ impl Game {
                 })
             });
         }
+        self.revert_stealth_bound_controls(outcomes)
+            .expect("stealth-bound control must revert after Disable reveals Stealth");
     }
 
     /// Settles every unit whose own region stopped holding it, killing or banishing it.
@@ -13381,6 +13424,7 @@ impl Game {
                     })
                 });
             }
+            self.revert_stealth_bound_controls(outcomes)?;
         }
         if genesis_spell_draw_count > 0 {
             let count =
@@ -19161,7 +19205,7 @@ impl Game {
                     target.as_ref(),
                     seat,
                     card_instance_id,
-                    false,
+                    None,
                     outcomes,
                 )?;
             }
@@ -19170,9 +19214,32 @@ impl Game {
                     target.as_ref(),
                     seat,
                     card_instance_id,
-                    true,
+                    Some(TemporaryControlExpiry::EndPhase),
                     outcomes,
                 )?;
+            }
+            MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost => {
+                let transferred = self.apply_minion_control_change(
+                    target.as_ref(),
+                    seat,
+                    card_instance_id,
+                    Some(TemporaryControlExpiry::UntilStealthLost),
+                    outcomes,
+                )?;
+                if transferred {
+                    let instance_id = target
+                        .as_ref()
+                        .ok_or(GameError::IllegalAction)?
+                        .instance_id()
+                        .clone();
+                    self.apply_grant_stealth_minion(
+                        &instance_id,
+                        seat,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                    self.apply_tap_minion(&instance_id, seat, seat, card_instance_id, outcomes)?;
+                }
             }
             MagicEffect::ReturnTargetMinionToOwnerHand => {
                 let Some(UnitTarget::Minion {
@@ -19328,6 +19395,9 @@ impl Game {
                             "wardRemoved": ward_removed,
                         })
                     });
+                    if stealth_removed {
+                        self.revert_stealth_bound_controls(outcomes)?;
+                    }
                 }
             }
             MagicEffect::DamageTargetUnit {

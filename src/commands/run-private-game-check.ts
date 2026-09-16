@@ -4547,6 +4547,7 @@ function gameDefinition(
   siteGenesisEnemiesLoseStealth = false,
   tapToDamageEachUnitAtAdjacentLocation = false,
   gainControlOfTargetEnemyMinionThisTurn = false,
+  gainControlOfTargetEnemyMinionUntilStealthLost = false,
   gainControlOfTargetNearbyMinion = false,
   untapsAtEndOfControllerTurn = false,
   killTargetWoundedMinion = false,
@@ -4792,6 +4793,7 @@ function gameDefinition(
     + Number(burrowAllMinionsAndArtifactsAtTargetLandSite)
     + Number(fightAllyWithAdjacentEnemy)
     + Number(gainControlOfTargetEnemyMinionThisTurn)
+    + Number(gainControlOfTargetEnemyMinionUntilStealthLost)
     + Number(gainControlOfTargetNearbyMinion)
     + Number(killTargetWoundedMinion)
     + Number(leapAttackAlly)
@@ -4820,6 +4822,9 @@ function gameDefinition(
       ...(fightAllyWithAdjacentEnemy ? { fightAllyWithAdjacentEnemy: true } : {}),
       ...(gainControlOfTargetEnemyMinionThisTurn
         ? { gainControlOfTargetEnemyMinionThisTurn: true }
+        : {}),
+      ...(gainControlOfTargetEnemyMinionUntilStealthLost
+        ? { gainControlOfTargetEnemyMinionUntilStealthLost: true }
         : {}),
       ...(gainControlOfTargetNearbyMinion ? { gainControlOfTargetNearbyMinion: true } : {}),
       ...(killTargetWoundedMinion ? { killTargetWoundedMinion: true } : {}),

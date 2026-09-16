@@ -702,6 +702,36 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /gainControlOfTargetEnemyMinionThisTurn/);
+  const stealthBoundControlManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        gainControlOfTargetEnemyMinionUntilStealthLost: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(stealthBoundControlManifest.cards[firstSpell], {
+    cardType: 'magic',
+    gainControlOfTargetEnemyMinionUntilStealthLost: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        gainControlOfTargetEnemyMinionUntilStealthLost: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /gainControlOfTargetEnemyMinionUntilStealthLost/);
   const lethalGrantManifest = createGameManifest({
     ...input,
     cards: {

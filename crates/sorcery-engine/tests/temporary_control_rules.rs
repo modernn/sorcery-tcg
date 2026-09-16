@@ -1,8 +1,10 @@
-//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0514).
+//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0516).
 //!
 //! Official Magic can gain control of a target enemy minion this turn and
-//! untap it. The transfer is not Nearby-restricted. Control reverts through
-//! the shared End Phase cleanup after that controller's end-turn triggers.
+//! untap it, or gain control until that minion loses Stealth after tapping it
+//! and granting Stealth. Neither transfer is Nearby-restricted. This-turn
+//! control reverts at End Phase; stealth-bound control survives End Phase and
+//! reverts when Stealth is lost.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -334,5 +336,199 @@ fn rule_catalog_0514_temporary_control_reverts_at_end_of_turn() {
     let after = state(&session);
     assert_eq!(unit(&after, &far_id)["controller"], "south");
     assert_eq!(unit(&after, &far_id)["owner"], "south");
+    assert_exact_replay(&session);
+}
+
+fn infiltrate() -> Value {
+    json!({
+        "cardType": "magic",
+        "gainControlOfTargetEnemyMinionUntilStealthLost": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn infiltrate_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "stealth-bound-control" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-stealth-bound-control-v1",
+        },
+        "cards": {
+            "north-ally": dummy(),
+            "north-avatar": avatar(),
+            "north-infiltrate": infiltrate(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-far": far(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-ally",
+                    "north-infiltrate",
+                    "north-infiltrate",
+                    "north-infiltrate",
+                    "north-infiltrate"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-far"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn infiltrate_targets(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("Infiltrate actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-infiltrate"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+/// North dummy at C4 and an untapped South minion at C1, North ready to cast.
+fn infiltrate_opening() -> (Session, String, String) {
+    let mut session = (1..=4096)
+        .map(infiltrate_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("stealth-bound-control candidate");
+            let north = opening_spell_ids(&session, "north");
+            let south = opening_spell_ids(&session, "south");
+            (north.iter().any(|card| card == "north-ally")
+                && north.iter().any(|card| card == "north-infiltrate")
+                && south.iter().any(|card| card == "south-far"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Infiltrate, an ally, and a far enemy");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("north ally identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (far, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-far"
+            && descriptor["cell"] == "C1"
+    });
+    let far_id = far["cardInstanceId"]
+        .as_str()
+        .expect("south far identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    (session, ally_id, far_id)
+}
+
+fn steal_until_stealth_lost(session: &mut Session, far_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-infiltrate"
+            && descriptor["target"]["instanceId"] == far_id
+    });
+    receipt
+}
+
+#[test]
+fn rule_catalog_0515_stealth_bound_control_steals_taps_and_hides_a_distant_enemy() {
+    let (mut session, ally_id, far_id) = infiltrate_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &far_id)["controller"], "south");
+    assert_eq!(unit(&before, &far_id)["tapped"], false);
+    assert_eq!(unit(&before, &far_id)["stealthed"], false);
+
+    let targets = infiltrate_targets(&session);
+    assert!(targets.contains(&far_id), "{targets:?}");
+    assert!(!targets.contains(&ally_id), "{targets:?}");
+
+    let receipt = steal_until_stealth_lost(&mut session, &far_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-control-changed",
+            "minion-stealthed",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    let after = state(&session);
+    assert_eq!(unit(&after, &far_id)["controller"], "north");
+    assert_eq!(unit(&after, &far_id)["owner"], "south");
+    assert_eq!(unit(&after, &far_id)["tapped"], true);
+    assert_eq!(unit(&after, &far_id)["stealthed"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0516_stealth_bound_control_survives_end_of_turn_and_reverts_when_stealth_is_lost() {
+    let (mut session, _, far_id) = infiltrate_opening();
+    steal_until_stealth_lost(&mut session, &far_id);
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &far_id)["stealthed"], true);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    end_then_draw(&mut session, "spellbook");
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &far_id)["tapped"], false);
+
+    let (_, interacted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == far_id.as_str()
+    });
+    assert!(interacted.events.iter().any(|event| {
+        event.event_type == "stealth-lost" && event.payload["instanceId"] == far_id
+    }));
+    assert!(interacted.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+            && event.payload["instanceId"] == far_id
+    }));
+    let after = state(&session);
+    assert_eq!(unit(&after, &far_id)["controller"], "south");
+    assert_eq!(unit(&after, &far_id)["owner"], "south");
+    assert_eq!(unit(&after, &far_id)["stealthed"], false);
     assert_exact_replay(&session);
 }

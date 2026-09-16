@@ -11809,6 +11809,57 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0514_temporary_control_reverts_at_end_of_turn"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0515",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that gains control of a target enemy minion until it loses Stealth may choose a distant enemy, transfers control without changing ownership, grants Stealth, and taps that minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionUntilStealthLost"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "minion-stealthed",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0515_stealth_bound_control_steals_taps_and_hides_a_distant_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0516",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Stealth-bound enemy-minion control survives the current End Phase and restores the previous controller when the stolen minion loses Stealth, without changing ownership.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionUntilStealthLost"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn",
+        "activate-mana"
+      ],
+      "eventHints": [
+        "stealth-lost",
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0516_stealth_bound_control_survives_end_of_turn_and_reverts_when_stealth_is_lost"
+      }
     }
   ]
 }

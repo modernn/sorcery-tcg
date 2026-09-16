@@ -358,6 +358,7 @@ export type GameCardDefinition =
     drawSpells?: number;
     fightAllyWithAdjacentEnemy?: true;
     gainControlOfTargetEnemyMinionThisTurn?: true;
+    gainControlOfTargetEnemyMinionUntilStealthLost?: true;
     gainControlOfTargetNearbyMinion?: true;
     grantAirborneToAllyThisTurn?: true;
     grantChargeToAllyThisTurn?: true;
@@ -1270,7 +1271,7 @@ const SUPPORTED_CARD_FIELDS = {
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
     destroyTargetArtifact destroyTargetAura destroyTargetSite
-    fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
+    fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
@@ -1744,6 +1745,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.gainControlOfTargetEnemyMinionThisTurn !== true) {
       throw new RangeError(`${path}.gainControlOfTargetEnemyMinionThisTurn must be true when defined`);
     }
+    if (card.gainControlOfTargetEnemyMinionUntilStealthLost !== undefined
+      && card.gainControlOfTargetEnemyMinionUntilStealthLost !== true) {
+      throw new RangeError(`${path}.gainControlOfTargetEnemyMinionUntilStealthLost must be true when defined`);
+    }
     if (card.gainControlOfTargetNearbyMinion !== undefined
       && card.gainControlOfTargetNearbyMinion !== true) {
       throw new RangeError(`${path}.gainControlOfTargetNearbyMinion must be true when defined`);
@@ -1850,6 +1855,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.disableTargetNearbyMinionUntilNextTurn === true)
       + Number(card.fightAllyWithAdjacentEnemy === true)
       + Number(card.gainControlOfTargetEnemyMinionThisTurn === true)
+      + Number(card.gainControlOfTargetEnemyMinionUntilStealthLost === true)
       + Number(card.gainControlOfTargetNearbyMinion === true)
       + Number(card.grantAirborneToAllyThisTurn === true)
       + Number(card.grantChargeToAllyThisTurn === true)
@@ -2703,6 +2709,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { fightAllyWithAdjacentEnemy: true as const }
                   : card.gainControlOfTargetEnemyMinionThisTurn === true
                     ? { gainControlOfTargetEnemyMinionThisTurn: true as const }
+                  : card.gainControlOfTargetEnemyMinionUntilStealthLost === true
+                    ? { gainControlOfTargetEnemyMinionUntilStealthLost: true as const }
                   : card.gainControlOfTargetNearbyMinion === true
                     ? { gainControlOfTargetNearbyMinion: true as const }
                   : card.grantAirborneToAllyThisTurn === true
