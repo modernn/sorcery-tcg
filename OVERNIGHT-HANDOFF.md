@@ -90,7 +90,7 @@ Still TypeScript (not a second legality, observation, or agent engine):
 ## Next exact step
 
 1. Merge PR #55 (`cursor/square-token-0005` → `master`) after CI and `pnpm verify:release` on a machine with rebuilt `session-json`.
-2. Run `pnpm game:check-private` and `pnpm authority:verify-private` on a machine that has `.local/authority/` and `pwsh`. That is the fastest path to real-card deck-vs-deck testing; ranked results still stay `unranked_partial_rules`.
+2. `pnpm game:check-private` is green on `cursor/square-token-0005` with local `.local/authority/` (verified 2026-09-16). `pnpm authority:verify-private` still fails the production boundary-scan tests on this machine (same on `master`); that is an environment gap, not a rules regression. Ranked results still stay `unranked_partial_rules`.
 3. Retire stale lane branches (`cursor/square-wrap-0396`, `cursor/square-outer-column-0005-4d19`, `cursor/deck-pair-harness-8038`) after the merge.
 4. Retire this handoff only after the private-check run is green on the merged line.
 
