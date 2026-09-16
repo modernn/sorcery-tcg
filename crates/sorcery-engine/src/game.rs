@@ -757,6 +757,12 @@ struct PendingStartTurn {
     seat: Seat,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RandomSiteOrVoidDestination {
+    location: Location,
+    cells: Option<SquareArea>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LuckyRandomRequest {
     candidate_instance_ids: Vec<IdentityHash>,
@@ -15488,7 +15494,7 @@ impl Game {
                     return None;
                 }
                 let candidates = self
-                    .random_site_or_void_locations()
+                    .random_site_or_void_locations_for_unit(unit, facts)
                     .into_iter()
                     .map(|(instance_id, _)| instance_id)
                     .collect::<Vec<_>>();
@@ -15577,7 +15583,7 @@ impl Game {
         candidates
     }
 
-    fn random_site_or_void_locations(&self) -> Vec<(IdentityHash, Location)> {
+    fn random_site_or_void_locations(&self) -> Vec<(IdentityHash, RandomSiteOrVoidDestination)> {
         Cell::ALL
             .into_iter()
             .filter_map(|cell| {
@@ -15601,9 +15607,102 @@ impl Game {
                     },
                 }))
                 .ok()?;
-                Some((instance_id, location))
+                Some((
+                    instance_id,
+                    RandomSiteOrVoidDestination {
+                        location,
+                        cells: None,
+                    },
+                ))
             })
             .collect()
+    }
+
+    fn random_site_or_void_locations_for_unit(
+        &self,
+        _unit: &UnitPosition,
+        facts: &MinionFacts,
+    ) -> Vec<(IdentityHash, RandomSiteOrVoidDestination)> {
+        if facts.occupies_square_area_two {
+            Self::minion_square_areas(facts)
+                .filter_map(|cells| self.oversized_random_site_or_void_destination(cells))
+                .collect()
+        } else {
+            self.random_site_or_void_locations()
+        }
+    }
+
+    fn oversized_random_site_or_void_destination(
+        &self,
+        cells: SquareArea,
+    ) -> Option<(IdentityHash, RandomSiteOrVoidDestination)> {
+        let all_void = cells.iter().all(|cell| {
+            self.position.sites[cell.index()].is_none()
+                && self.position.rubble[cell.index()].is_none()
+        });
+        let all_surface = cells.iter().all(|cell| {
+            self.position.sites[cell.index()].is_some()
+                && self.position.rubble[cell.index()].is_none()
+        });
+        if !all_void && !all_surface {
+            return None;
+        }
+        let region = if all_void {
+            Region::Void
+        } else {
+            Region::Surface
+        };
+        if !self.footprint_exists(cells, region) {
+            return None;
+        }
+        let location = Location {
+            cell: cells[0],
+            region,
+        };
+        let instance_id = identity_hash(&json!({
+            "cell": cells[0].to_string(),
+            "cells": cells.iter().map(Cell::to_string).collect::<Vec<_>>(),
+            "kind": "random-site-or-void-location",
+            "region": match region {
+                Region::Surface => "surface",
+                Region::Underground => "underground",
+                Region::Underwater => "underwater",
+                Region::Void => "void",
+            },
+        }))
+        .ok()?;
+        Some((
+            instance_id,
+            RandomSiteOrVoidDestination {
+                location,
+                cells: Some(cells),
+            },
+        ))
+    }
+
+    fn random_site_or_void_outcome_label(destination: RandomSiteOrVoidDestination) -> String {
+        let region = match destination.location.region {
+            Region::Surface => "surface",
+            Region::Underground => "underground",
+            Region::Underwater => "underwater",
+            Region::Void => "void",
+        };
+        if let Some(cells) = destination.cells {
+            return format!(
+                "Lucky Charm chooses {} {} ({})",
+                destination.location.cell,
+                region,
+                cells
+                    .iter()
+                    .map(Cell::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        format!(
+            "Lucky Charm chooses {} {}",
+            destination.location.cell, region
+        )
     }
 
     fn random_unit_candidates_at_location(
@@ -15704,24 +15803,29 @@ impl Game {
                     &dead.as_str()[..15.min(dead.as_str().len())]
                 );
             }
-            if matches!(
-                pending.action,
-                ActionDescriptor::ResolveStartTurnTrigger { .. }
-            ) && let Some((_, location)) = self
-                .random_site_or_void_locations()
-                .into_iter()
-                .find(|(instance_id, _)| instance_id == outcome_instance_id)
+            if let ActionDescriptor::ResolveStartTurnTrigger {
+                source_instance_id, ..
+            } = &pending.action
             {
-                return format!(
-                    "Lucky Charm chooses {} {}",
-                    location.cell,
-                    match location.region {
-                        Region::Surface => "surface",
-                        Region::Underground => "underground",
-                        Region::Underwater => "underwater",
-                        Region::Void => "void",
+                let unit = self
+                    .position
+                    .units
+                    .iter()
+                    .find(|candidate| candidate.card.instance_id == *source_instance_id);
+                if let Some(unit) = unit {
+                    let CardFacts::Minion(facts) =
+                        &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+                    else {
+                        return "Lucky Charm chooses outcome".to_owned();
+                    };
+                    let candidates = self.random_site_or_void_locations_for_unit(unit, facts);
+                    if let Some((_, destination)) = candidates
+                        .into_iter()
+                        .find(|(instance_id, _)| instance_id == outcome_instance_id)
+                    {
+                        return Self::random_site_or_void_outcome_label(destination);
                     }
-                );
+                }
             }
         }
         format!(
@@ -16208,7 +16312,10 @@ impl Game {
         let unit_planar_gate_voidwalk = unit_snapshot.planar_gate_voidwalk;
         let unit_occupied_cells = unit_snapshot.occupied_cells;
         let unit_controller = unit_snapshot.controller;
-        let candidates = self.random_site_or_void_locations();
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit_card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let candidates = self.random_site_or_void_locations_for_unit(unit_snapshot, facts);
         if candidates.is_empty() {
             self.finish_start_turn_trigger(source_instance_id, outcomes)?;
             self.position.state_version += 1;
@@ -16229,7 +16336,12 @@ impl Game {
                 random_draws,
             )?
         };
-        let (selected_outcome_id, destination) = candidates[index].clone();
+        let (selected_outcome_id, selected) = candidates[index].clone();
+        let destination_cells = selected.cells;
+        let destination = destination_cells.map_or(selected.location, |cells| Location {
+            cell: cells[0],
+            region: selected.location.region,
+        });
         let unit = self
             .position
             .units
@@ -16240,10 +16352,15 @@ impl Game {
             cell: unit_location,
             region: unit_region,
         };
-        let stays = from.cell == destination.cell && from.region == destination.region;
-        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit_card_id.0)].facts else {
-            return Err(GameError::IllegalAction);
-        };
+        let occupied = Self::unit_occupied_cells(unit_snapshot).to_vec();
+        let arrival =
+            destination_cells.map_or_else(|| vec![destination.cell], |cells| cells.to_vec());
+        let stays = unit_region == destination.region
+            && occupied.len() == arrival.len()
+            && occupied
+                .iter()
+                .zip(arrival.iter())
+                .all(|(left, right)| left == right);
         let profile = MovementProfile {
             airborne: self.minion_is_airborne(unit, facts),
             cause: MovementCause::CardEffect,
@@ -16256,21 +16373,48 @@ impl Game {
             restriction: None,
             seat: unit_controller,
         };
+        let destination_cell_slice = destination_cells.as_ref().map_or(
+            std::slice::from_ref(&destination.cell),
+            SquareArea::as_slice,
+        );
         let legal = stays
-            || (self.location_exists_in_region(destination.cell, destination.region)
+            || ((destination_cells
+                .is_some_and(|cells| self.footprint_exists(cells, destination.region))
+                || destination_cells.is_none()
+                    && self.location_exists_in_region(destination.cell, destination.region))
                 && (destination.region != Region::Void || profile.regions.voidwalk)
+                && self.teleport_cells_allowed(
+                    &occupied,
+                    destination_cell_slice,
+                    destination.region,
+                    profile.power,
+                )
+                && destination_cells
+                    .is_none_or(|cells| self.square_allows_power_entry(cells, profile.power))
                 && self.unit_entry_allowed(from, destination, profile));
         if legal && !stays {
             self.move_minion_to(source_instance_id, destination)?;
+            if let Some(cells) = destination_cells {
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|candidate| candidate.card.instance_id == *source_instance_id)
+                    .expect("teleporting minion")
+                    .occupied_cells = Some(cells);
+            }
             outcomes.push("unit-teleported", || {
-                json!({
+                let mut payload = json!({
                     "from": from,
                     "outcomeInstanceId": selected_outcome_id,
                     "seat": action.seat,
                     "sourceInstanceId": source_instance_id,
                     "targetInstanceId": source_instance_id,
                     "to": destination,
-                })
+                });
+                if let Some(cells) = destination_cells {
+                    payload["cells"] = json!(cells);
+                }
+                payload
             });
             self.settle_region_occupancy(outcomes)?;
             self.settle_static_power_deaths(outcomes)?;
@@ -16282,14 +16426,18 @@ impl Game {
                     "unit-teleport-failed"
                 },
                 || {
-                    json!({
+                    let mut payload = json!({
                         "from": from,
                         "outcomeInstanceId": selected_outcome_id,
                         "reason": if legal { "already-there" } else { "illegal-entry" },
                         "seat": action.seat,
                         "sourceInstanceId": source_instance_id,
                         "to": destination,
-                    })
+                    });
+                    if let Some(cells) = destination_cells {
+                        payload["cells"] = json!(cells);
+                    }
+                    payload
                 },
             );
         }

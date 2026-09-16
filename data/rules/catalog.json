@@ -8367,6 +8367,48 @@
         "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
         "testName": "rule_catalog_0378_deck_pair_batch_reproduces_transcript_hash_for_manifest_and_seed"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0379",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-turn random teleports move a 2×2 Voidwalk minion's whole footprint to an all-void or all-surface square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "voidwalk"
+      ],
+      "actionHints": [
+        "teleport"
+      ],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0379_oversized_start_turn_random_teleport_moves_whole_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0380",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Start-turn random teleports for a 2×2 Voidwalk minion resolve blocked footprints through Lucky Charm without moving the unit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "voidwalk"
+      ],
+      "actionHints": [
+        "teleport"
+      ],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0380_oversized_start_turn_random_teleport_fails_blocked_footprint_through_lucky_charm"
+      }
     }
   ]
 }
