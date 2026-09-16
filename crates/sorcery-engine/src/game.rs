@@ -2297,6 +2297,26 @@ impl Game {
         Ok(())
     }
 
+    fn shooter_may_step_after_ranged_strike(&self, shooter_instance_id: &IdentityHash) -> bool {
+        self.position.units.iter().any(|unit| {
+            unit.card.instance_id == *shooter_instance_id
+                && matches!(
+                    &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
+                    CardFacts::Minion(facts) if facts.may_step_after_ranged_strike
+                )
+        })
+    }
+
+    fn resume_after_ranged_step(&mut self) {
+        if let Some(pending) = self.position.pending_basic_movement.as_pending() {
+            self.position.phase = Phase::Movement;
+            self.position.decision_seat = pending.seat;
+        } else {
+            self.position.phase = Phase::Main;
+            self.position.decision_seat = self.position.active_seat;
+        }
+    }
+
     fn ranged_step_descriptors(
         &self,
         pending: &PendingRangedStep,
@@ -8969,7 +8989,9 @@ impl Game {
                 hit: Some(_),
                 shooter_instance_id,
                 ..
-            } if self.position.phase != Phase::Movement => Some(shooter_instance_id),
+            } if self.shooter_may_step_after_ranged_strike(shooter_instance_id) => {
+                Some(shooter_instance_id)
+            }
             _ => None,
         };
         let applied = match &action.descriptor {
@@ -9377,6 +9399,25 @@ impl Game {
         }
         self.reconcile_pending_combat();
         self.reconcile_attack_window();
+        if self.position.pending_ranged_step.is_pending() {
+            let pending = self
+                .position
+                .pending_ranged_step
+                .as_pending()
+                .ok_or(GameError::IllegalAction)?;
+            let source_exists = self.position.units.iter().any(|unit| {
+                unit.controller == pending.seat
+                    && unit.card.instance_id == pending.source_instance_id
+            });
+            if source_exists {
+                self.position.phase = Phase::RangedStep;
+                self.position.decision_seat = pending.seat;
+            } else {
+                self.position.pending_ranged_step = PendingField::Resolved;
+                self.resume_after_ranged_step();
+            }
+            return Ok(());
+        }
         if let Some(pending) = self.position.pending_basic_movement.as_pending().cloned() {
             let source_remains = self.position.units.iter().any(|unit| {
                 unit.controller == pending.seat
@@ -9398,26 +9439,6 @@ impl Game {
                     self.position.phase = Phase::Main;
                     self.position.decision_seat = self.position.active_seat;
                 }
-            }
-            return Ok(());
-        }
-        if self.position.pending_ranged_step.is_pending() {
-            let pending = self
-                .position
-                .pending_ranged_step
-                .as_pending()
-                .ok_or(GameError::IllegalAction)?;
-            let source_exists = self.position.units.iter().any(|unit| {
-                unit.controller == pending.seat
-                    && unit.card.instance_id == pending.source_instance_id
-            });
-            if source_exists {
-                self.position.phase = Phase::RangedStep;
-                self.position.decision_seat = pending.seat;
-            } else {
-                self.position.pending_ranged_step = PendingField::Resolved;
-                self.position.phase = Phase::Main;
-                self.position.decision_seat = self.position.active_seat;
             }
         }
         Ok(())
@@ -10239,8 +10260,7 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         self.position.pending_ranged_step = PendingField::Resolved;
-        self.position.phase = Phase::Main;
-        self.position.decision_seat = self.position.active_seat;
+        self.resume_after_ranged_step();
         if *choice == RangedStepChoice::Decline {
             self.position.state_version += 1;
             return Ok(());

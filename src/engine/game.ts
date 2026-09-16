@@ -2233,10 +2233,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.mayRangedStrikeOnceDuringBasicMovement === true && card.ranged !== true) {
     throw new RangeError(`${path}.mayRangedStrikeOnceDuringBasicMovement requires ranged`);
   }
-  if (card.mayRangedStrikeOnceDuringBasicMovement === true
-    && card.mayStepAfterRangedStrike === true) {
-    throw new RangeError(`${path} simultaneous during-movement and post-Ranged movement is unsupported`);
-  }
   if (card.atStartOfControllerTurnDrawSites !== undefined
     && (!Number.isSafeInteger(card.atStartOfControllerTurnDrawSites)
       || card.atStartOfControllerTurnDrawSites < 1
