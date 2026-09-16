@@ -12921,29 +12921,13 @@ impl Game {
             });
         }
         if let Some(token) = token {
-            let token_card_id = self.rules.cards[usize::from(token.card.card_id.0)]
-                .id
-                .clone();
-            let token_instance_id = token.card.instance_id.clone();
-            let token_owner = token.card.owner;
-            let occupied_cells = token.occupied_cells;
-            self.position.units.push(token);
-            outcomes.push("minion-summoned", || {
-                let mut payload = json!({
-                    "cardId": token_card_id,
-                    "cell": cell,
-                    "instanceId": token_instance_id,
-                    "manaPaid": 1,
-                    "owner": token_owner,
-                    "seat": seat,
-                    "sourceInstanceId": card_instance_id,
-                    "token": true,
-                });
-                if let Some(cells) = occupied_cells {
-                    payload["occupiedCells"] = json!(cells);
-                }
-                payload
-            });
+            self.finish_token_entry(
+                seat,
+                token,
+                &card_instance_id,
+                u64::from(paid_token),
+                outcomes,
+            )?;
         }
         if !abilities_lost && facts.genesis_enemies_lose_stealth {
             let enemy = other_seat(seat);
@@ -13102,6 +13086,56 @@ impl Game {
             temporary_ranged_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
+    }
+
+    /// Places a token minion and resolves any non-choice Genesis printed on its definition.
+    fn finish_token_entry(
+        &mut self,
+        seat: Seat,
+        token: UnitPosition,
+        source_instance_id: &IdentityHash,
+        mana_paid: u64,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let card_id = token.card.card_id;
+        let card_instance_id = token.card.instance_id.clone();
+        let token_owner = token.card.owner;
+        let cell = token.location;
+        let occupied_cells = token.occupied_cells;
+        let lance_count = token.carried_lance_count;
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        let genesis = facts.genesis;
+        let token_card_id = self.rules.cards[usize::from(card_id.0)].id.clone();
+        self.position.units.push(token);
+        outcomes.push("minion-summoned", || {
+            let mut payload = json!({
+                "cardId": token_card_id,
+                "cell": cell,
+                "instanceId": card_instance_id.clone(),
+                "manaPaid": mana_paid,
+                "owner": token_owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "token": true,
+            });
+            if let Some(cells) = occupied_cells {
+                payload["occupiedCells"] = json!(cells);
+            }
+            payload
+        });
+        if lance_count > 0 {
+            let lance_bearer = card_instance_id.clone();
+            outcomes.push("lance-gained", || {
+                json!({
+                    "bearerInstanceId": lance_bearer.clone(),
+                    "count": lance_count,
+                    "sourceInstanceId": lance_bearer,
+                })
+            });
+        }
+        self.apply_minion_genesis(seat, &card_instance_id, genesis, None, None, outcomes)
     }
 
     fn apply_replace_rubble_action(
@@ -13948,30 +13982,12 @@ impl Game {
                 )
             })
             .transpose()?;
-        let cell = pending.cell;
         let source_instance_id = pending.source_instance_id.clone();
         self.position.pending_genesis_token = PendingField::Resolved;
         self.position.phase = Phase::Main;
         if let Some(token) = token {
             self.position.players[seat_index(seat)].mana -= 1;
-            let card_id = self.rules.cards[usize::from(token.card.card_id.0)]
-                .id
-                .clone();
-            let instance_id = token.card.instance_id.clone();
-            let owner = token.card.owner;
-            self.position.units.push(token);
-            outcomes.push("minion-summoned", || {
-                json!({
-                    "cardId": card_id,
-                    "cell": cell,
-                    "instanceId": instance_id,
-                    "manaPaid": 1,
-                    "owner": owner,
-                    "seat": seat,
-                    "sourceInstanceId": source_instance_id,
-                    "token": true,
-                })
-            });
+            self.finish_token_entry(seat, token, &source_instance_id, 1, outcomes)?;
         }
         self.position.state_version += 1;
         Ok(())
@@ -18409,24 +18425,7 @@ impl Game {
             }
             MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(_) => {
                 for token in token_units {
-                    let token_card_id = self.rules.cards[usize::from(token.card.card_id.0)]
-                        .id
-                        .clone();
-                    let cell = token.location;
-                    let instance_id = token.card.instance_id.clone();
-                    let token_owner = token.card.owner;
-                    self.position.units.push(token);
-                    outcomes.push("minion-summoned", || {
-                        json!({
-                            "cardId": token_card_id,
-                            "cell": cell,
-                            "instanceId": instance_id,
-                            "owner": token_owner,
-                            "seat": seat,
-                            "sourceInstanceId": card_instance_id,
-                            "token": true,
-                        })
-                    });
+                    self.finish_token_entry(seat, token, card_instance_id, 0, outcomes)?;
                 }
             }
             MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite => {

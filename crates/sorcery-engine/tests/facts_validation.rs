@@ -824,13 +824,17 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "damage prevention",
         ),
         (
-            "token Genesis",
+            "token adjacent Genesis damage",
             with(
-                with(minion(), "token", json!(true)),
-                "genesisDrawSite",
-                json!(true),
+                with(
+                    with(minion(), "token", json!(true)),
+                    "genesisMayDamageTargetAdjacentUnit",
+                    json!(2),
+                ),
+                "attack",
+                json!(1),
             ),
-            "token Genesis",
+            "token adjacent Genesis damage",
         ),
         (
             "start-turn draw range",
@@ -1837,6 +1841,23 @@ fn oversized_wrap_should_parse() {
     };
     assert!(facts.occupies_square_area_two);
     assert!(facts.connects_top_bottom);
+}
+
+#[test]
+fn token_genesis_draw_site_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "token-genesis-draw",
+        &with(
+            with(minion(), "token", json!(true)),
+            "genesisDrawSite",
+            json!(true),
+        ),
+    )
+    .expect("valid token genesis minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.token);
+    assert_eq!(facts.genesis, Some(MinionGenesis::DrawSite));
 }
 
 #[test]

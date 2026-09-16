@@ -1896,10 +1896,10 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         path,
     )?
     .map(compact_u8);
-    if token && genesis.is_some() {
+    if token && matches!(genesis, Some(MinionGenesis::MayDamageTargetAdjacentUnitTwo)) {
         return Err(FactError::new(
             path,
-            "token Genesis effects are unsupported",
+            "token adjacent Genesis damage is unsupported",
         ));
     }
 

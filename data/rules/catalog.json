@@ -8409,6 +8409,44 @@
         "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
         "testName": "rule_catalog_0380_oversized_start_turn_random_teleport_fails_blocked_footprint_through_lucky_charm"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0381",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A token minion with printed Genesis draws a hidden Atlas card when it enters the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0381_token_genesis_draws_a_hidden_site_on_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0382",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A token minion with disable-until-damaged Genesis enters Disabled when it is created.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "disable"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_genesis_rules.rs",
+        "testName": "rule_catalog_0382_token_genesis_disables_the_token_until_damaged"
+      }
     }
   ]
 }
