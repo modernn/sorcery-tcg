@@ -181,6 +181,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("bearerControllerChoosesExtraRandomOutcome", json!(true)),
         ("grantsBearerLethal", json!(true)),
         ("grantsBearerPower", json!(2)),
+        (
+            "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
+            json!(true),
+        ),
         ("nearbyMinionsMustAttackIfAble", json!(true)),
         ("nearbyStrikesAgainstUnitsDealDoubleDamage", json!(true)),
         (

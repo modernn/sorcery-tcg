@@ -182,6 +182,7 @@ pub enum ArtifactEffect {
     GrantsBearerPowerTwo,
     NearbyMinionsMustAttackIfAble,
     NearbyStrikesAgainstUnitsDealDoubleDamage,
+    SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves,
     TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps,
     TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree,
     TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour,
@@ -754,6 +755,7 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "manaCost",
     "nearbyMinionsMustAttackIfAble",
     "nearbyStrikesAgainstUnitsDealDoubleDamage",
+    "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
     "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
     "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
@@ -1078,6 +1080,10 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
     })
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the effect list intentionally mirrors the fail-closed Artifact contract"
+)]
 fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFacts, FactError> {
     reject_unknown(object, ARTIFACT_FIELDS, path)?;
     let nearby_must_attack = true_only(object, "nearbyMinionsMustAttackIfAble", path)?;
@@ -1111,6 +1117,14 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         .then_some(ArtifactEffect::BearerControllerChoosesExtraRandomOutcome),
         true_only(object, "grantsBearerLethal", path)?
             .then_some(ArtifactEffect::GrantsBearerLethal),
+        true_only(
+            object,
+            "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
+            path,
+        )?
+        .then_some(
+            ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves,
+        ),
         fixed_integer(object, "grantsBearerPower", 2, path)?
             .then_some(ArtifactEffect::GrantsBearerPowerTwo),
         true_only(

@@ -4631,6 +4631,7 @@ function gameDefinition(
   atEndOfControllerTurnUntapNearbyAllies = false,
   cannotBeCarried = false,
   genesisGainControlOfTappedMinionsHereUntilThisLeaves = false,
+  sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4665,7 +4666,8 @@ function gameDefinition(
       + Number(atEndOfEachTurnSiteControllerLosesLife !== 0)
       + Number(atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn !== 0)
       + Number(bearerControllerChoosesExtraRandomOutcome)
-      + Number(atEndOfControllerTurnUntapNearbyAllies) === 1) {
+      + Number(atEndOfControllerTurnUntapNearbyAllies)
+      + Number(sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves) === 1) {
     return {
       cardType: 'artifact',
       ...(cannotBeCarried ? { cannotBeCarried: true as const } : {}),
@@ -4690,6 +4692,11 @@ function gameDefinition(
                     ? { atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn }
                     : atEndOfControllerTurnUntapNearbyAllies
                       ? { atEndOfControllerTurnUntapNearbyAllies: true as const }
+                      : sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
+                        ? {
+                          sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves:
+                            true as const,
+                        }
                   : { atEndOfEachTurnSiteControllerLosesLife }),
       manaCost: card.manaCost,
       thresholds: card.thresholds,

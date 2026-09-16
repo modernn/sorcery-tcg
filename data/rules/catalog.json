@@ -11909,6 +11909,57 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0518_genesis_control_reverts_when_the_source_leaves"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0519",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A carried Artifact that is sacrificed to steal a target enemy minion here grants its bearer control of that minion until the bearer leaves, offers only unstealthed enemy minions sharing the bearer's footprint, and leaves ownership unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "activate-artifact-sacrifice-control"
+      ],
+      "eventHints": [
+        "artifact-sacrificed",
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0519_sacrifice_artifact_steals_an_enemy_minion_here_and_skips_the_rest"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0520",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Sacrifice-to-steal Artifact control survives the current End Phase and restores the previous controller when the bearer leaves play, without changing ownership.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves"
+      ],
+      "actionHints": [
+        "activate-artifact-sacrifice-control",
+        "end-turn",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand",
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0520_sacrifice_artifact_control_persists_until_the_bearer_leaves"
+      }
     }
   ]
 }

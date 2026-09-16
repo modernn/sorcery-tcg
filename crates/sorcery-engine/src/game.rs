@@ -1371,6 +1371,7 @@ const fn unsupported_artifact_effect(effect: ArtifactEffect) -> Option<&'static 
         | ArtifactEffect::GrantsBearerPowerTwo
         | ArtifactEffect::NearbyMinionsMustAttackIfAble
         | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+        | ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
         | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
         | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
         | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -1389,6 +1390,7 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
             | ArtifactEffect::GrantsBearerPowerTwo
             | ArtifactEffect::NearbyMinionsMustAttackIfAble
             | ArtifactEffect::NearbyStrikesAgainstUnitsDealDoubleDamage
+            | ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
             | ArtifactEffect::TapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
             | ArtifactEffect::TapBearerAndAnotherAllyHereToDamageTargetWithinTwoStepsThree
             | ArtifactEffect::TapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPathFour
@@ -4627,7 +4629,8 @@ impl Game {
             .chain(self.drop_artifact_descriptors(seat)?)
             .chain(self.artifact_damage_descriptors(seat)?)
             .chain(self.artifact_discard_area_damage_descriptors(seat)?)
-            .chain(self.artifact_roll_damage_descriptors(seat)?);
+            .chain(self.artifact_roll_damage_descriptors(seat)?)
+            .chain(self.artifact_sacrifice_control_descriptors(seat)?);
         for descriptor in descriptors {
             let label = descriptor
                 .state_independent_label()
@@ -4972,6 +4975,90 @@ impl Game {
         Ok(descriptors)
     }
 
+    /// Offers each carried sacrifice-to-steal activation whose bearer can still use the ability.
+    fn artifact_sacrifice_control_descriptors(
+        &self,
+        seat: Seat,
+    ) -> Result<Vec<ActionDescriptor>, GameError> {
+        if !self.artifact_activation_window(seat) {
+            return Ok(Vec::new());
+        }
+        let mut descriptors = Vec::new();
+        for artifact in &self.position.artifacts {
+            if self.artifact_facts(artifact)?.effect
+                != ArtifactEffect::SacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
+            {
+                continue;
+            }
+            let Some(bearer) = artifact.bearer() else {
+                continue;
+            };
+            if bearer.seat() != seat || !self.granted_bearer_ability_available(bearer)? {
+                continue;
+            }
+            for target in self.enemy_minions_sharing_unit_footprint(bearer, seat)? {
+                descriptors.push(ActionDescriptor::ActivateArtifactSacrificeControl {
+                    artifact_instance_id: artifact.card.instance_id.clone(),
+                    target,
+                });
+            }
+        }
+        Ok(descriptors)
+    }
+
+    fn granted_bearer_ability_available(&self, bearer: &UnitTarget) -> Result<bool, GameError> {
+        match bearer {
+            UnitTarget::Avatar { instance_id, seat } => {
+                let avatar = &self.position.players[seat_index(*seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(true)
+            }
+            UnitTarget::Minion { instance_id, seat } => self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == *seat && unit.card.instance_id == *instance_id)
+                .map(|unit| !self.minion_is_disabled(unit))
+                .ok_or(GameError::IllegalAction),
+        }
+    }
+
+    fn enemy_minions_sharing_unit_footprint(
+        &self,
+        bearer: &UnitTarget,
+        seat: Seat,
+    ) -> Result<Vec<UnitTarget>, GameError> {
+        let region = self.unit_target_region(bearer)?;
+        let cells = self.unit_target_occupied_cells(bearer)?;
+        let enemy = other_seat(seat);
+        let mut targets = Vec::new();
+        for unit in &self.position.units {
+            if unit.controller != enemy || unit.region != region {
+                continue;
+            }
+            if self.combatant_stealthed(
+                UnitKind::Minion,
+                unit.controller,
+                &unit.card.instance_id,
+            )? {
+                continue;
+            }
+            if Self::unit_occupied_cells(unit)
+                .iter()
+                .any(|cell| cells.contains(cell))
+            {
+                targets.push(UnitTarget::Minion {
+                    instance_id: unit.card.instance_id.clone(),
+                    seat: unit.controller,
+                });
+            }
+        }
+        targets.sort_unstable_by(|left, right| left.instance_id().cmp(right.instance_id()));
+        Ok(targets)
+    }
+
     /// The maximal cardinal roll path from one location without revisiting a cell or leaving the
     /// starting region.
     fn maximal_roll_path(&self, origin: Location, direction: ProjectileDirection) -> Vec<Location> {
@@ -5153,12 +5240,15 @@ impl Game {
         &mut self,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let living: BTreeSet<_> = self
+        let mut living: BTreeSet<_> = self
             .position
             .units
             .iter()
             .map(|unit| unit.card.instance_id.clone())
             .collect();
+        for player in &self.position.players {
+            living.insert(player.avatar.card.instance_id.clone());
+        }
         self.revert_matching_temporary_controls(outcomes, |effect, _stealthed| {
             effect.expiry == TemporaryControlExpiry::UntilSourceLeaves
                 && !living.contains(&effect.source_instance_id)
@@ -9169,6 +9259,9 @@ impl Game {
             }
             ActionDescriptor::ActivateArtifactRollDamage { .. } => {
                 self.apply_artifact_roll_damage_action(action, outcomes)
+            }
+            ActionDescriptor::ActivateArtifactSacrificeControl { .. } => {
+                self.apply_artifact_sacrifice_control_action(action, outcomes)
             }
             ActionDescriptor::ActivateDiscardRandomDamage { .. } => self
                 .apply_discard_random_damage_action(
@@ -15038,6 +15131,74 @@ impl Game {
                 outcomes,
             )?;
         }
+        Ok(())
+    }
+
+    /// Sacrifices a carried Artifact so its bearer steals one targeted enemy minion here until
+    /// that bearer leaves. The Artifact is the cost; Ward may still absorb the targeted steal.
+    fn apply_artifact_sacrifice_control_action(
+        &mut self,
+        action: &IssuedAction,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let ActionDescriptor::ActivateArtifactSacrificeControl {
+            artifact_instance_id,
+            target,
+        } = &action.descriptor
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        let seat = action.seat;
+        if !self
+            .artifact_sacrifice_control_descriptors(seat)?
+            .contains(&action.descriptor)
+        {
+            return Err(GameError::IllegalAction);
+        }
+        let bearer = self
+            .position
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.card.instance_id == *artifact_instance_id)
+            .and_then(ArtifactPosition::bearer)
+            .ok_or(GameError::IllegalAction)?
+            .clone();
+        let artifact = self.take_targeted_artifact(artifact_instance_id)?;
+        let owner = artifact.card.owner;
+        let card_id = self.rules.cards[usize::from(artifact.card.card_id.0)]
+            .id
+            .clone();
+        if artifact.card.source == CardSource::Token {
+            outcomes.push("artifact-banished", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": artifact_instance_id,
+                    "owner": owner,
+                })
+            });
+        } else {
+            self.position.players[seat_index(owner)]
+                .cemetery
+                .push(artifact.card);
+            outcomes.push("artifact-sacrificed", || {
+                json!({
+                    "cardId": card_id,
+                    "instanceId": artifact_instance_id,
+                    "owner": owner,
+                    "seat": seat,
+                    "sourceInstanceId": bearer.instance_id(),
+                })
+            });
+        }
+        self.apply_minion_control_change(
+            Some(target),
+            seat,
+            bearer.instance_id(),
+            Some(TemporaryControlExpiry::UntilSourceLeaves),
+            true,
+            outcomes,
+        )?;
+        self.position.state_version += 1;
         Ok(())
     }
 

@@ -273,6 +273,14 @@ pub enum ActionDescriptor {
         /// region, whose occupants all take the damage.
         target_location: Location,
     },
+    /// Sacrifice a carried Artifact so its bearer steals a targeted enemy minion here until that
+    /// bearer leaves play.
+    ActivateArtifactSacrificeControl {
+        /// Authoritative carried Artifact identity being sacrificed.
+        artifact_instance_id: IdentityHash,
+        /// Engine-issued enemy minion sharing the bearer's footprint.
+        target: UnitTarget,
+    },
     /// Discard one Spellbook card to damage a hidden random other unit at the source's location.
     ActivateDiscardRandomDamage {
         /// Exact Spellbook card discarded to pay for the ability.
@@ -1025,6 +1033,15 @@ impl ActionDescriptor {
                 short_identity(artifact_instance_id),
                 target_location.cell
             )),
+            Self::ActivateArtifactSacrificeControl {
+                artifact_instance_id,
+                target,
+            } => Some(format!(
+                "Sacrifice artifact {}… to gain control of {} {}…",
+                short_identity(artifact_instance_id),
+                target.kind(),
+                short_identity(target.instance_id())
+            )),
             Self::ActivateArtifactRollDamage {
                 direction,
                 path,
@@ -1628,6 +1645,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         .then_with(|| compare_json_array(left_path, right_path, Location::cmp))
                         .then_with(|| compare_unit_targets(left_pusher, right_pusher)),
                     (
+                        ActionDescriptor::ActivateArtifactSacrificeControl {
+                            artifact_instance_id: left_artifact,
+                            target: left_target,
+                        },
+                        ActionDescriptor::ActivateArtifactSacrificeControl {
+                            artifact_instance_id: right_artifact,
+                            target: right_target,
+                        },
+                    ) => left_artifact
+                        .cmp(right_artifact)
+                        .then_with(|| compare_unit_targets(left_target, right_target)),
+                    (
                         ActionDescriptor::ActivateAreaDamage {
                             source_instance_id: left_source,
                             target_location: left_location,
@@ -2084,7 +2113,8 @@ const fn descriptor_group(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateMana { .. } | ActionDescriptor::AllocateStrike { .. } => 1,
         ActionDescriptor::ActivateArtifactDamage { .. }
         | ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. }
-        | ActionDescriptor::ActivateArtifactRollDamage { .. } => 2,
+        | ActionDescriptor::ActivateArtifactRollDamage { .. }
+        | ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 2,
         ActionDescriptor::DropArtifacts { .. } | ActionDescriptor::PickUpArtifacts { .. } => 3,
         ActionDescriptor::Mulligan { .. } => 4,
         ActionDescriptor::CastArtifact {
@@ -2220,6 +2250,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
+        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 46,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,

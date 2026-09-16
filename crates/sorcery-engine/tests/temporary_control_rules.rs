@@ -1,4 +1,4 @@
-//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0518).
+//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0520).
 //!
 //! Official Magic can gain control of a target enemy minion this turn and
 //! untap it, or gain control until that minion loses Stealth after tapping it
@@ -809,6 +809,283 @@ fn rule_catalog_0518_genesis_control_reverts_when_the_source_leaves() {
             .expect("realm units")
             .iter()
             .all(|unit| unit["instanceId"] != puppet_id)
+    );
+    assert_exact_replay(&session);
+}
+
+fn potion() -> Value {
+    json!({
+        "cardType": "artifact",
+        "manaCost": 0,
+        "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn potion_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "sacrifice-control-artifact" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-sacrifice-control-artifact-v1",
+        },
+        "cards": {
+            "north-ally": dummy(),
+            "north-avatar": avatar(),
+            "north-bounce": bounce(),
+            "north-potion": potion(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-far": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-near": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-ally",
+                    "north-potion",
+                    "north-potion",
+                    "north-potion",
+                    "north-bounce",
+                    "north-bounce",
+                    "north-bounce"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-near",
+                    "south-near",
+                    "south-near",
+                    "south-near",
+                    "south-far",
+                    "south-far",
+                    "south-far",
+                    "south-far"
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn potion_targets(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("sacrifice-control actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "activate-artifact-sacrifice-control")
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+/// North ally carrying the Artifact at C4, South enemy here at C4 and distant at C1.
+fn potion_opening() -> (Session, String, String, String, String) {
+    let mut session = (1..=4096)
+        .map(potion_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("sacrifice-control-artifact candidate");
+            let north = opening_spell_ids(&session, "north");
+            let south = opening_spell_ids(&session, "south");
+            (north.iter().any(|card| card == "north-ally")
+                && north.iter().any(|card| card == "north-potion")
+                && north.iter().any(|card| card == "north-bounce")
+                && south.iter().any(|card| card == "south-near")
+                && south.iter().any(|card| card == "south-far"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with potion, bounce, ally, and two South minions");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("north ally identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (far, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-far"
+            && descriptor["cell"] == "C1"
+    });
+    let far_id = far["cardInstanceId"]
+        .as_str()
+        .expect("south far identity")
+        .to_owned();
+    let (near, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-near"
+            && descriptor["cell"] == "C4"
+    });
+    let near_id = near["cardInstanceId"]
+        .as_str()
+        .expect("south near identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    let (cast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-potion"
+            && descriptor["bearer"]["instanceId"] == ally_id.as_str()
+    });
+    let artifact_id = cast["cardInstanceId"]
+        .as_str()
+        .expect("potion identity")
+        .to_owned();
+    (session, ally_id, near_id, far_id, artifact_id)
+}
+
+fn sacrifice_steal(session: &mut Session, artifact_id: &str, near_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-sacrifice-control"
+            && descriptor["artifactInstanceId"] == artifact_id
+            && descriptor["target"]["instanceId"] == near_id
+    });
+    receipt
+}
+
+#[test]
+fn rule_catalog_0519_sacrifice_artifact_steals_an_enemy_minion_here_and_skips_the_rest() {
+    let (mut session, ally_id, near_id, far_id, artifact_id) = potion_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &near_id)["controller"], "south");
+    assert_eq!(unit(&before, &near_id)["owner"], "south");
+    assert_eq!(unit(&before, &far_id)["controller"], "south");
+    assert_eq!(unit(&before, &ally_id)["controller"], "north");
+
+    let targets = potion_targets(&session);
+    assert!(targets.contains(&near_id), "{targets:?}");
+    assert!(!targets.contains(&far_id), "{targets:?}");
+    assert!(!targets.contains(&ally_id), "{targets:?}");
+
+    let receipt = sacrifice_steal(&mut session, &artifact_id, &near_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["artifact-sacrificed", "minion-control-changed"]
+    );
+    let changed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-control-changed")
+        .expect("control change");
+    assert_eq!(changed.payload["fromSeat"], "south");
+    assert_eq!(changed.payload["seat"], "north");
+    assert_eq!(changed.payload["instanceId"], near_id);
+    assert_eq!(changed.payload["sourceInstanceId"], ally_id);
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "artifact-sacrificed"
+            && event.payload["instanceId"] == artifact_id
+            && event.payload["sourceInstanceId"] == ally_id
+    }));
+
+    let after = state(&session);
+    assert_eq!(unit(&after, &near_id)["controller"], "north");
+    assert_eq!(unit(&after, &near_id)["owner"], "south");
+    assert_eq!(unit(&after, &far_id)["controller"], "south");
+    assert_eq!(unit(&after, &ally_id)["controller"], "north");
+    assert!(
+        after["realm"]["artifacts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|artifact| artifact["instanceId"] != artifact_id)
+    );
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == artifact_id && card["cardId"] == "north-potion")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0520_sacrifice_artifact_control_persists_until_the_bearer_leaves() {
+    let (mut session, ally_id, near_id, _, artifact_id) = potion_opening();
+    sacrifice_steal(&mut session, &artifact_id, &near_id);
+    assert_eq!(unit(&state(&session), &near_id)["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    assert_eq!(unit(&state(&session), &near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &near_id)["owner"], "south");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    end_then_draw(&mut session, "spellbook");
+    assert_eq!(unit(&state(&session), &near_id)["controller"], "north");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == ally_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-returned-to-hand",
+            "minion-control-changed",
+            "magic-resolved"
+        ]
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+            && event.payload["instanceId"] == near_id
+    }));
+    let after = state(&session);
+    assert_eq!(unit(&after, &near_id)["controller"], "south");
+    assert_eq!(unit(&after, &near_id)["owner"], "south");
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != ally_id)
     );
     assert_exact_replay(&session);
 }

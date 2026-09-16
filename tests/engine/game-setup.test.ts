@@ -19431,6 +19431,70 @@ test('RULE-04 a carried Lethal Artifact kills on positive strike damage and drop
   });
 });
 
+test('RULE-03 sacrifice-to-steal Artifact facts are exclusive and true-only', () => {
+  const cards: Record<string, GameCardDefinition> = {
+    'potion-north-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'potion-north-site': { cardType: 'site', elements: ['earth'] },
+    'potion-south-avatar': { attack: 1, cardType: 'avatar', defense: 1, drawSpell: false, life: 20 },
+    'potion-south-site': { cardType: 'site', elements: ['earth'] },
+    'love-potion': {
+      cardType: 'artifact',
+      manaCost: 0,
+      sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves: true,
+      thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+    },
+  };
+  const input = {
+    authority: {
+      contentHash: SYNTHETIC_AUTHORITY_HASH,
+      mode: 'synthetic' as const,
+      revisionId: 'synthetic-sacrifice-control-artifact-v1',
+    },
+    cards,
+    decks: {
+      north: {
+        atlas: Array(6).fill('potion-north-site'),
+        avatar: 'potion-north-avatar',
+        spellbook: Array(6).fill('love-potion'),
+      },
+      south: {
+        atlas: Array(6).fill('potion-south-site'),
+        avatar: 'potion-south-avatar',
+        spellbook: Array(6).fill('love-potion'),
+      },
+    },
+    firstSeat: 'north' as const,
+    seed: 1,
+  };
+  const gameManifest = createGameManifest(input);
+  assert.deepEqual(gameManifest.cards['love-potion'], cards['love-potion']);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'love-potion': {
+        cardType: 'artifact',
+        manaCost: 0,
+        sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves: false,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves must be true/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      'love-potion': {
+        cardType: 'artifact',
+        grantsBearerLethal: true,
+        manaCost: 0,
+        sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves: true,
+        thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /exactly one supported Artifact effect/);
+});
+
 test('RULE-03 Siege Ballista taps its bearer and another ally for measured artifact damage', async () => {
   const thresholds = { air: 0, earth: 0, fire: 0, water: 0 } as const;
   const north: GameDeckSpec = {
