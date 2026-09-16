@@ -1448,7 +1448,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisMayBottomNextSpell !== undefined
         || card.genesisReorderNextSpells !== undefined)) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
@@ -1473,7 +1472,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         || card.genesisGainManaIfOnlyControlledCopy !== undefined
         || card.genesisHealNearbyAvatars !== undefined
         || card.genesisImmobilizeNearbyUntilNextTurn !== undefined
-        || card.genesisPayOneManaToSummonToken !== undefined
         || card.genesisReorderNextSpells !== undefined)) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
     }

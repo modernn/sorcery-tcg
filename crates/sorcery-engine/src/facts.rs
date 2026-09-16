@@ -1034,19 +1034,14 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         || genesis_heal_nearby_avatars
         || genesis_immobilize_nearby_until_next_turn;
     if genesis_pay_one_mana_to_summon_token.is_some()
-        && (paid_token_blocked_genesis
-            || genesis_may_bottom_next_spell
-            || genesis_reorder_next_spells)
+        && (paid_token_blocked_genesis || genesis_reorder_next_spells)
     {
         return Err(FactError::new(
             path,
             "simultaneous paid-token and another site Genesis are unsupported",
         ));
     }
-    if genesis_may_bottom_next_spell
-        && (paid_token_blocked_genesis
-            || genesis_pay_one_mana_to_summon_token.is_some()
-            || genesis_reorder_next_spells)
+    if genesis_may_bottom_next_spell && (paid_token_blocked_genesis || genesis_reorder_next_spells)
     {
         return Err(FactError::new(
             path,

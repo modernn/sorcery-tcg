@@ -9303,6 +9303,59 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0416_site_genesis_gain_mana_then_discards_only_available_spell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0417",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both optional paid-token summon and may-bottom-next-spell, paying for the token resolves first, then the controller enters hidden spell Genesis where they may bottom the next spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "site-played",
+        "minion-summoned",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0417_site_genesis_pay_token_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0418",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same paid-token and may-bottom site is played, declining the token still enters hidden spell Genesis where the controller may keep the Spellbook order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "site-played",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0418_site_genesis_decline_token_then_keep_next_spell"
+      }
     }
   ]
 }
