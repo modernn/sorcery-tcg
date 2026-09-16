@@ -381,6 +381,7 @@ struct AvatarPosition {
     life: u16,
     location: Cell,
     tapped: bool,
+    temporary_movement_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
 }
 
@@ -433,6 +434,7 @@ struct UnitPosition {
     temporary_charge_sources: Vec<IdentityHash>,
     temporary_first_strike_sources: Vec<IdentityHash>,
     temporary_lethal_sources: Vec<IdentityHash>,
+    temporary_movement_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     temporary_ranged_sources: Vec<IdentityHash>,
     warded: bool,
@@ -473,6 +475,7 @@ impl SummonPlacement {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: self.warded,
@@ -830,6 +833,10 @@ struct PaidSummonContinuation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "PaidSummon keeps the summoned unit inline so Deathrite resume stays one match"
+)]
 enum DeathriteContinuation {
     Blink(BlinkContinuation),
     DragProjectile(DragProjectileContinuation),
@@ -1454,6 +1461,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+        | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantRangedToAllyThisTurn
@@ -2011,6 +2019,9 @@ impl Game {
                 if facts.token {
                     value["token"] = json!(true);
                 }
+                if !unit.temporary_movement_sources.is_empty() {
+                    value["temporaryMovementSources"] = json!(unit.temporary_movement_sources);
+                }
                 if !unit.temporary_power_sources.is_empty() {
                     value["temporaryPowerSources"] = json!(unit.temporary_power_sources);
                 }
@@ -2125,6 +2136,10 @@ impl Game {
         });
         if let Some(count) = player.air_thresholds_cast_this_turn {
             value["airThresholdsCastThisTurn"] = json!(count);
+        }
+        if !player.avatar.temporary_movement_sources.is_empty() {
+            value["avatar"]["temporaryMovementSources"] =
+                json!(player.avatar.temporary_movement_sources);
         }
         if !player.avatar.temporary_power_sources.is_empty() {
             value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
@@ -2830,7 +2845,7 @@ impl Game {
                     airborne: false,
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    maximum_cost: Some(1),
+                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
                     moving_minion: false,
                     occupied_cells: None,
                     power: self.avatar_entry_power(seat),
@@ -2871,7 +2886,7 @@ impl Game {
                     maximum_cost: if facts.cannot_defend || facts.immobile {
                         None
                     } else {
-                        Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
+                        Some(Self::minion_basic_movement_steps(unit, facts))
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -3625,6 +3640,22 @@ impl Game {
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
+                            } else if matches!(
+                                facts.effect,
+                                MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
+                            ) {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid("movement-grant action requires an ally"));
+                                };
+                                format!(
+                                    "Cast {} to grant +1 movement and draw to {} {}…",
+                                    definition.id,
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
                             } else if matches!(facts.effect, MagicEffect::GrantRangedToAllyThisTurn)
                             {
                                 let ActionDescriptor::CastMagic {
@@ -3892,7 +3923,7 @@ impl Game {
                     airborne: false,
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    maximum_cost: Some(1),
+                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
                     moving_minion: false,
                     occupied_cells: None,
                     power: self.avatar_entry_power(seat),
@@ -3927,7 +3958,7 @@ impl Game {
                     maximum_cost: if facts.immobile {
                         None
                     } else {
-                        Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
+                        Some(Self::minion_basic_movement_steps(unit, facts))
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -6216,6 +6247,14 @@ impl Game {
             .ok_or(GameError::IllegalAction)
     }
 
+    fn avatar_basic_movement_steps(avatar: &AvatarPosition) -> usize {
+        1 + avatar.temporary_movement_sources.len()
+    }
+
+    fn minion_basic_movement_steps(unit: &UnitPosition, facts: &MinionFacts) -> usize {
+        1 + usize::from(facts.movement_bonus.unwrap_or(0)) + unit.temporary_movement_sources.len()
+    }
+
     fn minion_caster_suffix(&self, seat: Seat, instance_id: &IdentityHash) -> String {
         if self.spellcaster_kind(seat, instance_id) == Some(UnitKind::Minion) {
             format!(" with minion {}…", &instance_id.as_str()[..15])
@@ -6743,6 +6782,7 @@ impl Game {
             | MagicEffect::GrantChargeToAllyThisTurn
             | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantLethalToAllyThisTurn
+            | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
             | MagicEffect::GrantPowerTwoToAllyThisTurn
             | MagicEffect::GrantRangedToAllyThisTurn => self
                 .controlled_allies(seat)
@@ -13387,7 +13427,7 @@ impl Game {
                         airborne: false,
                         cause: MovementCause::BasicMovement,
                         connects_top_bottom: false,
-                        maximum_cost: Some(1),
+                        maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
                         moving_minion: false,
                         occupied_cells: None,
                         power: self.avatar_entry_power(seat),
@@ -13423,7 +13463,7 @@ impl Game {
                         maximum_cost: if facts.immobile {
                             None
                         } else {
-                            Some(1 + usize::from(facts.movement_bonus.unwrap_or(0)))
+                            Some(Self::minion_basic_movement_steps(unit, facts))
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
@@ -14066,6 +14106,7 @@ impl Game {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
@@ -19389,6 +19430,47 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                match ally {
+                    UnitTarget::Avatar {
+                        instance_id,
+                        seat: ally_seat,
+                    } => {
+                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
+                        if avatar.card.instance_id != *instance_id {
+                            return Err(GameError::IllegalAction);
+                        }
+                        avatar
+                            .temporary_movement_sources
+                            .push(card_instance_id.clone());
+                    }
+                    UnitTarget::Minion {
+                        instance_id,
+                        seat: ally_seat,
+                    } => {
+                        self.position
+                            .units
+                            .iter_mut()
+                            .find(|unit| {
+                                unit.card.instance_id == *instance_id
+                                    && unit.controller == *ally_seat
+                            })
+                            .ok_or(GameError::IllegalAction)?
+                            .temporary_movement_sources
+                            .push(card_instance_id.clone());
+                    }
+                }
+                outcomes.push("movement-granted", || {
+                    json!({
+                        "amount": 1,
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
+            }
             MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 let UnitTarget::Minion {
@@ -22665,6 +22747,20 @@ impl Game {
             })
             .collect();
         let ending_avatar = &self.position.players[seat_index(seat)].avatar;
+        let mut expired_movement_sources: Vec<_> = ending_avatar
+            .temporary_movement_sources
+            .iter()
+            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
+            .collect();
+        expired_movement_sources.extend(self.position.units.iter().flat_map(|unit| {
+            unit.temporary_movement_sources.iter().map(|source| {
+                (
+                    unit.card.instance_id.clone(),
+                    unit.controller,
+                    source.clone(),
+                )
+            })
+        }));
         let mut expired_power_sources: Vec<_> = ending_avatar
             .temporary_power_sources
             .iter()
@@ -22679,6 +22775,10 @@ impl Game {
                 )
             })
         }));
+        self.position.players[seat_index(seat)]
+            .avatar
+            .temporary_movement_sources
+            .clear();
         self.position.players[seat_index(seat)]
             .avatar
             .temporary_power_sources
@@ -22724,6 +22824,7 @@ impl Game {
             unit.temporary_charge_sources.clear();
             unit.temporary_first_strike_sources.clear();
             unit.temporary_lethal_sources.clear();
+            unit.temporary_movement_sources.clear();
             unit.temporary_power_sources.clear();
             unit.temporary_ranged_sources.clear();
             if unit.controller == seat {
@@ -22800,6 +22901,16 @@ impl Game {
         for (instance_id, controller, source_instance_id) in expired_lethal_sources {
             outcomes.push("lethal-expired", || {
                 json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_movement_sources {
+            outcomes.push("movement-expired", || {
+                json!({
+                    "amount": 1,
                     "instanceId": instance_id,
                     "seat": controller,
                     "sourceInstanceId": source_instance_id,
@@ -23403,6 +23514,10 @@ impl Game {
                 }
             }
         }
+        if !player.avatar.temporary_movement_sources.is_empty() {
+            value["avatar"]["temporaryMovementSources"] =
+                json!(player.avatar.temporary_movement_sources);
+        }
         if !player.avatar.temporary_power_sources.is_empty() {
             value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
         }
@@ -23540,6 +23655,12 @@ impl Game {
             object.insert(
                 "temporaryLethalSources".to_owned(),
                 json!(unit.temporary_lethal_sources),
+            );
+        }
+        if !unit.temporary_movement_sources.is_empty() {
+            object.insert(
+                "temporaryMovementSources".to_owned(),
+                json!(unit.temporary_movement_sources),
             );
         }
         if !unit.temporary_power_sources.is_empty() {
@@ -23826,6 +23947,7 @@ fn create_player(
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
             .map_err(|_| invalid("avatar start cell must be valid"))?,
         tapped: false,
+        temporary_movement_sources: Vec::new(),
         temporary_power_sources: Vec::new(),
     };
     let remaining_atlas = atlas.split_off(3);
@@ -24261,6 +24383,10 @@ mod tests {
             (
                 MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell,
                 json!({ "grantAirborneToAllyThisTurnThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell,
+                json!({ "grantMovementOneToAllyThisTurnThenDrawSpell": true }),
             ),
             (
                 MagicEffect::TapTargetMinion,
@@ -24903,6 +25029,7 @@ mod tests {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: false,
@@ -25179,6 +25306,7 @@ mod tests {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
             warded: false,
@@ -26115,6 +26243,7 @@ mod tests {
                 temporary_charge_sources: Vec::new(),
                 temporary_first_strike_sources: Vec::new(),
                 temporary_lethal_sources: Vec::new(),
+                temporary_movement_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 temporary_ranged_sources: Vec::new(),
                 warded: false,

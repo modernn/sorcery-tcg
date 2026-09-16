@@ -398,6 +398,7 @@ export type GameCardDefinition =
     grantFirstStrikeToAllyThisTurn?: true;
     grantLethalToAllyThisTurn?: true;
     grantLethalToAllyThisTurnThenDrawSpell?: true;
+    grantMovementOneToAllyThisTurnThenDrawSpell?: true;
     grantPowerToAllyThisTurn?: 2;
     grantPowerTwoToAllyThisTurnThenDrawSpell?: true;
     grantRangedToAllyThisTurn?: true;
@@ -1336,7 +1337,7 @@ const SUPPORTED_CARD_FIELDS = {
     destroyTargetArtifact destroyTargetAura destroyTargetSite
     fightAllyWithAdjacentEnemy gainControlOfTargetEnemyMinionThisTurn gainControlOfTargetEnemyMinionUntilStealthLost gainControlOfTargetNearbyMinion grantAirborneToAllyThisTurn
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
-    grantLethalToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
+    grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
     lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost returnMinionFromOwnCemetery
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
@@ -1815,6 +1816,12 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
         `${path}.grantLethalToAllyThisTurnThenDrawSpell must be true when defined`,
       );
     }
+    if (card.grantMovementOneToAllyThisTurnThenDrawSpell !== undefined
+      && card.grantMovementOneToAllyThisTurnThenDrawSpell !== true) {
+      throw new RangeError(
+        `${path}.grantMovementOneToAllyThisTurnThenDrawSpell must be true when defined`,
+      );
+    }
     if (card.grantRangedToAllyThisTurn !== undefined
       && card.grantRangedToAllyThisTurn !== true) {
       throw new RangeError(`${path}.grantRangedToAllyThisTurn must be true when defined`);
@@ -1959,6 +1966,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.grantFirstStrikeToAllyThisTurn === true)
       + Number(card.grantLethalToAllyThisTurn === true)
       + Number(card.grantLethalToAllyThisTurnThenDrawSpell === true)
+      + Number(card.grantMovementOneToAllyThisTurnThenDrawSpell === true)
       + Number(card.grantPowerToAllyThisTurn === 2)
       + Number(card.grantPowerTwoToAllyThisTurnThenDrawSpell === true)
       + Number(card.grantRangedToAllyThisTurn === true)
@@ -2860,6 +2868,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                     ? { grantLethalToAllyThisTurn: true as const }
                   : card.grantLethalToAllyThisTurnThenDrawSpell === true
                     ? { grantLethalToAllyThisTurnThenDrawSpell: true as const }
+                  : card.grantMovementOneToAllyThisTurnThenDrawSpell === true
+                    ? { grantMovementOneToAllyThisTurnThenDrawSpell: true as const }
                   : card.grantRangedToAllyThisTurn === true
                     ? { grantRangedToAllyThisTurn: true as const }
                   : card.grantPowerToAllyThisTurn === 2
