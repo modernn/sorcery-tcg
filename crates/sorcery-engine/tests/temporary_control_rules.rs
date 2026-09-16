@@ -1,10 +1,11 @@
-//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0516).
+//! Direct proofs for temporary enemy-minion control (RULE-CATALOG-0513–0518).
 //!
 //! Official Magic can gain control of a target enemy minion this turn and
 //! untap it, or gain control until that minion loses Stealth after tapping it
 //! and granting Stealth. Neither transfer is Nearby-restricted. This-turn
 //! control reverts at End Phase; stealth-bound control survives End Phase and
-//! reverts when Stealth is lost.
+//! reverts when Stealth is lost. Genesis can also steal every tapped minion
+//! sharing the newcomer's footprint until that source leaves play.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -530,5 +531,284 @@ fn rule_catalog_0516_stealth_bound_control_survives_end_of_turn_and_reverts_when
     assert_eq!(unit(&after, &far_id)["controller"], "south");
     assert_eq!(unit(&after, &far_id)["owner"], "south");
     assert_eq!(unit(&after, &far_id)["stealthed"], false);
+    assert_exact_replay(&session);
+}
+
+fn puppet() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves": true,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn bounce() -> Value {
+    json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "returnTargetMinionToOwnerHand": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn near() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "tapForMana": 1,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "ward": true,
+    })
+}
+
+fn ready() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn puppet_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "source-bound-control" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-source-bound-control-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bounce": bounce(),
+            "north-puppet": puppet(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-far": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "tapForMana": 1,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-near": near(),
+            "south-ready": ready(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-puppet",
+                    "north-puppet",
+                    "north-puppet",
+                    "north-puppet",
+                    "north-bounce",
+                    "north-bounce",
+                    "north-bounce",
+                    "north-bounce"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-near",
+                    "south-near",
+                    "south-near",
+                    "south-ready",
+                    "south-ready",
+                    "south-ready",
+                    "south-far",
+                    "south-far"
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+/// Tapped warded South minion and untapped South minion at C1, tapped South
+/// minion at C2, North ready to summon the Genesis source onto C1.
+fn puppet_opening() -> (Session, String, String, String) {
+    let mut session = (1..=4096)
+        .map(puppet_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("source-bound-control candidate");
+            let north = opening_spell_ids(&session, "north");
+            let south = opening_spell_ids(&session, "south");
+            (north.iter().any(|card| card == "north-puppet")
+                && north.iter().any(|card| card == "north-bounce")
+                && south.iter().any(|card| card == "south-near")
+                && south.iter().any(|card| card == "south-ready")
+                && south.iter().any(|card| card == "south-far"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Puppet, bounce, and three South minions");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (near_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-near"
+            && descriptor["cell"] == "C1"
+    });
+    let near_id = near_summon["cardInstanceId"]
+        .as_str()
+        .expect("south near identity")
+        .to_owned();
+    let (ready_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-ready"
+            && descriptor["cell"] == "C1"
+    });
+    let ready_id = ready_summon["cardInstanceId"]
+        .as_str()
+        .expect("south ready identity")
+        .to_owned();
+    let (far_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-far"
+            && descriptor["cell"] == "C4"
+    });
+    let far_id = far_summon["cardInstanceId"]
+        .as_str()
+        .expect("south far identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    end_then_draw(&mut session, "atlas");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == near_id.as_str()
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == far_id.as_str()
+    });
+    end_then_draw(&mut session, "spellbook");
+    (session, near_id, ready_id, far_id)
+}
+
+fn steal_tapped_here(session: &mut Session) -> (String, Receipt) {
+    let (summoned, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-puppet"
+            && descriptor["cell"] == "C1"
+    });
+    let puppet_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("puppet identity")
+        .to_owned();
+    (puppet_id, receipt)
+}
+
+#[test]
+fn rule_catalog_0517_genesis_control_steals_tapped_minions_here_and_skips_the_rest() {
+    let (mut session, near_id, ready_id, far_id) = puppet_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &near_id)["controller"], "south");
+    assert_eq!(unit(&before, &near_id)["owner"], "south");
+    assert_eq!(unit(&before, &near_id)["tapped"], true);
+    assert_eq!(unit(&before, &near_id)["warded"], true);
+    assert_eq!(unit(&before, &ready_id)["controller"], "south");
+    assert_eq!(unit(&before, &ready_id)["tapped"], false);
+    assert_eq!(unit(&before, &far_id)["controller"], "south");
+    assert_eq!(unit(&before, &far_id)["tapped"], true);
+
+    let (puppet_id, receipt) = steal_tapped_here(&mut session);
+    assert!(event_types(&receipt).contains(&"minion-summoned"));
+    let changed: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-control-changed")
+        .collect();
+    assert_eq!(changed.len(), 1, "{:?}", event_types(&receipt));
+    assert_eq!(changed[0].payload["fromSeat"], "south");
+    assert_eq!(changed[0].payload["seat"], "north");
+    assert_eq!(changed[0].payload["instanceId"], near_id);
+    assert_eq!(changed[0].payload["sourceInstanceId"], puppet_id);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "ward-broken")
+    );
+
+    let after = state(&session);
+    assert_eq!(unit(&after, &near_id)["controller"], "north");
+    assert_eq!(unit(&after, &near_id)["owner"], "south");
+    assert_eq!(unit(&after, &near_id)["tapped"], true);
+    assert_eq!(unit(&after, &near_id)["warded"], true);
+    assert_eq!(unit(&after, &ready_id)["controller"], "south");
+    assert_eq!(unit(&after, &ready_id)["tapped"], false);
+    assert_eq!(unit(&after, &far_id)["controller"], "south");
+    assert_eq!(unit(&after, &far_id)["tapped"], true);
+    assert_eq!(unit(&after, &puppet_id)["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    assert_eq!(unit(&state(&session), &near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &near_id)["owner"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0518_genesis_control_reverts_when_the_source_leaves() {
+    let (mut session, near_id, _, _) = puppet_opening();
+    let (puppet_id, _) = steal_tapped_here(&mut session);
+    assert_eq!(unit(&state(&session), &near_id)["controller"], "north");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == puppet_id.as_str()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-returned-to-hand",
+            "minion-control-changed",
+            "magic-resolved"
+        ]
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+            && event.payload["instanceId"] == near_id
+    }));
+    let after = state(&session);
+    assert_eq!(unit(&after, &near_id)["controller"], "south");
+    assert_eq!(unit(&after, &near_id)["owner"], "south");
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != puppet_id)
+    );
     assert_exact_replay(&session);
 }

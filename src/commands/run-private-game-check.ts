@@ -4630,6 +4630,7 @@ function gameDefinition(
   affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities = false,
   atEndOfControllerTurnUntapNearbyAllies = false,
   cannotBeCarried = false,
+  genesisGainControlOfTappedMinionsHereUntilThisLeaves = false,
 ): GameCardDefinition {
   if (card.cardType === 'avatar'
     && card.attack !== null
@@ -4946,6 +4947,9 @@ function gameDefinition(
         : {}),
       ...(genesisDamageEachOtherUnitHere ? { genesisDamageEachOtherUnitHere } : {}),
       ...(genesisStrikeEachEnemyHere ? { genesisStrikeEachEnemyHere: true as const } : {}),
+      ...(genesisGainControlOfTappedMinionsHereUntilThisLeaves
+        ? { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const }
+        : {}),
       ...(genesisDisableSelfUntilDamaged
         ? { genesisDisableSelfUntilDamaged: true as const }
         : {}),

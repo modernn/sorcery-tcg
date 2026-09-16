@@ -60,6 +60,7 @@ type SpellFacts = Readonly<{
   genesisLoseControllerLife?: 2;
   genesisMayDamageTargetAdjacentUnit?: 2;
   genesisDisableSelfUntilDamaged?: true;
+  genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
   genesisStrikeEachEnemyHere?: true;
   immobile?: boolean;
   lanceCount?: 1 | 2 | 3;
@@ -259,6 +260,9 @@ function cardsFor(
           : {}),
         ...(facts.genesisStrikeEachEnemyHere === true
           ? { genesisStrikeEachEnemyHere: true as const }
+          : {}),
+        ...(facts.genesisGainControlOfTappedMinionsHereUntilThisLeaves === true
+          ? { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const }
           : {}),
         immobile: facts.immobile ?? false,
         ...(facts.lanceCount ? { lanceCount: facts.lanceCount } : {}),
@@ -10392,6 +10396,17 @@ test('RULE-03/04 Genesis resolves simultaneous area damage and enemy strikes', a
     ...input,
     cards: {
       ...cards,
+      [titanId]: {
+        ...cards[titanId]!,
+        genesisGainControlOfTappedMinionsHereUntilThisLeaves: false,
+      } as unknown as GameCardDefinition,
+    },
+    seed: 1,
+  }), /genesisGainControlOfTappedMinionsHereUntilThisLeaves must be true when defined/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
       [alliedMinionId]: {
         ...cards[alliedMinionId]!,
         genesisDisableSelfUntilDamaged: false,
@@ -11912,6 +11927,7 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { deathriteDamageEachUnitHere: 1 },
     { genesisDamageEachOtherUnitHere: 1 as const },
     { genesisStrikeEachEnemyHere: true as const },
+    { genesisGainControlOfTappedMinionsHereUntilThisLeaves: true as const },
     { genesisMayDamageTargetAdjacentUnit: 2 as const },
     { discardSpellToDamageRandomOtherUnitHere: 3 as const },
     { summonToAnySite: true as const },

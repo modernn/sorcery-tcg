@@ -375,6 +375,7 @@ pub struct MinionFacts {
     pub genesis_disable_self_until_damaged: bool,
     pub genesis_draw_site: bool,
     pub genesis_draw_spells: Option<u8>,
+    pub genesis_gain_control_of_tapped_minions_here_until_this_leaves: bool,
     pub genesis_heal_controller: bool,
     pub genesis_lose_controller_life: bool,
     pub genesis_may_damage_target_adjacent_unit: bool,
@@ -881,6 +882,7 @@ const MINION_FIELDS: &[&str] = &[
     "genesisDisableSelfUntilDamaged",
     "genesisDrawSite",
     "genesisDrawSpells",
+    "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
     "genesisHealController",
     "genesisLoseControllerLife",
     "genesisMayDamageTargetAdjacentUnit",
@@ -1718,6 +1720,11 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
     let genesis_draw_spells =
         optional_bounded_integer(object, "genesisDrawSpells", 1, MAX_DECK_CARDS, path)?
             .map(compact_u8);
+    let genesis_gain_control_of_tapped_minions_here_until_this_leaves = true_only(
+        object,
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
+        path,
+    )?;
     let genesis_heal_controller = fixed_integer(object, "genesisHealController", 2, path)?;
     let genesis_lose_controller_life = fixed_integer(object, "genesisLoseControllerLife", 2, path)?;
     let genesis_may_damage_target_adjacent_unit =
@@ -1855,6 +1862,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         genesis_disable_self_until_damaged,
         genesis_draw_site,
         genesis_draw_spells,
+        genesis_gain_control_of_tapped_minions_here_until_this_leaves,
         genesis_heal_controller,
         genesis_lose_controller_life,
         genesis_may_damage_target_adjacent_unit,

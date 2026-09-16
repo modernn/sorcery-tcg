@@ -1616,6 +1616,22 @@ fn genesis_disable_with_strike_here_should_parse() {
 }
 
 #[test]
+fn genesis_tapped_minion_control_here_should_parse() {
+    let CardFacts::Minion(facts) = parse_card_definition(
+        "genesis-tapped-control",
+        &with(
+            minion(),
+            "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
+            json!(true),
+        ),
+    )
+    .expect("valid Genesis tapped-minion control minion") else {
+        panic!("expected minion facts");
+    };
+    assert!(facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves);
+}
+
+#[test]
 fn targeted_genesis_with_random_card_discard_payment_should_parse() {
     let CardFacts::Minion(facts) = parse_card_definition(
         "targeted-genesis-alt-payment",

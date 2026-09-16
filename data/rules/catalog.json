@@ -11860,6 +11860,55 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_0516_stealth_bound_control_survives_end_of_turn_and_reverts_when_stealth_is_lost"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0517",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Minion Genesis that gains control of tapped minions here until this leaves steals each tapped minion sharing its footprint without targeting, leaves Ward intact, skips untapped and distant minions, and keeps control through the current End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0517_genesis_control_steals_tapped_minions_here_and_skips_the_rest"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0518",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Source-bound Genesis control restores the previous controller when the source leaves play, without changing ownership.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand",
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0518_genesis_control_reverts_when_the_source_leaves"
+      }
     }
   ]
 }

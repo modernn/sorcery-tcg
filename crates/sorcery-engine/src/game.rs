@@ -93,6 +93,7 @@ struct TemporaryControl {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TemporaryControlExpiry {
     EndPhase,
+    UntilSourceLeaves,
     UntilStealthLost,
 }
 
@@ -1551,6 +1552,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis_draw_spells: _,
         genesis_heal_controller: _,
         genesis_lose_controller_life: _,
+        genesis_gain_control_of_tapped_minions_here_until_this_leaves: _,
         genesis_may_damage_target_adjacent_unit: _,
         genesis_strike_each_enemy_here: _,
         immobile: _,
@@ -5072,6 +5074,7 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         expiry: Option<TemporaryControlExpiry>,
+        respect_ward: bool,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<bool, GameError> {
         let Some(UnitTarget::Minion {
@@ -5090,7 +5093,7 @@ impl Game {
         if unit.controller == seat {
             return Ok(false);
         }
-        if unit.warded {
+        if respect_ward && unit.warded {
             unit.warded = false;
             outcomes.push(
                 "ward-broken",
@@ -5143,6 +5146,22 @@ impl Game {
     ) -> Result<(), GameError> {
         self.revert_matching_temporary_controls(outcomes, |effect, stealthed| {
             effect.expiry == TemporaryControlExpiry::UntilStealthLost && !stealthed
+        })
+    }
+
+    fn revert_source_bound_controls(
+        &mut self,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let living: BTreeSet<_> = self
+            .position
+            .units
+            .iter()
+            .map(|unit| unit.card.instance_id.clone())
+            .collect();
+        self.revert_matching_temporary_controls(outcomes, |effect, _stealthed| {
+            effect.expiry == TemporaryControlExpiry::UntilSourceLeaves
+                && !living.contains(&effect.source_instance_id)
         })
     }
 
@@ -12130,7 +12149,7 @@ impl Game {
             return Ok(());
         }
         let mut banished = Vec::new();
-        self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished));
+        self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished))?;
         let deaths_start = outcomes.len();
         if !deaths.is_empty() {
             self.begin_minion_deaths(
@@ -12198,7 +12217,11 @@ impl Game {
     }
 
     /// Removes units from the game without a death, dropping whatever they carried where they were.
-    fn banish_units(&mut self, instance_ids: &[IdentityHash], outcomes: &mut OutcomeLog<'_>) {
+    fn banish_units(
+        &mut self,
+        instance_ids: &[IdentityHash],
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         for instance_id in instance_ids {
             let Some(index) = self
                 .position
@@ -12230,6 +12253,7 @@ impl Game {
                 })
             });
         }
+        self.revert_source_bound_controls(outcomes)
     }
 
     fn begin_minion_deaths(
@@ -12260,6 +12284,7 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
         let (sources, corpses) = self.collect_minion_deaths(instance_ids)?;
+        self.revert_source_bound_controls(outcomes)?;
         let batch = self.make_deathrite_batch(sources);
         let mut unique_defeated = Vec::new();
         for seat in defeated_avatars {
@@ -12549,6 +12574,7 @@ impl Game {
         }
         if !triggered_deaths.is_empty() {
             let (sources, corpses) = self.collect_minion_deaths(&triggered_deaths)?;
+            self.revert_source_bound_controls(outcomes)?;
             pending.corpses.extend(corpses);
             if let Some(batch) = self.make_deathrite_batch(sources) {
                 pending.batches.insert(0, batch);
@@ -19206,6 +19232,7 @@ impl Game {
                     seat,
                     card_instance_id,
                     None,
+                    true,
                     outcomes,
                 )?;
             }
@@ -19215,6 +19242,7 @@ impl Game {
                     seat,
                     card_instance_id,
                     Some(TemporaryControlExpiry::EndPhase),
+                    true,
                     outcomes,
                 )?;
             }
@@ -19224,6 +19252,7 @@ impl Game {
                     seat,
                     card_instance_id,
                     Some(TemporaryControlExpiry::UntilStealthLost),
+                    true,
                     outcomes,
                 )?;
                 if transferred {
@@ -19305,6 +19334,7 @@ impl Game {
                             })
                         });
                     }
+                    self.revert_source_bound_controls(outcomes)?;
                     self.settle_static_power_deaths(outcomes)?;
                 }
             }
@@ -19762,7 +19792,7 @@ impl Game {
                     }
                 }
                 let mut banished = Vec::new();
-                self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished));
+                self.banish_units(&banishments, &mut OutcomeLog::Record(&mut banished))?;
                 let deaths_start = outcomes.len();
                 if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
                     self.begin_minion_deaths(
@@ -20684,6 +20714,8 @@ impl Game {
         let genesis_may_damage_target_adjacent_unit = facts.genesis_may_damage_target_adjacent_unit;
         let genesis_damage_each_other_unit_here = facts.genesis_damage_each_other_unit_here;
         let genesis_strike_each_enemy_here = facts.genesis_strike_each_enemy_here;
+        let genesis_gain_control_of_tapped_minions_here_until_this_leaves =
+            facts.genesis_gain_control_of_tapped_minions_here_until_this_leaves;
 
         if genesis_disable_self_until_damaged {
             let unit = self
@@ -20736,6 +20768,50 @@ impl Game {
         }
         if genesis_strike_each_enemy_here {
             self.apply_genesis_here_damage(source_instance_id, true, outcomes)?;
+        }
+        if genesis_gain_control_of_tapped_minions_here_until_this_leaves {
+            self.apply_genesis_tapped_minion_control(source_instance_id, seat, outcomes)?;
+        }
+        Ok(())
+    }
+
+    fn apply_genesis_tapped_minion_control(
+        &mut self,
+        source_instance_id: &IdentityHash,
+        seat: Seat,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let source = self
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == *source_instance_id && unit.controller == seat)
+            .cloned()
+            .ok_or(GameError::IllegalAction)?;
+        let targets: Vec<_> = self
+            .units_sharing_footprint(&source, false)
+            .into_iter()
+            .filter(|(instance_id, kind, target_seat)| {
+                *kind == UnitKind::Minion
+                    && self.position.units.iter().any(|unit| {
+                        unit.card.instance_id == *instance_id
+                            && unit.controller == *target_seat
+                            && unit.tapped
+                    })
+            })
+            .collect();
+        for (instance_id, _, target_seat) in targets {
+            self.apply_minion_control_change(
+                Some(&UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }),
+                seat,
+                source_instance_id,
+                Some(TemporaryControlExpiry::UntilSourceLeaves),
+                false,
+                outcomes,
+            )?;
         }
         Ok(())
     }
