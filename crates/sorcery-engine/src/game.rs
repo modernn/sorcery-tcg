@@ -15494,10 +15494,6 @@ impl Game {
         Ok(self.position.artifacts.remove(index))
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "destroy, excluded bearer, and area damage stay one explicit transaction"
-    )]
     fn apply_destroy_own_artifact_at_location_for_area_damage(
         &mut self,
         seat: Seat,
