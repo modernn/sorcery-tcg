@@ -8322,6 +8322,51 @@
         "file": "crates/sorcery-engine/tests/square_outer_column_footprint_rules.rs",
         "testName": "rule_catalog_0376_outer_column_giant_movement_is_not_cast_restricted"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0377",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Two distinct synthetic 30/60 decks complete a short deterministic opening: both seats keep their mulligans, establish domains, and summon at least one minion each, with byte-identical authoritative replay.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "keep-mulligan",
+        "mulligan",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "mulligan-completed",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
+        "testName": "rule_catalog_0377_two_distinct_synthetic_decks_complete_short_deterministic_opening"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0378",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A deck-pair batch job with distinct north and south deck identities reproduces the same transcript hash when rerun with the same manifest and seed, regardless of worker count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deck_pair_rules.rs",
+        "testName": "rule_catalog_0378_deck_pair_batch_reproduces_transcript_hash_for_manifest_and_seed"
+      }
     }
   ]
 }
