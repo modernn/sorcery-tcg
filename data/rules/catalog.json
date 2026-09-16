@@ -10479,6 +10479,217 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0462_site_genesis_conditional_mana_immobilize_nearby_only_without_adjacent"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0463",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, optional paid-token summon, and draw-spell-per-adjacent-same-card, paying for the token on a later copy adjacent to a matching site summons the token and draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0463_site_genesis_conditional_mana_pay_token_then_draw_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0464",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, paid-token, and adjacent-draw site is played on a later copy, declining the token still draws one spell without granting the conditional mana again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisPayOneManaToSummonToken",
+        "genesisDrawSpellPerAdjacentSameCard"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0464_site_genesis_conditional_mana_decline_token_then_draw_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0465",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, draw-spell-per-adjacent-same-card, and may-bottom-next-spell, playing a later copy adjacent to a matching site draws one spell, then enters hidden spell Genesis where the controller may bottom the new top spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0465_site_genesis_conditional_mana_draw_per_adjacent_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0466",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, adjacent-draw, and may-bottom site is played on a later copy, keeping the next spell preserves Spellbook order after the adjacent draw completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0466_site_genesis_conditional_mana_draw_per_adjacent_then_keep_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0467",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, draw-spell-per-adjacent-same-card, and reorder-next-spells, playing a later copy adjacent to a matching site draws one spell, then enters hidden spell-order Genesis where the controller may reorder the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0467_site_genesis_conditional_mana_draw_per_adjacent_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0468",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, adjacent-draw, and reorder site is played on a later copy, choosing the identity order keeps Spellbook order after the adjacent draw completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0468_site_genesis_conditional_mana_draw_per_adjacent_then_keep_spell_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0469",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries first-copy-only gain-mana, draw-spell-per-adjacent-same-card, and discard-top-spells, playing a later copy adjacent to a matching site draws one spell, then publicly discards the top two spells from the controller's Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0469_site_genesis_conditional_mana_draws_per_adjacent_then_discards_top_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0470",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same first-copy-only gain-mana, adjacent-draw, and discard-top site is played without a bordering matching site, the conditional mana gain and top-two discards resolve on the first controlled copy and no spell is drawn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainManaIfOnlyControlledCopy",
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisDiscardTopSpells"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "mana-gained",
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0470_site_genesis_conditional_mana_discards_top_spells_without_adjacent_match"
+      }
     }
   ]
 }
