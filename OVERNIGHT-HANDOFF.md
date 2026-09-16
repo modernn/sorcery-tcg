@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Canonical line: `master` @ `ba29f86`. Lanes through `RULE-CATALOG-0506` are merged. TypeScript now admits 2×2 token, wrap, and outer-column combinations already proven as `0371`–`0376`. Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
+Canonical line: `master` @ `ffab7f4`. Lanes through `RULE-CATALOG-0506` are merged. TypeScript now admits 2×2 token, wrap, and outer-column combinations already proven as `0371`–`0376`. Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
 
 Lucky Charm extra-random discard-here damage, Sparkmage/Aramos random-discard honor, and the 2×2 occupy proofs through `RULE-CATALOG-0370` are merged on `master` (#54). Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
