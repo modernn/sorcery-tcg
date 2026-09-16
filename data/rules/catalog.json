@@ -9972,6 +9972,161 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0442_site_genesis_immobilize_nearby_only_without_adjacent_same_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0443",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both pay-one-mana-for-token and strip-enemy-stealth Genesis, paying for the token resolves the token first, then strips stealth from adjacent enemies, then draws one spell per bordering matching site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisEnemiesLoseStealth",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0443_site_genesis_pay_token_then_strip_stealth_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0444",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same paid-token and strip-enemy-stealth site is played with the token declined, stealth is stripped from adjacent enemies and one spell is drawn per bordering matching site without summoning a token.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDrawSpellPerAdjacentSameCard",
+        "genesisEnemiesLoseStealth",
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0444_site_genesis_decline_token_then_strip_stealth_per_adjacent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0445",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both heal-nearby-avatars and may-bottom-next-spell Genesis, playing it heals nearby avatars first, then privately offers bottom-or-keep on the next spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisHealNearbyAvatars",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "spell-bottomed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0445_site_genesis_heal_nearby_then_bottom_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0446",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same heal-nearby and may-bottom-next-spell site resolves, keeping the next spell preserves spellbook order after the heal completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisHealNearbyAvatars",
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "spell-kept"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0446_site_genesis_heal_nearby_then_keep_next_spell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0447",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one site carries both immobilize-nearby-until-next-turn and reorder-next-spells Genesis, playing it creates the immobile area first, then privately offers reordering the next three spells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0447_site_genesis_immobilize_nearby_then_reorder_next_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0448",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When the same immobilize-nearby and reorder-next-spells site resolves, keeping spell order preserves the private spellbook order after the immobile area is created.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisImmobilizeNearbyUntilNextTurn",
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "play-site",
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0448_site_genesis_immobilize_nearby_then_keep_spell_order"
+      }
     }
   ]
 }

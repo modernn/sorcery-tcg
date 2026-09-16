@@ -1097,7 +1097,7 @@ enum AdjacentSetupGenesis {
     KeepSpellOrder,
 }
 
-fn resolve_adjacent_setup_genesis(session: &mut Session, setup_genesis: &AdjacentSetupGenesis) {
+fn resolve_adjacent_setup_genesis(session: &mut Session, setup_genesis: AdjacentSetupGenesis) {
     match setup_genesis {
         AdjacentSetupGenesis::None => {}
         AdjacentSetupGenesis::KeepNextSpell => {
@@ -1117,7 +1117,7 @@ fn reach_adjacent_combo_play(session: &mut Session, setup_genesis: AdjacentSetup
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
-    resolve_adjacent_setup_genesis(session, &setup_genesis);
+    resolve_adjacent_setup_genesis(session, setup_genesis);
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -1125,7 +1125,7 @@ fn reach_adjacent_combo_play(session: &mut Session, setup_genesis: AdjacentSetup
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
-    resolve_adjacent_setup_genesis(session, &setup_genesis);
+    resolve_adjacent_setup_genesis(session, setup_genesis);
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -3781,6 +3781,354 @@ fn rule_catalog_0442_site_genesis_immobilize_nearby_only_without_adjacent_same_c
         hand_before
     );
     assert_exact_replay(&session);
+}
+
+fn token_stealth_manifest(seed: u32, north_spellbook_count: usize) -> String {
+    let mut stealth = minion(1, 2);
+    stealth["stealth"] = json!(true);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &stealth,
+        &stealth,
+        6,
+        north_spellbook_count,
+        5,
+    );
+    let mut site_card = adjacent_combo_site(&json!({ "genesisEnemiesLoseStealth": true }));
+    site_card["genesisPayOneManaToSummonToken"] = json!("foot-soldier");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .insert("adjacent-combo-site".to_owned(), site_card);
+    value["cards"]["foot-soldier"] = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    });
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    value["decks"]["north"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    value["decks"]["south"]["atlas"] = json!(vec!["adjacent-combo-site"; 6]);
+    finish_manifest(value)
+}
+
+fn heal_bottom_site() -> Value {
+    let mut card = site();
+    card.as_object_mut().expect("heal-bottom site").extend(
+        json!({
+            "genesisHealNearbyAvatars": 3,
+            "genesisMayBottomNextSpell": true,
+        })
+        .as_object()
+        .expect("heal-bottom facts")
+        .clone(),
+    );
+    card
+}
+
+fn adjacent_heal_bottom_manifest(
+    seed: u32,
+    north_atlas_count: usize,
+    north_spellbook_count: usize,
+) -> String {
+    let mut loss = minion(1, 2);
+    loss["genesisLoseControllerLife"] = json!(2);
+    let mut value = manifest_value(
+        seed,
+        &avatar(false, 20),
+        &loss,
+        &minion(1, 2),
+        north_atlas_count,
+        north_spellbook_count,
+        5,
+    );
+    value["cards"]["setup-site"] = site();
+    value["cards"]["heal-bottom-site"] = heal_bottom_site();
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("north-site");
+    value["cards"]
+        .as_object_mut()
+        .expect("card definitions")
+        .remove("south-site");
+    let mut north_atlas = vec!["setup-site"; north_atlas_count.saturating_sub(2)];
+    north_atlas.extend(["heal-bottom-site", "heal-bottom-site"]);
+    value["decks"]["north"]["atlas"] = json!(north_atlas);
+    value["decks"]["south"]["atlas"] = json!(vec!["setup-site"; 6]);
+    finish_manifest(value)
+}
+
+fn reach_adjacent_heal_play(session: &mut Session) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["cardId"] == "setup-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "summon-minion");
+    assert_eq!(state(session)["players"]["north"]["avatar"]["life"], 18);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C1"
+            && descriptor["cardId"] == "setup-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn immobilize_reorder_spell_genesis_facts() -> Value {
+    json!({
+        "genesisImmobilizeNearbyUntilNextTurn": true,
+        "genesisReorderNextSpells": 3,
+    })
+}
+
+#[test]
+fn rule_catalog_0443_site_genesis_pay_token_then_strip_stealth_per_adjacent() {
+    let manifest = token_stealth_manifest(443, 10);
+    let mut session = Session::new(&manifest).expect("valid token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let origin_state_version = origin["stateVersion"].clone();
+    let expected_token_id = identity_hash(&json!({
+        "cardId": "foot-soldier",
+        "cell": "C3",
+        "ordinal": 0,
+        "owner": "north",
+        "source": "token",
+        "sourceInstanceId": source_instance_id,
+        "stateVersion": origin_state_version,
+    }))
+    .expect("deterministic token identity");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "pay-one-mana"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "site-played",
+            "minion-summoned",
+            "stealth-lost",
+            "spell-drawn"
+        ]
+    );
+    assert_eq!(
+        receipt.events[1].payload["instanceId"],
+        json!(expected_token_id)
+    );
+    assert_eq!(
+        receipt.events[2].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0444_site_genesis_decline_token_then_strip_stealth_per_adjacent() {
+    let manifest = token_stealth_manifest(444, 10);
+    let mut session = Session::new(&manifest).expect("valid token stealth Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let south_id = setup_adjacent_stealth_minions(&mut session);
+    let origin = state(&session);
+    let source_instance_id = origin["players"]["north"]["hand"]["atlas"][0]["instanceId"].clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardInstanceId"] == source_instance_id
+            && descriptor["genesisTokenChoice"] == "decline"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-played", "stealth-lost", "spell-drawn"]
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": south_id,
+            "seat": "south",
+            "sourceInstanceId": receipt.events[0].payload["instanceId"],
+        })
+    );
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["controller"] == "south" && unit["stealthed"] == false)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0445_site_genesis_heal_nearby_then_bottom_next_spell() {
+    let manifest = adjacent_heal_bottom_manifest(445, 6, 10);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let mut session = Session::new(&manifest).expect("valid adjacent heal-bottom Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_heal_play(&mut session);
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardId"] == "heal-bottom-site"
+    });
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "avatar-healed"]);
+    assert_eq!(play_receipt.events[1].payload["amount"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["phase"], "genesis");
+
+    let mut bottomed = session;
+    let (_, bottomed_receipt) = accept_where(&mut bottomed, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "bottom-next"
+    });
+    let mut rotated = before_spellbook
+        .as_array()
+        .expect("Spellbook cards")
+        .clone();
+    let first = rotated.remove(0);
+    rotated.push(first);
+    assert_eq!(event_types(&bottomed_receipt), ["spell-bottomed"]);
+    assert_eq!(
+        state(&bottomed)["players"]["north"]["spellbook"],
+        Value::Array(rotated)
+    );
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&bottomed_receipt.events)
+            .expect("bottomed events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&bottomed);
+}
+
+#[test]
+fn rule_catalog_0446_site_genesis_heal_nearby_then_keep_next_spell() {
+    let manifest = adjacent_heal_bottom_manifest(446, 6, 10);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let mut session = Session::new(&manifest).expect("valid adjacent heal-bottom Genesis scenario");
+    keep(&mut session);
+    keep(&mut session);
+    reach_adjacent_heal_play(&mut session);
+    let (_, play_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor["cardId"] == "heal-bottom-site"
+    });
+
+    assert_eq!(event_types(&play_receipt), ["site-played", "avatar-healed"]);
+    assert_eq!(state(&session)["phase"], "genesis");
+
+    let mut kept = session;
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell" && descriptor["choice"] == "keep-next"
+    });
+    assert_eq!(event_types(&kept_receipt), ["spell-kept"]);
+    assert_eq!(
+        state(&kept)["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_eq!(state(&kept)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&kept);
+}
+
+#[test]
+fn rule_catalog_0447_site_genesis_immobilize_nearby_then_reorder_next_spells() {
+    let manifest = private_site_genesis_manifest(447, &immobilize_reorder_spell_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let top = before_spellbook[0].clone();
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+    let source_instance_id = play["cardInstanceId"].clone();
+
+    assert_eq!(event_types(&play_receipt), ["site-played"]);
+    assert_eq!(
+        state(&played)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": source_instance_id,
+        }])
+    );
+    assert_eq!(state(&played)["phase"], "genesis");
+
+    let mut reordered = played;
+    let (_, reordered_receipt) = accept_where(&mut reordered, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([2, 1, 0])
+    });
+    assert_eq!(event_types(&reordered_receipt), ["spells-reordered"]);
+    assert_eq!(
+        state(&reordered)["players"]["north"]["spellbook"][0],
+        before_spellbook[2]
+    );
+    let hidden_top_id = top["instanceId"].as_str().expect("top instance ID");
+    assert!(
+        !serde_json::to_string(&reordered_receipt.events)
+            .expect("reordered events")
+            .contains(hidden_top_id)
+    );
+    assert_exact_replay(&reordered);
+}
+
+#[test]
+fn rule_catalog_0448_site_genesis_immobilize_nearby_then_keep_spell_order() {
+    let manifest = private_site_genesis_manifest(448, &immobilize_reorder_spell_genesis_facts(), 6);
+    let before = state(&opening_checkpoint(&manifest));
+    let before_spellbook = before["players"]["north"]["spellbook"].clone();
+    let (played, play, play_receipt) = play_private_genesis_site(&manifest);
+
+    assert_eq!(event_types(&play_receipt), ["site-played"]);
+    assert_eq!(
+        state(&played)["realm"]["immobileAreas"],
+        json!([{
+            "cells": ["C4"],
+            "expiresAtSeat": "north",
+            "sourceInstanceId": play["cardInstanceId"],
+        }])
+    );
+
+    let mut kept = played;
+    let (_, kept_receipt) = accept_where(&mut kept, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-spell-order"
+            && descriptor["order"] == json!([0, 1, 2])
+    });
+    assert_eq!(event_types(&kept_receipt), ["spells-reordered"]);
+    assert_eq!(
+        state(&kept)["players"]["north"]["spellbook"],
+        before_spellbook
+    );
+    assert_exact_replay(&kept);
 }
 
 #[test]

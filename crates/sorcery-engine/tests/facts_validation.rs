@@ -720,8 +720,8 @@ fn site_and_minion_mutual_exclusions_should_fail_closed() {
             "unconditional and conditional",
         ),
         (
-            "paid token plus Genesis",
-            with(paid_token, "genesisHealNearbyAvatars", json!(3)),
+            "paid token plus conditional mana",
+            with(paid_token, "genesisGainManaIfOnlyControlledCopy", json!(1)),
             "paid-token",
         ),
         (

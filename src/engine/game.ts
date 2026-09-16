@@ -1442,10 +1442,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       );
     }
     if (card.genesisPayOneManaToSummonToken !== undefined
-      && (card.genesisEnemiesLoseStealth
-        || card.genesisGainManaIfOnlyControlledCopy !== undefined
-        || card.genesisHealNearbyAvatars !== undefined
-        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
+      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
       throw new RangeError(`${path} simultaneous paid-token and another site Genesis are unsupported`);
     }
     if (card.genesisDrawSpellPerAdjacentSameCard !== undefined
@@ -1463,10 +1460,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.genesisMayBottomNextSpell must be true`);
     }
     if (card.genesisMayBottomNextSpell === true
-      && (card.genesisEnemiesLoseStealth
-        || card.genesisGainManaIfOnlyControlledCopy !== undefined
-        || card.genesisHealNearbyAvatars !== undefined
-        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
+      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
       throw new RangeError(`${path} simultaneous next-spell and another site Genesis are unsupported`);
     }
     if (card.genesisReorderNextSpells !== undefined
@@ -1474,10 +1468,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       throw new RangeError(`${path}.genesisReorderNextSpells must be 3`);
     }
     if (card.genesisReorderNextSpells === 3
-      && (card.genesisEnemiesLoseStealth
-        || card.genesisGainManaIfOnlyControlledCopy !== undefined
-        || card.genesisHealNearbyAvatars !== undefined
-        || card.genesisImmobilizeNearbyUntilNextTurn !== undefined)) {
+      && card.genesisGainManaIfOnlyControlledCopy !== undefined) {
       throw new RangeError(`${path} simultaneous spell-order and another site Genesis are unsupported`);
     }
     if (card.connectsBurrowedAllies !== undefined && typeof card.connectsBurrowedAllies !== 'boolean') {
