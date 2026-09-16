@@ -2974,6 +2974,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
         cardType: 'minion',
         defense: 1,
         manaCost: 0,
+        occupiesSquareArea: 2,
         stealth: true,
         thresholds: { air: 0, earth: 0, fire: 0, water: 0 },
         token: true,
@@ -2983,6 +2984,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
   });
   assert.equal(
     waterboundStealthToken.cards['bound-scout']?.cardType === 'minion'
+      && waterboundStealthToken.cards['bound-scout'].occupiesSquareArea === 2
       && waterboundStealthToken.cards['bound-scout'].stealth
       && waterboundStealthToken.cards['bound-scout'].token
       && waterboundStealthToken.cards['bound-scout'].waterbound,
@@ -11840,20 +11842,6 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
       } as unknown as GameCardDefinition,
     },
   }), /occupiesSquareArea must be 2/);
-  for (const incompatibleFact of [
-    { connectsTopBottom: true as const },
-  ]) {
-    assert.throws(() => createGameManifest({
-      ...input,
-      cards: {
-        ...cards,
-        [giantCardId]: {
-          ...cards[giantCardId]!,
-          ...incompatibleFact,
-        },
-      },
-    }), /occupiesSquareArea has an unsupported ability combination/);
-  }
   for (const extra of [
     { genesisDrawSpells: 1 },
     { genesisDrawSite: true as const },
@@ -11887,6 +11875,8 @@ test('RULE-03 oversized minions occupy one canonical 2x2 footprint for movement,
     { ranged: true as const, mayRangedStrikeOnceDuringBasicMovement: true as const },
     { ranged: true as const, mayStepAfterRangedStrike: true as const },
     { voidwalk: true as const },
+    { connectsTopBottom: true as const },
+    { mustBeCastToOuterColumn: true as const },
   ]) {
     const composed = createGameManifest({
       ...input,
@@ -28760,18 +28750,24 @@ test('RULE-04 an active surface minion derives power, Ranged, and Spellcaster at
     },
     seed: 1,
   }), /gainsPowerRangedAndSpellcasterAtopTower must be 2/);
-  assert.throws(() => createGameManifest({
+  const oversizedConditional = createGameManifest({
     ...input,
     cards: {
       ...cards,
       [conditionalId]: {
         ...cards[conditionalId],
         occupiesSquareArea: 2,
-        token: true,
-      } as unknown as GameCardDefinition,
+        connectsTopBottom: true,
+      } as GameCardDefinition,
     },
     seed: 1,
-  }), /occupiesSquareArea has an unsupported ability combination/);
+  });
+  assert.equal(
+    oversizedConditional.cards[conditionalId]?.cardType === 'minion'
+      && oversizedConditional.cards[conditionalId].occupiesSquareArea === 2
+      && oversizedConditional.cards[conditionalId].connectsTopBottom,
+    true,
+  );
 
   const gameManifest = await findOpeningManifest(
     (seed) => createGameManifest({ ...input, seed }),

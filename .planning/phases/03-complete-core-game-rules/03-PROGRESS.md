@@ -254,4 +254,4 @@
 - State-based outcomes beyond the supported region death/void-banishment model, and continuous ability-loss interactions beyond supported Disable. Token Genesis (draw-site, disable-until-damaged, adjacent-damage choice) is bound at `RULE-CATALOG-0381`–`0384`; oversized start-turn random teleport is bound at `RULE-CATALOG-0379`–`0380`; 2×2 Voidwalk is bound at `RULE-CATALOG-0316`–`0317`; token occupancy, wraparound, and outer-column casts are bound at `RULE-CATALOG-0371`–`0376`.
 - Source-linked scenario and invariant coverage for every supported core mechanic.
 
-The runner classifies finished games with passing gates as `unranked_unverified_authority` (505 catalog rules complete; authority still unverified). Full ranked waits on verified authority binding.
+The runner classifies finished games with passing gates as `unranked_unverified_authority` (506 catalog rules complete; authority still unverified). Full ranked waits on verified authority binding. TypeScript now admits the same 2×2 token, wrap, and outer-column combinations already proven in Rust (`0371`–`0376`).

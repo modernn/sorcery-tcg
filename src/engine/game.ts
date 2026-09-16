@@ -2281,14 +2281,6 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
   if (card.occupiesSquareArea !== undefined && card.occupiesSquareArea !== 2) {
     throw new RangeError(`${path}.occupiesSquareArea must be 2`);
   }
-  if (card.occupiesSquareArea === 2
-    && (card.connectsTopBottom === true
-      || card.mustBeCastToOuterColumn === true
-      || card.token === true)) {
-    throw new RangeError(
-      `${path}.occupiesSquareArea has an unsupported ability combination`,
-    );
-  }
   if (card.movesOnlySideways !== undefined && typeof card.movesOnlySideways !== 'boolean') {
     throw new RangeError(`${path}.movesOnlySideways must be boolean`);
   }
