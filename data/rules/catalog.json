@@ -11617,6 +11617,54 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0506_finished_synthetic_game_classifies_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0507",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Landbound minion stays enabled when Flood covers only part of its footprint, because any remaining occupied land location keeps Landbound satisfied.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "occupiesSquareArea",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-aura"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0507_square_landbound_stays_enabled_when_flood_covers_only_part_of_its_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0508",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2x2 Landbound minion becomes Disabled in place when Flood covers every occupied cell of its footprint.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "occupiesSquareArea",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-aura"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_0508_square_landbound_is_disabled_when_flood_covers_its_whole_footprint"
+      }
     }
   ]
 }
