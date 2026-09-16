@@ -382,6 +382,7 @@ struct AvatarPosition {
     location: Cell,
     tapped: bool,
     temporary_movement_sources: Vec<IdentityHash>,
+    temporary_next_strike_double_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
 }
 
@@ -436,6 +437,7 @@ struct UnitPosition {
     temporary_charge_sources: Vec<IdentityHash>,
     temporary_first_strike_sources: Vec<IdentityHash>,
     temporary_lethal_sources: Vec<IdentityHash>,
+    temporary_next_strike_double_sources: Vec<IdentityHash>,
     temporary_movement_sources: Vec<IdentityHash>,
     temporary_power_sources: Vec<IdentityHash>,
     temporary_ranged_sources: Vec<IdentityHash>,
@@ -478,6 +480,7 @@ impl SummonPlacement {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -1469,6 +1472,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantFirstStrikeToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurn
         | MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell
+        | MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
         | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
         | MagicEffect::GrantPowerTwoToAllyThisTurn
         | MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell
@@ -2164,6 +2168,14 @@ impl Game {
         if !player.avatar.temporary_movement_sources.is_empty() {
             value["avatar"]["temporaryMovementSources"] =
                 json!(player.avatar.temporary_movement_sources);
+        }
+        if !player
+            .avatar
+            .temporary_next_strike_double_sources
+            .is_empty()
+        {
+            value["avatar"]["temporaryNextStrikeDoubleSources"] =
+                json!(player.avatar.temporary_next_strike_double_sources);
         }
         if !player.avatar.temporary_power_sources.is_empty() {
             value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
@@ -3662,6 +3674,24 @@ impl Game {
                                     } else {
                                         ""
                                     },
+                                    ally.kind(),
+                                    &ally.instance_id().as_str()[..15]
+                                )
+                            } else if matches!(
+                                facts.effect,
+                                MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
+                            ) {
+                                let ActionDescriptor::CastMagic {
+                                    ally: Some(ally), ..
+                                } = &descriptor
+                                else {
+                                    return Err(invalid(
+                                        "next-strike double grant action requires an ally",
+                                    ));
+                                };
+                                format!(
+                                    "Cast {} to grant double damage on the next strike to {} {}…",
+                                    definition.id,
                                     ally.kind(),
                                     &ally.instance_id().as_str()[..15]
                                 )
@@ -6991,6 +7021,7 @@ impl Game {
             }
             MagicEffect::GrantAirborneToAllyThisTurn
             | MagicEffect::GrantChargeToAllyThisTurn
+            | MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn
             | MagicEffect::GrantFirstStrikeToAllyThisTurn
             | MagicEffect::GrantLethalToAllyThisTurn
             | MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell
@@ -10554,6 +10585,12 @@ impl Game {
         if strike.lance_count > 0 {
             self.break_lance(action.seat, shooter_instance_id, outcomes)?;
         }
+        self.consume_next_strike_double(
+            UnitKind::Minion,
+            action.seat,
+            shooter_instance_id,
+            outcomes,
+        )?;
         if damage.minion_died || damage.avatar_defeated {
             let target_instance_id = target.instance_id().clone();
             let target_seat = target.seat();
@@ -12177,6 +12214,28 @@ impl Game {
         let amount = current_power
             .checked_add(u16::from(lance_count))
             .ok_or(GameError::IllegalAction)?;
+        let doubled = match kind {
+            UnitKind::Avatar => {
+                let avatar = &self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                !avatar.temporary_next_strike_double_sources.is_empty()
+            }
+            UnitKind::Minion => !self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?
+                .temporary_next_strike_double_sources
+                .is_empty(),
+        };
+        let amount = if doubled {
+            amount.checked_mul(2).ok_or(GameError::IllegalAction)?
+        } else {
+            amount
+        };
         Ok(StrikeStats {
             amount,
             current_power,
@@ -12226,6 +12285,43 @@ impl Game {
                     "bearerInstanceId": instance_id,
                     "count": count,
                     "sourceInstanceId": instance_id,
+                })
+            });
+        }
+        Ok(())
+    }
+
+    fn consume_next_strike_double(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let sources = match kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                std::mem::take(&mut avatar.temporary_next_strike_double_sources)
+            }
+            UnitKind::Minion => std::mem::take(
+                &mut self
+                    .position
+                    .units
+                    .iter_mut()
+                    .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_next_strike_double_sources,
+            ),
+        };
+        for source in sources {
+            outcomes.push("next-strike-double-consumed", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": seat,
+                    "sourceInstanceId": source,
                 })
             });
         }
@@ -12652,10 +12748,14 @@ impl Game {
         if attacker_can_strike && attacker.lance_count > 0 {
             self.break_lance(attacking_seat, &attacker_id, outcomes)?;
         }
-        for (_, target, strike) in &return_sources {
+        if attacker_can_strike {
+            self.consume_next_strike_double(attacker_kind, attacking_seat, &attacker_id, outcomes)?;
+        }
+        for (kind, target, strike) in &return_sources {
             if strike.lance_count > 0 {
                 self.break_lance(target.seat(), target.instance_id(), outcomes)?;
             }
+            self.consume_next_strike_double(*kind, target.seat(), target.instance_id(), outcomes)?;
         }
         let mut dead_minions = Vec::new();
         if attacker_damage.minion_died {
@@ -14696,6 +14796,7 @@ impl Game {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -20263,6 +20364,45 @@ impl Game {
                     })
                 });
             }
+            MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn => {
+                let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
+                match ally {
+                    UnitTarget::Avatar {
+                        instance_id,
+                        seat: ally_seat,
+                    } => {
+                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
+                        if avatar.card.instance_id != *instance_id {
+                            return Err(GameError::IllegalAction);
+                        }
+                        avatar
+                            .temporary_next_strike_double_sources
+                            .push(card_instance_id.clone());
+                    }
+                    UnitTarget::Minion {
+                        instance_id,
+                        seat: ally_seat,
+                    } => {
+                        self.position
+                            .units
+                            .iter_mut()
+                            .find(|unit| {
+                                unit.card.instance_id == *instance_id
+                                    && unit.controller == *ally_seat
+                            })
+                            .ok_or(GameError::IllegalAction)?
+                            .temporary_next_strike_double_sources
+                            .push(card_instance_id.clone());
+                    }
+                }
+                outcomes.push("next-strike-double-granted", || {
+                    json!({
+                        "instanceId": ally.instance_id(),
+                        "seat": ally.seat(),
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
                 match ally {
@@ -23987,9 +24127,29 @@ impl Game {
                 )
             })
         }));
+        let mut expired_next_strike_double_sources: Vec<_> = ending_avatar
+            .temporary_next_strike_double_sources
+            .iter()
+            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
+            .collect();
+        expired_next_strike_double_sources.extend(self.position.units.iter().flat_map(|unit| {
+            unit.temporary_next_strike_double_sources
+                .iter()
+                .map(|source| {
+                    (
+                        unit.card.instance_id.clone(),
+                        unit.controller,
+                        source.clone(),
+                    )
+                })
+        }));
         self.position.players[seat_index(seat)]
             .avatar
             .temporary_movement_sources
+            .clear();
+        self.position.players[seat_index(seat)]
+            .avatar
+            .temporary_next_strike_double_sources
             .clear();
         self.position.players[seat_index(seat)]
             .avatar
@@ -24036,6 +24196,7 @@ impl Game {
             unit.temporary_charge_sources.clear();
             unit.temporary_first_strike_sources.clear();
             unit.temporary_lethal_sources.clear();
+            unit.temporary_next_strike_double_sources.clear();
             unit.temporary_movement_sources.clear();
             unit.temporary_power_sources.clear();
             unit.temporary_ranged_sources.clear();
@@ -24113,6 +24274,15 @@ impl Game {
         }
         for (instance_id, controller, source_instance_id) in expired_lethal_sources {
             outcomes.push("lethal-expired", || {
+                json!({
+                    "instanceId": instance_id,
+                    "seat": controller,
+                    "sourceInstanceId": source_instance_id,
+                })
+            });
+        }
+        for (instance_id, controller, source_instance_id) in expired_next_strike_double_sources {
+            outcomes.push("next-strike-double-expired", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": controller,
@@ -24740,6 +24910,14 @@ impl Game {
             value["avatar"]["temporaryMovementSources"] =
                 json!(player.avatar.temporary_movement_sources);
         }
+        if !player
+            .avatar
+            .temporary_next_strike_double_sources
+            .is_empty()
+        {
+            value["avatar"]["temporaryNextStrikeDoubleSources"] =
+                json!(player.avatar.temporary_next_strike_double_sources);
+        }
         if !player.avatar.temporary_power_sources.is_empty() {
             value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
         }
@@ -24887,6 +25065,12 @@ impl Game {
             object.insert(
                 "temporaryLethalSources".to_owned(),
                 json!(unit.temporary_lethal_sources),
+            );
+        }
+        if !unit.temporary_next_strike_double_sources.is_empty() {
+            object.insert(
+                "temporaryNextStrikeDoubleSources".to_owned(),
+                json!(unit.temporary_next_strike_double_sources),
             );
         }
         if !unit.temporary_movement_sources.is_empty() {
@@ -25186,6 +25370,7 @@ fn create_player(
             .map_err(|_| invalid("avatar start cell must be valid"))?,
         tapped: false,
         temporary_movement_sources: Vec::new(),
+        temporary_next_strike_double_sources: Vec::new(),
         temporary_power_sources: Vec::new(),
     };
     let remaining_atlas = atlas.split_off(3);
@@ -25658,6 +25843,10 @@ mod tests {
             (
                 MagicEffect::GrantLethalToAllyThisTurnThenDrawSpell,
                 json!({ "grantLethalToAllyThisTurnThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn,
+                json!({ "grantDoubleDamageToAllyNextStrikeThisTurn": true }),
             ),
             (
                 MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell,
@@ -26333,6 +26522,7 @@ mod tests {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -26612,6 +26802,7 @@ mod tests {
             temporary_charge_sources: Vec::new(),
             temporary_first_strike_sources: Vec::new(),
             temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
             temporary_movement_sources: Vec::new(),
             temporary_power_sources: Vec::new(),
             temporary_ranged_sources: Vec::new(),
@@ -27555,6 +27746,7 @@ mod tests {
                 temporary_charge_sources: Vec::new(),
                 temporary_first_strike_sources: Vec::new(),
                 temporary_lethal_sources: Vec::new(),
+                temporary_next_strike_double_sources: Vec::new(),
                 temporary_movement_sources: Vec::new(),
                 temporary_power_sources: Vec::new(),
                 temporary_ranged_sources: Vec::new(),

@@ -253,6 +253,7 @@ pub enum MagicEffect {
     GrantFirstStrikeToAllyThisTurn,
     GrantLethalToAllyThisTurn,
     GrantLethalToAllyThisTurnThenDrawSpell,
+    GrantDoubleDamageToAllyNextStrikeThisTurn,
     GrantMovementOneToAllyThisTurnThenDrawSpell,
     GrantPowerTwoToAllyThisTurn,
     GrantPowerTwoToAllyThisTurnThenDrawSpell,
@@ -830,6 +831,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "grantAirborneToAllyThisTurn",
     "grantAirborneToAllyThisTurnThenDrawSpell",
     "grantChargeToAllyThisTurn",
+    "grantDoubleDamageToAllyNextStrikeThisTurn",
     "grantFirstStrikeToAllyThisTurn",
     "grantLethalToAllyThisTurn",
     "grantLethalToAllyThisTurnThenDrawSpell",
@@ -1468,6 +1470,8 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .then_some(MagicEffect::GrantAirborneToAllyThisTurnThenDrawSpell),
             true_only(object, "grantChargeToAllyThisTurn", path)?
                 .then_some(MagicEffect::GrantChargeToAllyThisTurn),
+            true_only(object, "grantDoubleDamageToAllyNextStrikeThisTurn", path)?
+                .then_some(MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn),
             true_only(object, "grantFirstStrikeToAllyThisTurn", path)?
                 .then_some(MagicEffect::GrantFirstStrikeToAllyThisTurn),
             true_only(object, "grantLethalToAllyThisTurn", path)?

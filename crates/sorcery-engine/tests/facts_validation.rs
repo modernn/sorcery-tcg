@@ -296,6 +296,7 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("grantAirborneToAllyThisTurn", json!(true)),
         ("grantAirborneToAllyThisTurnThenDrawSpell", json!(true)),
         ("grantChargeToAllyThisTurn", json!(true)),
+        ("grantDoubleDamageToAllyNextStrikeThisTurn", json!(true)),
         ("grantFirstStrikeToAllyThisTurn", json!(true)),
         ("grantLethalToAllyThisTurn", json!(true)),
         ("grantLethalToAllyThisTurnThenDrawSpell", json!(true)),

@@ -778,6 +778,49 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
       } as unknown as GameCardDefinition,
     },
   }), /grantLethalToAllyThisTurn/);
+  const nextStrikeDoubleGrantManifest = createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantDoubleDamageToAllyNextStrikeThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  });
+  assert.deepEqual(nextStrikeDoubleGrantManifest.cards[firstSpell], {
+    cardType: 'magic',
+    grantDoubleDamageToAllyNextStrikeThisTurn: true,
+    manaCost: 1,
+    thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+  });
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantDoubleDamageToAllyNextStrikeThisTurn: false,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      } as unknown as GameCardDefinition,
+    },
+  }), /grantDoubleDamageToAllyNextStrikeThisTurn/);
+  assert.throws(() => createGameManifest({
+    ...input,
+    cards: {
+      ...cards,
+      [firstSpell]: {
+        cardType: 'magic',
+        grantDoubleDamageToAllyNextStrikeThisTurn: true,
+        grantLethalToAllyThisTurn: true,
+        manaCost: 1,
+        thresholds: { air: 0, earth: 0, fire: 1, water: 0 },
+      },
+    },
+  }), /exactly one supported Magic effect/);
   const firstStrikeGrantManifest = createGameManifest({
     ...input,
     cards: {

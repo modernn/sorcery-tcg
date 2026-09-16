@@ -13012,6 +13012,52 @@
         "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
         "testName": "rule_catalog_0564_teleport_one_diagonal_is_unoffered_without_a_diagonal_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0565",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-double-damage-to-ally-next-strike-this-turn Magic marks a chosen ally. That ally's next unit strike this turn deals double damage, so an attack-2 minion kills a defense-3 enemy that it would only wound without the grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_0565_granted_next_strike_double_kills_a_tougher_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0566",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "The next-strike-double mark expires at End Phase. A later strike uses the ally's printed attack and only wounds the same tougher enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "next-strike-double-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_0566_next_strike_double_expires_before_a_later_strike"
+      }
     }
   ]
 }
