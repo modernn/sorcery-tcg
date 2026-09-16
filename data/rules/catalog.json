@@ -8230,6 +8230,52 @@
         "file": "crates/sorcery-engine/tests/token_footprint_rules.rs",
         "testName": "rule_catalog_0372_square_token_banishes_instead_of_entering_a_cemetery"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0373",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 minion with top/bottom wraparound can be summoned onto a wrapped footprint that spans rank 1 and rank 4 across two adjacent files.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "connectsTopBottom",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/square_wrap_footprint_rules.rs",
+        "testName": "rule_catalog_0373_square_wrap_summons_onto_a_wrapped_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0374",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 minion with top/bottom wraparound translates its whole footprint when the anchor steps across the connected edge, from a canonical square to the wrapped occupancy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "connectsTopBottom",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "decline-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/square_wrap_footprint_rules.rs",
+        "testName": "rule_catalog_0374_square_wrap_steps_from_canonical_to_wrapped_footprint"
+      }
     }
   ]
 }
