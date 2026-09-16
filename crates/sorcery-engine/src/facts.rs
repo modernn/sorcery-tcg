@@ -271,6 +271,7 @@ pub enum MagicEffect {
     MillSites(u8),
     MillSpells(u8),
     ReturnMinionFromOwnCemetery,
+    ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell,
     ReturnTargetArtifactFromOwnCemetery,
     ReturnTargetAuraFromOwnCemetery,
     ReturnTargetMagicFromOwnCemetery,
@@ -842,6 +843,7 @@ const MAGIC_FIELDS: &[&str] = &[
     "payLifeAsAdditionalCost",
     "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell",
     "returnMinionFromOwnCemetery",
+    "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell",
     "returnTargetArtifactFromOwnCemetery",
     "returnTargetAuraFromOwnCemetery",
     "returnTargetMagicFromOwnCemetery",
@@ -1504,6 +1506,12 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
                 .map(|count| MagicEffect::TargetPlayerDrawsSpells(compact_u8(count))),
             true_only(object, "returnMinionFromOwnCemetery", path)?
                 .then_some(MagicEffect::ReturnMinionFromOwnCemetery),
+            true_only(
+                object,
+                "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell",
+                path,
+            )?
+            .then_some(MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell),
             true_only(object, "returnTargetArtifactFromOwnCemetery", path)?
                 .then_some(MagicEffect::ReturnTargetArtifactFromOwnCemetery),
             true_only(object, "returnTargetAuraFromOwnCemetery", path)?

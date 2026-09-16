@@ -329,6 +329,10 @@ fn parse_should_accept_every_artifact_aura_and_magic_effect_shape() {
         ("targetPlayerDrawsSites", json!(1)),
         ("targetPlayerDrawsSpells", json!(1)),
         ("returnMinionFromOwnCemetery", json!(true)),
+        (
+            "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell",
+            json!(true),
+        ),
         ("returnTargetArtifactFromOwnCemetery", json!(true)),
         ("returnTargetAuraFromOwnCemetery", json!(true)),
         ("returnTargetMagicFromOwnCemetery", json!(true)),
@@ -1682,6 +1686,27 @@ fn genesis_untap_adjacent_allies_should_parse() {
         panic!("expected minion facts");
     };
     assert!(facts.genesis_untap_adjacent_allies);
+}
+
+#[test]
+fn return_up_to_three_cemetery_cards_to_deck_bottom_then_draw_spell_should_parse() {
+    let CardFacts::Magic(facts) = parse_card_definition(
+        "cemetery-to-bottom-then-draw",
+        &spell(
+            "magic",
+            (
+                "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell",
+                json!(true),
+            ),
+        ),
+    )
+    .expect("valid cemetery-to-bottom then draw-spell Magic") else {
+        panic!("expected Magic facts");
+    };
+    assert_eq!(
+        facts.effect,
+        MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
+    );
 }
 
 #[test]

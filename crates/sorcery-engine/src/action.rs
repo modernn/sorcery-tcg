@@ -216,6 +216,10 @@ impl CombatTarget {
 
 /// An engine-issued action payload for the supported synthetic rules slice.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "CastMagic keeps every engine-issued Magic choice on one explicit variant"
+)]
 #[serde(
     deny_unknown_fields,
     rename_all = "kebab-case",
@@ -457,6 +461,9 @@ pub enum ActionDescriptor {
         /// Exact own cemetery card selected by Rescue or cemetery Magic/Artifact/Site return.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cemetery_minion_instance_id: Option<IdentityHash>,
+        /// Own cemetery cards returned to their owners' deck bottoms, in instance-id order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        cemetery_card_instance_ids: Vec<IdentityHash>,
         /// Exact hand card discarded as an additional player-chosen cost.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         discard_card_instance_id: Option<IdentityHash>,
@@ -739,6 +746,7 @@ impl ActionDescriptor {
                 ally_strike_location,
                 card_id,
                 cemetery_minion_instance_id,
+                cemetery_card_instance_ids,
                 discard_card_instance_id,
                 discard_site_instance_id,
                 draw_zone,
@@ -807,6 +815,11 @@ impl ActionDescriptor {
                         "Cast {card_id} to grant Charge to {} {}…",
                         ally.kind(),
                         short_identity(ally.instance_id())
+                    )
+                } else if !cemetery_card_instance_ids.is_empty() {
+                    format!(
+                        "Cast {card_id} to return {} cemetery cards to the bottom…",
+                        cemetery_card_instance_ids.len()
                     )
                 } else if let Some(instance_id) = cemetery_minion_instance_id {
                     format!(
@@ -1310,6 +1323,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
                     cemetery_minion_instance_id: left_cemetery,
+                    cemetery_card_instance_ids: left_cemetery_cards,
                     discard_card_instance_id: left_discard_card,
                     discard_site_instance_id: left_discard,
                     draw_zone: left_draw_zone,
@@ -1331,6 +1345,7 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
                     cemetery_minion_instance_id: right_cemetery,
+                    cemetery_card_instance_ids: right_cemetery_cards,
                     discard_card_instance_id: right_discard_card,
                     discard_site_instance_id: right_discard,
                     draw_zone: right_draw_zone,
@@ -1354,6 +1369,13 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                 .then_with(|| left_caster.cmp(right_caster))
                 .then_with(|| {
                     compare_optional_identities(left_cemetery.as_ref(), right_cemetery.as_ref())
+                })
+                .then_with(|| {
+                    compare_json_array(
+                        left_cemetery_cards,
+                        right_cemetery_cards,
+                        IdentityHash::cmp,
+                    )
                 })
                 .then_with(|| {
                     compare_optional_identities(

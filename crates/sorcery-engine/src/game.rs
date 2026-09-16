@@ -630,6 +630,7 @@ struct MagicChoice {
     ally_destination_cells: Option<SquareArea>,
     ally_strike_location: Option<Location>,
     cemetery_minion_instance_id: Option<IdentityHash>,
+    cemetery_card_instance_ids: Vec<IdentityHash>,
     discard_card_instance_id: Option<IdentityHash>,
     discard_site_instance_id: Option<IdentityHash>,
     draw_zone: Option<DeckZone>,
@@ -1479,6 +1480,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::KillTargetWoundedMinion
         | MagicEffect::LureEnemyMinionOneStepCloser
         | MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell
+        | MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
         | MagicEffect::MillSites(_)
         | MagicEffect::MillSpells(_)
         | MagicEffect::TargetPlayerDrawsSites(_)
@@ -3579,6 +3581,7 @@ impl Game {
                             card_instance_id: card.instance_id.clone(),
                             caster_instance_id: caster_instance_id.clone(),
                             cemetery_minion_instance_id: choice.cemetery_minion_instance_id.clone(),
+                            cemetery_card_instance_ids: choice.cemetery_card_instance_ids.clone(),
                             discard_card_instance_id: choice.discard_card_instance_id.clone(),
                             discard_site_instance_id: choice.discard_site_instance_id.clone(),
                             draw_zone: choice.draw_zone,
@@ -6756,6 +6759,87 @@ impl Game {
         );
     }
 
+    fn cemetery_bottom_then_draw_choices(&self, seat: Seat) -> Vec<MagicChoice> {
+        let mut ids: Vec<IdentityHash> = self.position.players[seat_index(seat)]
+            .cemetery
+            .iter()
+            .map(|card| card.instance_id.clone())
+            .collect();
+        ids.sort();
+        let mut choices = vec![MagicChoice::default()];
+        let mut chosen = Vec::new();
+        for count in 1..=3.min(ids.len()) {
+            Self::push_cemetery_combinations(&ids, 0, count, &mut chosen, &mut choices);
+        }
+        choices
+    }
+
+    fn push_cemetery_combinations(
+        ids: &[IdentityHash],
+        start: usize,
+        remaining: usize,
+        chosen: &mut Vec<IdentityHash>,
+        choices: &mut Vec<MagicChoice>,
+    ) {
+        if remaining == 0 {
+            choices.push(MagicChoice {
+                cemetery_card_instance_ids: chosen.clone(),
+                ..MagicChoice::default()
+            });
+            return;
+        }
+        for index in start..=ids.len() - remaining {
+            chosen.push(ids[index].clone());
+            Self::push_cemetery_combinations(ids, index + 1, remaining - 1, chosen, choices);
+            chosen.pop();
+        }
+    }
+
+    fn return_cemetery_card_to_deck_bottom(
+        &mut self,
+        seat: Seat,
+        selected_id: &IdentityHash,
+        source_instance_id: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let selected = {
+            let cemetery = &mut self.position.players[seat_index(seat)].cemetery;
+            let selected_index = cemetery
+                .iter()
+                .position(|card| card.instance_id == *selected_id)
+                .ok_or(GameError::IllegalAction)?;
+            cemetery.remove(selected_index)
+        };
+        let definition = &self.rules.cards[usize::from(selected.card_id.0)];
+        let zone = match definition.facts {
+            CardFacts::Site(_) => DeckZone::Atlas,
+            _ => DeckZone::Spellbook,
+        };
+        let selected_card_id = definition.id.clone();
+        let owner = selected.owner;
+        match zone {
+            DeckZone::Atlas => self.position.players[seat_index(owner)]
+                .atlas
+                .push(selected),
+            DeckZone::Spellbook => {
+                self.position.players[seat_index(owner)]
+                    .spellbook
+                    .push(selected);
+            }
+        }
+        outcomes.push("card-returned-to-deck-bottom", || {
+            json!({
+                "cardId": selected_card_id,
+                "instanceId": selected_id,
+                "owner": owner,
+                "seat": seat,
+                "sourceInstanceId": source_instance_id,
+                "zone": zone,
+            })
+        });
+        Ok(())
+    }
+
     fn own_cemetery_type_choices(&self, seat: Seat, kind: OwnCemeteryReturn) -> Vec<MagicChoice> {
         let choices: Vec<_> = self.position.players[seat_index(seat)]
             .cemetery
@@ -7056,6 +7140,9 @@ impl Game {
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Minion)
+            }
+            MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell => {
+                self.cemetery_bottom_then_draw_choices(seat)
             }
             MagicEffect::ReturnTargetArtifactFromOwnCemetery => {
                 self.own_cemetery_type_choices(seat, OwnCemeteryReturn::Artifact)
@@ -19021,6 +19108,7 @@ impl Game {
             card_instance_id,
             caster_instance_id,
             cemetery_minion_instance_id,
+            cemetery_card_instance_ids,
             discard_card_instance_id,
             discard_site_instance_id,
             draw_zone,
@@ -19087,6 +19175,7 @@ impl Game {
                     ally_destination_cells: *ally_destination_cells,
                     ally_strike_location: *ally_strike_location,
                     cemetery_minion_instance_id: cemetery_minion_instance_id.clone(),
+                    cemetery_card_instance_ids: cemetery_card_instance_ids.clone(),
                     discard_card_instance_id: discard_card_instance_id.clone(),
                     discard_site_instance_id: discard_site_instance_id.clone(),
                     draw_zone: *draw_zone,
@@ -19295,6 +19384,9 @@ impl Game {
             });
             if let Some(selected_id) = cemetery_minion_instance_id {
                 payload["cemeteryMinionInstanceId"] = json!(selected_id);
+            }
+            if !cemetery_card_instance_ids.is_empty() {
+                payload["cemeteryCardInstanceIds"] = json!(cemetery_card_instance_ids);
             }
             if let Some(discard_card_instance_id) = discard_card_instance_id {
                 payload["discardCardInstanceId"] = json!(discard_card_instance_id);
@@ -19603,6 +19695,17 @@ impl Game {
                     random_draws,
                     forced_random_outcome,
                 )?;
+            }
+            MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell => {
+                for selected_id in cemetery_card_instance_ids {
+                    self.return_cemetery_card_to_deck_bottom(
+                        seat,
+                        selected_id,
+                        card_instance_id,
+                        outcomes,
+                    )?;
+                }
+                self.apply_genesis_draws(seat, card_instance_id, DeckZone::Spellbook, 1, outcomes);
             }
             MagicEffect::ReturnMinionFromOwnCemetery => {
                 if let Some(selected_id) = cemetery_minion_instance_id {
@@ -24773,6 +24876,10 @@ mod tests {
             (
                 MagicEffect::PullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell,
                 json!({ "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell": true }),
+            ),
+            (
+                MagicEffect::ReturnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell,
+                json!({ "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell": true }),
             ),
             (
                 MagicEffect::GrantPowerTwoToAllyThisTurnThenDrawSpell,

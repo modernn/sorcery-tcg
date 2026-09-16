@@ -419,6 +419,7 @@ export type GameCardDefinition =
     targetPlayerDrawsSites?: number;
     targetPlayerDrawsSpells?: number;
     returnMinionFromOwnCemetery?: true;
+    returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell?: true;
     returnTargetArtifactFromOwnCemetery?: true;
     returnTargetAuraFromOwnCemetery?: true;
     returnTargetMagicFromOwnCemetery?: true;
@@ -1345,7 +1346,7 @@ const SUPPORTED_CARD_FIELDS = {
     grantAirborneToAllyThisTurnThenDrawSpell grantChargeToAllyThisTurn grantFirstStrikeToAllyThisTurn grantLethalToAllyThisTurn
     grantLethalToAllyThisTurnThenDrawSpell grantMovementOneToAllyThisTurnThenDrawSpell grantRangedToAllyThisTurn
     grantPowerToAllyThisTurn grantPowerTwoToAllyThisTurnThenDrawSpell grantStealthToAlliedMinionsThenDrawSpell grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell grantStealthToTargetMinion grantWardToTargetMinion wardEachAlliedMinionAtTargetWaterSite healController healTargetMinion killTargetMinion killTargetWoundedMinion leapAttackAlly drawSites drawSiteThenMayPlayLandSite drawSiteThenMayPlayWaterSite drawSpells
-    lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery
+    lureEnemyMinionOneStepCloser manaCost millSites millSpells payLifeAsAdditionalCost pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell returnMinionFromOwnCemetery returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell
     returnTargetArtifactFromOwnCemetery returnTargetAuraFromOwnCemetery returnTargetMagicFromOwnCemetery
     returnTargetArtifactToOwnerHand
     returnTargetAuraToOwnerHand
@@ -1740,6 +1741,10 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       && card.returnMinionFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnMinionFromOwnCemetery must be true when defined`);
     }
+    if (card.returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell !== undefined
+      && card.returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell !== true) {
+      throw new RangeError(`${path}.returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell must be true when defined`);
+    }
     if (card.returnTargetArtifactFromOwnCemetery !== undefined
       && card.returnTargetArtifactFromOwnCemetery !== true) {
       throw new RangeError(`${path}.returnTargetArtifactFromOwnCemetery must be true when defined`);
@@ -2023,6 +2028,7 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
       + Number(card.targetPlayerDrawsSites !== undefined)
       + Number(card.targetPlayerDrawsSpells !== undefined)
       + Number(card.returnMinionFromOwnCemetery === true)
+      + Number(card.returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell === true)
       + Number(card.returnTargetArtifactFromOwnCemetery === true)
       + Number(card.returnTargetAuraFromOwnCemetery === true)
       + Number(card.returnTargetMagicFromOwnCemetery === true)
@@ -2962,6 +2968,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                       ? { returnTargetSiteFromOwnCemetery: true as const }
                     : card.returnMinionFromOwnCemetery === true
                       ? { returnMinionFromOwnCemetery: true as const }
+                    : card.returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell === true
+                      ? { returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell: true as const }
                     : card.returnTargetArtifactFromOwnCemetery === true
                       ? { returnTargetArtifactFromOwnCemetery: true as const }
                     : card.returnTargetAuraFromOwnCemetery === true

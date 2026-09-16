@@ -12637,6 +12637,53 @@
         "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
         "testName": "rule_catalog_0548_riptide_still_draws_without_an_adjacent_unit"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0549",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic offers each subset of up to three own-cemetery cards, returns the chosen cards to the bottoms of their owners' matching decks in instance-id order, and then draws one hidden spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_0549_nature_returns_a_cemetery_card_to_the_deck_bottom_then_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0550",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic still draws one hidden spell when no cemetery card is returned. The just-cast Magic stays in the cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_0550_nature_still_draws_when_no_cemetery_card_is_returned"
+      }
     }
   ]
 }
