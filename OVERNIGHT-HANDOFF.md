@@ -1,6 +1,6 @@
 # Overnight handoff
 
-Canonical line: `master` @ `1de331d`. Lanes through `RULE-CATALOG-0436` are merged (2×2 token/wrap/outer-column/deck-pair, oversized start-turn random teleport, full token Genesis, Chain Magic footprint hops, and stacked start-turn draw+mill). Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
+Canonical line: `master` @ `351048d` through `RULE-CATALOG-0442`. Lanes through `RULE-CATALOG-0442` are merged (2×2 token/wrap/outer-column/deck-pair, oversized start-turn random teleport, full token Genesis, Chain Magic footprint hops, and stacked start-turn draw+mill). Branch new Phase 3 work as `cursor/<one-family>-0005` from here. Do not grow already-merged landings.
 
 Lucky Charm extra-random discard-here damage, Sparkmage/Aramos random-discard honor, and the 2×2 occupy proofs through `RULE-CATALOG-0370` are merged on `master` (#54). Ballista range occupy, helper occupy, Flood/Drought water-cast proofs, Updraft Ridge occupy, measured-range Magic, and Secret Tunnel hops stay unchanged. Compact demo/batch stdout is unchanged.
 
