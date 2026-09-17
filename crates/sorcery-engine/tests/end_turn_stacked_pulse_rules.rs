@@ -1,6 +1,6 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
-//! RULE-CATALOG-0915).
+//! RULE-CATALOG-0915, RULE-CATALOG-0925).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -36,6 +36,18 @@ fn stacked_life() -> Value {
 fn stacked_gain_here_damage() -> Value {
     json!({
         "atEndOfControllerTurnControllerGainsLife": 2,
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn stacked_partial_gain_here_damage() -> Value {
+    json!({
+        "atEndOfControllerTurnControllerGainsLife": 3,
         "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
         "attack": 1,
         "cardType": "minion",
@@ -234,6 +246,51 @@ fn loss_here_damage_manifest() -> String {
         "cards": {
             "north-avatar": avatar(20),
             "north-pulser": stacked_loss_here_damage(),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+            "south-visitor": visitor(2),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-pulser"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                    "south-drain",
+                    "south-visitor",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn partial_gain_here_damage_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-partial-gain-here-damage" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-end-turn-partial-gain-here-damage-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-pulser": stacked_partial_gain_here_damage(),
             "north-site": site(),
             "south-avatar": avatar(20),
             "south-drain": drain(),
@@ -569,6 +626,46 @@ fn after_north_ready_to_end_turn_with_loss_here_pulser() -> Session {
     session
 }
 
+fn after_north_ready_to_end_turn_with_partial_gain_here_pulser() -> Session {
+    let mut session = Session::new(&partial_gain_here_damage_manifest())
+        .expect("valid partial-gain-here-damage session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
 fn after_north_ready_to_end_turn_with_visitor() -> Session {
     let mut session =
         Session::new(&gain_here_damage_manifest()).expect("valid gain-here-damage session");
@@ -679,6 +776,55 @@ fn rule_catalog_0389_end_turn_gain_then_loss_applies_net_avatar_life() {
     let after = state(&session);
     assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
     assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0925_end_turn_partial_gain_then_here_damage_on_same_minion() {
+    let mut session = after_north_ready_to_end_turn_with_partial_gain_here_pulser();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let north_avatar_id = avatar_id(&session, "north");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(before["phase"], "main");
+    assert_eq!(before["activeSeat"], "north");
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let heal_index = event_index(&receipt, "avatar-healed").expect("life gain event");
+    let damage_index =
+        event_index(&receipt, "end-turn-damage-allocated").expect("here damage event");
+    assert!(
+        heal_index < damage_index,
+        "end-turn life gain must resolve before here-area damage on the same minion"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-healed"
+            && event.payload["amount"] == 2
+            && event.payload["attemptedAmount"] == 3
+            && event.payload["life"] == 20
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    let mut here_targets = allocated_here_damage_targets(&receipt, &source_id);
+    here_targets.sort_by_key(Value::to_string);
+    let mut expected_here_targets = vec![north_avatar_id, visitor_id.clone()];
+    expected_here_targets.sort_by_key(Value::to_string);
+    assert_eq!(here_targets, expected_here_targets);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 19);
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == visitor_id)
+            .expect("visitor")["damage"],
+        0,
+        "end-turn here damage clears during end-phase cleanup unlike start-turn pulses"
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }
