@@ -1,5 +1,8 @@
 //! Direct proofs for destroy-minions-at-water-site-within-two-steps Magic
-//! (RULE-CATALOG-0571–0572).
+//! (RULE-CATALOG-0571–0572, 1028).
+//!
+//! 1028 covers boil killing a Deathrite minion: the controller draws a site
+//! and magic-resolved only appears after deathrite settlement.
 //!
 //! Ordinary Magic offers Water sites within two measured cardinal steps of
 //! the caster footprint and kills every minion occupying the chosen site.
@@ -47,6 +50,17 @@ fn mortal() -> Value {
     })
 }
 
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 3,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn beast() -> Value {
     json!({
         "attack": 2,
@@ -72,7 +86,15 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+fn boil_deathrite_manifest(seed: u32) -> String {
+    boil_manifest_with_minion(seed, &deathrite_minion())
+}
+
 fn boil_manifest(seed: u32) -> String {
+    boil_manifest_with_minion(seed, &mortal())
+}
+
+fn boil_manifest_with_minion(seed: u32, north_minion: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "destroy-water-site-minions" }))
@@ -85,7 +107,7 @@ fn boil_manifest(seed: u32) -> String {
             "north-beast": beast(),
             "north-boil": boil(),
             "north-earth": earth_site(),
-            "north-mortal": mortal(),
+            "north-mortal": north_minion.clone(),
             "north-water": water_site(),
             "south-avatar": avatar(),
             "south-mortal": mortal(),
@@ -285,6 +307,25 @@ fn south_plays_c1_and_summons(session: &mut Session) -> String {
     far_id
 }
 
+fn seed_with_deathrite(required: &[&str]) -> String {
+    (571..571 + 256)
+        .map(boil_deathrite_manifest)
+        .find(|candidate| {
+            let spells = opening_spell_ids(candidate);
+            required
+                .iter()
+                .all(|id| spells.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required opening cards")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
     snapshot["players"][seat]["cemetery"]
         .as_array()
@@ -425,5 +466,70 @@ fn rule_catalog_0572_empty_water_site_is_a_paid_noop() {
             .as_array()
             .is_none_or(Vec::is_empty)
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1028_destroy_water_site_minions_deathrite_draws_for_controller_on_kill() {
+    let encoded = (1028..1028 + 256)
+        .map(boil_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-mortal")
+                && hand.iter().any(|card| card == "north-boil")
+        })
+        .unwrap_or_else(|| seed_with_deathrite(&["north-mortal", "north-boil"]));
+    let mut session = opening_main(&encoded);
+    let minion_id = summon_at(&mut session, "north-mortal", "C4");
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-boil"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    let kill = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("minion-killed");
+    assert_eq!(kill.payload["instanceId"], minion_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], minion_id);
+    let site_drawn = event_types(&killed)
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = event_types(&killed)
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(event_types(&killed).last(), Some(&"magic-resolved"));
+
+    let after = state(&session);
+    assert!(cemetery_has(&after, "north", &minion_id));
+    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&after, "south"), south_atlas);
     assert_exact_replay(&session);
 }
