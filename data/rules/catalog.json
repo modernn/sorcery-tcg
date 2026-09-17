@@ -16646,6 +16646,41 @@
         "file": "crates/sorcery-engine/tests/duel_rules.rs",
         "testName": "rule_catalog_0711_duel_magic_fights_through_avatar_ally_adjacent_to_enemy_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0712",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Fight-ally-with-adjacent-enemy Magic in the underground region with a first-strike attacker pauses in deathrite-order after the initial strike when the target's Deathrite would settle. The pending continuation keeps the underground fight with first-strike semantics, defers magic-resolved until Deathrites are ordered, and checkpoint serialize/parse/resume preserves the pending state through terminal completion. Distinct from surface Duel proofs (0603\u20130604) and Leap Attack Deathrite resume (0695).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "strikesFirstWhileAttacking",
+        "deathriteDrawSite",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "fight-started",
+        "strike-damage-allocated",
+        "damage-dealt",
+        "deathrite-order-committed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_before_terminal"
+      }
     }
   ]
 }

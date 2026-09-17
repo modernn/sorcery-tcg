@@ -1,11 +1,17 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
-//! route strike damage through avatar-life-lost instead of minion damage.
+//! route strike damage through avatar-life-lost instead of minion damage. Underground
+//! first-strike Duels pause in deathrite-order, survive checkpoint round-trip, and
+//! finish through ordered Deathrites to terminal.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -48,6 +54,15 @@ fn duel() -> Value {
         "fightAllyWithAdjacentEnemy": true,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn burrow_all() -> Value {
+    json!({
+        "cardType": "magic",
+        "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
     })
 }
 
@@ -240,6 +255,154 @@ fn setup_duel(encoded: &str) -> (Session, String, String, String) {
     try_setup_duel(encoded).expect("complete Duel setup")
 }
 
+fn underground_duel_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "duel-underground-first-strike" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-duel-underground-first-strike-v1",
+        },
+        "cards": {
+            "north-ally": minion(json!({
+                "attack": 2,
+                "burrowing": true,
+                "defense": 10,
+                "strikesFirstWhileAttacking": true,
+            })),
+            "north-avatar": avatar(),
+            "north-burrow": burrow_all(),
+            "north-duel": duel(),
+            "north-filler": minion(json!({})),
+            "north-pinger": minion(json!({
+                "defense": 10,
+                "genesisDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-buff": minion(json!({
+                "burrowing": true,
+                "deathriteDrawSite": true,
+                "otherNearbyAlliesPowerBonus": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-pinger",
+                    "north-burrow",
+                    "north-duel",
+                    "north-filler",
+                    "north-filler",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-buff"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn summon_minion(session: &mut Session, card_id: &str, cell: &str, region: Option<&str>) -> String {
+    let (descriptor, _) = accept_where(session, |candidate| {
+        candidate["kind"] == "summon-minion"
+            && candidate["cardId"] == card_id
+            && candidate["cell"] == cell
+            && region.map_or_else(
+                || candidate["region"].is_null(),
+                |expected| candidate["region"] == expected,
+            )
+    });
+    descriptor["cardInstanceId"]
+        .as_str()
+        .expect("summoned minion identity")
+        .to_owned()
+}
+
+fn try_setup_underground_duel_checkpoint(encoded: &str) -> Option<(Session, String, Vec<String>)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    let opening = state(&session);
+    let hand = opening["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North opening hand");
+    if !hand.iter().any(|card| card["cardId"] == "north-ally") {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = summon_minion(&mut session, "north-ally", "C4", None);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let mut target_ids = Vec::new();
+    for _ in 0..2 {
+        target_ids.push(summon_minion(&mut session, "south-buff", "C4", None));
+    }
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let drawn = state(&session);
+    let north_hand = drawn["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand after one draw")
+        .iter()
+        .filter_map(|card| card["cardId"].as_str())
+        .collect::<Vec<_>>();
+    if !["north-pinger", "north-burrow", "north-duel"]
+        .into_iter()
+        .all(|card_id| north_hand.contains(&card_id))
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    summon_minion(&mut session, "north-pinger", "C4", None);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-burrow"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    })?;
+    let pre_duel = state(&session);
+    if !target_ids.iter().all(|instance_id| {
+        realm_unit(&pre_duel, instance_id).is_some_and(|unit| unit["damage"] == 1)
+    }) {
+        return None;
+    }
+    Some((session, ally_id, target_ids))
+}
+
+fn seed_underground_duel_checkpoint(start: u32) -> String {
+    (start..start + 512)
+        .map(underground_duel_manifest)
+        .find(|candidate| try_setup_underground_duel_checkpoint(candidate).is_some())
+        .expect("bounded seed with complete underground Duel checkpoint setup")
+}
+
 fn seed_with(ward: bool, start: u32) -> String {
     (start..start + 512)
         .map(|seed| duel_manifest(seed, ward))
@@ -327,5 +490,84 @@ fn rule_catalog_0711_duel_magic_fights_through_avatar_ally_adjacent_to_enemy_min
     );
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
     assert!(realm_unit(&state(&session), &enemy_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_before_terminal() {
+    let encoded = seed_underground_duel_checkpoint(712);
+    let (mut session, ally_id, mut target_ids) =
+        try_setup_underground_duel_checkpoint(&encoded).expect("complete underground Duel setup");
+    target_ids.sort_unstable();
+    let target_id = target_ids[0].clone();
+    let duel_action = session
+        .legal_actions()
+        .expect("underground Duel actions")
+        .into_iter()
+        .find(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-duel"
+                && action.descriptor["ally"]["instanceId"] == ally_id
+                && action.descriptor["target"]["instanceId"] == target_id
+        })
+        .expect("engine-issued underground Duel");
+    let StepResult::Accepted(cast) = session
+        .step(ActionRequest {
+            action_id: duel_action.action_id.to_string(),
+            seat: duel_action.seat,
+            state_version: duel_action.state_version,
+        })
+        .expect("underground Duel cast")
+    else {
+        panic!("engine-issued underground Duel must be accepted");
+    };
+    assert_eq!(
+        event_types(&cast),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+        ]
+    );
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"]["kind"],
+        "first-strike"
+    );
+    assert_eq!(
+        pending["pendingDeathrites"]["continuation"]["pending"]["region"],
+        "underground"
+    );
+    assert_eq!(
+        pending["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-duel",
+                "instanceId": cast.events[0].payload["instanceId"],
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
+    );
+
+    let checkpoint = create_game_checkpoint(&session).expect("pending Duel checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized pending Duel");
+    session = resume_game_checkpoint(
+        &parse_game_checkpoint(&serialized).expect("parsed pending Duel checkpoint"),
+    )
+    .expect("resumed pending Duel checkpoint");
+    assert_eq!(state(&session), pending);
+    let (_, completed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == target_ids[0]
+    });
+    let completed_types = event_types(&completed);
+    assert_eq!(
+        &completed_types[completed_types.len() - 2..],
+        ["magic-resolved", "game-ended"]
+    );
+    assert_eq!(state(&session)["phase"], "terminal");
     assert_exact_replay(&session);
 }
