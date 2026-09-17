@@ -1,8 +1,9 @@
 //! Direct proofs for Craterize discard-cost site destruction and damage grid
 //! (RULE-CATALOG-0160, 0705–0706).
 //!
-//! 0657–0658 cover the protected-site slice only. These proofs keep the full
-//! discard cost, terrain grid, and protection branches from the legacy harness.
+//! 0657–0658 cover the Session replay slice. 0705 is the unprotected
+//! discard/destroy/grid happy path; 0706 is discard-cost refusal plus
+//! protected-site damage without destroying the site.
 
 #[test]
 fn rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid() {

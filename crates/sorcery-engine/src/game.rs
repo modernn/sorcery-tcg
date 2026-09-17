@@ -26385,7 +26385,7 @@ pub mod catalog_proofs {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "one direct terrain proof keeps protected, Rubble, and subsurface Sinkhole branches together"
+        reason = "one direct land proof keeps protected, existing Rubble, and land-region Sinkhole branches together"
     )]
     pub fn rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface() {
         let admitted = selfplay_manifest_with(244, |manifest| {
@@ -26400,21 +26400,10 @@ pub mod catalog_proofs {
         let manifest = selfplay_manifest_with(244, |manifest| {
             manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
             manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
-            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
-            for ordinal in [1, 2] {
-                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
-                manifest["cards"][format!("south-spell-{ordinal}")]["submerge"] = json!(true);
-                manifest["cards"][format!("south-spell-{ordinal}")]["thresholds"] =
-                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
-            }
-            manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
-            manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
-            manifest["cards"]["south-spell-3"] = json!({
-                "cardType": "artifact",
-                "grantsBearerPower": 2,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
+            manifest["cards"]["south-spell-1"]["burrowing"] = json!(true);
+            manifest["cards"]["south-spell-1"]["manaCost"] = json!(0);
+            manifest["cards"]["south-spell-1"]["thresholds"] =
+                json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
         });
         let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
         let card_id = |name: &str| {
@@ -26433,8 +26422,7 @@ pub mod catalog_proofs {
             identity_hash(&json!({ "fixture": "sinkhole-source" })).expect("source identity");
         let protected_id =
             identity_hash(&json!({ "fixture": "sinkhole-protected" })).expect("protected identity");
-        let water_id =
-            identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
+        let land_id = identity_hash(&json!({ "fixture": "sinkhole-land" })).expect("land identity");
         let source = SitePosition {
             card: CardInstance {
                 card_id: card_id("north-site-1"),
@@ -26457,10 +26445,10 @@ pub mod catalog_proofs {
             last_flight_turn: None,
             warded: false,
         };
-        let water = SitePosition {
+        let land = SitePosition {
             card: CardInstance {
                 card_id: card_id("south-site-1"),
-                instance_id: water_id.clone(),
+                instance_id: land_id.clone(),
                 owner: Seat::South,
                 source: CardSource::Atlas,
             },
@@ -26473,33 +26461,14 @@ pub mod catalog_proofs {
         let c4 = Cell::parse("C4").expect("C4");
         base.position.sites = std::array::from_fn(|_| None);
         base.position.rubble = std::array::from_fn(|_| None);
-        base.position.sites[c2.index()] = Some(water);
+        base.position.sites[c2.index()] = Some(land);
         base.position.sites[c3.index()] = Some(source);
         base.position.sites[c4.index()] = Some(protected.clone());
-        let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let artifact_id = IdentityHash::parse(
-            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        )
-        .expect("artifact identity");
-        let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
-        drowned.region = Region::Underwater;
-        let mut survivor =
-            test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
-        survivor.region = Region::Underwater;
-        base.position.units = vec![drowned, survivor];
-        base.position.artifacts = vec![ArtifactPosition {
-            card: CardInstance {
-                card_id: card_id("south-spell-3"),
-                instance_id: artifact_id.clone(),
-                owner: Seat::South,
-                source: CardSource::Spellbook,
-            },
-            placement: ArtifactPlacement::Loose {
-                location: c2,
-                region: Region::Underwater,
-            },
-        }];
+        let burrower_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut burrower =
+            test_minion(card_id("south-spell-1"), burrower_id, Seat::South, c2, None);
+        burrower.region = Region::Underground;
+        base.position.units = vec![burrower];
         base.position.active_seat = Seat::North;
         base.position.decision_seat = Seat::North;
         base.position.phase = Phase::Main;
@@ -26598,11 +26567,8 @@ pub mod catalog_proofs {
         );
         assert!(rubble_events[1].1.get("owner").is_none());
 
-        let mut terminal_branch = base.clone();
-        terminal_branch.position.players[seat_index(Seat::South)]
-            .atlas
-            .clear();
-        let terminal_action = source_actions
+        let mut destroyed = base;
+        let land_action = source_actions
             .iter()
             .find(|action| {
                 matches!(
@@ -26610,9 +26576,158 @@ pub mod catalog_proofs {
                     ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
                 )
             })
-            .expect("terminal Water target action");
+            .expect("land target action");
+        let (events, random_draws) = destroyed
+            .apply_action_recorded(land_action)
+            .expect("land target activation");
+        assert!(random_draws.is_empty());
+        let event_types = events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&event_types[..2], ["site-sacrificed", "site-destroyed"]);
+        assert_eq!(
+            &event_types[event_types.len() - 2..],
+            ["rubble-created", "rubble-created"]
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == burrower_id)
+                .expect("land Burrowing occupant")
+                .region,
+            Region::Underground
+        );
+        assert_eq!(
+            destroyed.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
+            land_id
+        );
+        assert!(destroyed.position.sites[c2.index()].is_none());
+        assert!(destroyed.position.sites[c3.index()].is_none());
+        assert_eq!(destroyed.position.sites[c4.index()], Some(protected));
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Water proof keeps drowned, Burrowing, Artifact, and terminal Atlas Sinkhole branches together"
+    )]
+    pub fn rule_catalog_0704_sinkhole_preserves_subsurface_on_water_destruction() {
+        let manifest = selfplay_manifest_with(244, |manifest| {
+            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            for ordinal in [1, 2] {
+                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
+                manifest["cards"][format!("south-spell-{ordinal}")]["submerge"] = json!(true);
+                manifest["cards"][format!("south-spell-{ordinal}")]["thresholds"] =
+                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+            }
+            manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
+            manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
+            manifest["cards"]["south-spell-3"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut base = Game::from_manifest_json(&manifest).expect("valid Water Sinkhole fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    base.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let source_id =
+            identity_hash(&json!({ "fixture": "sinkhole-water-source" })).expect("source identity");
+        let water_id =
+            identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
+        let source = SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: source_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        };
+        let water = SitePosition {
+            card: CardInstance {
+                card_id: card_id("south-site-1"),
+                instance_id: water_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        };
+        let c2 = Cell::parse("C2").expect("C2");
+        let c3 = Cell::parse("C3").expect("C3");
+        base.position.sites = std::array::from_fn(|_| None);
+        base.position.rubble = std::array::from_fn(|_| None);
+        base.position.sites[c2.index()] = Some(water);
+        base.position.sites[c3.index()] = Some(source);
+        let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let artifact_id = IdentityHash::parse(
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .expect("artifact identity");
+        let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
+        drowned.region = Region::Underwater;
+        let mut survivor =
+            test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
+        survivor.region = Region::Underwater;
+        base.position.units = vec![drowned, survivor];
+        base.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("south-spell-3"),
+                instance_id: artifact_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underwater,
+            },
+        }];
+        base.position.active_seat = Seat::North;
+        base.position.decision_seat = Seat::North;
+        base.position.phase = Phase::Main;
+        base.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let water_action = base
+            .legal_actions()
+            .expect("Water site destruction actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction {
+                        source_site_instance_id,
+                        target_cell,
+                        ..
+                    } if *source_site_instance_id == source_id && *target_cell == c2
+                )
+            })
+            .expect("Water target action");
+
+        let mut terminal_branch = base.clone();
+        terminal_branch.position.players[seat_index(Seat::South)]
+            .atlas
+            .clear();
         let (terminal_events, _) = terminal_branch
-            .apply_action_recorded(terminal_action)
+            .apply_action_recorded(&water_action)
             .expect("terminal Water target activation");
         let terminal_types = terminal_events
             .iter()
@@ -26628,17 +26743,8 @@ pub mod catalog_proofs {
         );
 
         let mut destroyed = base;
-        let normal_action = source_actions
-            .iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
-                )
-            })
-            .expect("Water target action");
         let (events, random_draws) = destroyed
-            .apply_action_recorded(normal_action)
+            .apply_action_recorded(&water_action)
             .expect("Water target activation");
         assert!(random_draws.is_empty());
         let event_types = events
@@ -26650,6 +26756,7 @@ pub mod catalog_proofs {
             &event_types[event_types.len() - 2..],
             ["rubble-created", "rubble-created"]
         );
+        assert!(event_types.contains(&"minion-died"));
         assert!(
             !destroyed
                 .position
@@ -26685,16 +26792,11 @@ pub mod catalog_proofs {
         assert_eq!(south_cemetery[1].instance_id, water_id);
         assert!(destroyed.position.sites[c2.index()].is_none());
         assert!(destroyed.position.sites[c3.index()].is_none());
-        assert_eq!(destroyed.position.sites[c4.index()], Some(protected));
-    }
-
-    pub fn rule_catalog_0704_sinkhole_preserves_subsurface_on_water_destruction() {
-        rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface();
     }
 
     #[expect(
         clippy::too_many_lines,
-        reason = "one direct crater proof keeps the discard cost, protection, grid, and terrain branches together"
+        reason = "one direct crater proof keeps the discard payment, unprotected destroy, and Manhattan grid together"
     )]
     pub fn rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid() {
         let (base, identities) = craterize_fixture(false);
@@ -26712,13 +26814,6 @@ pub mod catalog_proofs {
             .hand_atlas
             .len();
         assert!(discard_count > 1);
-
-        // The additional cost is mandatory, so an empty Atlas hand offers no cast at all.
-        let mut costless = base.clone();
-        costless.position.players[seat_index(Seat::North)]
-            .hand_atlas
-            .clear();
-        assert!(craterize_casts(&costless, &craterize).is_empty());
 
         let casts = craterize_casts(&base, &craterize);
         let target_cells = casts
@@ -26753,63 +26848,6 @@ pub mod catalog_proofs {
             unreachable!("Craterize issues its discard cost");
         };
         let discarded_site_instance_id = discarded_site_instance_id.clone();
-
-        // Only an Atlas card in hand pays the cost; the target site itself is not a legal payment.
-        let mut forged = cast.clone();
-        let ActionDescriptor::CastMagic {
-            discard_site_instance_id,
-            ..
-        } = &mut forged.descriptor
-        else {
-            unreachable!("filtered Craterize cast");
-        };
-        *discard_site_instance_id = Some(target_site_instance_id.clone());
-        let mut forgery = base.clone();
-        let before_forgery = forgery.authoritative_state();
-        assert!(matches!(
-            forgery.apply_action(&forged),
-            Err(GameError::IllegalAction)
-        ));
-        assert_eq!(forgery.authoritative_state(), before_forgery);
-
-        let (protected_base, protected_identities) = craterize_fixture(true);
-        let protected_site = protected_base.position.sites[c2.index()].clone();
-        let protected_spell = protected_base.position.players[seat_index(Seat::North)]
-            .hand_spellbook[0]
-            .instance_id
-            .clone();
-        let protected_cast = craterize_casts(&protected_base, &protected_spell)
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
-                        if location.cell == c2
-                )
-            })
-            .expect("protected Craterize cast");
-        let mut protected = protected_base;
-        let (protected_events, protected_random) = protected
-            .apply_action_recorded(&protected_cast)
-            .expect("protected Craterize cast");
-        assert!(protected_random.is_empty());
-        let protected_types: Vec<_> = protected_events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect();
-        assert!(protected_types.contains(&"site-destruction-prevented"));
-        assert!(!protected_types.contains(&"rubble-created"));
-        assert_eq!(protected.position.sites[c2.index()], protected_site);
-        let protected_center = protected
-            .position
-            .units
-            .iter()
-            .find(|unit| unit.card.instance_id == protected_identities["center"])
-            .expect("protected crater centre");
-        assert_eq!(
-            (protected_center.damage, protected_center.region),
-            (10, Region::Underwater)
-        );
 
         let mut destroyed = base.clone();
         let (events, random_draws) = destroyed
@@ -26936,12 +26974,101 @@ pub mod catalog_proofs {
     }
 
     pub fn rule_catalog_0706_craterize_enforces_discard_cost_and_still_damages_protected_sites() {
-        rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid();
+        let (base, _) = craterize_fixture(false);
+        let c2 = Cell::parse("C2").expect("C2");
+        let craterize = base.position.players[seat_index(Seat::North)].hand_spellbook[0]
+            .instance_id
+            .clone();
+        let target_site_instance_id = base.position.sites[c2.index()]
+            .as_ref()
+            .expect("Water target site")
+            .card
+            .instance_id
+            .clone();
+
+        // The additional cost is mandatory, so an empty Atlas hand offers no cast at all.
+        let mut costless = base.clone();
+        costless.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .clear();
+        assert!(craterize_casts(&costless, &craterize).is_empty());
+
+        let cast = craterize_casts(&base, &craterize)
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_site_instance_id: Some(site),
+                        ..
+                    } if *site == target_site_instance_id
+                )
+            })
+            .expect("Craterize cast with Atlas discard");
+
+        // Only an Atlas card in hand pays the cost; the target site itself is not a legal payment.
+        let mut forged = cast.clone();
+        let ActionDescriptor::CastMagic {
+            discard_site_instance_id,
+            ..
+        } = &mut forged.descriptor
+        else {
+            unreachable!("filtered Craterize cast");
+        };
+        *discard_site_instance_id = Some(target_site_instance_id.clone());
+        let mut forgery = base;
+        let before_forgery = forgery.authoritative_state();
+        assert!(matches!(
+            forgery.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(forgery.authoritative_state(), before_forgery);
+
+        let (protected_base, protected_identities) = craterize_fixture(true);
+        let protected_site = protected_base.position.sites[c2.index()].clone();
+        let protected_spell = protected_base.position.players[seat_index(Seat::North)]
+            .hand_spellbook[0]
+            .instance_id
+            .clone();
+        let protected_cast = craterize_casts(&protected_base, &protected_spell)
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
+                        if location.cell == c2
+                )
+            })
+            .expect("protected Craterize cast");
+        let mut protected = protected_base;
+        let (protected_events, protected_random) = protected
+            .apply_action_recorded(&protected_cast)
+            .expect("protected Craterize cast");
+        assert!(protected_random.is_empty());
+        let protected_types: Vec<_> = protected_events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect();
+        assert!(protected_types.contains(&"site-destruction-prevented"));
+        assert!(protected_types.contains(&"magic-damage-allocated"));
+        assert!(!protected_types.contains(&"rubble-created"));
+        assert!(!protected_types.contains(&"site-destroyed"));
+        assert_eq!(protected.position.sites[c2.index()], protected_site);
+        let protected_center = protected
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == protected_identities["center"])
+            .expect("protected crater centre");
+        assert_eq!(
+            (protected_center.damage, protected_center.region),
+            (10, Region::Underwater)
+        );
     }
 
     #[expect(
         clippy::too_many_lines,
-        reason = "one direct Raise Dead proof keeps the empty pool, blocked placement, and free summon branches together"
+        reason = "one direct Raise Dead proof keeps the empty pool and free summon branches together"
     )]
     pub fn rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement() {
         let base = raise_dead_fixture(false);
@@ -26996,36 +27123,6 @@ pub mod catalog_proofs {
                 .cemetery
                 .len(),
             1,
-        );
-
-        // A footprint with nowhere to land fails its summon instead of silently vanishing.
-        let oversized = raise_dead_fixture(true);
-        let mut blocked = oversized.game;
-        blocked.position.players[seat_index(Seat::North)].cemetery = Vec::new();
-        let blocked_cast = raise_dead_cast(&blocked);
-        let (blocked_events, blocked_random) = blocked
-            .apply_action_recorded(&blocked_cast)
-            .expect("blocked Raise Dead cast");
-        assert_eq!(
-            event_types(&blocked_events),
-            [
-                "magic-cast",
-                "dead-minion-selected",
-                "minion-summon-failed",
-                "magic-resolved",
-            ]
-        );
-        assert_eq!(blocked_random.len(), 1);
-        assert_eq!(blocked_events[2].1["reason"], json!("no-legal-location"));
-        assert_eq!(
-            blocked_events[2].1["instanceId"],
-            json!(oversized.south_corpse.as_str())
-        );
-        assert_eq!(blocked.position.phase, Phase::Main);
-        assert!(blocked.position.pending_cemetery_summon.is_none());
-        assert_eq!(
-            blocked.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
-            oversized.south_corpse
         );
 
         // One candidate proves the placement itself: free, anywhere, and enemy owned.
@@ -27171,8 +27268,43 @@ pub mod catalog_proofs {
         assert_eq!(repeated.position, placed.position);
     }
 
-    pub fn rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon() {
-        rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement();
+    pub fn rule_catalog_0708_raise_dead_blocked_footprint_summon() {
+        // A 2×2 footprint with nowhere to land fails its summon instead of silently vanishing.
+        let oversized = raise_dead_fixture(true);
+        let mut blocked = oversized.game;
+        blocked.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        let blocked_cast = raise_dead_cast(&blocked);
+        let (blocked_events, blocked_random) = blocked
+            .apply_action_recorded(&blocked_cast)
+            .expect("blocked Raise Dead cast");
+        assert_eq!(
+            event_types(&blocked_events),
+            [
+                "magic-cast",
+                "dead-minion-selected",
+                "minion-summon-failed",
+                "magic-resolved",
+            ]
+        );
+        assert_eq!(blocked_random.len(), 1);
+        assert_eq!(blocked_events[2].1["reason"], json!("no-legal-location"));
+        assert_eq!(
+            blocked_events[2].1["instanceId"],
+            json!(oversized.south_corpse.as_str())
+        );
+        assert_eq!(blocked.position.phase, Phase::Main);
+        assert!(blocked.position.pending_cemetery_summon.is_none());
+        assert_eq!(
+            blocked.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
+            oversized.south_corpse
+        );
+        assert!(
+            !blocked
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == oversized.south_corpse)
+        );
     }
 }
 
