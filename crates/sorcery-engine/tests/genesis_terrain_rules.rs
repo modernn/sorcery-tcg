@@ -449,7 +449,10 @@ fn terminal_manifest_with_seed(seed: u32) -> String {
     canonical_json(&value).expect("canonical terminal terrain manifest")
 }
 
-fn setup_if_water_is_last(session: &mut Session) -> Option<(Value, Vec<Value>, u64)> {
+fn setup_if_water_is_last(
+    session: &mut Session,
+    deathrite_count: usize,
+) -> Option<(Value, Vec<Value>, u64)> {
     keep(session);
     keep(session);
     accept_where(session, |descriptor| {
@@ -463,12 +466,14 @@ fn setup_if_water_is_last(session: &mut Session) -> Option<(Value, Vec<Value>, u
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
     });
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cell"] == "C3"
-            && descriptor["region"] == "underground"
-            && descriptor["cardId"] == "deathrite-1"
-    });
+    for ordinal in 0..deathrite_count {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cell"] == "C3"
+                && descriptor["region"] == "underground"
+                && descriptor["cardId"] == format!("deathrite-{}", ordinal + 1)
+        });
+    }
     end_turn_and_draw_spellbook(session);
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
@@ -485,10 +490,10 @@ fn setup_if_water_is_last(session: &mut Session) -> Option<(Value, Vec<Value>, u
     let deathrites = before["realm"]["units"]
         .as_array()?
         .iter()
-        .filter(|unit| unit["cardId"] == "deathrite-1")
+        .filter(|unit| unit["cardId"] == "deathrite-1" || unit["cardId"] == "deathrite-2")
         .cloned()
         .collect::<Vec<_>>();
-    if deathrites.len() != 1 {
+    if deathrites.len() != deathrite_count {
         return None;
     }
     Some((
@@ -506,7 +511,7 @@ fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
         .map(terminal_manifest_with_seed)
         .find_map(|manifest| {
             let mut session = Session::new(&manifest).ok()?;
-            let (_, _, mana_before) = setup_if_water_is_last(&mut session)?;
+            let (_, _, mana_before) = setup_if_water_is_last(&mut session, 1)?;
             Some((session, mana_before))
         })
         .expect("bounded seed with water-site as the last Atlas card");
@@ -532,5 +537,106 @@ fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
     );
     assert_eq!(state(&session)["phase"], "terminal");
     assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis_when_atlas_is_empty(
+) {
+    let (mut session, deathrites, mana_before) = (244..1024)
+        .map(terminal_manifest_with_seed)
+        .find_map(|manifest| {
+            let mut session = Session::new(&manifest).ok()?;
+            let (_, deathrites, mana_before) = setup_if_water_is_last(&mut session, 2)?;
+            Some((session, deathrites, mana_before))
+        })
+        .expect("bounded seed with water-site as the last Atlas card and two Deathrites");
+    let (_, interrupted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&interrupted),
+        ["rubble-replaced", "site-played"]
+    );
+    assert!(!event_types(&interrupted).contains(&"mana-gained"));
+    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["decisionSeat"], "north");
+    assert_eq!(
+        state(&session)["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after replacement"),
+        mana_before + 1
+    );
+    assert_eq!(
+        state(&session)["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    assert_eq!(
+        state(&session)["pendingDeathrites"]["continuation"]["descriptor"]["fromTopAtlas"],
+        true
+    );
+    assert!(deathrites.iter().all(|unit| {
+        !state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|candidate| candidate["instanceId"] == unit["instanceId"])
+    }));
+    let orders = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .collect::<Vec<_>>();
+    assert_eq!(orders.len(), 2);
+
+    let chosen = orders[0].descriptor["sourceInstanceId"]
+        .as_str()
+        .expect("chosen source");
+    let (_, terminal) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == chosen
+    });
+    assert_eq!(
+        event_types(&terminal),
+        [
+            "deathrite-order-committed",
+            "minion-died",
+            "minion-died",
+            "game-ended",
+        ]
+    );
+    assert!(!event_types(&terminal).contains(&"site-drawn"));
+    assert!(!event_types(&terminal).contains(&"mana-gained"));
+    assert_eq!(state(&session)["phase"], "terminal");
+    assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after deck-out"),
+        mana_before + 1
+    );
+    assert_eq!(
+        terminal.events.last().expect("game ended").payload["reason"],
+        "deck_empty"
+    );
+    assert_eq!(
+        terminal.events.last().expect("game ended").payload["loser"],
+        "north"
+    );
+    assert!(deathrites.iter().all(|unit| {
+        state(&session)["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == unit["instanceId"])
+    }));
     assert_exact_replay(&session);
 }
