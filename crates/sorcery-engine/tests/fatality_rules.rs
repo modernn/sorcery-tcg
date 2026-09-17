@@ -1,5 +1,5 @@
 //! Direct proofs for kill-target-wounded-minion Magic (RULE-CATALOG-0609–0610,
-//! RULE-CATALOG-0721).
+//! RULE-CATALOG-0721, RULE-CATALOG-1021).
 //!
 //! Fatality kills only a wounded minion in the caster region. Healthy minions
 //! are never offered as legal targets. Enemy Stealth and underground region
@@ -27,14 +27,18 @@ fn site() -> Value {
     })
 }
 
-fn minion() -> Value {
-    json!({
+fn minion(deathrite: bool) -> Value {
+    let mut value = json!({
         "attack": 1,
         "cardType": "minion",
         "defense": 3,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-    })
+    });
+    if deathrite {
+        value["deathriteDrawSite"] = json!(true);
+    }
+    value
 }
 
 fn fatality() -> Value {
@@ -61,13 +65,19 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn fatality_manifest(seed: u32) -> String {
+fn fatality_manifest(seed: u32, deathrite: bool) -> String {
+    let fixture = if deathrite {
+        "fatality-deathrite-draw"
+    } else {
+        "fatality-rules"
+    };
+    let south_atlas = if deathrite { 4 } else { 6 };
     finish_manifest(json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "fatality-rules" }))
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-fatality-rules-v1",
+            "revisionId": format!("synthetic-{fixture}-v1"),
         },
         "cards": {
             "north-avatar": avatar(),
@@ -75,7 +85,7 @@ fn fatality_manifest(seed: u32) -> String {
             "north-lash": lash(),
             "north-site": site(),
             "south-avatar": avatar(),
-            "south-minion": minion(),
+            "south-minion": minion(deathrite),
             "south-site": site(),
         },
         "decks": {
@@ -85,7 +95,7 @@ fn fatality_manifest(seed: u32) -> String {
                 "spellbook": ["north-lash", "north-lash", "north-lash", "north-fatality", "north-fatality", "north-fatality"],
             },
             "south": {
-                "atlas": vec!["south-site"; 6],
+                "atlas": vec!["south-site"; south_atlas],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-minion"; 6],
             },
@@ -95,6 +105,13 @@ fn fatality_manifest(seed: u32) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -219,9 +236,9 @@ fn stage_two_enemies(session: &mut Session) -> Vec<String> {
     enemy_ids
 }
 
-fn seed_with_both_magic_cards() -> String {
-    (609..609 + 512)
-        .map(fatality_manifest)
+fn seed_with_both_magic_cards(deathrite: bool, start: u32) -> String {
+    (start..start + 512)
+        .map(|seed| fatality_manifest(seed, deathrite))
         .find(|candidate| {
             let preview = Session::new(candidate).expect("Fatality seed candidate");
             let hand = state(&preview)["players"]["north"]["hand"]["spellbook"]
@@ -237,7 +254,7 @@ fn seed_with_both_magic_cards() -> String {
 
 #[test]
 fn rule_catalog_0609_fatality_kills_a_wounded_minion_in_the_caster_region() {
-    let encoded = seed_with_both_magic_cards();
+    let encoded = seed_with_both_magic_cards(false, 609);
     let mut session = opening_main(&encoded);
     let enemy_ids = stage_two_enemies(&mut session);
     let wounded_id = enemy_ids[0].clone();
@@ -285,7 +302,7 @@ fn rule_catalog_0609_fatality_kills_a_wounded_minion_in_the_caster_region() {
 
 #[test]
 fn rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy() {
-    let encoded = seed_with_both_magic_cards();
+    let encoded = seed_with_both_magic_cards(false, 609);
     let mut session = opening_main(&encoded);
     let enemy_ids = stage_two_enemies(&mut session);
 
@@ -312,4 +329,71 @@ fn rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy() {
 #[test]
 fn rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies();
+}
+
+#[test]
+fn rule_catalog_1021_kill_wounded_minion_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_both_magic_cards(true, 1021);
+    let mut session = opening_main(&encoded);
+    let enemy_ids = stage_two_enemies(&mut session);
+    let wounded_id = enemy_ids[0].clone();
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    assert_eq!(
+        south_atlas, 1,
+        "thin South atlas leaves one site before the Fatality kill"
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == wounded_id.as_str()
+    });
+    assert_eq!(fatality_targets(&session), [wounded_id.as_str()]);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-fatality"
+    });
+    let types = event_types(&receipt);
+    assert_eq!(
+        types,
+        [
+            "magic-cast",
+            "minion-killed",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "expected site-drawn before magic-resolved; got {types:?}"
+    );
+
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], wounded_id);
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &wounded_id).is_none());
+    assert_eq!(
+        realm_unit(&finished, &enemy_ids[1]).expect("healthy survivor")["damage"],
+        0
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
 }
