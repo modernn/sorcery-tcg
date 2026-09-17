@@ -440,8 +440,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0022_leap_attack_resumes_its_strike_after_ordered_movement_deathrites"
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_deathrites"
       }
     },
     {
@@ -596,8 +596,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0030_chain_magic_stages_distinct_nearby_hops_and_resolves_simultaneously"
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0696_chain_magic_stages_distinct_nearby_hops_and_resolves_simultaneously"
       }
     },
     {
@@ -16205,6 +16205,65 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
         "testName": "rule_catalog_0694_heal_controller_caps_and_cannot_leave_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0695",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic steps a controlled ally, then pauses in deathrite-order when that step settles two wounded Deathrite allies who lost a nearby power bonus. After either Deathrite order, the pending leap strike resumes at the destination and kills the enemy there. Distinct from ordinary Leap Attack (0599–0600), which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite",
+        "otherNearbyAlliesPowerBonus",
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "unit-stepped",
+        "deathrite-order-committed",
+        "site-drawn",
+        "strike-damage-allocated",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0696",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 1x1 caster stages Chain Magic through distinct nearby hops and damages every chosen unit simultaneously on resolve. Extra hops cost two mana, already-chosen units cannot be hopped again, and hops cannot leave the caster region. Distinct from oversized Spellcaster footprint hops (0385–0386).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0696_chain_magic_stages_distinct_nearby_hops_and_resolves_simultaneously"
       }
     }
   ]
