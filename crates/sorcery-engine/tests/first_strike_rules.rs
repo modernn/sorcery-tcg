@@ -1,5 +1,5 @@
 //! Direct proofs for first-strike combat (RULE-CATALOG-0204–0206, RULE-CATALOG-0744,
-//! RULE-CATALOG-0749, RULE-CATALOG-0778).
+//! RULE-CATALOG-0749, RULE-CATALOG-0778, RULE-CATALOG-0790).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -697,7 +697,7 @@ fn resolve_sleep_fight(seed: u32, attacker: &Value, sleeper: &Value) -> AttackSe
 }
 
 #[test]
-fn genesis_sleep_should_require_real_damage_and_not_strike_retroactively() {
+fn rule_catalog_0790_genesis_sleep_requires_real_damage_not_retroactive_strike() {
     let attacker = minion(json!({ "attack": 2, "defense": 6 }));
     let sleeper = minion(json!({
         "attack": 5,
