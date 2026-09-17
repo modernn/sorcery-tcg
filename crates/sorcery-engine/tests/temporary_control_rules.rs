@@ -2286,3 +2286,439 @@ fn rule_catalog_0959_nearby_avatar_discard_control_transfers_distant_deathrite_t
     assert!(!cemetery_has(&finished, "north", &deathrite_id));
     assert_exact_replay(&session);
 }
+
+fn potion_deathrite_bounce_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "sacrifice-control-artifact-deathrite-revert" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-sacrifice-control-artifact-deathrite-revert-v1",
+        },
+        "cards": {
+            "north-ally": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-avatar": avatar(),
+            "north-bounce": bounce(),
+            "north-lash": lash(),
+            "north-potion": potion(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-potion",
+                    "north-bounce",
+                    "north-lash",
+                    "north-potion",
+                    "north-bounce",
+                    "north-lash",
+                    "north-potion",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_ally_potion_and_bounce(snapshot: &Value) -> bool {
+    let hand = snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook");
+    ["north-ally", "north-potion", "north-bounce"]
+        .into_iter()
+        .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+}
+
+fn potion_deathrite_bounce_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(potion_deathrite_bounce_manifest)
+        .find(|candidate| {
+            Session::new(candidate)
+                .ok()
+                .is_some_and(|preview| north_has_ally_potion_and_bounce(&state(&preview)))
+        })
+        .expect("bounded seed with Ally, Potion, and Bounce in the opening hand")
+}
+
+/// Tapped South Deathrite at distant C1, North ally there carrying the Artifact.
+fn potion_deathrite_bounce_opening() -> (Session, String, String, String) {
+    let encoded = potion_deathrite_bounce_seed_with(974);
+    let mut session =
+        Session::new(&encoded).expect("valid sacrifice-control Deathrite revert session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+    });
+    let deathrite_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Deathrite minion identity")
+        .to_owned();
+    end_then_draw(&mut session, "spellbook");
+    end_then_draw(&mut session, "atlas");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana"
+            && descriptor["unitInstanceId"] == deathrite_id.as_str()
+    });
+    end_then_draw(&mut session, "spellbook");
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C1"
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("north ally identity")
+        .to_owned();
+    let (cast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-potion"
+            && descriptor["bearer"]["instanceId"] == ally_id.as_str()
+    });
+    let artifact_id = cast["cardInstanceId"]
+        .as_str()
+        .expect("potion identity")
+        .to_owned();
+    (session, ally_id, deathrite_id, artifact_id)
+}
+
+#[test]
+fn rule_catalog_0974_sacrifice_artifact_deathrite_draws_for_original_controller_when_bearer_leaves_before_kill()
+ {
+    let (mut session, ally_id, deathrite_id, artifact_id) = potion_deathrite_bounce_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &deathrite_id)["controller"], "south");
+    assert_eq!(unit(&before, &deathrite_id)["owner"], "south");
+    assert_eq!(unit(&before, &deathrite_id)["tapped"], true);
+    assert_eq!(unit(&before, &ally_id)["controller"], "north");
+
+    let targets = potion_targets(&session);
+    assert!(targets.contains(&deathrite_id), "{targets:?}");
+    assert!(!targets.contains(&ally_id), "{targets:?}");
+
+    let stolen = sacrifice_steal(&mut session, &artifact_id, &deathrite_id);
+    assert_eq!(
+        event_types(&stolen),
+        ["artifact-sacrificed", "minion-control-changed"]
+    );
+    assert!(stolen.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "south"
+            && event.payload["seat"] == "north"
+            && event.payload["instanceId"] == deathrite_id
+            && event.payload["sourceInstanceId"] == ally_id
+    }));
+    assert_eq!(
+        unit(&state(&session), &deathrite_id)["controller"],
+        "north"
+    );
+
+    let (_, reverted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == ally_id.as_str()
+    });
+    assert_eq!(
+        event_types(&reverted),
+        [
+            "magic-cast",
+            "minion-returned-to-hand",
+            "minion-control-changed",
+            "magic-resolved"
+        ]
+    );
+    assert!(reverted.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+            && event.payload["instanceId"] == deathrite_id
+    }));
+    let reverted_state = state(&session);
+    assert!(realm_unit(&reverted_state, &ally_id).is_none());
+    let restored = realm_unit(&reverted_state, &deathrite_id).expect("Deathrite still on board");
+    assert_eq!(restored["controller"], "south");
+    assert_eq!(restored["owner"], "south");
+
+    let before_kill = state(&session);
+    let north_atlas = atlas_len(&before_kill, "north");
+    let south_atlas = atlas_len(&before_kill, "south");
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == deathrite_id
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], deathrite_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &deathrite_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert!(cemetery_has(&finished, "south", &deathrite_id));
+    assert!(!cemetery_has(&finished, "north", &deathrite_id));
+    assert_exact_replay(&session);
+}
+
+fn thais_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "previous-player-control-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-previous-player-control-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-lash": lash(),
+            "north-site": site(),
+            "north-thais": thais(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-thais",
+                    "north-lash",
+                    "north-thais",
+                    "north-lash",
+                    "north-thais",
+                    "north-lash",
+                    "north-thais",
+                    "north-lash",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn south_has_deathrite(snapshot: &Value) -> bool {
+    snapshot["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .expect("South Spellbook")
+        .iter()
+        .any(|card| card["cardId"] == "south-deathrite")
+}
+
+fn south_deathrite_on_board(snapshot: &Value) -> Option<String> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["controller"] == "south" && unit["owner"] == "south")
+        .and_then(|unit| unit["instanceId"].as_str().map(ToOwned::to_owned))
+}
+
+fn offers_lash_on_south_minion(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| {
+            actions.iter().any(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "north-lash"
+                    && action.descriptor["target"]["kind"] == "minion"
+                    && action.descriptor["target"]["seat"] == "south"
+            })
+        })
+}
+
+fn thais_deathrite_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(thais_deathrite_manifest)
+        .find(|candidate| {
+            let Ok(mut session) = Session::new(candidate) else {
+                return false;
+            };
+            keep(&mut session);
+            keep(&mut session);
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+            });
+            end_then_draw(&mut session, "spellbook");
+            if !south_has_deathrite(&state(&session)) {
+                return false;
+            }
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+            });
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "south-deathrite"
+                    && descriptor["cell"] == "C1"
+            });
+            end_then_draw(&mut session, "spellbook");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-thais"
+                    && descriptor["cell"] == "C4"
+            });
+            accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+            });
+            south_deathrite_on_board(&state(&session)).is_some()
+                && offers_lash_on_south_minion(&session)
+        })
+        .expect("bounded seed reaching a hijacked turn with Lash on Deathrite")
+}
+
+/// South Deathrite at C1, North Thais at C4 after two turns; South's turn is hijacked by North.
+fn thais_deathrite_opening() -> (Session, String, String) {
+    let encoded = thais_deathrite_seed_with(975);
+    let mut session =
+        Session::new(&encoded).expect("valid previous-player-control Deathrite session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_then_draw(&mut session, "spellbook");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+    });
+    end_then_draw(&mut session, "spellbook");
+    let (thais_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-thais"
+            && descriptor["cell"] == "C4"
+    });
+    let thais_id = thais_summon["cardInstanceId"]
+        .as_str()
+        .expect("Thais identity")
+        .to_owned();
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "player-controlled"
+            && event.payload["seat"] == "south"
+            && event.payload["controller"] == "north"
+            && event.payload["sourceInstanceId"] == thais_id
+    }));
+    let hijacked = state(&session);
+    let deathrite_id = south_deathrite_on_board(&hijacked).expect("South Deathrite on board");
+    assert_eq!(hijacked["activeSeat"], "south");
+    assert_eq!(hijacked["turnController"], "north");
+    assert_eq!(unit(&hijacked, &deathrite_id)["controller"], "south");
+    assert_acting_seat(&session, Seat::North);
+    (session, thais_id, deathrite_id)
+}
+
+#[test]
+fn rule_catalog_0975_previous_player_control_deathrite_draws_for_minion_controller_not_turn_controller()
+ {
+    let (mut session, _thais_id, deathrite_id) = thais_deathrite_opening();
+    let before_kill = state(&session);
+    let north_atlas = atlas_len(&before_kill, "north");
+    let south_atlas = atlas_len(&before_kill, "south");
+    assert_eq!(unit(&before_kill, &deathrite_id)["controller"], "south");
+    assert_eq!(unit(&before_kill, &deathrite_id)["owner"], "south");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == deathrite_id.as_str()
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], deathrite_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &deathrite_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert!(cemetery_has(&finished, "south", &deathrite_id));
+    assert!(!cemetery_has(&finished, "north", &deathrite_id));
+    assert_exact_replay(&session);
+}
