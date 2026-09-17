@@ -12802,6 +12802,22 @@ impl Game {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
+        let defending_first_strike_window = matches!(
+            continuation.as_ref(),
+            Some(DeathriteContinuation::FirstStrike(_)) if !attacker_strikes && !striking_ids.is_empty()
+        );
+        let attacker_still_present = match attacker_kind {
+            UnitKind::Avatar => true,
+            UnitKind::Minion => self
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id == attacker_id),
+        };
+        let attacker_owes_allocation = attacker_can_strike
+            || defending_first_strike_window
+                && pending.combatants.len() > 1
+                && attacker_still_present;
         let return_sources = pending
             .combatants
             .iter()
@@ -12880,7 +12896,7 @@ impl Game {
             )?
         };
         let mut combatant_results = Vec::with_capacity(pending.combatants.len());
-        if attacker_can_strike {
+        if attacker_owes_allocation {
             for (target, minion_status) in pending.combatants.iter().zip(combatant_statuses) {
                 let allocation = pending
                     .allocations
