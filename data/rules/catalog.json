@@ -14311,6 +14311,57 @@
         "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
         "testName": "rule_catalog_0618_grant_stealth_magic_cannot_target_an_enemy_already_stealthed"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0619",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-minion Magic destroys a healthy same-region minion and never offers an Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_target_rules.rs",
+        "testName": "rule_catalog_0619_kill_target_minion_destroys_a_healthy_minion_and_excludes_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0620",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-minion Magic that targets an enemy warded minion is absorbed. Ward breaks and the minion survives.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_target_rules.rs",
+        "testName": "rule_catalog_0620_kill_target_minion_ward_absorbs_the_kill"
+      }
     }
   ]
 }
