@@ -3468,3 +3468,235 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
     assert_eq!(state(session)["phase"], "draw");
     assert_exact_replay(session);
 }
+
+fn deathrite_start_turn_teleport_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-teleport-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-teleport-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-teleport": minion(json!({
+                "atStartOfControllerTurnDrawSites": 1,
+                "atStartOfControllerTurnTeleportToRandomSiteOrVoid": true,
+                "attack": 3,
+                "voidwalk": true,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-teleport",
+                    "north-pulser",
+                    "north-teleport",
+                    "north-pulser",
+                    "north-teleport",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+struct PendingDeathriteStartTurnTeleportSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    teleport_id: String,
+}
+
+fn try_pending_deathrite_during_start_turn_teleport(
+    encoded: &str,
+) -> Option<PendingDeathriteStartTurnTeleportSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let pulser = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    })?;
+    let teleport = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-teleport"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "start-turn" {
+        return None;
+    }
+    let pulser_id = pulser.0["cardInstanceId"].as_str()?.to_owned();
+    let teleport_id = teleport.0["cardInstanceId"].as_str()?.to_owned();
+    let offered: Vec<_> = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .collect();
+    if !offered.contains(&pulser_id) || !offered.contains(&teleport_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == pulser_id
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteStartTurnTeleportSetup {
+        deathrite_ids,
+        session,
+        teleport_id,
+    })
+}
+
+fn deathrite_start_turn_teleport_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(deathrite_start_turn_teleport_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_start_turn_teleport(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites before start-turn teleport trigger")
+}
+
+#[test]
+fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_start_turn_teleport_seed_with(1180);
+    let mut setup = try_pending_deathrite_during_start_turn_teleport(&encoded)
+        .expect("complete start-turn teleport Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let teleport_id = setup.teleport_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "start-turn");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
+        "deathrite-order must issue no resolve-start-turn-trigger"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "resolve-start-turn-trigger"
+                    || action.descriptor["sourceInstanceId"] != teleport_id
+            })
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "start-turn");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "resolve-start-turn-trigger"
+                    && action.descriptor["sourceInstanceId"] == teleport_id
+            }),
+        "draw-sites teleport trigger must return once deathrite-order clears"
+    );
+    assert_exact_replay(session);
+}

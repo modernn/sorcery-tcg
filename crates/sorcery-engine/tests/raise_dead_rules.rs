@@ -9,6 +9,7 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::game::{Game, IssuedAction};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -630,4 +631,282 @@ fn rule_catalog_1054_raise_dead_magic_withheld_during_pending_deathrite_order() 
         cast["cardInstanceId"]
     );
     assert_exact_replay(session);
+}
+
+fn power_bonus_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "otherNearbyAlliesPowerBonus": 1,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_cemetery_summon_interrupt_manifest(seed: u32) -> String {
+    let fixture = "raise-dead-cemetery-summon-deathrite-interrupt";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-raise": raise_dead(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-aura": power_bonus_minion(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-raise",
+                    "north-rain",
+                    "north-rain",
+                    "north-raise",
+                    "north-rain",
+                    "north-raise",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .chain(std::iter::repeat_n("south-aura", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
+fn issued_descriptor(action: &IssuedAction) -> Value {
+    serde_json::to_value(action.descriptor()).expect("typed descriptor JSON")
+}
+
+fn replay_game(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("replay legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .is_ok_and(|action| action.action_id == receipt.action_id)
+            })
+            .expect("recorded engine-issued action");
+        game.apply_action(&action).expect("replay action");
+    }
+    game
+}
+
+fn apply_where(game: &mut Game, predicate: impl Fn(&Value) -> bool) {
+    let action = game
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&issued_descriptor(action)))
+        .expect("expected engine-issued action");
+    game.apply_action(&action).expect("authoritative Game step");
+}
+
+struct PendingCemeterySummonInterruptSetup {
+    aura_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_ready_cemetery_summon_interrupt(
+    encoded: &str,
+) -> Option<PendingCemeterySummonInterruptSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let aura = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-aura"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_raise_and_rain(&state(&session)) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    let snapshot = state(&session);
+    if snapshot["phase"] != "main" {
+        return None;
+    }
+    let aura_id = aura.0["cardInstanceId"].as_str()?.to_owned();
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    if deathrite_ids.iter().any(|instance_id| {
+        realm_unit(&snapshot, instance_id).is_none_or(|unit| unit["damage"] != 1)
+    }) || realm_unit(&snapshot, &aura_id).is_none_or(|unit| unit["damage"] != 1)
+    {
+        return None;
+    }
+    Some(PendingCemeterySummonInterruptSetup {
+        aura_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_cemetery_summon_interrupt_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_cemetery_summon_interrupt_manifest)
+        .find(|candidate| try_ready_cemetery_summon_interrupt(candidate).is_some())
+        .expect("bounded seed that reaches wounded Deathrites after Rain in main")
+}
+
+#[test]
+fn rule_catalog_1177_cemetery_summon_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_cemetery_summon_interrupt_seed_with(1177);
+    let setup = try_ready_cemetery_summon_interrupt(&encoded)
+        .expect("complete cemetery-summon Deathrite interrupt setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    assert_exact_replay(&setup.session);
+
+    let mut control = setup.session.clone();
+    let (_, cast_receipt) = accept_where(&mut control, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-raise"
+    });
+    assert_eq!(cast_receipt.events[1].event_type, "dead-minion-selected");
+    let raised_id = cast_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("raised minion identity")
+        .to_owned();
+    assert_eq!(state(&control)["phase"], "cemetery-summon");
+
+    let mut branched = replay_game(&setup.session);
+    assert!(
+        branched.test_remove_realm_unit(&aura_id),
+        "checkpoint branch must drop the power-bonus ally so wounded Deathrites settle"
+    );
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-raise"
+    });
+
+    let paused = branched.authoritative_state();
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(
+        paused["pendingDeathrites"]["returnPhase"],
+        "cemetery-summon"
+    );
+    assert_eq!(paused["pendingCemeterySummon"]["cardInstanceId"], raised_id);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        branched
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| issued_descriptor(action)["kind"] != "summon-minion"),
+        "deathrite-order must issue no cemetery summon while cemetery-summon stays pending"
+    );
+
+    let order_sources: Vec<_> = branched
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
+        .map(|action| {
+            issued_descriptor(&action)["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = branched.authoritative_state();
+    assert_eq!(resumed["phase"], "cemetery-summon");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(
+        resumed["pendingCemeterySummon"]["cardInstanceId"],
+        raised_id
+    );
+    assert!(
+        branched
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                issued_descriptor(action)["kind"] == "summon-minion"
+                    && issued_descriptor(action)["cardInstanceId"] == raised_id
+            }),
+        "cemetery summon-minion must return once deathrite-order clears"
+    );
 }

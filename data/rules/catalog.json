@@ -27157,6 +27157,26 @@
       }
     },
     {
+      "ruleId": "RULE-CATALOG-1173",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Draw step, draw is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1173_draw_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
       "ruleId": "RULE-CATALOG-1174",
       "requirementIds": [
         "RULE-04"
@@ -27174,6 +27194,70 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
         "testName": "rule_catalog_1174_decline_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1175",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during filtered-site-play, play-site and decline-filtered-site-play are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site",
+        "decline-filtered-site-play",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/filtered_site_play_rules.rs",
+        "testName": "rule_catalog_1175_filtered_site_play_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1176",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during Genesis token resolution, resolve-genesis-token is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisPayOneManaToSummonToken"
+      ],
+      "actionHints": [
+        "resolve-genesis-token",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_1176_resolve_genesis_token_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1177",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during cemetery-summon, summon-minion is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "dead-minion-selected"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1177_cemetery_summon_withheld_during_pending_deathrite_order"
       }
     },
     {
@@ -27195,6 +27279,91 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
         "testName": "rule_catalog_1178_flood_after_drought_restores_waterbound_movement_on_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1179",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, every remaining resolve-start-turn-trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife",
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1180",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred draw-sites-then-teleport start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1181",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Main Phase, move-and-attack required by enemies-must-attack-this-if-able is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge",
+        "enemiesMustAttackThisIfAble",
+        "genesisDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1182",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of three synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1182_three_game_synthetic_batch_stays_unranked_unverified_authority"
       }
     }
   ]

@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
-use sorcery_engine::game::{Game, GameEndReason, GameOutcome};
+use sorcery_engine::game::{Game, GameEndReason, GameOutcome, IssuedAction};
 use sorcery_engine::session::{Session, StepResult};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
@@ -793,5 +793,210 @@ fn rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order()
     assert!(resumed["pendingDeathrites"].is_null());
     assert_eq!(resumed["players"]["north"]["avatar"]["tapped"], false);
     assert!(has_kind(session, "draw-spell"));
+    assert_exact_replay(session);
+}
+
+fn finish_manifest(mut value: Value) -> String {
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn pulser() -> Value {
+    json!({
+        "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_draw_step_withheld_manifest(seed: u32) -> String {
+    let fixture = "draw-step-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(false),
+            "north-pulser": pulser(),
+            "north-site": site(),
+            "south-avatar": avatar(false),
+            "south-deathrite": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-pulser"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct PendingDeathriteDrawStepSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_during_draw_step(encoded: &str) -> Option<PendingDeathriteDrawStepSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let pulser = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "start-turn" {
+        return None;
+    }
+    let pulser_id = pulser.0["cardInstanceId"].as_str()?.to_owned();
+    let offered: Vec<_> = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .collect();
+    if offered != [pulser_id.clone()] {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == pulser_id
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDrawStepSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_draw_step_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(deathrite_draw_step_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_step(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites during Draw step")
+}
+
+#[test]
+fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_draw_step_seed_with(1173);
+    let mut setup = try_pending_deathrite_during_draw_step(&encoded)
+        .expect("complete Draw step Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "draw");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "draw"),
+        "deathrite-order must issue no draw while Draw step stays pending"
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "draw");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "draw"),
+        "draw must return once deathrite-order clears"
+    );
     assert_exact_replay(session);
 }

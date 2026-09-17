@@ -33,7 +33,7 @@ fn life_giver(amount: u8) -> Value {
         "atStartOfControllerTurnControllerGainsLife": amount,
         "attack": 0,
         "cardType": "minion",
-        "defense": 1,
+        "defense": 2,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -279,4 +279,292 @@ fn rule_catalog_0906_two_start_turn_minion_triggers_resolve_separately_before_dr
     assert_eq!(after["terminal"]["status"], "active");
     assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
     assert_exact_replay(&session);
+}
+
+fn start_turn_minion(extra: &Value) -> Value {
+    let mut value = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    value
+        .as_object_mut()
+        .expect("minion facts")
+        .extend(extra.as_object().expect("extra minion facts").clone());
+    value
+}
+
+fn dual_start_turn_deathrite_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "dual-start-turn-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-dual-start-turn-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-first": start_turn_minion(&json!({
+                "atStartOfControllerTurnControllerGainsLife": 2,
+            })),
+            "north-pulser": start_turn_minion(&json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-second": start_turn_minion(&json!({
+                "atStartOfControllerTurnControllerGainsLife": 1,
+            })),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-deathrite": start_turn_minion(&json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-first",
+                    "north-second",
+                    "north-pulser",
+                    "north-first",
+                    "north-second",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+struct PendingDualStartTurnDeathriteSetup {
+    deathrite_ids: [String; 2],
+    first_id: String,
+    second_id: String,
+    session: Session,
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn try_pending_deathrite_during_dual_start_turn(
+    encoded: &str,
+) -> Option<PendingDualStartTurnDeathriteSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let pulser = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser"
+            && descriptor["cell"] == "C4"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-first"
+            && descriptor["cell"] == "C4"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let death1 = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let death2 = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "start-turn" {
+        return None;
+    }
+    let pulser_id = pulser.0["cardInstanceId"].as_str()?.to_owned();
+    let first_id = first.0["cardInstanceId"].as_str()?.to_owned();
+    let second_id = second.0["cardInstanceId"].as_str()?.to_owned();
+    let offered: Vec<_> = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned()
+        })
+        .collect();
+    if !offered.contains(&pulser_id)
+        || !offered.contains(&first_id)
+        || !offered.contains(&second_id)
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == pulser_id
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        death1.0["cardInstanceId"].as_str()?.to_owned(),
+        death2.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDualStartTurnDeathriteSetup {
+        deathrite_ids,
+        first_id,
+        second_id,
+        session,
+    })
+}
+
+fn dual_start_turn_deathrite_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(dual_start_turn_deathrite_manifest)
+        .find(|candidate| try_pending_deathrite_during_dual_start_turn(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites during dual start-turn triggers")
+}
+
+#[test]
+fn rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_order() {
+    let encoded = dual_start_turn_deathrite_seed_with(1179);
+    let mut setup = try_pending_deathrite_during_dual_start_turn(&encoded)
+        .expect("complete dual start-turn Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let first_id = setup.first_id.clone();
+    let second_id = setup.second_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "start-turn");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
+        "deathrite-order must issue no resolve-start-turn-trigger"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "resolve-start-turn-trigger"
+                    || !matches!(
+                        action.descriptor["sourceInstanceId"].as_str(),
+                        Some(id) if id == first_id || id == second_id
+                    )
+            })
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "start-turn");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    let remaining: Vec<_> = session
+        .legal_actions()
+        .expect("resumed start-turn triggers")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("trigger source")
+                .to_owned()
+        })
+        .collect();
+    assert!(remaining.contains(&first_id));
+    assert!(remaining.contains(&second_id));
+    assert_exact_replay(session);
 }

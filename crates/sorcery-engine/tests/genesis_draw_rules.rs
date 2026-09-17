@@ -8027,3 +8027,252 @@ fn rule_catalog_1165_resolve_genesis_spell_order_withheld_during_pending_deathri
     assert_eq!(after["players"]["north"]["spellbook"], before_spellbook);
     assert_exact_replay(session);
 }
+
+fn deathrite_genesis_token_manifest(seed: u32) -> String {
+    let fixture = "genesis-token-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "deathrite-1": burrowing_deathrite(),
+            "deathrite-2": burrowing_deathrite(),
+            "foot-soldier": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                "token": true,
+            },
+            "north-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+                "replaceAdjacentRubbleWithTopAtlasSite": true,
+            },
+            "north-minion": minion(1, 1),
+            "north-site": {
+                "cardType": "site",
+                "elements": ["earth"],
+                "sacrificeToDestroyNearbySite": true,
+            },
+            "south-avatar": avatar(false, 20),
+            "south-minion": minion(1, 1),
+            "south-site": site(),
+            "water-site": {
+                "cardType": "site",
+                "elements": ["water"],
+                "genesisPayOneManaToSummonToken": "foot-soldier",
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": [
+                    "north-site",
+                    "north-site",
+                    "north-site",
+                    "north-site",
+                    "water-site",
+                    "north-site",
+                    "north-site",
+                ],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "deathrite-1",
+                    "deathrite-2",
+                    "deathrite-1",
+                    "deathrite-2",
+                    "north-minion",
+                    "north-minion",
+                    "north-minion",
+                    "north-minion",
+                    "north-minion",
+                    "north-minion",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn resolve_genesis_token_offered(session: &Session) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == "resolve-genesis-token")
+    })
+}
+
+struct PendingDeathriteGenesisTokenSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_during_genesis_token(
+    encoded: &str,
+) -> Option<PendingDeathriteGenesisTokenSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_end_turn_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_end_turn_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "deathrite-1"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "deathrite-2"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+    })?;
+    try_end_turn_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    try_end_turn_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-site-destruction" && descriptor["targetCell"] == "C3"
+    })?;
+    let before = state(&session);
+    if before["players"]["north"]["atlas"].get(0)?["cardId"] != "water-site" {
+        return None;
+    }
+    if before["players"]["north"]["atlas"].as_array()?.len() < 3 {
+        return None;
+    }
+    if before["players"]["north"]["spellbook"]
+        .as_array()?
+        .is_empty()
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    })?;
+    let after = state(&session);
+    if after["phase"] != "deathrite-order" {
+        return None;
+    }
+    if resolve_genesis_token_offered(&session) {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteGenesisTokenSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_genesis_token_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_genesis_token_manifest)
+        .find(|candidate| try_pending_deathrite_during_genesis_token(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites before Genesis token choices")
+}
+
+#[test]
+fn rule_catalog_1176_resolve_genesis_token_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_genesis_token_seed_with(1176);
+    let mut setup = try_pending_deathrite_during_genesis_token(&encoded)
+        .expect("complete Genesis token Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "north");
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    assert!(paused["pendingGenesisToken"].is_null());
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-genesis-token")
+    );
+    assert!(!resolve_genesis_token_offered(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "genesis");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(resumed["pendingGenesisToken"].is_object());
+    let choices = session
+        .legal_actions()
+        .expect("resumed Genesis token choices");
+    assert_eq!(choices.len(), 2);
+    assert!(
+        choices
+            .iter()
+            .all(|action| action.descriptor["kind"] == "resolve-genesis-token")
+    );
+    assert!(resolve_genesis_token_offered(session));
+
+    let (_, paid) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "resolve-genesis-token" && descriptor["choice"] == "pay-one-mana"
+    });
+    assert_eq!(event_types(&paid), ["minion-summoned"]);
+    let after = state(session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingGenesisToken"].is_null());
+    assert_exact_replay(session);
+}
