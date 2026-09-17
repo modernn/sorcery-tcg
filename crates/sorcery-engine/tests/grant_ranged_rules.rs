@@ -1,9 +1,12 @@
-//! Direct proofs for grant-Ranged-this-turn Magic (RULE-CATALOG-0276–0277).
+//! Direct proofs for grant-Ranged-this-turn Magic (RULE-CATALOG-0276–0277,
+//! RULE-CATALOG-1107).
 //!
 //! Official Magic can grant Ranged for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, and expires through
 //! the shared End Phase temporary-effect cleanup. Summoning sickness still
 //! blocks Ranged: Charge bypasses sickness for Move and Attack, not for shots.
+//! While deathrite-order is pending, the grant is withheld until the chain
+//! completes.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -43,6 +46,27 @@ fn grant() -> Value {
         "cardType": "magic",
         "grantRangedToAllyThisTurn": true,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -89,13 +113,15 @@ fn manifest() -> String {
     }))
 }
 
-fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
     let action = session
         .legal_actions()
-        .expect("legal actions")
+        .ok()?
         .into_iter()
-        .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .find(|action| predicate(&action.descriptor))?;
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -103,11 +129,15 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
             seat: action.seat,
             state_version: action.state_version,
         })
-        .expect("authoritative step")
+        .ok()?
     else {
-        panic!("engine-issued action must be accepted");
+        return None;
     };
-    (descriptor, receipt)
+    Some((descriptor, receipt))
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    try_accept_where(session, predicate).expect("expected engine-issued action")
 }
 
 fn keep(session: &mut Session) {
@@ -178,6 +208,23 @@ fn grant_ranged(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
             && descriptor["cardId"] == "north-grant"
             && descriptor["ally"]["instanceId"] == ally_id
     })
+}
+
+fn grant_ally_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("grant actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-grant"
+        })
+        .filter_map(|action| {
+            action.descriptor["ally"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }
 
 fn pass_south_turn(session: &mut Session) {
@@ -293,4 +340,212 @@ fn rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness() {
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
     assert_exact_replay(&session);
+}
+
+fn deathrite_grant_ranged_manifest(seed: u32) -> String {
+    let fixture = "grant-ranged-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-grant": grant(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-grant",
+                    "north-rain",
+                    "north-rain",
+                    "north-grant",
+                    "north-grant",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_grant_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-grant", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteGrantRangedSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_allied_minion(
+    encoded: &str,
+) -> Option<PendingDeathriteGrantRangedSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_grant_and_rain(&state(&session)) {
+        return None;
+    }
+    if !grant_ally_ids(&session).contains(&ally_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteGrantRangedSetup {
+        ally_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_grant_ranged_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_grant_ranged_manifest)
+        .find(|candidate| try_pending_deathrite_with_allied_minion(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with grant-Ranged Magic in hand")
+}
+
+#[test]
+fn rule_catalog_1107_grant_ranged_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_grant_ranged_seed_with(1107);
+    let mut setup = try_pending_deathrite_with_allied_minion(&encoded)
+        .expect("complete grant-Ranged Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(unit(&paused, &ally_id).is_object());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(grant_ally_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(unit(&resumed, &ally_id).is_object());
+    assert!(grant_ally_ids(session).contains(&ally_id));
+    assert!(
+        unit(&resumed, &ally_id)
+            .get("temporaryRangedSources")
+            .is_none()
+    );
+
+    let (descriptor, receipt) = grant_ranged(session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ranged-granted", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        unit(&state(session), &ally_id)["temporaryRangedSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert_exact_replay(session);
 }
