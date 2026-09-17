@@ -15565,6 +15565,58 @@
         "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
         "testName": "rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0677",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic burrows a loose Artifact at the chosen land site. After an uncarried Artifact occupies C1, casting at that site moves the Artifact underground in place. This is distinct from minion-only Cave-In (0587) and from targeted Bury (0043).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0677_cave_in_burrows_a_loose_artifact_at_the_land_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0678",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic detaches an Avatar-carried Artifact at the chosen land site and burrows it independently. The Avatar stays on the surface. A minion-only Cave-In (0587) has no Artifact to detach.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0678_cave_in_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
+      }
     }
   ]
 }
