@@ -182,6 +182,13 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .collect()
 }
 
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<IdentityHash> = session
         .transcript()
@@ -1485,5 +1492,58 @@ fn rule_catalog_0899_attacking_first_strike_does_not_replace_ranged_post_strike_
     assert_eq!(unit(&state(&session), &setup.shooter_id)["location"], "C3");
     assert_eq!(state(&session)["phase"], "main");
     assert!(state(&session)["pendingRangedStep"].is_null());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0998_ranged_strike_deathrite_draws_for_minion_controller_on_kill() {
+    let setup = prepare_ranged(
+        202,
+        &minion(json!({ "attack": 4, "ranged": true })),
+        &minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        &minion(json!({})),
+        &site(json!({})),
+        Some("C3"),
+        None,
+        6,
+    );
+    let before = state(&setup.session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    let target_id = setup.near_target_id.as_ref().expect("Deathrite target");
+    let mut session = setup.session;
+    let receipt = fire_south(&mut session, &setup.shooter_id, target_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], *target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], *target_id);
+    let finished = state(&session);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == *target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
