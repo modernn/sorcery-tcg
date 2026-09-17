@@ -7,7 +7,8 @@
 //! (RULE-CATALOG-0916), and direct draw-sites-then-teleport ordering
 //! (RULE-CATALOG-0936), and direct draw-sites-then-mill ordering
 //! (RULE-CATALOG-0948), and thin-Atlas draw-then-mill edges
-//! (RULE-CATALOG-0967).
+//! (RULE-CATALOG-0967), and thin-library draw-then-teleport edges
+//! (RULE-CATALOG-0980).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2438,6 +2439,103 @@ fn rule_catalog_0401_start_turn_draw_spells_then_teleport_resolves_in_order() {
     );
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
+    assert_ne!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == source_id)
+            .expect("source after teleport")["location"],
+        location_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0980_start_turn_draw_spells_then_teleport_draws_last_spell_before_teleport_on_thin_library(
+) {
+    let mut session = draw_spells_teleport_start_turn(980, &["north-source"; 4]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let location_before = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == source_id)
+        .expect("source before teleport")["location"]
+        .clone();
+    let drawn_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("only spell")["instanceId"]
+        .clone();
+    let library_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    assert_eq!(library_before, 1);
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "spell-drawn")
+        .expect("spell-drawn event");
+    let teleport_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "unit-teleported")
+        .expect("unit-teleported event");
+    assert!(
+        draw_index < teleport_index,
+        "Spellbook draw must resolve before random teleport on the same minion Start Phase trigger"
+    );
+    assert_eq!(
+        receipt.events[draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(
+        receipt.events[teleport_index].payload["sourceInstanceId"],
+        source_id
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
     assert_ne!(
         after["realm"]["units"]
             .as_array()
