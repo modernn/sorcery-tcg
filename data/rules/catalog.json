@@ -17159,6 +17159,47 @@
         "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
         "testName": "rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0733",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink Magic passes self-play admission when paired with ordinary minions, Burrowing, Submerge, Waterbound, Landbound, Voidwalk, start-turn and end-turn triggers, Deathrite library effects, forced-attack facts, and common Artifact bearer modifiers including composed Mask effects.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard",
+        "burrowing",
+        "submerge",
+        "waterbound",
+        "landbound",
+        "voidwalk",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnMillSites",
+        "deathriteDrawSpells",
+        "deathriteMillSpells",
+        "deathriteMillSites",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "doesNotUntapDuringControllersStartPhase",
+        "mustAttackAUnitIfAble",
+        "enemiesMustAttackThisIfAble",
+        "grantsBearerPower",
+        "grantsBearerLethal",
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_0733_blink_magic_admits_minion_slices_and_common_modifiers"
+      }
     }
   ]
 }

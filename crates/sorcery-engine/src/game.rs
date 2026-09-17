@@ -28596,6 +28596,219 @@ pub mod catalog_proofs {
             .expect("Cave-In with power Artifacts is self-play safe");
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one admission matrix keeps every Blink slice and common modifier visible"
+    )]
+    pub fn rule_catalog_0733_blink_magic_admits_minion_slices_and_common_modifiers() {
+        let blink_manifest = |extra: &[(&str, Value)]| {
+            let extra = extra.to_vec();
+            selfplay_manifest_with(31, move |manifest| {
+                for ordinal in 1..=50 {
+                    manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                        "cardType": "magic",
+                        "manaCost": 0,
+                        "teleportNearbyAllyThenDrawCard": true,
+                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                    });
+                }
+                for (field, value) in &extra {
+                    manifest["cards"]["south-spell-1"][*field] = value.clone();
+                }
+            })
+        };
+        Game::from_manifest_json(&blink_manifest(&[]))
+            .expect("valid Blink manifest")
+            .ensure_selfplay_supported()
+            .expect("ordinary minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("burrowing", json!(true))]))
+            .expect("valid Burrowing manifest")
+            .ensure_selfplay_supported()
+            .expect("Burrowing minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("submerge", json!(true))]))
+            .expect("valid Submerge manifest")
+            .ensure_selfplay_supported()
+            .expect("Submerge minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("waterbound", json!(true))]))
+            .expect("valid Waterbound manifest")
+            .ensure_selfplay_supported()
+            .expect("Waterbound minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("landbound", json!(true))]))
+            .expect("valid Landbound manifest")
+            .ensure_selfplay_supported()
+            .expect("Landbound minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("voidwalk", json!(true))]))
+            .expect("valid Voidwalk manifest")
+            .ensure_selfplay_supported()
+            .expect("Voidwalk minion Blink is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[
+            (
+                "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                json!(true),
+            ),
+            ("voidwalk", json!(true)),
+        ]))
+        .expect("valid random teleport manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn random teleport is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atStartOfControllerTurnDrawSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw spells is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atStartOfControllerTurnDrawSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas draw manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn draw sites is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atStartOfControllerTurnLureNearbyEnemyMinion",
+            json!(true),
+        )]))
+        .expect("valid start-turn lure manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn lure is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atStartOfControllerTurnMillSpells",
+            json!(1),
+        )]))
+        .expect("valid start-turn mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill spells is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atStartOfControllerTurnMillSites",
+            json!(1),
+        )]))
+        .expect("valid start-turn Atlas mill manifest")
+        .ensure_selfplay_supported()
+        .expect("start-turn mill sites is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("deathriteDrawSpells", json!(true))]))
+            .expect("valid Deathrite spell-draw manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell draw is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("deathriteMillSpells", json!(true))]))
+            .expect("valid Deathrite spell-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite spell mill is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("deathriteMillSites", json!(true))]))
+            .expect("valid Deathrite site-mill manifest")
+            .ensure_selfplay_supported()
+            .expect("Deathrite site mill is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atEndOfControllerTurnControllerGainsLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-gain manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life gain is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "atEndOfControllerTurnControllerLosesLife",
+            json!(2),
+        )]))
+        .expect("valid end-turn life-loss manifest")
+        .ensure_selfplay_supported()
+        .expect("end-turn controller life loss is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "doesNotUntapDuringControllersStartPhase",
+            json!(true),
+        )]))
+        .expect("valid does-not-untap manifest")
+        .ensure_selfplay_supported()
+        .expect("does not untap during Start Phase is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
+            .expect("valid must-attack manifest")
+            .ensure_selfplay_supported()
+            .expect("must attack a unit if able is self-play safe");
+        Game::from_manifest_json(&blink_manifest(&[(
+            "enemiesMustAttackThisIfAble",
+            json!(true),
+        )]))
+        .expect("valid forced-attack source manifest")
+        .ensure_selfplay_supported()
+        .expect("enemies must attack this if able is self-play safe");
+
+        let power_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        let artifact_manifest = |artifact: &Value, blinks: bool| {
+            selfplay_manifest_with(31, |manifest| {
+                manifest["cards"]["south-spell-1"] = artifact.clone();
+                if blinks {
+                    for ordinal in 1..=50 {
+                        manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                            "cardType": "magic",
+                            "manaCost": 0,
+                            "teleportNearbyAllyThenDrawCard": true,
+                            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                        });
+                    }
+                }
+            })
+        };
+        Game::from_manifest_json(&artifact_manifest(&power_artifact, false))
+            .expect("valid power Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("power Artifacts are self-play safe");
+        Game::from_manifest_json(&artifact_manifest(&power_artifact, true))
+            .expect("valid Blink plus Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Blink with power Artifacts is self-play safe");
+
+        let lethal_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerLethal": true,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&lethal_artifact, false))
+            .expect("valid Lethal Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Lethal Artifacts are self-play safe");
+        Game::from_manifest_json(&artifact_manifest(&lethal_artifact, true))
+            .expect("valid Blink plus Lethal Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("Blink with Lethal Artifacts is self-play safe");
+
+        let nearby_must_attack_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_must_attack_artifact, false))
+            .expect("valid nearby-must-attack Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby-must-attack Artifacts are self-play safe");
+        let nearby_double_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&nearby_double_artifact, false))
+            .expect("valid nearby-double-strike Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("nearby double-strike Artifacts are self-play safe");
+        let mask_artifact = json!({
+            "cardType": "artifact",
+            "manaCost": 0,
+            "nearbyMinionsMustAttackIfAble": true,
+            "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        Game::from_manifest_json(&artifact_manifest(&mask_artifact, false))
+            .expect("valid composed Mask Artifact manifest")
+            .ensure_selfplay_supported()
+            .expect("composed nearby-must-attack and double-strike Artifacts are self-play safe");
+    }
+
     pub fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
         let manifest = selfplay_manifest_with(31, |_| {});
         let mut game = Game::from_manifest_json(&manifest).expect("valid game");
