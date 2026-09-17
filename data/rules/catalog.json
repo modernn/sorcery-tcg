@@ -15384,6 +15384,48 @@
         "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
         "testName": "rule_catalog_0662_freeze_is_absorbed_by_enemy_ward"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0667",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-aura Magic offers every realm Aura, moves a real Aura into its owner's cemetery, and leaves no later Aura target once the realm is empty of them. The event is aura-destroyed rather than a return to hand or a duration dispel.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "aura-destroyed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_0667_destroy_target_aura_sends_flood_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0668",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-aura Magic offers no target when no Aura occupies the realm, including when only a minion is in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_0668_destroy_target_aura_offers_no_target_without_an_aura"
+      }
     }
   ]
 }
