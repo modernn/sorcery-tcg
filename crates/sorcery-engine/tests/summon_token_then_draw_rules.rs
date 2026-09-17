@@ -1,10 +1,11 @@
 //! Direct proofs for summon-token-to-allied-minion then draw-spell Magic
-//! (RULE-CATALOG-0543–0544).
+//! (RULE-CATALOG-0543–0544, RULE-CATALOG-1068).
 //!
 //! Ordinary Magic can summon one source-linked token to an allied minion's
 //! surface cell and then draw one spell. Avatars and enemy minions are not
 //! hosts. When no allied minion is in play, the summon is a paid no-op that
-//! still draws.
+//! still draws. While Deathrites wait for ordering, summon-token-then-draw
+//! Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -54,6 +55,27 @@ fn gift() -> Value {
         "cardType": "magic",
         "manaCost": 0,
         "summonTokenToAlliedMinionThenDrawSpell": "north-frog",
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -382,4 +404,220 @@ fn rule_catalog_0544_token_then_draw_still_draws_without_an_allied_minion() {
             .any(|card| card["instanceId"] == library_top)
     );
     assert_exact_replay(&session);
+}
+
+fn deathrite_summon_token_manifest(seed: u32) -> String {
+    let fixture = "summon-token-then-draw-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-frog": frog_token(),
+            "north-gift": gift(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-gift",
+                    "north-rain",
+                    "north-rain",
+                    "north-gift",
+                    "north-gift",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_gift_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-gift", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteSummonTokenSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_allied_minion(
+    encoded: &str,
+) -> Option<PendingDeathriteSummonTokenSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_gift_and_rain(&state(&session)) {
+        return None;
+    }
+    if !gift_ally_ids(&session).contains(&ally_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSummonTokenSetup {
+        ally_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_summon_token_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_summon_token_manifest)
+        .find(|candidate| try_pending_deathrite_with_allied_minion(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with summon-token Magic in hand")
+}
+
+#[test]
+fn rule_catalog_1068_summon_token_then_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_summon_token_seed_with(1068);
+    let mut setup = try_pending_deathrite_with_allied_minion(&encoded)
+        .expect("complete summon-token Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(unit(&paused, &ally_id).is_object());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(gift_ally_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(unit(&resumed, &ally_id).is_object());
+    let offered = gift_ally_ids(session);
+    assert!(offered.contains(&ally_id));
+    assert!(offered.iter().all(|id| id == &ally_id));
+
+    let (cast, granted) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-summoned",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(granted.events[1].payload["cardId"], "north-frog");
+    assert_eq!(granted.events[1].payload["cell"], "C4");
+    assert_eq!(granted.events[1].payload["token"], true);
+    assert_eq!(
+        granted.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    let token_id = granted.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity");
+    assert_eq!(unit(&state(session), token_id)["cardId"], "north-frog");
+    assert_exact_replay(session);
 }
