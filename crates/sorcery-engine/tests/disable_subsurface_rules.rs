@@ -316,7 +316,7 @@ fn rule_catalog_0698_disable_kills_an_underground_burrowing_target() {
 }
 
 #[test]
-fn rule_catalog_0698_disable_leaves_a_surface_burrowing_minion_in_play() {
+fn rule_catalog_1127_disable_leaves_surface_burrowing_minion_in_play() {
     let encoded = surface_manifest(26);
     let mut session = opening_main(&encoded);
     let target_id = south_summons_at(&mut session, "south-burrower", "C4");
