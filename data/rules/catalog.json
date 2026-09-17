@@ -14116,6 +14116,57 @@
         "file": "crates/sorcery-engine/tests/fatality_rules.rs",
         "testName": "rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0611",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Tap-target-minion Magic exhausts a ready same-region minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-tapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
+        "testName": "rule_catalog_0611_tap_magic_exhausts_a_ready_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0612",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Tap-target-minion Magic that targets an enemy warded minion is absorbed. Ward breaks and no tap event is emitted.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapTargetMinion",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
+        "testName": "rule_catalog_0612_tap_magic_is_absorbed_by_enemy_ward"
+      }
     }
   ]
 }
