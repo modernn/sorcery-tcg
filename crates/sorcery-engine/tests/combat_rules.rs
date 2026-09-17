@@ -1835,3 +1835,252 @@ fn rule_catalog_0927_enemies_must_attack_this_if_able_excludes_site_targets_when
     );
     assert_exact_replay(&session);
 }
+
+fn nearby_must_attack_mask() -> Value {
+    json!({
+        "cardType": "artifact",
+        "manaCost": 0,
+        "nearbyMinionsMustAttackIfAble": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn nearby_must_attack_mask_manifest(seed: u32) -> String {
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let site = json!({ "cardType": "site", "elements": ["earth"] });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "nearby-must-attack-site-target" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-nearby-must-attack-site-target-v1",
+        },
+        "cards": {
+            "north-avatar": avatar,
+            "north-site": site,
+            "north-source": {
+                "attack": 2,
+                "cardType": "minion",
+                "charge": true,
+                "defense": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-avatar": avatar,
+            "south-mask": nearby_must_attack_mask(),
+            "south-minion": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 1,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "south-site": site,
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-mask",
+                    "south-minion",
+                    "south-minion",
+                    "south-mask",
+                    "south-minion",
+                    "south-minion",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn nearby_must_attack_mask_opening_manifest() -> String {
+    (1..=4096)
+        .map(nearby_must_attack_mask_manifest)
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("mask candidate"));
+            let hand = opening["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("south opening spellbook");
+            hand.iter().any(|card| card["cardId"] == "south-mask")
+                && hand.iter().any(|card| card["cardId"] == "south-minion")
+        })
+        .expect("bounded seed opening with a Mask and a south minion")
+}
+
+fn after_nearby_must_attack_mask_and_site_setup() -> Session {
+    let mut session =
+        Session::new(&nearby_must_attack_mask_opening_manifest()).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    });
+    let bearer_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "south-minion")
+        .expect("south minion")["instanceId"]
+        .clone();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-mask"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "nearby-must-attack site-target scenario proof keeps setup and assertions inline"
+)]
+fn rule_catalog_0937_nearby_must_attack_if_able_still_offers_site_targets_when_a_unit_is_also_in_range()
+ {
+    let mut session = after_nearby_must_attack_mask_and_site_setup();
+    assert_eq!(state(&session)["phase"], "main");
+    let source_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("north minion")["instanceId"]
+        .clone();
+    let target_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "south-minion")
+        .expect("south minion")["instanceId"]
+        .clone();
+    let site_instance_id = state(&session)["realm"]["sites"]["C3"]["instanceId"].clone();
+    let legal = session.legal_actions().expect("mandatory nearby attacks");
+    assert!(!legal.is_empty());
+    assert!(legal.iter().all(|action| {
+        action.descriptor["kind"] == "move-and-attack"
+            && action.descriptor["unitInstanceId"] == source_id
+    }));
+    assert!(legal.iter().any(|action| {
+        action.descriptor["kind"] == "move-and-attack" && action.descriptor["to"]["cell"] == "C3"
+    }));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == source_id
+            && descriptor["to"]["cell"] == "C3"
+    });
+    while state(&session)["phase"] == "movement" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+    }
+    assert_eq!(state(&session)["phase"], "attack");
+    let attack_actions = session.legal_actions().expect("attack actions");
+    assert!(
+        attack_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "decline-attack")
+    );
+    assert!(
+        attack_actions.iter().any(|action| {
+            action.descriptor["kind"] == "declare-attack"
+                && action.descriptor["target"]["kind"] == "site"
+                && action.descriptor["target"]["instanceId"] == site_instance_id
+        }),
+        "nearby-must-attack must still offer a site Declare Attack when a unit is also in range"
+    );
+    assert!(
+        attack_actions.iter().any(|action| {
+            action.descriptor["kind"] == "declare-attack"
+                && action.descriptor["target"]["kind"] == "minion"
+                && action.descriptor["target"]["instanceId"] == target_id
+        })
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "site"
+            && descriptor["target"]["instanceId"] == site_instance_id
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == false
+    });
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "undefended-site-struck")
+            .expect("site strike")
+            .payload["amount"],
+        2
+    );
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    assert_eq!(state(&session)["phase"], "main");
+    assert_exact_replay(&session);
+}
