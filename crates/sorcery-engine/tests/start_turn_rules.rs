@@ -2452,8 +2452,8 @@ fn rule_catalog_0401_start_turn_draw_spells_then_teleport_resolves_in_order() {
 }
 
 #[test]
-fn rule_catalog_0980_start_turn_draw_spells_then_teleport_draws_last_spell_before_teleport_on_thin_library(
-) {
+fn rule_catalog_0980_start_turn_draw_spells_then_teleport_draws_last_spell_before_teleport_on_thin_library()
+ {
     let mut session = draw_spells_teleport_start_turn(980, &["north-source"; 4]);
     assert_eq!(state(&session)["phase"], "start-turn");
     let before = state(&session);

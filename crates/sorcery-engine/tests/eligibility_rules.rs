@@ -243,7 +243,7 @@ fn rule_catalog_0961_synthetic_only_batch_keeps_synthetic_game_unranked() {
 
 #[test]
 fn rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_stays_unranked_for_both()
-{
+ {
     let allowlisted_manifest = verified_private_local_manifest(31).expect("allowlisted manifest");
     let non_allowlisted_manifest =
         non_allowlisted_private_local_manifest(32).expect("non-allowlisted manifest");
@@ -269,7 +269,10 @@ fn rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_s
     assert!(allowlisted_record.replay_verified);
     assert!(allowlisted_record.eligibility.gates.all_passed());
     assert!(allowlisted_record.eligibility.ranked);
-    assert_eq!(allowlisted_record.classification, BatchClassification::Ranked);
+    assert_eq!(
+        allowlisted_record.classification,
+        BatchClassification::Ranked
+    );
 
     let non_allowlisted_game =
         sorcery_engine::game::Game::from_manifest_json(&non_allowlisted_manifest).expect("game");

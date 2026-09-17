@@ -1777,8 +1777,7 @@ fn puppet_deathrite_bounce_seed_with(start: u32) -> String {
 /// Tapped South Deathrite at distant C1, North ready to steal then bounce the Genesis source.
 fn puppet_deathrite_bounce_opening() -> (Session, String) {
     let encoded = puppet_deathrite_bounce_seed_with(971);
-    let mut session =
-        Session::new(&encoded).expect("valid source-bound Deathrite revert session");
+    let mut session = Session::new(&encoded).expect("valid source-bound Deathrite revert session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -1824,10 +1823,7 @@ fn rule_catalog_0971_source_bound_deathrite_draws_for_original_controller_when_t
             && event.payload["instanceId"] == deathrite_id
             && event.payload["sourceInstanceId"] == puppet_id
     }));
-    assert_eq!(
-        unit(&state(&session), &deathrite_id)["controller"],
-        "north"
-    );
+    assert_eq!(unit(&state(&session), &deathrite_id)["controller"], "north");
 
     let (_, reverted) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -2438,10 +2434,7 @@ fn rule_catalog_0974_sacrifice_artifact_deathrite_draws_for_original_controller_
             && event.payload["instanceId"] == deathrite_id
             && event.payload["sourceInstanceId"] == ally_id
     }));
-    assert_eq!(
-        unit(&state(&session), &deathrite_id)["controller"],
-        "north"
-    );
+    assert_eq!(unit(&state(&session), &deathrite_id)["controller"], "north");
 
     let (_, reverted) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -2505,6 +2498,87 @@ fn rule_catalog_0974_sacrifice_artifact_deathrite_draws_for_original_controller_
     assert!(realm_unit(&finished, &deathrite_id).is_none());
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert!(cemetery_has(&finished, "south", &deathrite_id));
+    assert!(!cemetery_has(&finished, "north", &deathrite_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0976_nearby_avatar_discard_deathrite_still_draws_for_permanent_thief_after_turn_boundary()
+ {
+    let (mut session, deathrite_id) = discard_deathrite_opening();
+    let before = state(&session);
+    assert_eq!(unit(&before, &deathrite_id)["controller"], "south");
+    assert_eq!(unit(&before, &deathrite_id)["owner"], "south");
+
+    steal_sellsword(&mut session, &deathrite_id);
+    assert_eq!(unit(&state(&session), &deathrite_id)["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    let persisted = state(&session);
+    assert_eq!(
+        realm_unit(&persisted, &deathrite_id).expect("stolen minion")["controller"],
+        "north"
+    );
+    assert_eq!(
+        realm_unit(&persisted, &deathrite_id).expect("stolen minion")["owner"],
+        "south"
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    let before_kill = state(&session);
+    let north_atlas = atlas_len(&before_kill, "north");
+    let south_atlas = atlas_len(&before_kill, "south");
+    assert_eq!(
+        realm_unit(&before_kill, &deathrite_id).expect("stolen minion")["controller"],
+        "north"
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == deathrite_id
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], deathrite_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &deathrite_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas);
     assert!(cemetery_has(&finished, "south", &deathrite_id));
     assert!(!cemetery_has(&finished, "north", &deathrite_id));
     assert_exact_replay(&session);
@@ -2579,15 +2653,11 @@ fn south_has_bolt(snapshot: &Value) -> bool {
 }
 
 fn try_accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> bool {
-    let Some(action) = session
-        .legal_actions()
-        .ok()
-        .and_then(|actions| {
-            actions
-                .into_iter()
-                .find(|action| predicate(&action.descriptor))
-        })
-    else {
+    let Some(action) = session.legal_actions().ok().and_then(|actions| {
+        actions
+            .into_iter()
+            .find(|action| predicate(&action.descriptor))
+    }) else {
         return false;
     };
     matches!(
@@ -2621,17 +2691,11 @@ fn deathrite_instance_id(snapshot: &Value) -> Option<String> {
 fn try_advance_hijacked_turn_draws(session: &mut Session) -> bool {
     while session.legal_actions().ok().is_some_and(|actions| {
         actions.iter().any(|action| {
-            matches!(
-                action.descriptor["kind"].as_str(),
-                Some("draw-site") | Some("draw")
-            )
+            matches!(action.descriptor["kind"].as_str(), Some("draw-site" | "draw"))
         })
     }) {
         if !try_accept_where(session, |descriptor| {
-            matches!(
-                descriptor["kind"].as_str(),
-                Some("draw-site") | Some("draw")
-            )
+            matches!(descriptor["kind"].as_str(), Some("draw-site" | "draw"))
         }) {
             return false;
         }
@@ -2677,7 +2741,8 @@ fn thais_deathrite_seed_with(start: u32) -> String {
             }) {
                 return false;
             }
-            if !try_end_then_draw(&mut session, "spellbook") || !south_has_deathrite(&state(&session))
+            if !try_end_then_draw(&mut session, "spellbook")
+                || !south_has_deathrite(&state(&session))
             {
                 return false;
             }

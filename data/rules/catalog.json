@@ -22548,6 +22548,266 @@
         "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
         "testName": "rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_revert"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0973",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After stealth-bound control reverts when the stolen minion loses Stealth, killing that Deathrite minion draws a site for the original controller, not the temporary thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionWhileStealthBound",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "activate-mana"
+      ],
+      "eventHints": [
+        "stealth-lost",
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_0973_stealth_bound_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_stealth_revert"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0974",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After sacrifice-to-steal Artifact control reverts because the bearer left play, killing the formerly stolen Deathrite minion draws a site for the original controller, not the temporary thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "activate-artifact-sacrifice-control",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand",
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0974_sacrifice_artifact_deathrite_draws_for_original_controller_when_bearer_leaves_before_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0975",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "While previous-player Genesis turn control is active, a Deathrite minion death draws a site for the minion's controller, not the acting turn-controller submitting the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisEachPlayerControlledByPreviousPlayerNextTurn",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "player-controlled",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0975_previous_player_control_deathrite_draws_for_minion_controller_not_turn_controller"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0976",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby-Avatar discard control is permanent: after a turn boundary, killing the stolen Deathrite minion still draws a site for the permanent thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyAvatarsMayDiscardCardToGainControlOfThis",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "activate-discard-to-gain-control",
+        "end-turn",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0976_nearby_avatar_discard_deathrite_still_draws_for_permanent_thief_after_turn_boundary"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0977",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Mesmerism control that persists after the cast: killing the stolen Deathrite minion on a later turn draws a site for the Mesmerism controller, not only on immediate fight resolution.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_0977_mesmerism_deathrite_draws_for_new_controller_on_delayed_kill_not_only_fight"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0978",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Defending-only first strike with Deathrite pauses combat in deathrite-order, resolves the Deathrite chain once, then resumes the remaining strike window exactly once.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "defendingFirstStrike",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "declare-attack",
+        "defend"
+      ],
+      "eventHints": [
+        "first-strike-damage-allocated",
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_once"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0979",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-double-damage-to-ally-next-strike-this-turn Magic consumes the grant on a doubled strike that kills an enemy Deathrite minion, and the Deathrite draws a site for that minion's controller.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "strike-damage-allocated",
+        "next-strike-double-consumed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_0979_granted_next_strike_double_triggers_deathrite_draw_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0980",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and random teleport, exactly one Spellbook card remains, and the Start Phase draws that sole spell before teleport on the same trigger.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0980_start_turn_draw_spells_then_teleport_draws_last_spell_before_teleport_on_thin_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0981",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "extend-chain-magic may target a nearby enemy Avatar as a second hop after begin-chain-magic stages a nearby minion hop.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0981_extend_chain_magic_may_target_nearby_enemy_avatar_as_second_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0982",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Batch policy that mixes allowlisted and non-allowlisted private-local manifests keeps every finished game unranked with unverified authority, including the allowlisted record alone.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_stays_unranked_for_both"
+      }
     }
   ]
 }

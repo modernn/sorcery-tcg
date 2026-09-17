@@ -838,7 +838,9 @@ fn rule_catalog_0968_start_turn_draw_sites_then_lure_draws_last_site_when_lure_n
         .as_array()
         .expect("north Atlas hand")
         .len();
-    let legal = session.legal_actions().expect("empty start-turn draw-site-lure");
+    let legal = session
+        .legal_actions()
+        .expect("empty start-turn draw-site-lure");
     assert!(legal.iter().all(|action| {
         action.descriptor["kind"] == "resolve-start-turn-trigger"
             && action.descriptor["sourceInstanceId"] == source_id

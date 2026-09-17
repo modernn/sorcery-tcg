@@ -2445,7 +2445,10 @@ fn try_setup_spellcaster_distant_avatar_hop(
     if !begin_targets.contains(&south_minion_id) {
         return None;
     }
-    if begin_targets.iter().any(|target_id| target_id == &south_avatar_id) {
+    if begin_targets
+        .iter()
+        .any(|target_id| target_id == &south_avatar_id)
+    {
         return None;
     }
     Some((

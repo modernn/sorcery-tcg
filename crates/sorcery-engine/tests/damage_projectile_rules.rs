@@ -788,8 +788,7 @@ fn rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck
 }
 
 #[test]
-fn rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask()
- {
+fn rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask() {
     let mut session = after_fixed_projectile_mask_ready(false);
     let shooter_id = unit_id(&session, "north-shooter");
     let target_id = unit_id(&session, "south-minion");

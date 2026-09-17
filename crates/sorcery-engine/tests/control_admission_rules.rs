@@ -408,8 +408,8 @@ fn rule_catalog_0930_this_turn_control_transfers_distant_deathrite_to_thief_befo
 }
 
 #[test]
-fn rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_revert(
-) {
+fn rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_revert()
+ {
     let encoded = seed_with(972);
     let mut session = Session::new(&encoded).expect("valid this-turn Deathrite control session");
     keep(&mut session);
@@ -425,7 +425,10 @@ fn rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_w
             && descriptor["cardId"] == "north-betrayal"
             && descriptor["target"]["instanceId"] == far_id
     });
-    assert_eq!(realm_unit(&state(&session), &far_id).expect("stolen minion")["controller"], "north");
+    assert_eq!(
+        realm_unit(&state(&session), &far_id).expect("stolen minion")["controller"],
+        "north"
+    );
 
     let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(ended.events.iter().any(|event| {
@@ -435,8 +438,14 @@ fn rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_w
             && event.payload["instanceId"] == far_id
     }));
     let reverted = state(&session);
-    assert_eq!(realm_unit(&reverted, &far_id).expect("reverted minion")["controller"], "south");
-    assert_eq!(realm_unit(&reverted, &far_id).expect("reverted minion")["owner"], "south");
+    assert_eq!(
+        realm_unit(&reverted, &far_id).expect("reverted minion")["controller"],
+        "south"
+    );
+    assert_eq!(
+        realm_unit(&reverted, &far_id).expect("reverted minion")["owner"],
+        "south"
+    );
 
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -565,8 +574,8 @@ fn rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_
 }
 
 #[test]
-fn rule_catalog_0973_stealth_bound_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_stealth_revert(
-) {
+fn rule_catalog_0973_stealth_bound_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_stealth_revert()
+ {
     let encoded = stealth_bound_seed_with(973);
     let mut session =
         Session::new(&encoded).expect("valid stealth-bound Deathrite control session");

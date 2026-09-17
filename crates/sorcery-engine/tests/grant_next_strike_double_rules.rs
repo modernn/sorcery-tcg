@@ -416,8 +416,7 @@ fn rule_catalog_0979_granted_next_strike_double_triggers_deathrite_draw_on_kill(
             && event.payload["targetInstanceId"] == enemy_id
     }));
     assert!(doubled.events.iter().any(|event| {
-        event.event_type == "next-strike-double-consumed"
-            && event.payload["instanceId"] == ally_id
+        event.event_type == "next-strike-double-consumed" && event.payload["instanceId"] == ally_id
     }));
     let drawn = doubled
         .events

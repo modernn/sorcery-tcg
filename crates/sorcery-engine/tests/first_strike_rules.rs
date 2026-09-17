@@ -755,11 +755,7 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
         json!([fs_defender_id])
     );
     assert!(unit(&paused, &setup.attacker_id).is_none());
-    assert!(
-        deathrite_ids
-            .iter()
-            .all(|id| unit(&paused, id).is_none())
-    );
+    assert!(deathrite_ids.iter().all(|id| unit(&paused, id).is_none()));
     assert!(
         deathrite_ids
             .iter()
