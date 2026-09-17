@@ -7,8 +7,8 @@
 //! destroys a tougher minion; the same strike without Lethal only wounds it.
 //! Grant-Lethal Magic stays withheld while Deathrites wait for ordering.
 
-use serde_json::{json, Value};
-use sorcery_engine::canonical::{canonical_json, identity_hash, IdentityHash};
+use serde_json::{Value, json};
+use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
@@ -303,9 +303,11 @@ fn rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn() {
     let mut session = opening_main();
     let ally_id = summon_north_ally(&mut session);
     let before = state(&session);
-    assert!(unit(&before, &ally_id)
-        .get("temporaryLethalSources")
-        .is_none());
+    assert!(
+        unit(&before, &ally_id)
+            .get("temporaryLethalSources")
+            .is_none()
+    );
 
     let (descriptor, receipt) = grant_lethal(&mut session, &ally_id);
     assert_eq!(
@@ -331,9 +333,11 @@ fn rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn() {
             && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
     }));
     let after = state(&session);
-    assert!(unit(&after, &ally_id)
-        .get("temporaryLethalSources")
-        .is_none());
+    assert!(
+        unit(&after, &ally_id)
+            .get("temporaryLethalSources")
+            .is_none()
+    );
     assert_exact_replay(&session);
     let checkpoint = create_game_checkpoint(&session).expect("grant-lethal checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized grant-lethal");
@@ -373,11 +377,13 @@ fn rule_catalog_0279_granted_lethal_is_required_to_kill_a_tougher_minion() {
     grant_lethal(&mut session, &ally_id);
     strike_minion(&mut session, &ally_id, &enemy_id);
     assert!(cemetery_has(&session, "south", &enemy_id));
-    assert!(!state(&session)["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .any(|unit| unit["instanceId"] == enemy_id));
+    assert!(
+        !state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["instanceId"] == enemy_id)
+    );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
     assert_exact_replay(&session);
@@ -533,11 +539,13 @@ fn rule_catalog_1106_grant_lethal_withheld_during_pending_deathrite_order() {
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
     assert!(unit(&paused, &ally_id).is_object());
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(grant_ally_ids(session).is_empty());
 
     let order_sources: Vec<_> = session

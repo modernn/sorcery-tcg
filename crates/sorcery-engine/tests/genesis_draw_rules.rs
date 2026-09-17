@@ -7383,7 +7383,9 @@ fn try_pending_deathrite_with_genesis_draw_spell_in_hand(
     try_accept_genesis_draw_spell_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     })?;
-    try_accept_genesis_draw_spell_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_genesis_draw_spell_where(&mut session, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    })?;
     try_accept_genesis_draw_spell_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
@@ -7402,7 +7404,9 @@ fn try_pending_deathrite_with_genesis_draw_spell_in_hand(
             && descriptor["cell"] == "C1"
             && descriptor["region"].is_null()
     })?;
-    try_accept_genesis_draw_spell_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_genesis_draw_spell_where(&mut session, |descriptor| {
+        descriptor["kind"] == "end-turn"
+    })?;
     try_accept_genesis_draw_spell_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
@@ -7432,7 +7436,9 @@ fn try_pending_deathrite_with_genesis_draw_spell_in_hand(
 fn deathrite_genesis_draw_spell_seed_with(start: u32) -> String {
     (start..start + 2048)
         .map(deathrite_genesis_draw_spell_manifest)
-        .find(|candidate| try_pending_deathrite_with_genesis_draw_spell_in_hand(candidate).is_some())
+        .find(|candidate| {
+            try_pending_deathrite_with_genesis_draw_spell_in_hand(candidate).is_some()
+        })
         .expect(
             "bounded seed that reaches pending Deathrites with genesis draw-spell minion in hand",
         )

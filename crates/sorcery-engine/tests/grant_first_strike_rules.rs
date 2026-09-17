@@ -9,8 +9,8 @@
 //! While deathrite-order is pending, the grant is withheld until the chain
 //! completes.
 
-use serde_json::{json, Value};
-use sorcery_engine::canonical::{canonical_json, identity_hash, IdentityHash};
+use serde_json::{Value, json};
+use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
@@ -305,9 +305,11 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
     let mut session = opening_main();
     let ally_id = summon_north_ally(&mut session);
     let before = state(&session);
-    assert!(unit(&before, &ally_id)
-        .get("temporaryFirstStrikeSources")
-        .is_none());
+    assert!(
+        unit(&before, &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
 
     let (descriptor, receipt) = grant_first_strike(&mut session, &ally_id);
     assert_eq!(
@@ -333,9 +335,11 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
             && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
     }));
     let after = state(&session);
-    assert!(unit(&after, &ally_id)
-        .get("temporaryFirstStrikeSources")
-        .is_none());
+    assert!(
+        unit(&after, &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
     assert_exact_replay(&session);
     let checkpoint = create_game_checkpoint(&session).expect("grant-first-strike checkpoint");
     let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized grant-first-strike");
@@ -367,11 +371,13 @@ fn rule_catalog_0283_granted_first_strike_kills_before_return_damage() {
     let after = state(&session);
     assert_eq!(unit(&after, &ally_id)["damage"], 0);
     assert!(cemetery_has(&session, "south", &enemy_id));
-    assert!(!after["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .any(|unit| unit["instanceId"] == enemy_id));
+    assert!(
+        !after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["instanceId"] == enemy_id)
+    );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
     assert_exact_replay(&session);
@@ -529,11 +535,13 @@ fn rule_catalog_1108_grant_first_strike_withheld_during_pending_deathrite_order(
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
     assert!(unit(&paused, &ally_id).is_object());
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(grant_ally_ids(session).is_empty());
 
     let order_sources: Vec<_> = session
@@ -561,9 +569,11 @@ fn rule_catalog_1108_grant_first_strike_withheld_during_pending_deathrite_order(
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &ally_id).is_object());
     assert!(grant_ally_ids(session).contains(&ally_id));
-    assert!(unit(&resumed, &ally_id)
-        .get("temporaryFirstStrikeSources")
-        .is_none());
+    assert!(
+        unit(&resumed, &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
 
     let (descriptor, receipt) = grant_first_strike(session, &ally_id);
     assert_eq!(
