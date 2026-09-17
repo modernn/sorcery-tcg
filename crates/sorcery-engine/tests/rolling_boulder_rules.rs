@@ -1,4 +1,5 @@
-//! Direct proof for Rolling Boulder path push damage (RULE-CATALOG-0145).
+//! Direct proofs for Rolling Boulder path push damage (RULE-CATALOG-0145) and a
+//! carried Boulder relocating with its pusher (RULE-CATALOG-1142).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -351,24 +352,6 @@ fn rule_catalog_0145_rolling_boulder_should_roll_maximally_and_damage_other_unit
         "a truncated path must stay illegal"
     );
 
-    let mut carried = Session::new(&rolling_boulder_scenario()).expect("carried scenario");
-    let carried_position = boulder_position(&mut carried);
-    accept_where(&mut carried, |descriptor| {
-        descriptor["kind"] == "pick-up-artifacts"
-            && descriptor["unit"]["instanceId"] == carried_position.pusher
-            && descriptor["artifactInstanceIds"] == json!([carried_position.boulder])
-    });
-    accept_where(&mut carried, |descriptor| {
-        descriptor["kind"] == "activate-artifact-roll-damage"
-            && descriptor["artifactInstanceId"] == carried_position.boulder
-            && descriptor["pusher"]["instanceId"] == carried_position.pusher
-            && descriptor["direction"] == "south"
-    });
-    let carried_artifact = &state(&carried)["realm"]["artifacts"][0];
-    assert_eq!(carried_artifact["location"], "C1");
-    assert_eq!(carried_artifact["region"], "surface");
-    assert!(carried_artifact.get("bearer").is_none());
-
     let zero_receipt = {
         let mut zero_session =
             Session::new(&rolling_boulder_scenario()).expect("zero-roll scenario");
@@ -471,5 +454,28 @@ fn rule_catalog_0145_rolling_boulder_should_roll_maximally_and_damage_other_unit
             .iter()
             .all(|receipt| receipt.random_draws.is_empty())
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1142_rolling_boulder_carried_artifact_relocates_with_pusher() {
+    let mut session =
+        Session::new(&rolling_boulder_scenario()).expect("valid Rolling Boulder scenario");
+    let position = boulder_position(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "pick-up-artifacts"
+            && descriptor["unit"]["instanceId"] == position.pusher
+            && descriptor["artifactInstanceIds"] == json!([position.boulder])
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-roll-damage"
+            && descriptor["artifactInstanceId"] == position.boulder
+            && descriptor["pusher"]["instanceId"] == position.pusher
+            && descriptor["direction"] == "south"
+    });
+    let carried_artifact = &state(&session)["realm"]["artifacts"][0];
+    assert_eq!(carried_artifact["location"], "C1");
+    assert_eq!(carried_artifact["region"], "surface");
+    assert!(carried_artifact.get("bearer").is_none());
     assert_exact_replay(&session);
 }
