@@ -407,6 +407,86 @@ fn rule_catalog_0930_this_turn_control_transfers_distant_deathrite_to_thief_befo
 }
 
 #[test]
+fn rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_revert(
+) {
+    let encoded = seed_with(972);
+    let mut session = Session::new(&encoded).expect("valid this-turn Deathrite control session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let far_id = stage_far_deathrite(&mut session);
+    assert_eq!(betrayal_targets(&session), [far_id.as_str()]);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-betrayal"
+            && descriptor["target"]["instanceId"] == far_id
+    });
+    assert_eq!(realm_unit(&state(&session), &far_id).expect("stolen minion")["controller"], "north");
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "minion-control-changed"
+            && event.payload["fromSeat"] == "north"
+            && event.payload["seat"] == "south"
+            && event.payload["instanceId"] == far_id
+    }));
+    let reverted = state(&session);
+    assert_eq!(realm_unit(&reverted, &far_id).expect("reverted minion")["controller"], "south");
+    assert_eq!(realm_unit(&reverted, &far_id).expect("reverted minion")["owner"], "south");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == far_id
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], far_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &far_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert!(cemetery_has(&finished, "south", &far_id));
+    assert!(!cemetery_has(&finished, "north", &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_before_stealth_lost()
  {
     let encoded = stealth_bound_seed_with(939);
