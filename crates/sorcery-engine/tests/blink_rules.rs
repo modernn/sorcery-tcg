@@ -951,7 +951,7 @@ fn rule_catalog_0994_blink_teleport_then_draw_empty_spellbook_is_a_deck_out() {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty() {
+fn rule_catalog_1116_blink_empty_chosen_deck_is_deck_out() {
     let mut checkpoint = blink_checkpoint(true);
     assert_eq!(
         state(&checkpoint.session)["players"]["north"]["spellbook"],
