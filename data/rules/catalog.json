@@ -17301,6 +17301,101 @@
         "file": "crates/sorcery-engine/tests/selfplay_admission_rules.rs",
         "testName": "rule_catalog_0736_supported_magic_effects_should_cover_every_admitted_variant"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0737",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Geomancer terrain replacement ends the game terminal when the last Atlas card is played and skips deferred Genesis mana gain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain"
+      ],
+      "actionHints": [
+        "replace-rubble-with-top-atlas-site"
+      ],
+      "eventHints": [
+        "game-ended",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0738",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Opposing Lance-bearing minions in a Defend fight strike early simultaneously, break Lance in striker order, and apply damage before cleanup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [
+        "lance-broken",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_0738_opposing_lances_strike_early_simultaneously_and_break_in_striker_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0739",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged Lance projectile breaks Ward then Lance, and power-threshold prevention uses unbuffed printed power rather than the Lance bonus.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance",
+        "ranged",
+        "ward",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "ward-broken",
+        "lance-broken",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_0739_ranged_lance_breaks_ward_and_uses_unmodified_power_for_prevention"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0740",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Cave-In burrows a minion bearer underground while its carried Artifact remains attached instead of detaching like Avatar-carried Artifacts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0740_cave_in_keeps_minion_carried_artifact_attached_while_burrowing"
+      }
     }
   ]
 }

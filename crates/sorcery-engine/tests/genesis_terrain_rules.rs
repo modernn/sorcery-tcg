@@ -501,7 +501,7 @@ fn setup_if_water_is_last(session: &mut Session) -> Option<(Value, Vec<Value>, u
 }
 
 #[test]
-fn terrain_replacement_deathrite_should_end_the_game_when_the_atlas_is_empty() {
+fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
     let (mut session, mana_before) = (244..1024)
         .map(terminal_manifest_with_seed)
         .find_map(|manifest| {

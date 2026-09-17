@@ -351,7 +351,7 @@ fn lance_should_buff_and_break_on_next_unit_strike_but_not_site_strike() {
 }
 
 #[test]
-fn opposing_lances_should_strike_early_simultaneously_and_break_in_striker_order() {
+fn rule_catalog_0738_opposing_lances_strike_early_simultaneously_and_break_in_striker_order() {
     let attacker = minion(json!({ "attack": 1, "defense": 4, "lanceCount": 1 }));
     let defender = minion(json!({ "attack": 1, "defense": 3, "lanceCount": 3 }));
     let mut setup = prepare_lance(196, &attacker, &defender, true, 6);
@@ -389,7 +389,7 @@ fn opposing_lances_should_strike_early_simultaneously_and_break_in_striker_order
 }
 
 #[test]
-fn ranged_lance_should_break_after_ward_and_use_unmodified_current_power() {
+fn rule_catalog_0739_ranged_lance_breaks_ward_and_uses_unmodified_power_for_prevention() {
     let lancer = minion(json!({ "attack": 1, "lanceCount": 1, "ranged": true }));
     let warded = minion(json!({ "ward": true }));
     let mut ward = prepare_lance(197, &lancer, &warded, true, 6);
