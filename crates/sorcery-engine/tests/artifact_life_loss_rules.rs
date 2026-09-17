@@ -1,7 +1,7 @@
 //! Direct proofs for the life an Artifact costs its current site controller as each turn ends
 //! (RULE-CATALOG-0155), the carried cell that end-turn loss follows when the bearer moves
-//! (RULE-CATALOG-0782), and the regions, Rubble, stacking, and Death's Door it respects
-//! (RULE-CATALOG-0157), and the oversized bearer cell that attribution follows (0726).
+//! (RULE-CATALOG-0782), stacking and Death's Door (RULE-CATALOG-0783), and the oversized bearer
+//! cell that attribution follows (0726).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -610,8 +610,10 @@ fn rule_catalog_0754_carried_artifact_life_loss_charges_before_bearer_dies() {
     assert_exact_replay(&session);
 }
 
+/// Stacked Artifacts charge separately; reaching zero opens Death's Door; further charges record
+/// triggers without reducing life.
 #[test]
-fn end_turn_artifact_life_loss_should_respect_regions_rubble_stacking_and_deaths_door() {
+fn rule_catalog_0783_end_turn_artifact_life_loss_respects_regions_rubble_deaths_door() {
     let cards = json!({
         "north-avatar": avatar(2, json!({})),
         "north-egg": devils_egg(1),
