@@ -1,8 +1,10 @@
 //! Direct proofs for ally-strikes-each-enemy-at-its-location Magic
-//! (RULE-CATALOG-0557–0558, 1011).
+//! (RULE-CATALOG-0557–0558, 1011, 1093).
 //!
 //! 1011 covers ally strike here killing a Deathrite minion: the controller
 //! draws a site and magic-resolved only appears after deathrite settlement.
+//! While Deathrites wait for ordering, ally-strike-here Magic stays withheld
+//! until the chain drains.
 //!
 //! Ordinary Magic chooses a controlled ally. That ally strikes every
 //! enemy sharing its current cell and region without taking a step. No
@@ -67,6 +69,15 @@ fn spin() -> Value {
     json!({
         "allyStrikesEachEnemyAtItsLocation": true,
         "cardType": "magic",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -316,6 +327,148 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn deathrite_spin_manifest(seed: u32) -> String {
+    let fixture = "ally-strike-here-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": fighter(),
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "north-spin": spin(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_raider(),
+            "south-raider": raider(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-spin",
+                    "north-rain",
+                    "north-spin",
+                    "north-rain",
+                    "north-spin",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-raider", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_spin_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-spin", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteSpinSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    nearby_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_ally(encoded: &str) -> Option<PendingDeathriteSpinSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let nearby = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let nearby_id = nearby.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_spin_and_rain(&state(&session)) {
+        return None;
+    }
+    if !spin_ally_ids(&session).contains(&ally_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSpinSetup {
+        ally_id,
+        deathrite_ids,
+        nearby_id,
+        session,
+    })
+}
+
+fn deathrite_spin_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_spin_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_ally(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with ally-strike-here Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0557_ally_strikes_each_enemy_at_its_location() {
     let encoded = seed_with(&["north-ally", "north-spin"]);
@@ -479,4 +632,96 @@ fn rule_catalog_1011_ally_strike_here_deathrite_draws_for_minion_controller_on_k
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1093_ally_strike_here_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_spin_seed_with(1093);
+    let mut setup = try_pending_deathrite_with_ready_ally(&encoded)
+        .expect("complete ally-strike-here Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let nearby_id = setup.nearby_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &ally_id)["location"], "C4");
+    assert_eq!(unit(&paused, &nearby_id)["location"], "C4");
+    assert_eq!(unit(&paused, &nearby_id)["damage"], 1);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(spin_ally_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(spin_ally_ids(session).contains(&ally_id));
+
+    let (cast, struck) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    let types = event_types(&struck);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(!types.contains(&"unit-stepped"));
+    let allocations: Vec<_> = struck
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .collect();
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].payload["amount"], 2);
+    assert_eq!(allocations[0].payload["strikerInstanceId"], ally_id);
+    assert_eq!(allocations[0].payload["targetInstanceId"], nearby_id);
+    assert_eq!(
+        struck.events[0].payload["instanceId"],
+        cast["cardInstanceId"]
+    );
+    let after = state(session);
+    assert_eq!(unit(&after, &ally_id)["location"], "C4");
+    assert_eq!(unit(&after, &ally_id)["tapped"], false);
+    assert!(
+        after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == nearby_id)
+    );
+    assert_exact_replay(session);
 }
