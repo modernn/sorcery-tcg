@@ -14071,6 +14071,51 @@
         "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
         "testName": "rule_catalog_0608_random_bolt_lets_ward_absorb_the_random_hit"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0609",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic kills only a wounded minion in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_0609_fatality_kills_a_wounded_minion_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0610",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers no target when every minion in the caster region is healthy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy"
+      }
     }
   ]
 }
