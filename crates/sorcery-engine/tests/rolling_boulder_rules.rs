@@ -1,5 +1,6 @@
-//! Direct proofs for Rolling Boulder path push damage (RULE-CATALOG-0145) and a
-//! carried Boulder relocating with its pusher (RULE-CATALOG-1142).
+//! Direct proofs for Rolling Boulder path push damage (RULE-CATALOG-0145), a
+//! carried Boulder relocating with its pusher (RULE-CATALOG-1142), and roll
+//! activation withheld during deathrite-order (RULE-CATALOG-1143).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -118,6 +119,29 @@ fn accept_where_label(
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -293,6 +317,162 @@ fn roll_paths(session: &Session, boulder: &str, pusher: &str) -> Vec<(String, Ve
             )
         })
         .collect()
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    minion(json!({
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "summonToAnySite": true,
+    }))
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+fn deathrite_roll_manifest(seed: u32) -> String {
+    let fixture = "rolling-boulder-deathrite-withheld";
+    let thresholds = json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+    let cards = json!({
+        "boulder-north-avatar": avatar(),
+        "boulder-north-site": { "cardType": "site", "elements": ["earth"] },
+        "boulder-pusher": minion(json!({
+            "defense": 5,
+            "lanceCount": 1,
+            "lethal": true,
+            "stealth": true,
+        })),
+        "boulder-south-avatar": avatar(),
+        "boulder-south-site": { "cardType": "site", "elements": ["earth"] },
+        "north-rain": rain(),
+        "rolling-boulder": {
+            "cardType": "artifact",
+            "manaCost": 0,
+            "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath": 4,
+            "thresholds": thresholds,
+        },
+        "south-deathrite": deathrite_minion(),
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["boulder-north-site"; 6],
+            "avatar": "boulder-north-avatar",
+            "spellbook": [
+                "boulder-pusher",
+                "rolling-boulder",
+                "north-rain",
+                "north-rain",
+                "boulder-pusher",
+                "north-rain",
+            ],
+        },
+        "south": {
+            "atlas": vec!["boulder-south-site"; 6],
+            "avatar": "boulder-south-avatar",
+            "spellbook": vec!["south-deathrite"; 6],
+        },
+    });
+    manifest(&format!("synthetic-{fixture}-v1"), &cards, &decks, seed)
+}
+
+struct PendingDeathriteRollSetup {
+    boulder: String,
+    deathrite_ids: [String; 2],
+    pusher: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_roll(encoded: &str) -> Option<PendingDeathriteRollSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let pusher = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "boulder-pusher"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?
+    .0["cardInstanceId"]
+        .as_str()?
+        .to_owned();
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "rolling-boulder"
+            && (descriptor.get("bearer").is_none() || descriptor["bearer"].is_null())
+            && descriptor["cell"] == "C4"
+    })?;
+    let boulder = state(&session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()?
+        .to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if roll_paths(&session, &boulder, &pusher).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    realm_unit(&state(&session), &pusher)?;
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteRollSetup {
+        boulder,
+        deathrite_ids,
+        pusher,
+        session,
+    })
+}
+
+fn deathrite_roll_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_roll_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_roll(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with a ready Rolling Boulder pusher")
 }
 
 #[test]
@@ -478,4 +658,79 @@ fn rule_catalog_1142_rolling_boulder_carried_artifact_relocates_with_pusher() {
     assert_eq!(carried_artifact["region"], "surface");
     assert!(carried_artifact.get("bearer").is_none());
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1143_activate_artifact_roll_damage_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_roll_seed_with(1143);
+    let mut setup = try_pending_deathrite_with_ready_roll(&encoded)
+        .expect("complete activate-artifact-roll-damage Deathrite withheld setup");
+    let boulder = setup.boulder.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let pusher = setup.pusher.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        realm_unit(&paused, &pusher).expect("ready pusher")["cardId"],
+        "boulder-pusher"
+    );
+    assert_eq!(paused["realm"]["artifacts"][0]["instanceId"], boulder);
+    assert!(roll_paths(session, &boulder, &pusher).is_empty());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-artifact-roll-damage")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(
+        realm_unit(&resumed, &pusher).expect("ready pusher")["cardId"],
+        "boulder-pusher"
+    );
+    assert_eq!(resumed["realm"]["artifacts"][0]["instanceId"], boulder);
+    assert!(!roll_paths(session, &boulder, &pusher).is_empty());
+
+    let (_, rolled) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-artifact-roll-damage"
+            && descriptor["artifactInstanceId"] == boulder
+            && descriptor["pusher"]["instanceId"] == pusher
+    });
+    assert_eq!(
+        rolled.events[0].event_type.as_str(),
+        "artifact-roll-damage-activated"
+    );
+    assert_exact_replay(session);
 }
