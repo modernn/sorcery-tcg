@@ -2,8 +2,10 @@
 //! temporary Voidwalk a Planar Gate lends until a minion leaves the void (RULE-CATALOG-0120), the
 //! outer-column cast restriction that filters those summons but not movement (RULE-CATALOG-0121),
 //! the settlement that kills inhospitable minions and banishes stranded void occupants
-//! (RULE-CATALOG-0050), and the loose Artifacts a newly played site lifts out of the void it
-//! covers (RULE-CATALOG-0051).
+//! (RULE-CATALOG-0050), the loose Artifacts a newly played site lifts out of the void it
+//! covers (RULE-CATALOG-0051), oversized Voidwalk (RULE-CATALOG-0316–0317), flooded Secret Tunnel
+//! hops (RULE-CATALOG-0902), and state-based void banishment when a site covers part of a 2×2
+//! footprint (RULE-CATALOG-0918).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -217,6 +219,17 @@ fn draw_spell(session: &mut Session) {
 fn pass_turn(session: &mut Session) {
     end_turn(session);
     draw_spell(session);
+}
+
+fn draw_atlas(session: &mut Session) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn pass_turn_with_site_draw(session: &mut Session) {
+    end_turn(session);
+    draw_atlas(session);
 }
 
 fn voidwalk_cards(voidwalker: &Value, north_site: &Value) -> Value {
@@ -907,6 +920,44 @@ fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surf
             &json!(["A2", "A3", "B2", "B3"])
         )
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0918_playing_site_on_void_square_banishes_oversized_voidwalk_footprint() {
+    let cards = voidwalk_cards(&oversized_voidwalker(), &site(&["earth"]));
+    let mut session = Session::new(&manifest(141, &cards, "north-site", &["north-spell"; 8]))
+        .expect("valid oversized void site-cover scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    let (summoned, _) = accept_where(
+        &mut session,
+        is_square_void_summon_at("A1", &["A1", "A2", "B1", "B2"]),
+    );
+    let giant = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned identity")
+        .to_owned();
+    pass_turn(&mut session);
+    play_site(&mut session, "C1");
+    pass_turn_with_site_draw(&mut session);
+    play_site(&mut session, "B4");
+    pass_turn_with_site_draw(&mut session);
+    play_site(&mut session, "C2");
+    pass_turn_with_site_draw(&mut session);
+    play_site(&mut session, "B3");
+    pass_turn_with_site_draw(&mut session);
+    play_site(&mut session, "D1");
+    pass_turn_with_site_draw(&mut session);
+    // Cover a non-anchor void cell the 2×2 still occupies; settlement banishes the stranded walker.
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B2"
+    });
+    assert_eq!(event_types(&receipt), ["site-played", "minion-banished"]);
+    let after = state(&session);
+    assert!(realm_unit(&after, &giant).is_none());
+    assert!(!in_cemetery(&after, "north", &giant));
     assert_exact_replay(&session);
 }
 
