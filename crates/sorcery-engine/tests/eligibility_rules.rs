@@ -3,7 +3,10 @@
 use serde_json::{Value, json};
 use sorcery_engine::batch::{BatchClassification, MAX_GAME_ACTIONS};
 use sorcery_engine::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
-use sorcery_engine::eligibility::{EligibilityReason, TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH};
+use sorcery_engine::eligibility::{
+    EligibilityReason, TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
+    eligibility_policy_for_manifest_jsons,
+};
 use sorcery_engine::game_record::record_policy_game;
 use sorcery_engine::game_record::record_synthetic_demo;
 use sorcery_engine::policy::{BASELINE_POLICY_DECK_ID, baseline_policy_snapshot};
@@ -71,4 +74,19 @@ fn rule_catalog_0881_private_local_allowlisted_manifest_classifies_ranked() {
         BatchClassification::Ranked
     );
     assert!(record.eligibility.reasons.is_empty());
+}
+
+#[test]
+fn rule_catalog_0882_mixed_manifest_batch_keeps_unverified_authority_policy() {
+    let verified = verified_private_local_manifest(31).expect("verified manifest");
+    let synthetic = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+
+    let verified_only = eligibility_policy_for_manifest_jsons([verified.as_str()]);
+    assert!(verified_only.authority_verified);
+
+    let mixed = eligibility_policy_for_manifest_jsons([verified.as_str(), synthetic.as_str()]);
+    assert!(!mixed.authority_verified);
+
+    let synthetic_only = eligibility_policy_for_manifest_jsons([synthetic.as_str()]);
+    assert!(!synthetic_only.authority_verified);
 }

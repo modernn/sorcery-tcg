@@ -20400,6 +20400,21 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0881_private_local_allowlisted_manifest_classifies_ranked"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0882",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Batch, schedule, and gauntlet eligibility treat authority as verified only when every bound manifest uses an allowlisted private-local hash.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0882_mixed_manifest_batch_keeps_unverified_authority_policy"
+      }
     }
   ]
 }
