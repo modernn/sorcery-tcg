@@ -489,7 +489,7 @@ fn takes_less_damage_should_prevent_each_simultaneous_lethal_source() {
 }
 
 #[test]
-fn joining_defend_should_preserve_stealth_until_fight_interaction() {
+fn rule_catalog_0750_joining_defend_preserves_stealth_until_fight_interaction() {
     let mut stealthed_defender = minion(1, false);
     stealthed_defender["stealth"] = json!(true);
     let AttackSetup {

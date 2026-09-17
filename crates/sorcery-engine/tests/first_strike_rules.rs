@@ -501,7 +501,7 @@ fn rule_catalog_0206_printed_first_strike_should_resolve_early_attacking_and_def
     clippy::too_many_lines,
     reason = "the direct continuation proof keeps allocation, ordering, resume, and event order together"
 )]
-fn first_strike_deathrites_should_pause_order_and_resume_normal_return_once() {
+fn rule_catalog_0749_first_strike_deathrites_pause_order_and_resume_return_once() {
     let deathrite = minion(json!({
         "attack": 2,
         "deathriteDamageEachUnitHere": 1,

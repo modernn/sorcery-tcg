@@ -970,7 +970,7 @@ fn a_siege_ballista_should_shoot_the_ally_that_paid_its_second_tap() {
 }
 
 #[test]
-fn a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally() {
+fn rule_catalog_0751_siege_ballista_requires_ready_bearer_and_second_ally() {
     // Tapping the bearer for mana spends the first cost, so the Ballista offers nothing even with
     // two ready allies still standing on its cell.
     let mut spent_bearer =
@@ -1004,7 +1004,7 @@ fn a_siege_ballista_should_require_both_its_bearer_and_a_second_ready_ally() {
 }
 
 #[test]
-fn a_siege_ballista_should_not_fire_while_its_bearer_is_disabled() {
+fn rule_catalog_0752_siege_ballista_cannot_fire_while_bearer_is_disabled() {
     let mut value: Value =
         serde_json::from_str(&ballista_scenario()).expect("Siege Ballista scenario JSON");
     value

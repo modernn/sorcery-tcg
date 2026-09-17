@@ -17592,6 +17592,96 @@
         "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
         "testName": "rule_catalog_0748_fixed_projectile_applies_ward_lethal_and_ordinary_death"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0749",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Attacking first strike pauses on ordered Deathrites, lets each controller commit source order, then resumes normal return strikes exactly once.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "deathriteDamageEachUnitHere"
+      ],
+      "actionHints": [
+        "allocate-strike",
+        "order-deathrites",
+        "defend"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated",
+        "minion-died",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0749_first_strike_deathrites_pause_order_and_resume_return_once"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0750",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Stealthed minion keeps Stealth while joining Defend and loses it only when the fight interaction closes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [
+        "defend",
+        "close-defend"
+      ],
+      "eventHints": [
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0750_joining_defend_preserves_stealth_until_fight_interaction"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0751",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Siege Ballista activation requires a ready bearer tap plus a second ready ally at the same location; neither a tapped bearer nor a lone ready bearer suffices.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageUnitWithinTwoSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-damage"
+      ],
+      "eventHints": [
+        "artifact-damage-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0751_siege_ballista_requires_ready_bearer_and_second_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0752",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A disable-until-damaged bearer cannot pay Siege Ballista's first tap, so the carried Artifact offers no activation.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDisableSelfUntilDamaged",
+        "tapBearerAndAnotherAllyHereToDamageUnitWithinTwoSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-damage"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0752_siege_ballista_cannot_fire_while_bearer_is_disabled"
+      }
     }
   ]
 }
