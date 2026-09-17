@@ -1,3 +1,6 @@
+//! Direct proofs for first-strike combat (RULE-CATALOG-0204–0206, RULE-CATALOG-0744,
+//! RULE-CATALOG-0749, RULE-CATALOG-0778).
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -289,7 +292,7 @@ fn resolve_single_target(mut setup: AttackSetup) -> AttackSetup {
 }
 
 #[test]
-fn attacking_only_first_strike_should_kill_before_return_and_be_inactive_defending() {
+fn rule_catalog_0778_attacking_first_strike_kills_before_return_inactive_defending() {
     let vanilla = minion(json!({ "attack": 3, "defense": 3 }));
     let first_strike = minion(json!({
         "attack": 3,
