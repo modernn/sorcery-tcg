@@ -1,5 +1,5 @@
 //! Direct proofs for draw-then-may-play filtered site Magic (RULE-CATALOG-0525–0526,
-//! RULE-CATALOG-1102).
+//! RULE-CATALOG-1102-1103).
 //!
 //! Ordinary Magic can draw a site and then offer an extra land or water site
 //! play. The extra play is independent of the Avatar's once-per-turn site play:
@@ -526,5 +526,133 @@ fn rule_catalog_1102_draw_then_may_play_site_withheld_during_pending_deathrite_o
     let after = state(session);
     assert_eq!(after["phase"], "filtered-site-play");
     assert_eq!(after["pendingFilteredSitePlay"]["water"], false);
+    assert_exact_replay(session);
+}
+
+fn deathrite_filtered_water_site_play_manifest(seed: u32) -> String {
+    let fixture = "filtered-site-play-water-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw": draw_then_play(true),
+            "north-earth": site(&["earth"]),
+            "north-rain": rain_spell(),
+            "north-water": site(&["water"]),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(&["earth"]),
+        },
+        "decks": {
+            "north": {
+                "atlas": [
+                    "north-earth",
+                    "north-earth",
+                    "north-water",
+                    "north-water",
+                    "north-earth",
+                    "north-water",
+                ],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-draw",
+                    "north-rain",
+                    "north-rain",
+                    "north-draw",
+                    "north-rain",
+                    "north-draw",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn try_pending_deathrite_with_water_filtered_site_play(
+    encoded: &str,
+) -> Option<PendingDeathriteFilteredSitePlaySetup> {
+    try_pending_deathrite_with_filtered_site_play(encoded)
+}
+
+fn deathrite_filtered_water_site_play_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_filtered_water_site_play_manifest)
+        .find(|candidate| try_pending_deathrite_with_water_filtered_site_play(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with water draw-then-may-play Magic in hand",
+        )
+}
+
+#[test]
+fn rule_catalog_1103_draw_then_may_play_water_site_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_filtered_water_site_play_seed_with(1103);
+    let mut setup = try_pending_deathrite_with_water_filtered_site_play(&encoded)
+        .expect("complete water draw-then-may-play Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert_eq!(draw_casts(session), 0);
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(draw_casts(session) >= 1);
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "site-drawn"]);
+    let after = state(session);
+    assert_eq!(after["phase"], "filtered-site-play");
+    assert_eq!(after["pendingFilteredSitePlay"]["water"], true);
     assert_exact_replay(session);
 }
