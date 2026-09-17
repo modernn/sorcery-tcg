@@ -1,5 +1,5 @@
 //! Direct proofs for damage-each-unit-at-location-within-two-steps Magic
-//! (RULE-CATALOG-0589–0590).
+//! (RULE-CATALOG-0589–0590, RULE-CATALOG-0716).
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal steps
 //! of the caster footprint and deals 3 damage to every Unit there. Ward
@@ -404,4 +404,9 @@ fn rule_catalog_0590_empty_offered_location_is_a_paid_noop() {
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
     assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region();
 }

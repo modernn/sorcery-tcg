@@ -16761,6 +16761,32 @@
         "file": "crates/sorcery-engine/tests/footprint_rules.rs",
         "testName": "rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0716",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic measures connected surface locations from the caster footprint. With a partial B2\u2013C4 site cluster, only connected cells within two steps are offered. Casting at C2 damages a 2\u00d72 surface minion there but not a Burrowing minion at the same cell underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps",
+        "occupiesSquareArea",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region"
+      }
     }
   ]
 }

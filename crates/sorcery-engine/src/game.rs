@@ -27649,7 +27649,178 @@ pub mod catalog_proofs {
         );
         assert_eq!(outcomes[0].1["cell"], json!(contested));
     }
-}
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one internal proof keeps measured topology, oversized footprints, and region isolation together"
+    )]
+    pub fn rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region()
+     {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "damageEachUnitAtLocationWithinTwoSteps": 3,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("north-site-{ordinal}")]["elements"] = json!(["fire"]);
+            }
+            manifest["cards"]["south-spell-1"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 10,
+                "manaCost": 0,
+                "occupiesSquareArea": 2,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["south-spell-2"] = json!({
+                "attack": 1,
+                "burrowing": true,
+                "cardType": "minion",
+                "defense": 10,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Minor Explosion game");
+        let cells =
+            ["B2", "B3", "C2", "C3", "C4"].map(|cell| Cell::parse(cell).expect("fixture cell"));
+        let mut site_cards = Vec::new();
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        while site_cards.len() < cells.len() {
+            site_cards.push(if north.hand_atlas.is_empty() {
+                north.atlas.remove(0)
+            } else {
+                north.hand_atlas.remove(0)
+            });
+        }
+        game.position.sites.fill(None);
+        for (cell, card) in [cells[1], cells[2], cells[4]]
+            .into_iter()
+            .zip(site_cards.drain(..3))
+        {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        let start = Location {
+            cell: cells[4],
+            region: Region::Surface,
+        };
+        assert_eq!(game.locations_within_measured_steps(start, 2), [start]);
+
+        for (cell, card) in [cells[0], cells[3]].into_iter().zip(site_cards) {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        assert_eq!(
+            game.locations_within_measured_steps(start, 2),
+            [cells[1], cells[2], cells[3], cells[4]].map(|cell| Location {
+                cell,
+                region: Region::Surface,
+            })
+        );
+
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("target card"),
+                )
+                .expect("target card index"),
+            )
+        };
+        let surface_id = "sha256:7777777777777777777777777777777777777777777777777777777777777777";
+        let underground_id =
+            "sha256:8888888888888888888888888888888888888888888888888888888888888888";
+        let area = Cell::SQUARE_AREAS
+            .into_iter()
+            .find(|area| area[0] == cells[0])
+            .expect("B2 footprint");
+        game.position.units.push(test_minion(
+            card_id("south-spell-1"),
+            surface_id,
+            Seat::South,
+            area[0],
+            Some(area),
+        ));
+        let mut underground = test_minion(
+            card_id("south-spell-2"),
+            underground_id,
+            Seat::South,
+            cells[2],
+            None,
+        );
+        underground.region = Region::Underground;
+        game.position.units.push(underground);
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cells[4];
+        north.domain_established = true;
+        north.mana = 10;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let action = game
+            .legal_actions()
+            .expect("Minor Explosion actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_location: Some(Location { cell, region: Region::Surface }),
+                        ..
+                    } if cell == cells[2]
+                )
+            })
+            .expect("C2 Minor Explosion");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued Minor Explosion");
+
+        assert!(random_draws.is_empty());
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|(event_type, _)| event_type == "magic-damage-allocated")
+                .map(|(_, payload)| payload["targetInstanceId"].clone())
+                .collect::<Vec<_>>(),
+            [json!(surface_id)]
+        );
+        assert_eq!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == surface_id)
+                .expect("surface oversized minion")
+                .damage,
+            3
+        );
+        assert_eq!(
+            game.position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == underground_id)
+                .expect("underground minion")
+                .damage,
+            0
+        );
+    }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -28062,176 +28233,6 @@ mod tests {
                 .any(|card| card.instance_id == payment_instance_id)
         );
         assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one internal proof keeps measured topology, oversized footprints, and region isolation together"
-    )]
-    fn minor_explosion_should_measure_connected_locations_and_hit_only_the_target_region() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for ordinal in 1..=50 {
-                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                    "cardType": "magic",
-                    "damageEachUnitAtLocationWithinTwoSteps": 3,
-                    "manaCost": 0,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-            for ordinal in 1..=30 {
-                manifest["cards"][format!("north-site-{ordinal}")]["elements"] = json!(["fire"]);
-            }
-            manifest["cards"]["south-spell-1"] = json!({
-                "attack": 1,
-                "cardType": "minion",
-                "defense": 10,
-                "manaCost": 0,
-                "occupiesSquareArea": 2,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-            manifest["cards"]["south-spell-2"] = json!({
-                "attack": 1,
-                "burrowing": true,
-                "cardType": "minion",
-                "defense": 10,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Minor Explosion game");
-        let cells =
-            ["B2", "B3", "C2", "C3", "C4"].map(|cell| Cell::parse(cell).expect("fixture cell"));
-        let mut site_cards = Vec::new();
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        while site_cards.len() < cells.len() {
-            site_cards.push(if north.hand_atlas.is_empty() {
-                north.atlas.remove(0)
-            } else {
-                north.hand_atlas.remove(0)
-            });
-        }
-        game.position.sites.fill(None);
-        for (cell, card) in [cells[1], cells[2], cells[4]]
-            .into_iter()
-            .zip(site_cards.drain(..3))
-        {
-            game.position.sites[cell.index()] = Some(SitePosition {
-                card,
-                controller: Seat::North,
-                last_flight_turn: None,
-                warded: false,
-            });
-        }
-        let start = Location {
-            cell: cells[4],
-            region: Region::Surface,
-        };
-        assert_eq!(game.locations_within_measured_steps(start, 2), [start]);
-
-        for (cell, card) in [cells[0], cells[3]].into_iter().zip(site_cards) {
-            game.position.sites[cell.index()] = Some(SitePosition {
-                card,
-                controller: Seat::North,
-                last_flight_turn: None,
-                warded: false,
-            });
-        }
-        assert_eq!(
-            game.locations_within_measured_steps(start, 2),
-            [cells[1], cells[2], cells[3], cells[4]].map(|cell| Location {
-                cell,
-                region: Region::Surface,
-            })
-        );
-
-        let card_id = |id: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == id)
-                        .expect("target card"),
-                )
-                .expect("target card index"),
-            )
-        };
-        let surface_id = "sha256:7777777777777777777777777777777777777777777777777777777777777777";
-        let underground_id =
-            "sha256:8888888888888888888888888888888888888888888888888888888888888888";
-        let area = Cell::SQUARE_AREAS
-            .into_iter()
-            .find(|area| area[0] == cells[0])
-            .expect("B2 footprint");
-        game.position.units.push(test_minion(
-            card_id("south-spell-1"),
-            surface_id,
-            Seat::South,
-            area[0],
-            Some(area),
-        ));
-        let mut underground = test_minion(
-            card_id("south-spell-2"),
-            underground_id,
-            Seat::South,
-            cells[2],
-            None,
-        );
-        underground.region = Region::Underground;
-        game.position.units.push(underground);
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.location = cells[4];
-        north.domain_established = true;
-        north.mana = 10;
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        let action = game
-            .legal_actions()
-            .expect("Minor Explosion actions")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::CastMagic {
-                        target_location: Some(Location { cell, region: Region::Surface }),
-                        ..
-                    } if cell == cells[2]
-                )
-            })
-            .expect("C2 Minor Explosion");
-        let (outcomes, random_draws) = game
-            .apply_action_recorded(&action)
-            .expect("issued Minor Explosion");
-
-        assert!(random_draws.is_empty());
-        assert_eq!(
-            outcomes
-                .iter()
-                .filter(|(event_type, _)| event_type == "magic-damage-allocated")
-                .map(|(_, payload)| payload["targetInstanceId"].clone())
-                .collect::<Vec<_>>(),
-            [json!(surface_id)]
-        );
-        assert_eq!(
-            game.position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id.as_str() == surface_id)
-                .expect("surface oversized minion")
-                .damage,
-            3
-        );
-        assert_eq!(
-            game.position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id.as_str() == underground_id)
-                .expect("underground minion")
-                .damage,
-            0
-        );
     }
 
     #[expect(
