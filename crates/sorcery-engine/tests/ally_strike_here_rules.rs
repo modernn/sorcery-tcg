@@ -1,5 +1,8 @@
 //! Direct proofs for ally-strikes-each-enemy-at-its-location Magic
-//! (RULE-CATALOG-0557–0558).
+//! (RULE-CATALOG-0557–0558, 1011).
+//!
+//! 1011 covers ally strike here killing a Deathrite minion: the controller
+//! draws a site and magic-resolved only appears after deathrite settlement.
 //!
 //! Ordinary Magic chooses a controlled ally. That ally strikes every
 //! enemy sharing its current cell and region without taking a step. No
@@ -48,6 +51,18 @@ fn raider() -> Value {
     })
 }
 
+fn deathrite_raider() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn spin() -> Value {
     json!({
         "allyStrikesEachEnemyAtItsLocation": true,
@@ -64,6 +79,14 @@ fn finish_manifest(mut value: Value) -> String {
 }
 
 fn spin_manifest(seed: u32) -> String {
+    spin_manifest_with_raider(seed, raider())
+}
+
+fn spin_deathrite_manifest(seed: u32) -> String {
+    spin_manifest_with_raider(seed, deathrite_raider())
+}
+
+fn spin_manifest_with_raider(seed: u32, south_raider: Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "ally-strike-here" }))
@@ -77,7 +100,7 @@ fn spin_manifest(seed: u32) -> String {
             "north-site": earth_site(),
             "north-spin": spin(),
             "south-avatar": avatar(),
-            "south-raider": raider(),
+            "south-raider": south_raider,
             "south-site": earth_site(),
         },
         "decks": {
@@ -204,13 +227,28 @@ fn spin_ally_ids(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
+    seed_with_manifest(required, spin_manifest)
+}
+
+fn seed_with_deathrite(required: &[&str]) -> String {
+    seed_with_manifest(required, spin_deathrite_manifest)
+}
+
+fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
     (557..557 + 256)
-        .map(spin_manifest)
+        .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn south_plays_c1(session: &mut Session) {
@@ -361,5 +399,84 @@ fn rule_catalog_0558_ally_strike_here_is_a_paid_noop_without_an_enemy() {
     assert_eq!(event_types(&resolved), ["magic-cast", "magic-resolved"]);
     assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
     assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1011_ally_strike_here_deathrite_draws_for_minion_controller_on_kill() {
+    let encoded = (1011..1011 + 256)
+        .map(spin_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-ally")
+                && hand.iter().any(|card| card == "north-spin")
+        })
+        .unwrap_or_else(|| seed_with_deathrite(&["north-ally", "north-spin"]));
+    let mut session = opening_main(&encoded);
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let (_, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, struck) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&struck),
+        [
+            "magic-cast",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(struck.events[1].payload["targetInstanceId"], nearby_id);
+    let drawn = struck
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], nearby_id);
+    let site_drawn = event_types(&struck)
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = event_types(&struck)
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(event_types(&struck).last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert_eq!(unit(&finished, &ally_id)["damage"], 0);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == nearby_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
