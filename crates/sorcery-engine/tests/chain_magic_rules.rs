@@ -3659,22 +3659,17 @@ fn try_setup_spellcaster_begin_avatar_extend_deathrite_hop(
 }
 
 #[test]
-fn rule_catalog_0996_chain_magic_avatar_then_deathrite_minion_two_hop_deathrite_draws_before_magic_resolved() {
+fn rule_catalog_0996_chain_magic_avatar_then_deathrite_minion_two_hop_deathrite_draws_before_magic_resolved()
+ {
     let encoded = (996..996 + 512)
         .map(spellcaster_avatar_deathrite_manifest)
         .find(|candidate| try_setup_spellcaster_begin_avatar_extend_deathrite_hop(candidate).is_some())
         .expect(
             "bounded seed with Chain Magic, printed Spellcaster at C2, nearby South Avatar at C1, and nearby South Deathrite at B1 for extend",
         );
-    let (
-        mut session,
-        chain_id,
-        caster_id,
-        south_avatar_id,
-        south_deathrite_id,
-        life_before,
-    ) = try_setup_spellcaster_begin_avatar_extend_deathrite_hop(&encoded)
-        .expect("spellcaster begin avatar extend deathrite hop setup");
+    let (mut session, chain_id, caster_id, south_avatar_id, south_deathrite_id, life_before) =
+        try_setup_spellcaster_begin_avatar_extend_deathrite_hop(&encoded)
+            .expect("spellcaster begin avatar extend deathrite hop setup");
     let before = state(&session);
     let south_atlas = atlas_len(&before, "south");
     assert_eq!(

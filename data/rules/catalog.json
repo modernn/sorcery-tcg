@@ -23057,6 +23057,246 @@
         "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
         "testName": "rule_catalog_0992_heal_target_minion_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0993",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pull-adjacent-aboveground-unit-to-target-water-site then draw-spell Magic ends the game in a deck-out when the follow-up draw empties the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "unit-teleported",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_0993_riptide_pull_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0994",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "teleport-nearby-ally-then-draw-card Magic ends the game in a deck-out when the chosen deck is empty after the teleport resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "unit-teleported",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_0994_blink_teleport_then_draw_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0995",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "On a thin Atlas and Spellbook, start-turn draw-sites-then-draw-spells draws the last site before the last spell, then proceeds to Draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0995_start_turn_draw_sites_then_draw_spells_on_thin_libraries"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0996",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "begin-chain-magic on a nearby enemy Avatar, extend-chain-magic on a nearby Deathrite minion, then resolve-chain-magic: the Deathrite controller draws a site before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "deathriteDrawSite",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0996_chain_magic_avatar_then_deathrite_minion_two_hop_deathrite_draws_before_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0997",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, end-turn and summon-minion are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDamageEachUnitHere"
+      ],
+      "actionHints": [
+        "end-turn",
+        "summon-minion",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0997_end_turn_and_summon_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0998",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged strike that kills a Deathrite minion draws a site for that minion's controller in the same strike receipt.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "ranged"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "strike-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0998_ranged_strike_deathrite_draws_for_minion_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0999",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, tap-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
+        "testName": "rule_catalog_0999_tap_target_minion_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1000",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed first-strike attacker with Deathrite pauses in deathrite-order during Attack, resolves the chain once, then resumes the remaining strike window exactly once.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDamageEachUnitHere",
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "declare-attack",
+        "allocate-strike",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated",
+        "minion-died",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_1000_printed_first_strike_attacking_deathrite_pauses_order_and_resumes_once"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1001",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A batch mixing one allowlisted private-local manifest and one synthetic manifest keeps every finished game unranked with unverified authority, including the allowlisted record alone.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1001_mixed_allowlisted_private_local_and_synthetic_batch_stays_unranked_for_both"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1002",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A drag projectile that kills a Deathrite minion during ordered movement draws a site for that minion's controller before the drag path resumes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "dragProjectile"
+      ],
+      "actionHints": [
+        "activate-projectile",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "site-drawn",
+        "minion-died",
+        "unit-dragged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
+        "testName": "rule_catalog_1002_drag_projectile_deathrite_draws_for_minion_controller_on_kill"
+      }
     }
   ]
 }

@@ -2980,11 +2980,20 @@ fn rule_catalog_0983_start_turn_draw_sites_then_teleport_draws_last_site_before_
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "thin-library cross-zone ordering proof keeps setup and assertions together"
+)]
 fn rule_catalog_0995_start_turn_draw_sites_then_draw_spells_on_thin_libraries() {
     let mut session = draw_sites_draw_spells_stack_start_turn(
         995,
         &["north-site"; 4],
-        &["north-spell-card", "north-source", "north-source", "north-source"],
+        &[
+            "north-spell-card",
+            "north-source",
+            "north-source",
+            "north-source",
+        ],
     );
     assert_eq!(state(&session)["phase"], "start-turn");
     let before = state(&session);

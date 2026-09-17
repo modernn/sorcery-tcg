@@ -478,15 +478,13 @@ fn rule_catalog_0999_tap_target_minion_withheld_during_pending_deathrite_order()
     let paused = state(session);
     assert_eq!(paused["phase"], "deathrite-order");
     assert_eq!(paused["decisionSeat"], "south");
-    assert!(
-        deathrite_ids
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
             .iter()
-            .all(|instance_id| paused["realm"]["units"]
-                .as_array()
-                .expect("realm units")
-                .iter()
-                .all(|unit| unit["instanceId"] != *instance_id))
-    );
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
     assert_eq!(realm_unit(&paused, &visitor_id)["tapped"], false);
     assert!(
         session

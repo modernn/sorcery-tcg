@@ -331,8 +331,7 @@ fn rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_s
 }
 
 #[test]
-fn rule_catalog_1001_mixed_allowlisted_private_local_and_synthetic_batch_stays_unranked_for_both()
-{
+fn rule_catalog_1001_mixed_allowlisted_private_local_and_synthetic_batch_stays_unranked_for_both() {
     let allowlisted_manifest = verified_private_local_manifest(31).expect("allowlisted manifest");
     let synthetic_manifest = synthetic_demo_manifest_json(32).expect("synthetic manifest");
 
