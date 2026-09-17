@@ -1,9 +1,11 @@
-//! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709).
+//! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
+//! 0885–0886).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
 //! every chosen unit in one resolve. 0709 is the edge slice: paid Chain Magic
 //! is suppressed without enough mana, and hops cannot leave the caster region.
+//! 0885–0886 cover pay-life additional costs on Chain Magic resolution.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -49,6 +51,61 @@ fn chain(mana_cost: u8) -> Value {
         "manaCost": mana_cost,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
+}
+
+fn avatar_with_life(life: u8) -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": life,
+    })
+}
+
+fn pay_life_chain(life_cost: u8) -> Value {
+    json!({
+        "cardType": "magic",
+        "damageChainNearbyUnits": true,
+        "manaCost": 0,
+        "payLifeAsAdditionalCost": life_cost,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn pay_life_chain_manifest(seed: u32, life: u8) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-pay-life" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-pay-life-v1",
+        },
+        "cards": {
+            "north-avatar": avatar_with_life(life),
+            "north-chain": pay_life_chain(2),
+            "north-site": site(),
+            "south-avatar": avatar_with_life(20),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-chain"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn finish_manifest(mut value: Value) -> String {
@@ -520,5 +577,126 @@ fn rule_catalog_0709_chain_magic_requires_mana_and_same_region_hops() {
     assert!(extensions.contains(&avatar_id));
     assert!(!extensions.contains(&burrower_id));
     assert!(!extensions.contains(&target_id));
+    assert_exact_replay(&session);
+}
+
+fn setup_pay_life_chain(life: u8, seed: u32) -> (Session, String, String) {
+    let mut session = Session::new(&pay_life_chain_manifest(seed, life))
+        .expect("valid pay-life Chain Magic session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (target, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let before = state(&session);
+    let chain_id = hand_instance(&before, "north-chain");
+    let target_id = target["cardInstanceId"]
+        .as_str()
+        .expect("south minion identity")
+        .to_owned();
+    (session, chain_id, target_id)
+}
+
+fn offers_begin_pay_life_chain(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardId"] == "north-chain"
+        })
+}
+
+#[test]
+fn rule_catalog_0885_chain_magic_pay_life_is_paid_before_the_cast_resolves() {
+    let (mut session, chain_id, target_id) = setup_pay_life_chain(20, 885);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "life-paid",
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(resolved.events[0].payload["amount"], 2);
+    assert_eq!(resolved.events[0].payload["life"], 18);
+    assert_eq!(resolved.events[1].payload["lifePaid"], 2);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0886_deaths_door_cannot_begin_pay_life_chain_magic() {
+    let blocked = setup_pay_life_chain(1, 886).0;
+    assert_eq!(state(&blocked)["players"]["north"]["avatar"]["life"], 1);
+    assert!(!offers_begin_pay_life_chain(&blocked));
+    assert_exact_replay(&blocked);
+
+    let (mut session, chain_id, target_id) = setup_pay_life_chain(2, 887);
+    assert!(offers_begin_pay_life_chain(&session));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "life-paid",
+            "avatar-reached-deaths-door",
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
+    assert!(!state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
+    assert!(!offers_begin_pay_life_chain(&session));
     assert_exact_replay(&session);
 }

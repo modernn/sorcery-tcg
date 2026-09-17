@@ -2400,17 +2400,23 @@ impl Game {
             u64::try_from(pending.targets.len()).map_err(|_| GameError::IllegalAction)?;
         let mana_paid = facts.mana_cost
             + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
-        let finish = ActionDescriptor::ResolveChainMagic;
-        self.push_action(
-            actions,
-            finish,
-            format!(
-                "Cast {} through {} chosen unit{} ({mana_paid} mana)",
-                definition.id,
-                pending.targets.len(),
-                if pending.targets.len() == 1 { "" } else { "s" }
-            ),
-        );
+        let can_resolve = u64::from(player.mana) >= mana_paid
+            && facts.pay_life_as_additional_cost.is_none_or(|amount| {
+                player.avatar.life >= u16::from(amount)
+            });
+        if can_resolve {
+            let finish = ActionDescriptor::ResolveChainMagic;
+            self.push_action(
+                actions,
+                finish,
+                format!(
+                    "Cast {} through {} chosen unit{} ({mana_paid} mana)",
+                    definition.id,
+                    pending.targets.len(),
+                    if pending.targets.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
         let next_mana =
             facts.mana_cost + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(chosen_count);
         if u64::from(player.mana) >= next_mana {

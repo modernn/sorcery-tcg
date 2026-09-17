@@ -20445,6 +20445,54 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0884_private_local_non_allowlisted_hash_stays_unverified"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0885",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a pay-life additional cost spends life before magic-cast and resolves the staged chain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "life-paid",
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0885_chain_magic_pay_life_is_paid_before_the_cast_resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0886",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Death's Door cannot begin Chain Magic that requires paying life. Paying the cost to reach Death's Door still resolves the chain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "life-paid",
+        "avatar-reached-deaths-door",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0886_deaths_door_cannot_begin_pay_life_chain_magic"
+      }
     }
   ]
 }
