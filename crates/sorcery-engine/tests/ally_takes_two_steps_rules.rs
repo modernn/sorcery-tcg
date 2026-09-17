@@ -1,8 +1,10 @@
-//! Direct proofs for ally-takes-up-to-two-steps Magic (RULE-CATALOG-0561–0562).
+//! Direct proofs for ally-takes-up-to-two-steps Magic (RULE-CATALOG-0561–0562,
+//! RULE-CATALOG-1049).
 //!
 //! Ordinary Magic chooses a controlled ally and a card-effect destination
 //! within two cardinal steps. Empty cells are not destinations. Stay is a
-//! paid no-op without a step event.
+//! paid no-op without a step event. While Deathrites wait for ordering,
+//! ally-step Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -41,6 +43,27 @@ fn tactical() -> Value {
         "allyTakesUpToTwoSteps": true,
         "cardType": "magic",
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -174,6 +197,13 @@ fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
         .expect("expected realm unit")
 }
 
+fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
 fn tactical_destinations(session: &Session, instance_id: &str) -> Vec<String> {
     let mut cells: Vec<String> = session
         .legal_actions()
@@ -234,6 +264,136 @@ fn lay_two_step_sites(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn deathrite_tactical_manifest(seed: u32) -> String {
+    let fixture = "ally-takes-two-steps-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": fighter(),
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "north-tactical": tactical(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-tactical",
+                    "north-rain",
+                    "north-tactical",
+                    "north-rain",
+                    "north-tactical",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_tactical_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-tactical", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteTacticalSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_ally(encoded: &str) -> Option<PendingDeathriteTacticalSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_tactical_and_rain(&state(&session)) {
+        return None;
+    }
+    lay_two_step_sites(&mut session);
+    if tactical_destinations(&session, &ally_id).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteTacticalSetup {
+        ally_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_tactical_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_tactical_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_ally(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with ally-step Magic in hand")
 }
 
 fn opening_with_path(encoded: &str) -> (Session, String) {
@@ -323,4 +483,75 @@ fn rule_catalog_0562_ally_takes_up_to_two_steps_stay_is_a_paid_noop() {
     assert_eq!(event_types(&resolved), ["magic-cast", "magic-resolved"]);
     assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1049_ally_takes_two_steps_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_tactical_seed_with(1049);
+    let mut setup = try_pending_deathrite_with_ready_ally(&encoded)
+        .expect("complete ally-step Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(realm_unit(&paused, &ally_id).is_some());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(tactical_destinations(session, &ally_id).is_empty());
+    assert_eq!(unit(&paused, &ally_id)["location"], "C4");
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(
+        tactical_destinations(session, &ally_id),
+        ["C2", "C3", "C4"]
+    );
+
+    let (_, stepped) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tactical"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == "C2"
+    });
+    let types = event_types(&stepped);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(types.contains(&"unit-stepped"));
+    assert_eq!(unit(&state(session), &ally_id)["location"], "C2");
+    assert_exact_replay(session);
 }
