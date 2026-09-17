@@ -14017,6 +14017,60 @@
         "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
         "testName": "rule_catalog_0606_rain_of_arrows_lets_ward_absorb_the_damage"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0607",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-random-unit-at-location Magic targets a surface location and deterministically damages one random unit there.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageRandomUnitAtLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
+        "testName": "rule_catalog_0607_random_bolt_damages_one_random_unit_at_the_chosen_location"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0608",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-random-unit-at-location Magic lets Ward absorb the random hit without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageRandomUnitAtLocation",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
+        "testName": "rule_catalog_0608_random_bolt_lets_ward_absorb_the_random_hit"
+      }
     }
   ]
 }
