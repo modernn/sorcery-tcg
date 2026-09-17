@@ -1013,3 +1013,40 @@ fn rule_catalog_1113_play_site_withheld_during_pending_deathrite_order() {
     );
     assert_exact_replay(session);
 }
+
+#[test]
+fn rule_catalog_1171_end_turn_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_heal_seed_with(1171);
+    let mut setup = try_pending_deathrite_with_wounded_visitor(&encoded)
+        .expect("complete end-turn Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "end-turn")
+    );
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "end-turn")
+    );
+    assert_exact_replay(session);
+}
