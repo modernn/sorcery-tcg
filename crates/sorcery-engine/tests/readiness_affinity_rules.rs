@@ -476,6 +476,78 @@ fn rule_catalog_0821_charge_allows_immediate_move_and_attack() {
 }
 
 #[test]
+fn rule_catalog_1114_summoning_sickness_blocks_move_and_attack() {
+    let mut enemy = minion(1, 2);
+    enemy["summonToAnySite"] = json!(true);
+    let manifest = scenario_manifest(
+        54,
+        &json!({
+            "north-minion": minion(1, 2),
+            "south-minion": enemy,
+        }),
+        &["north-minion"; 4],
+        &["south-minion"; 4],
+    );
+    let mut session = Session::new(&manifest).expect("valid summoning-sickness scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-minion"
+            && descriptor["cell"] == "C4"
+    });
+    let instance_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("summoned minion identity")
+        .to_owned();
+
+    let after = state(&session);
+    let unit = after["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("freshly summoned minion");
+    assert_eq!(unit["summoningSickness"], true);
+    assert_eq!(unit["location"], "C4");
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["controller"] == "south" && unit["location"] == "C4"),
+        "an enemy must occupy the summoned minion's cell"
+    );
+    assert!(
+        movement_paths(&session, &instance_id).is_empty(),
+        "a freshly summoned minion without Charge must not be offered Move and Attack"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0824_restricted_attacker_filters_site_targets() {
     let mut restricted = minion(1, 3);
     restricted["cannotAttackSites"] = json!(true);
