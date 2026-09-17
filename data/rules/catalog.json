@@ -14929,6 +14929,55 @@
         "file": "crates/sorcery-engine/tests/target_player_discard_rules.rs",
         "testName": "rule_catalog_0644_target_player_discard_is_a_paid_noop_without_cards"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0645",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic pays its cost, draws the printed number of hidden Spellbook cards in deck order, and enters its owner's cemetery. The opponent sees only the new hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_0645_draw_spells_magic_draws_hidden_spellbook_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0646",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic draws every remaining Spellbook card it can, then loses immediately when a required draw finds an empty library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-drawn",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_0646_draw_spells_magic_exhausts_then_loses_on_empty_library"
+      }
     }
   ]
 }
