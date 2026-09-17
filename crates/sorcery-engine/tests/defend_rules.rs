@@ -653,3 +653,100 @@ fn rule_catalog_0907_defend_simultaneous_lethal_kills_tougher_attacker() {
     );
     exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0938_warded_attacker_absorbs_three_way_simultaneous_return_split() {
+    let mut warded_attacker = attacker(0, 1);
+    warded_attacker["ward"] = json!(true);
+    let AttackSetup {
+        attacker_id,
+        defender_id,
+        extra_defender_ids,
+        mut session,
+        target_id,
+    } = declared_attack(209, &minion(1, false), &warded_attacker, true, 1);
+    let target_id = target_id.expect("original minion target");
+    let extra_defender_id = extra_defender_ids
+        .first()
+        .expect("extra defender identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend" && descriptor["unitInstanceId"] == defender_id
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend" && descriptor["unitInstanceId"] == extra_defender_id
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    let (_, first_allocation) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "allocate-strike" && descriptor["amount"] == 0
+    });
+    let (_, second_allocation) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "allocate-strike" && descriptor["amount"] == 0
+    });
+    let (_, fought) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "allocate-strike" && descriptor["amount"] == 0
+    });
+    let state = &session.replay_value().expect("authoritative state")["state"];
+    let attacker = state["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == attacker_id)
+        .expect("surviving warded attacker");
+    let living_ids: Vec<&str> = state["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .filter_map(|unit| unit["instanceId"].as_str())
+        .collect();
+    let attacker_damage = fought.events.iter().find(|event| {
+        event.event_type == "damage-dealt" && event.payload["instanceId"] == attacker_id
+    });
+    let allocation_amounts: Vec<u64> = first_allocation
+        .events
+        .iter()
+        .chain(&second_allocation.events)
+        .chain(&fought.events)
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| event.payload["amount"].as_u64().expect("allocation amount"))
+        .collect();
+    let event_types: Vec<&str> = fought
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect();
+
+    assert!(
+        state["phase"] == "main"
+            && allocation_amounts == [0, 0, 0]
+            && attacker["damage"] == 0
+            && attacker["warded"] == false
+            && attacker_damage.is_some_and(|event| {
+                event.payload["amount"] == 0
+                    && event.payload["attemptedAmount"] == 3
+                    && event.payload["prevented"] == true
+            })
+            && fought.events.iter().any(|event| {
+                event.event_type == "ward-broken" && event.payload["instanceId"] == attacker_id
+            })
+            && living_ids.contains(&attacker_id.as_str())
+            && living_ids.contains(&defender_id.as_str())
+            && living_ids.contains(&extra_defender_id.as_str())
+            && living_ids.contains(&target_id.as_str())
+            && event_types
+                .iter()
+                .filter(|event_type| **event_type == "damage-dealt")
+                .count()
+                == 4
+            && fought
+                .events
+                .iter()
+                .filter(|event| event.event_type == "minion-died")
+                .count()
+                == 0,
+        "three-way Defend split must aggregate simultaneous return damage once against Ward: living={living_ids:?} attacker={attacker:?} events={event_types:?}"
+    );
+    exact_replay(&session);
+}
