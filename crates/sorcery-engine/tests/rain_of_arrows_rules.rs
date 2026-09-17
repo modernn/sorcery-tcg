@@ -62,6 +62,22 @@ fn rain_manifest(seed: u32, ward: bool) -> String {
         minion(json!({ "summonToAnySite": true }))
     };
     let fixture = if ward { "rain-ward" } else { "rain-lethal" };
+    rain_manifest_with_target(seed, fixture, south_target)
+}
+
+fn rain_deathrite_manifest(seed: u32) -> String {
+    rain_manifest_with_target(
+        seed,
+        "rain-deathrite",
+        minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+    )
+}
+
+fn rain_manifest_with_target(seed: u32, fixture: &str, south_target: Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": fixture }))
@@ -258,5 +274,66 @@ fn rule_catalog_0606_rain_of_arrows_lets_ward_absorb_the_damage() {
         realm_unit(&after, &target_id).expect("ward survivor")["damage"],
         0
     );
+    assert_exact_replay(&session);
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+fn deathrite_seed(start: u32) -> String {
+    (start..start + 512)
+        .map(rain_deathrite_manifest)
+        .find(|candidate| try_setup_rain(candidate).is_some())
+        .expect("bounded seed with complete Rain of Arrows Deathrite setup")
+}
+
+#[test]
+fn rule_catalog_1008_area_damage_deathrite_draws_for_minion_controller_on_kill() {
+    let encoded = deathrite_seed(1008);
+    let (mut session, _victim_id, target_id) = setup_rain(&encoded);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    let receipt = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })
+    .1;
+    let types = event_types(&receipt);
+    assert!(types.starts_with(&["magic-cast", "magic-damage-allocated"][..]));
+    assert!(types.contains(&"damage-dealt"));
+    let drawn_index = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    let first_death_index = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion death");
+    assert!(
+        drawn_index < first_death_index,
+        "Deathrite draw must resolve before corpses settle: {types:?}"
+    );
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw event");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    assert!(types.contains(&"magic-resolved"));
+    let finished = state(&session);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
