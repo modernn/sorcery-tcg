@@ -167,13 +167,15 @@ fn setup_if_water_on_pile(
     Some((top.clone(), deathrites))
 }
 
-fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
     let action = session
         .legal_actions()
-        .expect("legal actions")
+        .ok()?
         .into_iter()
-        .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .find(|action| predicate(&action.descriptor))?;
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -181,11 +183,15 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
             seat: action.seat,
             state_version: action.state_version,
         })
-        .expect("authoritative step")
+        .ok()?
     else {
-        panic!("engine-issued action must be accepted");
+        return None;
     };
-    (descriptor, receipt)
+    Some((descriptor, receipt))
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    try_accept_where(session, predicate).expect("expected engine-issued action")
 }
 
 fn keep(session: &mut Session) {
@@ -936,4 +942,255 @@ fn rule_catalog_0940_penultimate_terrain_replacement_single_deathrite_draws_last
             .any(|card| card["instanceId"] == deathrite["instanceId"])
     );
     assert_exact_replay(&session);
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_plain() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn geomancer_avatar() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "earthSitePlayCreatesAdjacentRubble": true,
+        "life": 20,
+        "replaceAdjacentRubbleWithTopAtlasSite": true,
+    })
+}
+
+fn earth_site() -> Value {
+    json!({
+        "cardType": "site",
+        "elements": ["earth"],
+    })
+}
+
+fn finish_manifest(mut value: Value) -> String {
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn deathrite_replace_rubble_manifest(seed: u32) -> String {
+    let fixture = "geomancer-replace-rubble-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": geomancer_avatar(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            },
+            "south-deathrite": deathrite_plain(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+fn offers_replace_rubble(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+                && action.descriptor["targetCell"] == "C3"
+        })
+    })
+}
+
+struct PendingDeathriteReplaceRubbleSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_replace_rubble_legal(
+    encoded: &str,
+) -> Option<PendingDeathriteReplaceRubbleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C4"
+            && descriptor["createRubbleAt"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if !offers_replace_rubble(&session) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteReplaceRubbleSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_replace_rubble_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_replace_rubble_manifest)
+        .find(|candidate| try_pending_deathrite_with_replace_rubble_legal(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal Geomancer rubble replacement",
+        )
+}
+
+#[test]
+fn rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_replace_rubble_seed_with(1118);
+    let mut setup = try_pending_deathrite_with_replace_rubble_legal(&encoded)
+        .expect("complete Geomancer replace-rubble Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["realm"]["sites"]["C3"]["rubble"], true);
+    assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "end-turn"
+                    && action.descriptor["kind"] != "replace-rubble-with-top-atlas-site"
+            })
+    );
+    assert!(!offers_replace_rubble(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["realm"]["sites"]["C3"]["rubble"], true);
+    assert!(offers_replace_rubble(session));
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    assert_eq!(event_types(&receipt), ["rubble-replaced", "site-played"]);
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["rubble"],
+        Value::Null
+    );
+    assert_eq!(state(session)["players"]["north"]["avatar"]["tapped"], true);
+    assert_exact_replay(session);
 }
