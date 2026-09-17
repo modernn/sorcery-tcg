@@ -1,5 +1,5 @@
 //! Direct proofs for start-turn nearby enemy lures (RULE-CATALOG-0256–0257,
-//! 0403–0404).
+//! 0403–0404, RULE-CATALOG-0926).
 //!
 //! Official cards such as Guile Sirens force a nearby same-region enemy minion
 //! to take one card-effect step toward the source. The ability is mandatory,
@@ -444,6 +444,162 @@ fn rule_catalog_0404_start_turn_draw_spells_then_lure_no_ops_when_no_enemy_is_ne
     assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
     let after = state(&session);
     assert_eq!(after["phase"], "draw");
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("unmoved south minion");
+    assert_eq!(target["location"], "C1");
+    assert_exact_replay(&session);
+}
+
+fn draw_lure_thin_library_manifest(seed: u32, north_spellbook: &[&str]) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-lure-thin-library" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-lure-thin-library-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw-card": minion(json!({})),
+            "north-site": site(),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 1,
+                "atStartOfControllerTurnLureNearbyEnemyMinion": true,
+                "defense": 4,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_lure_thin_library_start_turn(seed: u32, north_spellbook: &[&str]) -> Session {
+    let mut session =
+        Session::new(&draw_lure_thin_library_manifest(seed, north_spellbook)).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0926_start_turn_draw_then_lure_draws_last_spell_when_lure_no_ops() {
+    let mut session = draw_lure_thin_library_start_turn(
+        926,
+        &[
+            "north-draw-card",
+            "north-draw-card",
+            "north-draw-card",
+            "north-source",
+        ],
+    );
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let target_id = unit_id(&session, "south-minion");
+    let drawn_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("only spell")["instanceId"]
+        .clone();
+    let library_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    assert_eq!(library_before, 1);
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let legal = session.legal_actions().expect("empty start-turn draw-lure");
+    assert!(legal.iter().all(|action| {
+        action.descriptor["kind"] == "resolve-start-turn-trigger"
+            && action.descriptor["sourceInstanceId"] == source_id
+            && action.descriptor.get("lureTargetInstanceId").is_none()
+    }));
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor.get("lureTargetInstanceId").is_none()
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
     let target = after["realm"]["units"]
         .as_array()
         .expect("units")
