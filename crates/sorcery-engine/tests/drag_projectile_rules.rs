@@ -338,6 +338,13 @@ fn movement_deathrite_position() -> Session {
     session
 }
 
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 /// The ray passes over the stealthed ally at C3 and stops at the first visible unit on C2.
 fn assert_hook_enumeration(session: &Session, target_id: &str) {
     let actions = drag_actions(session);
@@ -547,6 +554,93 @@ fn rule_catalog_0093_drag_projectile_should_resume_after_ordered_movement_deathr
     assert_eq!(unit_by_card(&finished, "south-power")["damage"], 6);
     // Rain hit Pudge too, so its own strike back from the hauled minion adds to that wound.
     assert_eq!(unit_by_card(&finished, "north-pudge")["damage"], 4);
+    assert_eq!(finished["pendingDeathrites"], Value::Null);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1002_drag_projectile_deathrite_draws_for_minion_controller_on_kill() {
+    let mut session = movement_deathrite_position();
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    let power_id = unit_by_card(&before, "south-power")["instanceId"]
+        .as_str()
+        .expect("power source identity")
+        .to_owned();
+    let deathrite_id = unit_by_card(&before, "south-fragile-a")["instanceId"]
+        .as_str()
+        .expect("Deathrite minion identity")
+        .to_owned();
+    for card_id in ["south-fragile-a", "south-fragile-b"] {
+        assert_eq!(unit_by_card(&before, card_id)["damage"], 1);
+        assert_eq!(unit_by_card(&before, card_id)["location"], "C1");
+    }
+
+    let (_, interrupted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-drag-projectile"
+            && descriptor["direction"] == "south"
+            && descriptor["hit"]["instanceId"] == power_id.as_str()
+            && descriptor["fightOnArrival"] == false
+    });
+    assert_eq!(
+        event_types(&interrupted),
+        ["projectile-shot", "unit-dragged"]
+    );
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(unit_by_card(&paused, "south-power")["location"], "C3");
+
+    let (_, resumed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_id.as_str()
+    });
+    assert_eq!(
+        event_types(&resumed),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "unit-dragged",
+        ]
+    );
+    let drawn = resumed
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "site-drawn"
+                && event.payload["sourceInstanceId"] == deathrite_id.as_str()
+        })
+        .expect("Deathrite site draw for the ordered minion controller");
+    assert_eq!(drawn.payload["seat"], "south");
+    let drag_index = resumed
+        .events
+        .iter()
+        .position(|event| event.event_type == "unit-dragged")
+        .expect("resumed drag step");
+    assert!(
+        resumed
+            .events
+            .iter()
+            .position(|event| event.event_type == "site-drawn")
+            < Some(drag_index),
+        "Deathrite site draw must resolve before the drag path resumes"
+    );
+    let finished = state(&session);
+    assert_eq!(finished["phase"], "main");
+    assert_eq!(unit_by_card(&finished, "south-power")["location"], "C4");
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == deathrite_id.as_str())
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 2);
     assert_eq!(finished["pendingDeathrites"], Value::Null);
     assert_exact_replay(&session);
 }
