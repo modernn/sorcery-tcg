@@ -2976,16 +2976,23 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Fatality kills only a wounded minion in the caster region.",
+      "plainLanguage": "Fatality kills only a wounded minion in the caster region. A wounded underground minion is not offered when the caster is on the surface. Distinct from 0609–0610, which prove wounded-versus-healthy on the surface only.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "region"
+        "killTargetWoundedMinion"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_region"
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0673_fatality_kills_a_wounded_minion_in_the_caster_region_not_underground"
       }
     },
     {
@@ -15564,6 +15571,51 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
         "testName": "rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0673",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic kills a wounded minion in the caster region and does not offer a wounded minion in a different region. After two surface minions are wounded, burrowing one underground leaves only the surface copy as a legal Fatality target. Distinct from 0609, which never places a wounded minion off the caster's region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0673_fatality_kills_a_wounded_minion_in_the_caster_region_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0674",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers no target when the only wounded minion occupies a different region from the caster. A wounded underground minion is excluded even though that same minion was a legal surface target before it was burrowed. Distinct from 0610, which proves the all-healthy surface case.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0674_fatality_offers_no_target_for_a_wounded_underground_minion"
       }
     }
   ]
