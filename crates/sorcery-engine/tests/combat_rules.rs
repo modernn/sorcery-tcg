@@ -1160,7 +1160,7 @@ fn deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw
 }
 
 #[test]
-fn terminal_outcome_exposes_winner_and_loser() {
+fn rule_catalog_0773_terminal_outcome_exposes_winner_and_loser() {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../tests/engine/fixtures/typescript-parity-v1.json"
     ))
