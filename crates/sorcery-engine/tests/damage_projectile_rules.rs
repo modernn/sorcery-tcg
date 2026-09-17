@@ -355,7 +355,7 @@ fn ready_minion_should_tap_to_shoot_fixed_damage_at_first_visible_unit() {
 }
 
 #[test]
-fn disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire() {
+fn rule_catalog_0746_disabled_stealth_is_visible_but_disabled_shooter_cannot_fire() {
     let visible = prepare_projectile(
         83,
         &minion(json!({ "tapToShootProjectileDamage": 1 })),
@@ -411,7 +411,7 @@ fn disabled_stealth_should_be_visible_but_disabled_shooter_cannot_fire() {
 }
 
 #[test]
-fn current_power_should_classify_fixed_projectile_damage_for_prevention() {
+fn rule_catalog_0747_fixed_projectile_uses_current_power_for_prevention_threshold() {
     let setup = prepare_projectile(
         85,
         &minion(json!({ "attack": 4, "tapToShootProjectileDamage": 1 })),
@@ -442,7 +442,7 @@ fn current_power_should_classify_fixed_projectile_damage_for_prevention() {
 }
 
 #[test]
-fn fixed_projectile_should_apply_ward_lethal_and_ordinary_death() {
+fn rule_catalog_0748_fixed_projectile_applies_ward_lethal_and_ordinary_death() {
     let warded = prepare_projectile(
         86,
         &minion(json!({ "tapToShootProjectileDamage": 4 })),

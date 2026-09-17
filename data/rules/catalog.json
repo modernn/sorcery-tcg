@@ -17493,6 +17493,105 @@
         "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
         "testName": "rule_catalog_0744_first_strike_snapshots_targets_before_awakening_nearby_aura"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0745",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Simultaneous Genesis area damage snapshots each unit's status before a disable-until-damaged aura awakens and adds nearby power.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisDamageEachOtherUnitHere",
+        "genesisDisableSelfUntilDamaged",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-awakened",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0745_simultaneous_area_damage_snapshots_status_before_awakening_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0746",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Disabled Stealth minions remain visible projectile targets, but a disable-until-damaged shooter cannot fire its fixed-damage projectile.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "stealth",
+        "waterbound",
+        "genesisDisableSelfUntilDamaged",
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0746_disabled_stealth_is_visible_but_disabled_shooter_cannot_fire"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0747",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Fixed-damage projectiles classify prevention thresholds from the shooter's current power, not its printed attack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0747_fixed_projectile_uses_current_power_for_prevention_threshold"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0748",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Fixed-damage projectiles break Ward without dealing damage, kill through Lethal regardless of defense, and kill ordinary minions when damage exceeds defense.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage",
+        "ward",
+        "lethal"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt",
+        "ward-broken",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0748_fixed_projectile_applies_ward_lethal_and_ordinary_death"
+      }
     }
   ]
 }

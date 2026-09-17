@@ -647,7 +647,7 @@ fn deathrite_damage_should_preserve_source_power_until_resolution() {
     clippy::too_many_lines,
     reason = "one direct scenario proves stable target snapshots across an awakening AOE"
 )]
-fn simultaneous_area_damage_should_snapshot_status_before_awakening_power_aura() {
+fn rule_catalog_0745_simultaneous_area_damage_snapshots_status_before_awakening_aura() {
     let seed = 289;
     let mut manifest = base_manifest(seed);
     let preview_manifest = finish_manifest(manifest.clone(), "synthetic-area-snapshot-preview-v1");
