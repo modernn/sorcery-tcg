@@ -332,23 +332,27 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Printed Spellcasters cast while tapped or summoning sick from their own location.",
+      "plainLanguage": "Printed Spellcasters cast Magic and summon while summoning sick from their own location. A Stealthed printed Spellcaster Freezes and summons on the turn it enters; a Waterbound Spellcaster summoned onto land is Disabled and cannot cast. Distinct from 0151 (Tower-granted Spellcaster) and from 0690 (tapped caster origin).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "spellcaster",
-        "summoning-sickness"
+        "stealth",
+        "waterbound"
       ],
       "actionHints": [
-        "summon",
-        "cast",
-        "tap"
+        "summon-minion",
+        "cast-magic"
       ],
       "eventHints": [
-        "summon"
+        "magic-cast",
+        "stealth-lost",
+        "minion-disabled",
+        "minion-summoned",
+        "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "printed_spellcaster_should_cast_and_summon_while_sick_or_tapped"
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_0689_printed_spellcaster_casts_and_summons_while_summoning_sick"
       }
     },
     {
@@ -16036,6 +16040,61 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
         "testName": "rule_catalog_0688_dead_token_banishes_instead_of_entering_a_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0689",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A printed Spellcaster may cast Magic and summon on the turn it enters, even while summoning sick. Freeze on itself reveals Stealth and Disables the caster. The same sick caster can summon a Waterbound Spellcaster onto land; that summoned minion is Disabled and cannot cast or summon. Distinct from 0151, which grants Spellcaster from a Tower rather than the printed fact.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "stealth",
+        "waterbound",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "stealth-lost",
+        "minion-disabled",
+        "magic-resolved",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_0689_printed_spellcaster_casts_and_summons_while_summoning_sick"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0690",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A printed Spellcaster may still cast after tapping for mana. Freeze originates at the caster's site, so a tapped minion at C3 can Disable a nearby C2 minion while the Avatar at C4 cannot. Distinct from 0151 (Tower-granted Spellcaster) and from 0661 (Freeze itself).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "tapForMana",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "activate-mana",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_0690_printed_spellcaster_casts_from_its_site_while_tapped"
       }
     }
   ]
