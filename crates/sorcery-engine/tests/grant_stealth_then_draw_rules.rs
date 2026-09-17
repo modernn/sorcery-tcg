@@ -1,12 +1,14 @@
 //! Direct proofs for grant-Stealth-to-allied-minions then draw-spell Magic
-//! (RULE-CATALOG-0539–0540).
+//! (RULE-CATALOG-0539–0540, RULE-CATALOG-1067).
 //!
 //! Ordinary Magic can give every allied minion Stealth and then draw one
 //! spell. The Avatar and enemy minions are not stealthed. Already-stealthed
 //! allies stay stealthed without a second event. An empty allied-minion set
-//! is a paid no-op grant that still draws.
+//! is a paid no-op grant that still draws. While Deathrites wait for
+//! ordering, grant-Stealth-then-draw Magic stays withheld until the chain
+//! drains.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
@@ -43,6 +45,27 @@ fn vanish() -> Value {
         "cardType": "magic",
         "grantStealthToAlliedMinionsThenDrawSpell": true,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -323,30 +346,24 @@ fn rule_catalog_0539_stealth_then_draw_stealths_allied_minions_not_enemies() {
         granted.events[1].payload["sourceInstanceId"],
         cast["cardInstanceId"]
     );
-    assert!(
-        !granted
-            .events
-            .iter()
-            .any(|event| event.event_type == "minion-stealthed"
-                && (event.payload["instanceId"] == enemy_id
-                    || event.payload["instanceId"] == north_avatar))
-    );
+    assert!(!granted
+        .events
+        .iter()
+        .any(|event| event.event_type == "minion-stealthed"
+            && (event.payload["instanceId"] == enemy_id
+                || event.payload["instanceId"] == north_avatar)));
     let after = state(&session);
     assert_eq!(unit(&after, &ally_id)["stealthed"], true);
     assert_eq!(unit(&after, &enemy_id)["stealthed"], false);
-    assert!(
-        after["players"]["north"]["hand"]["spellbook"]
-            .as_array()
-            .expect("north hand after draw")
-            .iter()
-            .any(|card| card["instanceId"] == library_top)
-    );
+    assert!(after["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand after draw")
+        .iter()
+        .any(|card| card["instanceId"] == library_top));
     let south_view = session.public_view(Seat::South).expect("South public view");
-    assert!(
-        !serde_json::to_string(&south_view)
-            .expect("view JSON")
-            .contains(&library_top)
-    );
+    assert!(!serde_json::to_string(&south_view)
+        .expect("view JSON")
+        .contains(&library_top));
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
     assert_exact_replay(&session);
@@ -366,12 +383,10 @@ fn rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions() {
         .expect("drawn identity")
         .to_owned();
     assert_targetless_vanish(&session);
-    assert!(
-        before["realm"]["units"]
-            .as_array()
-            .expect("realm units")
-            .is_empty()
-    );
+    assert!(before["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .is_empty());
 
     let (_, granted) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -383,19 +398,233 @@ fn rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions() {
         event_types(&granted),
         ["magic-cast", "spell-drawn", "magic-resolved"]
     );
-    assert!(
-        !granted
-            .events
-            .iter()
-            .any(|event| event.event_type == "minion-stealthed")
-    );
+    assert!(!granted
+        .events
+        .iter()
+        .any(|event| event.event_type == "minion-stealthed"));
     let after = state(&session);
-    assert!(
-        after["players"]["north"]["hand"]["spellbook"]
-            .as_array()
-            .expect("north hand after draw")
-            .iter()
-            .any(|card| card["instanceId"] == library_top)
-    );
+    assert!(after["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand after draw")
+        .iter()
+        .any(|card| card["instanceId"] == library_top));
     assert_exact_replay(&session);
+}
+
+fn deathrite_vanish_manifest(seed: u32) -> String {
+    let fixture = "grant-stealth-then-draw-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "north-vanish": vanish(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-vanish",
+                    "north-rain",
+                    "north-rain",
+                    "north-vanish",
+                    "north-vanish",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_vanish_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-vanish", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteVanishSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_allied_minion(encoded: &str) -> Option<PendingDeathriteVanishSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_vanish_and_rain(&state(&session)) {
+        return None;
+    }
+    if vanish_casts(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteVanishSetup {
+        ally_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_vanish_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_vanish_manifest)
+        .find(|candidate| try_pending_deathrite_with_allied_minion(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with grant-Stealth-then-draw Magic in hand",
+        )
+}
+
+#[test]
+fn rule_catalog_1067_grant_stealth_then_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_vanish_seed_with(1067);
+    let mut setup = try_pending_deathrite_with_allied_minion(&encoded)
+        .expect("complete grant-Stealth-then-draw Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &ally_id)["stealthed"], false);
+    assert!(session
+        .legal_actions()
+        .expect("paused legal actions")
+        .iter()
+        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(vanish_casts(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &ally_id)["stealthed"], false);
+    assert_targetless_vanish(session);
+
+    let library_top = resumed["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("card to draw")["instanceId"]
+        .as_str()
+        .expect("drawn identity")
+        .to_owned();
+
+    let (_, granted) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-vanish"
+            && descriptor["ally"].is_null()
+            && descriptor["target"].is_null()
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-stealthed",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(granted.events[1].payload["instanceId"], ally_id);
+    let after = state(session);
+    assert_eq!(unit(&after, &ally_id)["stealthed"], true);
+    assert!(after["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand after draw")
+        .iter()
+        .any(|card| card["instanceId"] == library_top));
+    assert_exact_replay(session);
 }
