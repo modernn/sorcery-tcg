@@ -26033,6 +26033,233 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1122_synthetic_batch_keeps_all_games_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1123",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink offers every nearby ally a destination and a choice to draw from either deck after teleporting.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "teleport",
+        "draw"
+      ],
+      "eventHints": [
+        "teleport",
+        "spell-drawn",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1123_blink_offers_nearby_location_and_either_deck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1124",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink keeps an Aura on a co-located ally when the teleported minion never leaves its neighbor cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "teleport"
+      ],
+      "eventHints": [
+        "teleport",
+        "aura-attached"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1124_blink_keeps_aura_when_ally_never_leaves_neighbor"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1125",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Blink settles interrupting Deathrites before its private draw resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites",
+        "draw"
+      ],
+      "eventHints": [
+        "deathrite-order-committed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1125_blink_settles_interrupting_deathrites_before_draw"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1126",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink keeps the game active when the caster draws from the non-empty deck after choosing the other library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "draw"
+      ],
+      "eventHints": [
+        "spell-drawn",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1126_blink_stays_active_when_drawing_other_deck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1127",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Disable Magic leaves a surface Burrowing minion in play rather than killing it underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetMinionUntilNextTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_subsurface_rules.rs",
+        "testName": "rule_catalog_1127_disable_leaves_surface_burrowing_minion_in_play"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1128",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Overpower Magic offers allied Avatars and minions and stacks multiple +2 power grants until End Phase cleanup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1129",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-site-destruction is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeToDestroyNearbySite"
+      ],
+      "actionHints": [
+        "activate-site-destruction",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_destruction_rules.rs",
+        "testName": "rule_catalog_1129_activate_site_destruction_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1130",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, pick-up-artifacts is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "pick-up-artifacts",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifacts-picked-up"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1131",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, drop-artifacts is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "drop-artifacts",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifacts-dropped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1132",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, an Avatar's private site draw and play-site are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw-site",
+        "play-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

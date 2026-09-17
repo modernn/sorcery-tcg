@@ -460,9 +460,7 @@ fn try_pending_deathrite_with_uncarried_artifact(
     if state(&session)["phase"] != "deathrite-order" {
         return None;
     }
-    if realm_unit(&state(&session), &minion_id).is_none() {
-        return None;
-    }
+    realm_unit(&state(&session), &minion_id)?;
     let mut deathrite_ids = [
         first.0["cardInstanceId"].as_str()?.to_owned(),
         second.0["cardInstanceId"].as_str()?.to_owned(),
