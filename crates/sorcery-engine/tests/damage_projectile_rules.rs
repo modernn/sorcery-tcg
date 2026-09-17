@@ -264,6 +264,65 @@ fn fire_south(session: &mut Session, shooter_id: &str, target_id: &str) -> Recei
     .1
 }
 
+/// Shooter on C4 with empty intermediate cells so the south ray reaches the enemy Avatar on C1.
+fn prepare_long_range_projectile(seed: u32) -> (Session, String, String) {
+    let encoded = manifest(
+        seed,
+        &minion(json!({ "tapToShootProjectileDamage": 3 })),
+        &minion(json!({})),
+        &minion(json!({})),
+    );
+    let mut session = Session::new(&encoded).expect("valid long-range fixed projectile scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-shooter"
+            && descriptor["cell"] == "C4"
+    });
+    let shooter_id = summon["cardInstanceId"]
+        .as_str()
+        .expect("shooter identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    (session, shooter_id, south_avatar_id)
+}
+
 #[test]
 fn rule_catalog_0781_ready_minion_taps_to_shoot_fixed_damage_at_first_visible_unit() {
     let setup = prepare_projectile(
@@ -503,4 +562,47 @@ fn rule_catalog_0748_fixed_projectile_applies_ward_lethal_and_ordinary_death() {
         );
         assert_exact_replay(&dead_session);
     }
+}
+
+#[test]
+fn rule_catalog_0911_fixed_projectile_ray_extends_past_ranged_two_step_cap() {
+    let (session, shooter_id, south_avatar_id) = prepare_long_range_projectile(89);
+    let south = projectile_actions(&session, &shooter_id)
+        .into_iter()
+        .find(|descriptor| descriptor["direction"] == "south")
+        .expect("south fixed-damage ray");
+    assert_eq!(south["hit"]["instanceId"], south_avatar_id);
+    assert_eq!(south["hit"]["kind"], "avatar");
+    assert_eq!(south["hit"]["seat"], "south");
+    assert_eq!(
+        south["path"]
+            .as_array()
+            .expect("long south ray")
+            .iter()
+            .map(|location| location["cell"].as_str().expect("ray cell"))
+            .collect::<Vec<_>>(),
+        ["C4", "C3", "C2", "C1"],
+        "fixed projectiles are not capped at Ranged's two measured steps"
+    );
+
+    let mut session = session;
+    let receipt = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "shoot-damage-projectile"
+            && descriptor["direction"] == "south"
+            && descriptor["shooterInstanceId"] == shooter_id.as_str()
+            && descriptor["hit"]["instanceId"] == south_avatar_id.as_str()
+    })
+    .1;
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "projectile-shot",
+            "projectile-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 3);
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 17);
+    assert_exact_replay(&session);
 }
