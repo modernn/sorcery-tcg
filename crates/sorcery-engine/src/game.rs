@@ -18396,13 +18396,20 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
+        if self.position.phase != Phase::RandomChoice {
+            return Err(GameError::IllegalAction);
+        }
+        self.settle_static_power_deaths(outcomes)?;
+        if self.position.pending_deathrites.is_some() {
+            self.position.state_version += 1;
+            return Ok(());
+        }
         let pending = self
             .position
             .pending_random_outcome
             .take()
             .ok_or(GameError::IllegalAction)?;
-        if self.position.phase != Phase::RandomChoice
-            || pending.seat != action.seat
+        if pending.seat != action.seat
             || !pending.outcome_instance_ids.contains(outcome_instance_id)
         {
             return Err(GameError::IllegalAction);
