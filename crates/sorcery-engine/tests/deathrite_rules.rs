@@ -288,7 +288,7 @@ fn unit_ids_for_cards(session: &Session, card_ids: &[String]) -> Vec<String> {
 }
 
 #[test]
-fn simultaneous_deathrites_should_resolve_nap_then_ap_before_cemetery_entry() {
+fn rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery() {
     let facts = json!({ "deathriteDrawSite": true });
     let manifest = combat_manifest(48, &facts, &facts, 20);
     let (setup, receipt) = resolve_minion_fight(&manifest);
