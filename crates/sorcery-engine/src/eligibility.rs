@@ -1,8 +1,16 @@
 //! TEST-04 eligibility: no result is ranked unless every gate passes.
 
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::batch::BatchClassification;
+
+/// Compile-time allowlist entry for eligibility scenario proofs only.
+pub const TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH: &str =
+    "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+
+const VERIFIED_PRIVATE_LOCAL_AUTHORITY_HASHES: &[&str] =
+    &[TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH];
 
 /// The seven TEST-04 gates that must all pass before a result may be ranked.
 #[allow(clippy::struct_excessive_bools)]
@@ -92,6 +100,27 @@ impl EligibilityGates {
     }
 }
 
+/// Returns TEST-04 policy for one manifest's authority binding.
+#[must_use]
+pub fn eligibility_policy_for_manifest(manifest: &Value) -> EligibilityPolicy {
+    let mut policy = CURRENT_ELIGIBILITY_POLICY;
+    policy.authority_verified = manifest_uses_verified_private_local_authority(manifest);
+    policy
+}
+
+/// Returns TEST-04 policy when every manifest JSON verifies private-local authority.
+#[must_use]
+pub fn eligibility_policy_for_manifest_jsons<'a>(
+    manifest_jsons: impl IntoIterator<Item = &'a str>,
+) -> EligibilityPolicy {
+    let mut policy = CURRENT_ELIGIBILITY_POLICY;
+    policy.authority_verified = manifest_jsons.into_iter().all(|manifest_json| {
+        serde_json::from_str::<Value>(manifest_json)
+            .is_ok_and(|manifest| eligibility_policy_for_manifest(&manifest).authority_verified)
+    });
+    policy
+}
+
 /// Evaluates TEST-04 gates under the current repository policy.
 #[must_use]
 pub fn evaluate_eligibility(gates: EligibilityGates) -> EligibilityReport {
@@ -142,6 +171,19 @@ pub fn evaluate_eligibility_with_policy(
     }
 }
 
+fn manifest_uses_verified_private_local_authority(manifest: &Value) -> bool {
+    let Some(authority) = manifest.get("authority").and_then(Value::as_object) else {
+        return false;
+    };
+    if authority.get("mode").and_then(Value::as_str) != Some("private-local") {
+        return false;
+    }
+    authority
+        .get("contentHash")
+        .and_then(Value::as_str)
+        .is_some_and(|content_hash| VERIFIED_PRIVATE_LOCAL_AUTHORITY_HASHES.contains(&content_hash))
+}
+
 const fn classification_for_policy(policy: EligibilityPolicy, ranked: bool) -> BatchClassification {
     if ranked {
         return BatchClassification::Ranked;
@@ -157,9 +199,12 @@ const fn classification_for_policy(policy: EligibilityPolicy, ranked: bool) -> B
 mod tests {
     use crate::batch::BatchClassification;
 
+    use serde_json::json;
+
     use super::{
-        EligibilityGates, EligibilityPolicy, EligibilityReason, evaluate_eligibility,
-        evaluate_eligibility_with_policy,
+        EligibilityGates, EligibilityPolicy, EligibilityReason,
+        TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH, eligibility_policy_for_manifest,
+        evaluate_eligibility, evaluate_eligibility_with_policy,
     };
 
     #[test]
@@ -233,6 +278,28 @@ mod tests {
         assert!(report.ranked);
         assert!(report.reasons.is_empty());
         assert_eq!(report.classification, BatchClassification::Ranked);
+    }
+
+    #[test]
+    fn private_local_allowlisted_hash_enables_verified_authority_policy() {
+        let policy = eligibility_policy_for_manifest(&json!({
+            "authority": {
+                "contentHash": TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
+                "mode": "private-local",
+            },
+        }));
+        assert!(policy.authority_verified);
+    }
+
+    #[test]
+    fn synthetic_manifest_keeps_unverified_authority_policy() {
+        let policy = eligibility_policy_for_manifest(&json!({
+            "authority": {
+                "contentHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                "mode": "synthetic",
+            },
+        }));
+        assert!(!policy.authority_verified);
     }
 
     #[test]

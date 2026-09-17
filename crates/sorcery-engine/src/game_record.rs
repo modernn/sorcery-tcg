@@ -11,7 +11,10 @@ use serde_json::Value;
 use crate::batch::{BatchClassification, FinishedTerminal, MAX_GAME_ACTIONS};
 use crate::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
 use crate::contract::{ActionRequest, Event, Receipt, Seat};
-use crate::eligibility::{EligibilityGates, EligibilityReport, evaluate_eligibility};
+use crate::eligibility::{
+    EligibilityGates, EligibilityReport, eligibility_policy_for_manifest, evaluate_eligibility,
+    evaluate_eligibility_with_policy,
+};
 use crate::game::{ENGINE_VERSION, Game};
 use crate::policy::{BASELINE_POLICY_DECK_ID, PolicySnapshot, baseline_policy_snapshot};
 use crate::session::{Session, SessionError, StepResult};
@@ -474,15 +477,18 @@ fn compare_replay(
     let eligibility = if matched {
         record.eligibility.clone()
     } else {
-        evaluate_eligibility(EligibilityGates {
-            coverage: record.eligibility.gates.coverage,
-            design: record.eligibility.gates.design,
-            execution: record.eligibility.gates.execution,
-            legality: record.eligibility.gates.legality,
-            pinned_input: record.eligibility.gates.pinned_input,
-            replay: false,
-            reporting: true,
-        })
+        evaluate_eligibility_with_policy(
+            EligibilityGates {
+                coverage: record.eligibility.gates.coverage,
+                design: record.eligibility.gates.design,
+                execution: record.eligibility.gates.execution,
+                legality: record.eligibility.gates.legality,
+                pinned_input: record.eligibility.gates.pinned_input,
+                replay: false,
+                reporting: true,
+            },
+            eligibility_policy_for_manifest(manifest),
+        )
     };
     ArtifactReplayReport {
         classification: eligibility.classification,
@@ -601,22 +607,25 @@ fn finished_game_eligibility(
     coverage: &GameCoverage,
     replay_verified: bool,
 ) -> EligibilityReport {
-    evaluate_eligibility(EligibilityGates {
-        coverage: !coverage.offered_action_kinds.is_empty()
-            || !coverage.committed_action_kinds.is_empty(),
-        design: manifest
-            .get("decks")
-            .and_then(Value::as_object)
-            .is_some_and(|decks| decks.contains_key("north") && decks.contains_key("south")),
-        execution: true,
-        legality: true,
-        pinned_input: manifest.get("seed").is_some()
-            && manifest.get("manifestId").is_some()
-            && manifest.get("engineVersion").and_then(Value::as_str) == Some(ENGINE_VERSION)
-            && manifest_authority_hash(manifest).is_some(),
-        replay: replay_verified,
-        reporting: true,
-    })
+    evaluate_eligibility_with_policy(
+        EligibilityGates {
+            coverage: !coverage.offered_action_kinds.is_empty()
+                || !coverage.committed_action_kinds.is_empty(),
+            design: manifest
+                .get("decks")
+                .and_then(Value::as_object)
+                .is_some_and(|decks| decks.contains_key("north") && decks.contains_key("south")),
+            execution: true,
+            legality: true,
+            pinned_input: manifest.get("seed").is_some()
+                && manifest.get("manifestId").is_some()
+                && manifest.get("engineVersion").and_then(Value::as_str) == Some(ENGINE_VERSION)
+                && manifest_authority_hash(manifest).is_some(),
+            replay: replay_verified,
+            reporting: true,
+        },
+        eligibility_policy_for_manifest(manifest),
+    )
 }
 
 /// Runs one policy-controlled game and writes its SIM-03 record.

@@ -12,7 +12,10 @@ use crate::canonical::{
 };
 use crate::contract::Seat;
 use crate::deck::{CanonicalDeck, DeckCost, DeckValidation};
-use crate::eligibility::{EligibilityGates, evaluate_eligibility};
+use crate::eligibility::{
+    EligibilityGates, EligibilityPolicy, eligibility_policy_for_manifest_jsons,
+    evaluate_eligibility_with_policy,
+};
 use crate::game::{Game, GameOutcome};
 use crate::policy::{
     PolicyError, PolicySnapshot, parse_policy_snapshot, serialize_policy_snapshot,
@@ -701,16 +704,7 @@ impl SelfPlayCampaign {
             ));
         }
         let audit = SelfPlayAudit {
-            classification: evaluate_eligibility(EligibilityGates {
-                coverage: true,
-                design: true,
-                execution: true,
-                legality: true,
-                pinned_input: true,
-                replay: true,
-                reporting: true,
-            })
-            .classification,
+            classification: self_play_result_classification(audit),
             policy_id: self.champion().policy_id().clone(),
             baseline_score,
             score,
@@ -1336,16 +1330,7 @@ pub fn compare_decks(
     }
 
     Ok(DeckComparisonResult {
-        classification: evaluate_eligibility(EligibilityGates {
-            coverage: true,
-            design: true,
-            execution: true,
-            legality: true,
-            pinned_input: true,
-            replay: true,
-            reporting: true,
-        })
-        .classification,
+        classification: self_play_result_classification(reference_pairs.unwrap_or(&[])),
         selected_score,
         standings: ranked.into_iter().map(|(_, standing)| standing).collect(),
     })
@@ -1434,16 +1419,7 @@ fn train_and_promote_at_significance(
     );
     let nominee_policy_id = nominee.policy_id().clone();
     Ok(PromotionResult {
-        classification: evaluate_eligibility(EligibilityGates {
-            coverage: true,
-            design: true,
-            execution: true,
-            legality: true,
-            pinned_input: true,
-            replay: true,
-            reporting: true,
-        })
-        .classification,
+        classification: prepared_self_play_result_classification(&training, &heldout),
         policy: if promoted { nominee } else { champion.clone() },
         promoted,
         nominee_policy_id,
@@ -1535,6 +1511,58 @@ fn exact_sign_test_at_most(wins: usize, losses: usize, denominator: u128) -> boo
         (1_u128 << decisive) / denominator
     };
     upper_tail <= threshold
+}
+
+fn passing_self_play_gates() -> EligibilityGates {
+    EligibilityGates {
+        coverage: true,
+        design: true,
+        execution: true,
+        legality: true,
+        pinned_input: true,
+        replay: true,
+        reporting: true,
+    }
+}
+
+fn self_play_result_classification(pairs: &[SelfPlayPair<'_>]) -> BatchClassification {
+    evaluate_eligibility_with_policy(
+        passing_self_play_gates(),
+        self_play_eligibility_policy(pairs),
+    )
+    .classification
+}
+
+fn prepared_self_play_result_classification(
+    training: &[PreparedPair<'_>],
+    heldout: &[PreparedPair<'_>],
+) -> BatchClassification {
+    evaluate_eligibility_with_policy(
+        passing_self_play_gates(),
+        prepared_self_play_eligibility_policy(training, heldout),
+    )
+    .classification
+}
+
+fn self_play_eligibility_policy(pairs: &[SelfPlayPair<'_>]) -> EligibilityPolicy {
+    eligibility_policy_for_manifest_jsons(pairs.iter().flat_map(|pair| {
+        [
+            pair.candidate_as_north_manifest_json,
+            pair.candidate_as_south_manifest_json,
+        ]
+    }))
+}
+
+fn prepared_self_play_eligibility_policy(
+    training: &[PreparedPair<'_>],
+    heldout: &[PreparedPair<'_>],
+) -> EligibilityPolicy {
+    eligibility_policy_for_manifest_jsons(training.iter().chain(heldout.iter()).flat_map(|pair| {
+        [
+            pair.candidate_as_north_manifest_json,
+            pair.candidate_as_south_manifest_json,
+        ]
+    }))
 }
 
 fn score_policy(
