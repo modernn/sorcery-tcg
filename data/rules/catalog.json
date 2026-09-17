@@ -22310,6 +22310,244 @@
         "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
         "testName": "rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0963",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a fixed-damage projectile whose struck unit is not nearby the source. A 1-power undoubled projectile leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0964",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Leap Attack Magic strike whose struck unit is not nearby the source. A 1-power undoubled Leap Attack strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0964_leap_attack_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0965",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change a Duel Magic fight strike whose struck unit is not nearby the Mask bearer. A 1-power undoubled fight strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "fight-started",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0965_duel_magic_fight_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0966",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "The same nearby-double-strike fact does not change ally-strikes-each-enemy-at-its-location Magic when the struck enemy is not nearby the source. A 1-power undoubled strike leaves a 2-defense minion wounded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0966_ally_strike_magic_is_not_doubled_when_struck_enemy_is_not_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0967",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and mill, draw consumes the last Atlas card and mill is a no-op on the same Start Phase trigger.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0967_start_turn_draw_sites_then_mill_sites_mills_no_op_when_atlas_has_one_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0968",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and nearby-enemy lure, exactly one Atlas card remains, and no enemy is nearby, the Start Phase draws that sole site and the lure is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0968_start_turn_draw_sites_then_lure_draws_last_site_when_lure_no_ops"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0969",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here hits every co-located enemy at normal damage when no nearby-double-strike source is present, even with multiple enemies sharing the newcomer's cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0969_genesis_strike_each_co_located_enemy_is_not_doubled_without_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0970",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "begin-chain-magic does not offer a distant enemy Avatar as the first hop when only nearby minion hops are legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0970_begin_chain_magic_omits_distant_enemy_avatar_as_first_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0971",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After source-bound Genesis control reverts because the source left play, killing the formerly stolen Deathrite minion draws a site for the original controller, not the temporary thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0971_source_bound_deathrite_draws_for_original_controller_when_thief_kills_after_source_leaves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0972",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "This-turn enemy-minion control that reverts at End Phase: if the stolen Deathrite minion dies after revert, its Deathrite draws a site for the original controller.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_0972_this_turn_control_deathrite_draws_for_original_controller_when_stolen_minion_dies_after_revert"
+      }
     }
   ]
 }
