@@ -691,7 +691,7 @@ fn rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase
 }
 
 #[test]
-fn rule_catalog_0700_overpower_offers_allies_and_stacks_until_end_phase() {
+fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
     let encoded = seed_with(1700);
     let mut session = opening_main(&encoded);
     let (fighter_id, enemy_id, avatar_id) = play_to_powered_board(&mut session);
