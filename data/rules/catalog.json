@@ -14833,6 +14833,53 @@
         "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
         "testName": "rule_catalog_0640_cemetery_site_return_is_a_paid_noop_without_cemetery_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0641",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Aura return is the Rescue sibling for Auras: it offers only Auras in the caster's own cemetery, never a Magic card, minion, site, artifact, or an opponent's cemetery card, and returns the unchanged instance to the hidden Spellbook hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "aura-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_aura_return_rules.rs",
+        "testName": "rule_catalog_0641_cemetery_aura_return_restores_own_cemetery_aura_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0642",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Cemetery Aura return that finds no Aura in the caster's own cemetery is a paid no-choice resolution, even when the cemetery holds Magic. It still pays and enters the cemetery, and emits no return event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_aura_return_rules.rs",
+        "testName": "rule_catalog_0642_cemetery_aura_return_is_a_paid_noop_without_cemetery_aura"
+      }
     }
   ]
 }
