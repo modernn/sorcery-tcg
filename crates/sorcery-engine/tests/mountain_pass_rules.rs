@@ -295,7 +295,7 @@ fn entry_actor_ids(session: &Session) -> Vec<String> {
 }
 
 #[test]
-fn mountain_pass_should_block_only_occupied_ground_minion_entry() {
+fn rule_catalog_0800_mountain_pass_blocks_only_occupied_ground_minion_entry() {
     let setup = prepare_mountain_pass();
 
     let mut empty = setup.session.clone();
