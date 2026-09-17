@@ -1137,3 +1137,9 @@ fn connected_top_bottom_should_wrap_only_the_minion() {
     });
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled();
+}
+

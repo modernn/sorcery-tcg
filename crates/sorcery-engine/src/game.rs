@@ -27842,6 +27842,96 @@ pub mod catalog_proofs {
             .ensure_selfplay_supported()
             .expect("Geomancer Atlas Genesis is self-play safe");
     }
+
+    pub fn rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled()
+     {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-site-1"]["elements"] = json!(["earth", "fire"]);
+            manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Granary Rats fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.sites[c4.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "dual-site" }))
+                    .expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mulligan_complete = true;
+        north.mana = 0;
+        game.position.players[seat_index(Seat::South)].mulligan_complete = true;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+
+        let ally_id = identity_hash(&json!({ "fixture": "rats-ally" })).expect("ally rats");
+        let enemy_id = identity_hash(&json!({ "fixture": "rats-enemy" })).expect("enemy rats");
+        let mut underground = test_minion(
+            card_id("north-spell-1"),
+            ally_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        underground.region = Region::Underground;
+        underground.tapped = false;
+        let mut underwater = test_minion(
+            card_id("north-spell-1"),
+            enemy_id.as_str(),
+            Seat::South,
+            c4,
+            None,
+        );
+        underwater.region = Region::Underwater;
+        underwater.tapped = false;
+        game.position.units = vec![underground, underwater];
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+
+        let mut voided = game.clone();
+        voided.position.units[0].region = Region::Void;
+        voided.position.units.truncate(1);
+        assert_eq!(voided.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+
+        let mut one_disabled = game.clone();
+        one_disabled.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::North,
+                source_instance_id: ally_id.clone(),
+            });
+        assert_eq!(one_disabled.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+        one_disabled.position.units[1]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::North,
+                source_instance_id: enemy_id,
+            });
+        assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+    }
+
 }
 
 #[cfg(test)]
@@ -29118,94 +29208,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn granary_rats_should_ignore_void_and_keep_suppressing_while_any_copy_is_enabled() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["north-site-1"]["elements"] = json!(["earth", "fire"]);
-            manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
-            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Granary Rats fixture");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let c4 = Cell::parse("C4").expect("C4");
-        game.position.sites[c4.index()] = Some(SitePosition {
-            card: CardInstance {
-                card_id: card_id("north-site-1"),
-                instance_id: identity_hash(&json!({ "fixture": "dual-site" }))
-                    .expect("site identity"),
-                owner: Seat::North,
-                source: CardSource::Atlas,
-            },
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        });
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.domain_established = true;
-        north.mulligan_complete = true;
-        north.mana = 0;
-        game.position.players[seat_index(Seat::South)].mulligan_complete = true;
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-
-        assert_eq!(game.elemental_affinities(Seat::North), [1, 1, 0, 0]);
-
-        let ally_id = identity_hash(&json!({ "fixture": "rats-ally" })).expect("ally rats");
-        let enemy_id = identity_hash(&json!({ "fixture": "rats-enemy" })).expect("enemy rats");
-        let mut underground = test_minion(
-            card_id("north-spell-1"),
-            ally_id.as_str(),
-            Seat::North,
-            c4,
-            None,
-        );
-        underground.region = Region::Underground;
-        underground.tapped = false;
-        let mut underwater = test_minion(
-            card_id("north-spell-1"),
-            enemy_id.as_str(),
-            Seat::South,
-            c4,
-            None,
-        );
-        underwater.region = Region::Underwater;
-        underwater.tapped = false;
-        game.position.units = vec![underground, underwater];
-        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
-
-        let mut voided = game.clone();
-        voided.position.units[0].region = Region::Void;
-        voided.position.units.truncate(1);
-        assert_eq!(voided.elemental_affinities(Seat::North), [1, 1, 0, 0]);
-
-        let mut one_disabled = game.clone();
-        one_disabled.position.units[0]
-            .disable_effects
-            .push(DisableEffect {
-                expires_at_seat: Seat::North,
-                source_instance_id: ally_id.clone(),
-            });
-        assert_eq!(one_disabled.elemental_affinities(Seat::North), [0, 0, 0, 0]);
-        one_disabled.position.units[1]
-            .disable_effects
-            .push(DisableEffect {
-                expires_at_seat: Seat::North,
-                source_instance_id: enemy_id,
-            });
-        assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
-    }
 
     #[test]
     fn tower_should_grant_derived_stats_regardless_of_site_controller() {
