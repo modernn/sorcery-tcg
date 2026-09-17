@@ -28211,6 +28211,26 @@ pub mod catalog_proofs {
         );
     }
 
+    pub fn rule_catalog_0731_post_action_terminal_event_should_follow_magic_completion() {
+        let mut events = vec![
+            ("magic-cast".to_owned(), Value::Null),
+            ("magic-resolved".to_owned(), Value::Null),
+        ];
+        let mut outcomes = OutcomeLog::Record(&mut events);
+        let settlement_start = outcomes.len();
+        outcomes.push("minion-died", || Value::Null);
+        outcomes.push("game-ended", || Value::Null);
+        outcomes.move_tail_before_completion(settlement_start);
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["magic-cast", "minion-died", "magic-resolved", "game-ended",]
+        );
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one direct payment proof keeps self-play admission and zero/one-card legality together"
@@ -29213,27 +29233,6 @@ mod tests {
         }
     }
 
-
-    #[test]
-    fn post_action_terminal_event_should_follow_magic_completion() {
-        let mut events = vec![
-            ("magic-cast".to_owned(), Value::Null),
-            ("magic-resolved".to_owned(), Value::Null),
-        ];
-        let mut outcomes = OutcomeLog::Record(&mut events);
-        let settlement_start = outcomes.len();
-        outcomes.push("minion-died", || Value::Null);
-        outcomes.push("game-ended", || Value::Null);
-        outcomes.move_tail_before_completion(settlement_start);
-
-        assert_eq!(
-            events
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            ["magic-cast", "minion-died", "magic-resolved", "game-ended",]
-        );
-    }
 
     #[test]
     fn ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
