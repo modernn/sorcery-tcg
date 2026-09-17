@@ -26716,6 +26716,226 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1153",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts the Attack phase, declare-attack is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "declare-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1154",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts strike allocation, allocate-strike is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "allocate-strike",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_1154_allocate_strike_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1155",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, cast-artifact is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "cast-artifact",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-played",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1156",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts end-turn Aura movement, resolve-end-turn-aura-move is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnDamageEachUnitHereThenMoveToUnvisitedAdjacent"
+      ],
+      "actionHints": [
+        "resolve-end-turn-aura-move",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_wandering_aura_rules.rs",
+        "testName": "rule_catalog_1156_resolve_end_turn_aura_move_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1157",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts end-turn Aura random damage, resolve-end-turn-aura-random is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep"
+      ],
+      "actionHints": [
+        "resolve-end-turn-aura-random",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-end-turn-triggered",
+        "aura-end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_aura_rules.rs",
+        "testName": "rule_catalog_1157_resolve_end_turn_aura_random_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1158",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts the Defend window, close-defend is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "close-defend",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_1158_close_defend_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1159",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts the Intercept window, close-intercept is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "close-intercept",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1160",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts a pending Ranged step, resolve-ranged-step is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "resolve-ranged-step",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1161",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-artifact-sacrifice-control is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeToGainControl"
+      ],
+      "actionHints": [
+        "activate-artifact-sacrifice-control",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1162",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-discard-to-gain-control is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardToGainControl"
+      ],
+      "actionHints": [
+        "activate-discard-to-gain-control",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

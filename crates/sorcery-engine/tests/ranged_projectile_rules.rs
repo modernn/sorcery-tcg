@@ -1949,12 +1949,12 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
             })
     );
 
-    let (_, stepped) = accept_where(&mut session, |descriptor| {
+    let (_, stepped_events) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "resolve-ranged-step"
             && descriptor["choice"] == "step"
             && descriptor["to"]["cell"] == "C3"
     });
-    assert_eq!(event_types(&stepped), ["unit-stepped"]);
+    assert_eq!(event_types(&stepped_events), ["unit-stepped"]);
     assert_eq!(unit(&state(&session), &stepper_id)["location"], "C3");
     assert_eq!(state(&session)["phase"], "main");
     assert!(state(&session)["pendingRangedStep"].is_null());

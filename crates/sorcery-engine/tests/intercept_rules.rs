@@ -984,6 +984,64 @@ fn rule_catalog_1141_intercept_withheld_during_pending_deathrite_order() {
 }
 
 #[test]
+fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
+    let encoded = intercept_deathrite_seed_with(1153);
+    let mut setup = try_pending_intercept_during_deathrite_order(&encoded)
+        .expect("complete declare-attack Deathrite withheld setup");
+    let attacker_id = setup.attacker_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "declare-attack"),
+        "deathrite-order must issue no declare-attack"
+    );
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+                && descriptor["unitInstanceId"] == attacker_id
+        });
+    }
+    assert_eq!(state(session)["phase"], "attack");
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed attack actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "declare-attack"
+                    || action.descriptor["kind"] == "decline-attack"
+            }),
+        "declare-attack must return once deathrite-order clears"
+    );
+    exact_replay(session);
+}
+
+#[test]
 fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
     let encoded = intercept_deathrite_seed_with(1159);
     let mut setup = try_pending_intercept_during_deathrite_order(&encoded)

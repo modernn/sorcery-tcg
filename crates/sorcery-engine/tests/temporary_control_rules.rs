@@ -3111,11 +3111,13 @@ fn rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending
         "north-potion"
     );
     assert!(potion_targets(session).is_empty());
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "activate-artifact-sacrifice-control"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-artifact-sacrifice-control")
+    );
 
     let order_sources: Vec<_> = session
         .legal_actions()

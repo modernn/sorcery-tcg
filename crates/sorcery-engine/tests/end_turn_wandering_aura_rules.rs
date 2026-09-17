@@ -57,7 +57,7 @@ fn deathrite_minion() -> Value {
     })
 }
 
-fn encoded_manifest(fixture: &str, south_minion: Value) -> String {
+fn encoded_manifest(fixture: &str, south_minion: &Value) -> String {
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": fixture }))
@@ -70,7 +70,7 @@ fn encoded_manifest(fixture: &str, south_minion: Value) -> String {
             "north-avatar": avatar(),
             "north-site": site(),
             "south-avatar": avatar(),
-            "south-minion": south_minion,
+            "south-minion": south_minion.clone(),
             "south-site": site(),
         },
         "decks": {
@@ -95,11 +95,11 @@ fn encoded_manifest(fixture: &str, south_minion: Value) -> String {
 }
 
 fn manifest() -> String {
-    encoded_manifest("end-turn-wandering-aura", minion())
+    encoded_manifest("end-turn-wandering-aura", &minion())
 }
 
 fn deathrite_manifest() -> String {
-    encoded_manifest("end-turn-wandering-aura-deathrite", deathrite_minion())
+    encoded_manifest("end-turn-wandering-aura-deathrite", &deathrite_minion())
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
