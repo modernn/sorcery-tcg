@@ -724,7 +724,7 @@ fn gnarled_wendigo_should_sacrifice_only_local_surface_allies_before_paying_mana
 }
 
 #[test]
-fn gnarled_wendigo_should_offer_normal_and_only_useful_sacrifice_payments() {
+fn rule_catalog_0828_gnarled_wendigo_offers_useful_sacrifice_payments() {
     let manifest = wendigo_manifest(4, 1, false);
     let session = wendigo_main(&manifest, false);
     let before = state(&session);
@@ -1148,7 +1148,7 @@ fn gnarled_wendigo_terminal_deathrite_should_end_before_deferred_summon() {
 }
 
 #[test]
-fn hamlet_should_discount_only_ordinary_minions_at_that_site() {
+fn rule_catalog_0829_hamlet_discounts_ordinary_minions_at_that_site() {
     let mut ordinary = minion(1, &thresholds(None, 0));
     ordinary["ordinary"] = json!(true);
     let manifest = scenario_manifest(17, &site("earth", true), &ordinary, &site("earth", false));
@@ -1322,7 +1322,7 @@ fn summon_costs(session: &Session, card_id: &str) -> Vec<(String, u64, String)> 
 }
 
 #[test]
-fn hamlet_should_discount_only_ordinary_payments_across_sites_and_payment_modes() {
+fn rule_catalog_0830_hamlet_discounts_ordinary_payments_across_modes() {
     let mut ordinary = minion(1, &thresholds(None, 0));
     ordinary["ordinary"] = json!(true);
     let ordinary_board = hamlet_three_sites(&ordinary, false);
@@ -1420,7 +1420,7 @@ fn hamlet_should_discount_only_ordinary_payments_across_sites_and_payment_modes(
 }
 
 #[test]
-fn explicit_permission_should_allow_summoning_to_any_site() {
+fn rule_catalog_0831_explicit_permission_summons_to_any_site() {
     let ordinary_manifest = scenario_manifest(
         47,
         &site("earth", false),
@@ -1444,7 +1444,7 @@ fn explicit_permission_should_allow_summoning_to_any_site() {
 }
 
 #[test]
-fn water_site_restriction_should_filter_unrestricted_summons_by_terrain() {
+fn rule_catalog_0832_water_site_restriction_filters_by_terrain() {
     let mut water_only = minion(1, &thresholds(Some("water"), 1));
     water_only["mustBeCastToWaterSite"] = json!(true);
     water_only["summonToAnySite"] = json!(true);
@@ -1464,7 +1464,7 @@ fn water_site_restriction_should_filter_unrestricted_summons_by_terrain() {
 }
 
 #[test]
-fn mana_and_each_elemental_threshold_should_gate_without_spending_affinity() {
+fn rule_catalog_0833_mana_and_thresholds_gate_without_spending_affinity() {
     let mana_gated = scenario_manifest(
         79,
         &site("earth", false),

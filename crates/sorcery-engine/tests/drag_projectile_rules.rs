@@ -552,7 +552,7 @@ fn rule_catalog_0093_drag_projectile_should_resume_after_ordered_movement_deathr
 }
 
 #[test]
-fn drag_projectile_descriptors_labels_order_and_ids_should_match_typescript() {
+fn rule_catalog_0837_drag_projectile_descriptors_match_typescript_contract() {
     let fixture: Value = serde_json::from_str(FIXTURE).expect("valid drag projectile fixture");
     assert_eq!(fixture["schemaVersion"], 1);
     assert_eq!(fixture["source"], "rust-legality-engine");

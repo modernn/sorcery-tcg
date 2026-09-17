@@ -525,7 +525,7 @@ fn rule_catalog_0050_region_settlement_should_kill_inhospitable_minions_and_bani
 }
 
 #[test]
-fn waterbound_voidwalk_should_stop_at_the_first_inhospitable_void_cell() {
+fn rule_catalog_0836_waterbound_voidwalk_stops_at_inhospitable_void() {
     let walker = minion(json!({
         "burrowing": true,
         "deathriteDrawSite": true,

@@ -359,7 +359,7 @@ fn rule_catalog_0039_teleport_should_move_ally_to_any_target_site_surface() {
 }
 
 #[test]
-fn teleport_to_the_site_an_ally_already_occupies_should_resolve_without_moving_it() {
+fn rule_catalog_0834_teleport_to_occupied_site_resolves_without_movement() {
     let mut session = opening_with_three_sites();
     let current = state(&session);
     let avatar_instance_id = current["players"]["north"]["avatar"]["card"]["instanceId"]
@@ -507,7 +507,7 @@ fn rule_catalog_0038_lure_should_make_a_nearby_enemy_minion_take_its_own_closer_
 }
 
 #[test]
-fn lure_without_a_nearby_enemy_minion_should_resolve_as_a_paid_no_op() {
+fn rule_catalog_0835_lure_without_nearby_enemy_resolves_as_paid_no_op() {
     let north_spellbook = ["north-lure"; 6];
     let manifest = manifest(7, &lure_cards(), &north_spellbook, &["south-minion"; 6]);
     let mut session = Session::new(&manifest).expect("valid Lure scenario");

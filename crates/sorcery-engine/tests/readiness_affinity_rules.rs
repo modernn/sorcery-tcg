@@ -343,7 +343,7 @@ fn rule_catalog_0820_sideways_restriction_filters_non_sideways_steps() {
 }
 
 #[test]
-fn forward_restriction_should_use_seat_direction_and_top_bottom_wrap() {
+fn rule_catalog_0823_forward_restriction_uses_seat_direction_and_wrap() {
     let mut mover = minion(5, 5);
     mover["connectsTopBottom"] = json!(true);
     mover["movementBonus"] = json!(1);
@@ -476,7 +476,7 @@ fn rule_catalog_0821_charge_allows_immediate_move_and_attack() {
 }
 
 #[test]
-fn restricted_attacker_should_preserve_unit_targets_and_filter_site_target() {
+fn rule_catalog_0824_restricted_attacker_filters_site_targets() {
     let mut restricted = minion(1, 3);
     restricted["cannotAttackSites"] = json!(true);
     restricted["charge"] = json!(true);
@@ -551,7 +551,7 @@ fn restricted_attacker_should_preserve_unit_targets_and_filter_site_target() {
 }
 
 #[test]
-fn provider_affinity_should_stop_immediately_when_provider_dies() {
+fn rule_catalog_0825_provider_affinity_ends_when_provider_dies() {
     let mut provider = minion(0, 1);
     provider["provides"] = json!("earth");
     let mut threshold_minion = minion(1, 2);
@@ -864,7 +864,7 @@ fn mana_activation_should_require_readiness_tap_add_printed_mana_reveal_and_expi
 }
 
 #[test]
-fn unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplicates() {
+fn rule_catalog_0826_unconditional_end_turn_stealth_before_turn_events() {
     let mut fox = minion(1, 2);
     fox["gainsStealthAtEndOfTurn"] = json!(true);
     fox["stealth"] = json!(true);
@@ -1060,7 +1060,7 @@ fn rule_catalog_0106_conditional_end_turn_stealth_should_require_no_nearby_enemy
 }
 
 #[test]
-fn connected_top_bottom_should_wrap_only_the_minion() {
+fn rule_catalog_0827_connected_top_bottom_wraps_only_the_minion() {
     let mut connector = minion(1, 2);
     connector["connectsTopBottom"] = json!(true);
     let manifest = scenario_manifest(

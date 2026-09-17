@@ -324,7 +324,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "hamlet_should_discount_only_ordinary_minions_at_that_site"
+        "testName": "rule_catalog_0829_hamlet_discounts_ordinary_minions_at_that_site"
       }
     },
     {
@@ -946,7 +946,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "explicit_permission_should_allow_summoning_to_any_site"
+        "testName": "rule_catalog_0831_explicit_permission_summons_to_any_site"
       }
     },
     {
@@ -968,7 +968,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "water_site_restriction_should_filter_unrestricted_summons_by_terrain"
+        "testName": "rule_catalog_0832_water_site_restriction_filters_by_terrain"
       }
     },
     {
@@ -1603,7 +1603,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "mana_and_each_elemental_threshold_should_gate_without_spending_affinity"
+        "testName": "rule_catalog_0833_mana_and_thresholds_gate_without_spending_affinity"
       }
     },
     {
@@ -1700,7 +1700,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "restricted_attacker_should_preserve_unit_targets_and_filter_site_target"
+        "testName": "rule_catalog_0824_restricted_attacker_filters_site_targets"
       }
     },
     {
@@ -1948,7 +1948,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "provider_affinity_should_stop_immediately_when_provider_dies"
+        "testName": "rule_catalog_0825_provider_affinity_ends_when_provider_dies"
       }
     },
     {
@@ -2148,7 +2148,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "unconditional_end_turn_stealth_should_gain_before_turn_events_without_duplicates"
+        "testName": "rule_catalog_0826_unconditional_end_turn_stealth_before_turn_events"
       }
     },
     {
@@ -2267,7 +2267,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "forward_restriction_should_use_seat_direction_and_top_bottom_wrap"
+        "testName": "rule_catalog_0823_forward_restriction_uses_seat_direction_and_wrap"
       }
     },
     {
@@ -2287,7 +2287,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "connected_top_bottom_should_wrap_only_the_minion"
+        "testName": "rule_catalog_0827_connected_top_bottom_wraps_only_the_minion"
       }
     },
     {
@@ -18188,7 +18188,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "A later-entered persistent 2×2 Flood Aura covering the same site wins the timestamp: the site becomes a Water site and provides Water threshold, while its other affinities remain. Drought entered first stays in the realm.",
+      "plainLanguage": "A later-entered persistent 2\u00d72 Flood Aura covering the same site wins the timestamp: the site becomes a Water site and provides Water threshold, while its other affinities remain. Drought entered first stays in the realm.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "affectedSitesAreFlooded"
@@ -19181,6 +19181,300 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
         "testName": "rule_catalog_0822_spellcaster_pays_mana_and_summons_at_controlled_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0823",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Dalcean Phalanx can move itself only forward for its seat.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0823_forward_restriction_uses_seat_direction_and_wrap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0824",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A restricted attacker can target units but not sites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "choose-target"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0824_restricted_attacker_filters_site_targets"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0825",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A provider adds affinity until that minion dies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "elemental-affinity"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0825_provider_affinity_ends_when_provider_dies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0826",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sly Fox gains Stealth once at the end of its controller turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0826_unconditional_end_turn_stealth_before_turn_events"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0827",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A unit can move across connected top and bottom realm edges.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0827_connected_top_bottom_wraps_only_the_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0828",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Gnarled Wendigo offers normal mana payment and only sacrifice branches that reduce cost.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon",
+        "sacrifice"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0828_gnarled_wendigo_offers_useful_sacrifice_payments"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0829",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Hamlet reduces only Ordinary minion mana payments at that site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0829_hamlet_discounts_ordinary_minions_at_that_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0830",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Hamlet's Ordinary minion discount applies only at that site across mana and alternative payment modes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ordinaryMinionManaDiscount"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0830_hamlet_discounts_ordinary_payments_across_modes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0831",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Explicit permission allows a minion to be summoned to any site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0831_explicit_permission_summons_to_any_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0832",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Water-site cast restriction filters unrestricted summons by terrain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "terrain"
+      ],
+      "actionHints": [
+        "summon",
+        "cast"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0832_water_site_restriction_filters_by_terrain"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0833",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Mana and every elemental threshold gate minion actions without being spent together.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "elemental-threshold"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0833_mana_and_thresholds_gate_without_spending_affinity"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0834",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Teleport Magic to a site an ally already occupies resolves without moving that ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportAllyToTargetSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/targeted_relocation_magic_rules.rs",
+        "testName": "rule_catalog_0834_teleport_to_occupied_site_resolves_without_movement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0835",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Lure Magic resolves as a paid no-op when no nearby enemy minion is available.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/targeted_relocation_magic_rules.rs",
+        "testName": "rule_catalog_0835_lure_without_nearby_enemy_resolves_as_paid_no_op"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0836",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Waterbound Voidwalk movement stops at the first void cell where the minion would become inhospitable.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "voidwalk",
+        "waterbound"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0836_waterbound_voidwalk_stops_at_inhospitable_void"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0837",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Drag projectile descriptors, labels, opaque action IDs, and canonical sort order match the TypeScript legality contract fixture.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "shootsDragProjectile"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
+        "testName": "rule_catalog_0837_drag_projectile_descriptors_match_typescript_contract"
       }
     }
   ]
