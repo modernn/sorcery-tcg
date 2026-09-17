@@ -13527,6 +13527,54 @@
         "file": "crates/sorcery-engine/tests/cave_in_rules.rs",
         "testName": "rule_catalog_0588_cave_in_does_not_offer_a_water_only_site"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0589",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic offers existing locations within two measured cardinal steps of the caster footprint. After C4 and C3 exist, choosing C3 deals 3 damage to each Unit there: an unwarded minion takes 3, Ward absorbs for a second minion, and Avatars at C4 and C1 stay unwounded. Location offers are not unit targets, so Stealth does not filter them.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_0589_explosion_damages_each_unit_at_location_and_ward_absorbs"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0590",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic still offers an empty measured location. Casting at empty C3 is a paid no-op: magic-cast and magic-resolved only.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_0590_empty_offered_location_is_a_paid_noop"
+      }
     }
   ]
 }
