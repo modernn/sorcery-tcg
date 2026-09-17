@@ -629,6 +629,124 @@ fn rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order() {
     assert_exact_replay(&session);
 }
 
+fn combined_ignited_malakhim_cards(ignited: &Value, malakhim: &Value) -> Value {
+    json!({
+        "north-avatar": avatar(),
+        "north-filler": minion(json!({})),
+        "north-ignited": ignited,
+        "north-malakhim": malakhim,
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-filler": minion(json!({})),
+        "south-site": site(),
+    })
+}
+
+#[test]
+fn rule_catalog_0931_ignited_death_precedes_malakhim_untap_on_same_end_turn() {
+    let ignited = minion(json!({
+        "attack": 3,
+        "charge": true,
+        "defense": 3,
+        "diesAtEndOfControllerTurn": true,
+    }));
+    let malakhim = minion(json!({
+        "attack": 4,
+        "defense": 4,
+        "untapsAtEndOfControllerTurn": true,
+    }));
+    let manifest = manifest(
+        113,
+        &combined_ignited_malakhim_cards(&ignited, &malakhim),
+        &["north-malakhim", "north-ignited", "north-filler"],
+        &["south-filler"; 3],
+        6,
+    );
+    let mut session = Session::new(&manifest).expect("valid combined end-turn scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let (malakhim_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-malakhim"
+    });
+    let malakhim_id = malakhim_summon["cardInstanceId"]
+        .as_str()
+        .expect("Malakhim identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == malakhim_id
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "decline-attack");
+    let (ignited_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-ignited"
+    });
+    let ignited_id = ignited_summon["cardInstanceId"]
+        .as_str()
+        .expect("Ignited identity")
+        .to_owned();
+    let before = state(&session);
+    assert_eq!(unit(&before, &malakhim_id)["tapped"], true);
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "minion-died",
+            "minion-untapped",
+            "turn-ended",
+            "turn-started"
+        ]
+    );
+    assert_eq!(
+        receipt.events[0].payload,
+        json!({
+            "cardId": "north-ignited",
+            "instanceId": ignited_id,
+            "owner": "north",
+        })
+    );
+    assert_eq!(
+        receipt.events[1].payload,
+        json!({
+            "instanceId": malakhim_id,
+            "seat": "north",
+            "sourceInstanceId": malakhim_id,
+        })
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
+    let survivor = unit(&after, &malakhim_id);
+    assert_eq!(survivor["tapped"], false);
+    assert_eq!(survivor["damage"], 0);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == ignited_id)
+    );
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn rule_catalog_0760_terminal_end_turn_deathrite_suppresses_turn_transition() {
     let manifest = manifest(
