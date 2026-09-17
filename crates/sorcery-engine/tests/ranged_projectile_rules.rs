@@ -490,7 +490,7 @@ fn rule_catalog_0767_ranged_issuance_requires_enabled_ready_minion() {
 }
 
 #[test]
-fn ranged_damage_should_keep_current_power_unit_source_without_return_strike() {
+fn rule_catalog_0814_ranged_damage_keeps_unit_source_without_return_strike() {
     let setup = prepare_ranged(
         186,
         &minion(json!({ "attack": 4, "defense": 1, "ranged": true })),
@@ -662,7 +662,7 @@ fn ranged_strikes_should_apply_ward_lethal_deathrites_and_terminal_results() {
 }
 
 #[test]
-fn ranged_hit_should_offer_one_replayable_optional_step() {
+fn rule_catalog_0815_ranged_hit_offers_replayable_optional_step() {
     let setup = prepare_ranged(
         192,
         &minion(json!({
@@ -701,7 +701,7 @@ fn ranged_hit_should_offer_one_replayable_optional_step() {
 }
 
 #[test]
-fn empty_ranged_projectile_should_not_offer_a_step() {
+fn rule_catalog_0816_empty_ranged_projectile_offers_no_step() {
     let setup = prepare_ranged(
         196,
         &minion(json!({
@@ -730,7 +730,7 @@ fn empty_ranged_projectile_should_not_offer_a_step() {
 }
 
 #[test]
-fn ranged_deathrites_should_clear_a_dead_shooters_pending_step() {
+fn rule_catalog_0817_ranged_deathrites_clear_dead_shooters_pending_step() {
     let setup = prepare_ranged(
         195,
         &minion(json!({

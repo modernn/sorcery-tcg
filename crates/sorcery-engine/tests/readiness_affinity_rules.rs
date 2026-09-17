@@ -240,7 +240,7 @@ fn movement_paths(session: &Session, instance_id: &str) -> Vec<String> {
 }
 
 #[test]
-fn movement_bonus_one_should_issue_exact_returning_surface_paths() {
+fn rule_catalog_0818_movement_bonus_one_exact_returning_surface_paths() {
     let mut mover = minion(2, 3);
     mover["movementBonus"] = json!(1);
     let (mut session, instance_id) = ready_movement_session(53, mover, Seat::North, "C2", false);
@@ -274,7 +274,7 @@ fn movement_bonus_one_should_issue_exact_returning_surface_paths() {
 }
 
 #[test]
-fn movement_bonus_two_should_reject_reused_directed_edges_and_attack_after_three_steps() {
+fn rule_catalog_0819_movement_bonus_two_three_steps_no_reused_edges() {
     let mut mover = minion(2, 3);
     mover["movementBonus"] = json!(2);
     let (mut session, instance_id) = ready_movement_session(125, mover, Seat::North, "C2", true);
@@ -317,7 +317,7 @@ fn movement_bonus_two_should_reject_reused_directed_edges_and_attack_after_three
 }
 
 #[test]
-fn sideways_restriction_should_filter_every_non_sideways_step() {
+fn rule_catalog_0820_sideways_restriction_filters_non_sideways_steps() {
     let mut mover = minion(3, 3);
     mover["movementBonus"] = json!(1);
     mover["movesOnlySideways"] = json!(true);
@@ -411,7 +411,7 @@ fn forward_restriction_should_use_seat_direction_and_top_bottom_wrap() {
 }
 
 #[test]
-fn charge_should_allow_immediate_move_and_attack_without_clearing_sickness() {
+fn rule_catalog_0821_charge_allows_immediate_move_and_attack() {
     let mut charge = minion(1, 2);
     charge["charge"] = json!(true);
     let manifest = scenario_manifest(

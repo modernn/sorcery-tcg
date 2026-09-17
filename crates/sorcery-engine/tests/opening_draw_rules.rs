@@ -400,7 +400,7 @@ fn rule_catalog_0812_empty_atlas_avatar_draw_pays_tap_and_loses() {
 }
 
 #[test]
-fn empty_normal_draw_immediately_loses() {
+fn rule_catalog_0813_empty_normal_draw_immediately_loses() {
     let mut session = Session::new(&scenario_manifest(19, 3, 3)).expect("valid session");
     keep(&mut session);
     keep(&mut session);

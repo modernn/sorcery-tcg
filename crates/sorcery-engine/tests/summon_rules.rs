@@ -338,7 +338,7 @@ fn summon_cells(session: &Session) -> Vec<String> {
 }
 
 #[test]
-fn spellcaster_should_pay_mana_and_summon_at_controlled_site() {
+fn rule_catalog_0822_spellcaster_pays_mana_and_summons_at_controlled_site() {
     let manifest = scenario_manifest(
         41,
         &site("earth", false),

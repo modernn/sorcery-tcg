@@ -240,7 +240,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "spellcaster_should_pay_mana_and_summon_at_controlled_site"
+        "testName": "rule_catalog_0822_spellcaster_pays_mana_and_summons_at_controlled_site"
       }
     },
     {
@@ -1054,7 +1054,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "charge_should_allow_immediate_move_and_attack_without_clearing_sickness"
+        "testName": "rule_catalog_0821_charge_allows_immediate_move_and_attack"
       }
     },
     {
@@ -1664,7 +1664,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "ranged_damage_should_keep_current_power_unit_source_without_return_strike"
+        "testName": "rule_catalog_0814_ranged_damage_keeps_unit_source_without_return_strike"
       }
     },
     {
@@ -1812,7 +1812,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "ranged_hit_should_offer_one_replayable_optional_step"
+        "testName": "rule_catalog_0815_ranged_hit_offers_replayable_optional_step"
       }
     },
     {
@@ -1833,7 +1833,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "empty_ranged_projectile_should_not_offer_a_step"
+        "testName": "rule_catalog_0816_empty_ranged_projectile_offers_no_step"
       }
     },
     {
@@ -1852,7 +1852,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "ranged_deathrites_should_clear_a_dead_shooters_pending_step"
+        "testName": "rule_catalog_0817_ranged_deathrites_clear_dead_shooters_pending_step"
       }
     },
     {
@@ -2248,7 +2248,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "sideways_restriction_should_filter_every_non_sideways_step"
+        "testName": "rule_catalog_0820_sideways_restriction_filters_non_sideways_steps"
       }
     },
     {
@@ -2496,7 +2496,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "movement_bonus_one_should_issue_exact_returning_surface_paths"
+        "testName": "rule_catalog_0818_movement_bonus_one_exact_returning_surface_paths"
       }
     },
     {
@@ -2537,7 +2537,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "movement_bonus_two_should_reject_reused_directed_edges_and_attack_after_three_steps"
+        "testName": "rule_catalog_0819_movement_bonus_two_three_steps_no_reused_edges"
       }
     },
     {
@@ -2842,7 +2842,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "empty_normal_draw_immediately_loses"
+        "testName": "rule_catalog_0813_empty_normal_draw_immediately_loses"
       }
     },
     {
@@ -18969,6 +18969,218 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
         "testName": "rule_catalog_0812_empty_atlas_avatar_draw_pays_tap_and_loses"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0813",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Attempting to draw from an empty deck immediately loses.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0813_empty_normal_draw_immediately_loses"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0814",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged damage retains its attacking unit source classification.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "attack"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0814_ranged_damage_keeps_unit_source_without_return_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0815",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A surviving enabled minion may take one legal step after its Ranged strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0815_ranged_hit_offers_replayable_optional_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0816",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An empty Ranged projectile does not offer the post-strike step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0816_empty_ranged_projectile_offers_no_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0817",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged striker that dies during the hit cannot leave a pending step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0817_ranged_deathrites_clear_dead_shooters_pending_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0818",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +1 issues exact two-step and returning Move and Attack paths.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0818_movement_bonus_one_exact_returning_surface_paths"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0819",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +2 issues exact three-step paths and attacks after moving.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0819_movement_bonus_two_three_steps_no_reused_edges"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0820",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sedge Crabs can move themselves only sideways.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0820_sideways_restriction_filters_non_sideways_steps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0821",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Charge allows a summoned minion to Move and Attack immediately.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge"
+      ],
+      "actionHints": [
+        "summon",
+        "move",
+        "attack"
+      ],
+      "eventHints": [
+        "summon",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0821_charge_allows_immediate_move_and_attack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0822",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Spellcaster pays mana and summons a minion atop a controlled site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster"
+      ],
+      "actionHints": [
+        "summon",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0822_spellcaster_pays_mana_and_summons_at_controlled_site"
       }
     }
   ]
