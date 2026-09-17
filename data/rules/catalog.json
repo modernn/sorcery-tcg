@@ -25809,6 +25809,230 @@
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_1112_genesis_draw_spell_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1113",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, playing a site from hand is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_1113_play_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1114",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A freshly summoned minion without Charge has summoning sickness and cannot move and attack while an enemy remains in range.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summoningSickness"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_1114_summoning_sickness_blocks_move_and_attack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1115",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink may draw a site when the caster chooses the Atlas deck after teleporting a nearby ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "draw"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "teleport"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1115_blink_draws_site_when_caster_chooses_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1116",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Blink loses the game when the caster chooses an empty deck for its private draw after teleporting a nearby ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "draw"
+      ],
+      "eventHints": [
+        "deck-empty",
+        "terminal"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1116_blink_empty_chosen_deck_is_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1117",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Blink defers its private draw until ordered Deathrites from interrupting deaths are committed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites",
+        "draw"
+      ],
+      "eventHints": [
+        "deathrite-order-committed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1117_blink_draw_deferred_until_deathrites_ordered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1118",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, a Geomancer Avatar's replace-adjacent-rubble action is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "replaceAdjacentRubbleWithTopAtlasSite"
+      ],
+      "actionHints": [
+        "replace-rubble-with-top-atlas-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1119",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, a ready Ranged minion's shoot-projectile action is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1120",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Lash Magic untaps a surviving nearby minion after damage but does not untap a minion killed by lethal damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "untap"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-untapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_1120_lash_lethal_damage_does_not_untap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1121",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A surface Sinkhole site sacrifices itself to destroy a nearby site and replace it with neutral Rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeToDestroyNearbySite",
+        "rubble"
+      ],
+      "actionHints": [
+        "activate-site-destruction"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_destruction_rules.rs",
+        "testName": "rule_catalog_1121_sinkhole_sacrifices_nearby_site_into_neutral_rubble"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1122",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of synthetic manifests with passing game gates classifies every finished game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1122_synthetic_batch_keeps_all_games_unranked_unverified_authority"
+      }
     }
   ]
 }
