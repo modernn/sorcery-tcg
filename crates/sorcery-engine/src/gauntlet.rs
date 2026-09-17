@@ -12,7 +12,9 @@ use crate::batch::{
     run_batch, run_batch_to_dir_from,
 };
 use crate::contract::Seat;
-use crate::eligibility::{EligibilityGates, evaluate_eligibility};
+use crate::eligibility::{
+    EligibilityGates, eligibility_policy_for_manifest_jsons, evaluate_eligibility_with_policy,
+};
 
 /// One deck orientation for a gauntlet seed.
 #[derive(Clone, Copy, Debug)]
@@ -254,15 +256,22 @@ fn run_gauntlet_inner(
         u32::try_from(games.len())
             .map_err(|_| GauntletError::Invalid("gauntlet game count overflowed"))?,
     );
-    let classification = evaluate_eligibility(EligibilityGates {
-        coverage: !games.is_empty(),
-        design: by_deck.len() >= 2,
-        execution: !games.is_empty(),
-        legality: true,
-        pinned_input: !pairs.is_empty(),
-        replay: games.iter().all(|game| game.result.report.replay_verified),
-        reporting: true,
-    })
+    let classification = evaluate_eligibility_with_policy(
+        EligibilityGates {
+            coverage: !games.is_empty(),
+            design: by_deck.len() >= 2,
+            execution: !games.is_empty(),
+            legality: true,
+            pinned_input: !pairs.is_empty(),
+            replay: games.iter().all(|game| game.result.report.replay_verified),
+            reporting: true,
+        },
+        eligibility_policy_for_manifest_jsons(pairs.iter().flat_map(|pair| {
+            pair.orientations
+                .iter()
+                .map(|orientation| orientation.job.manifest_json)
+        })),
+    )
     .classification;
     Ok(GauntletReport {
         average_turns,

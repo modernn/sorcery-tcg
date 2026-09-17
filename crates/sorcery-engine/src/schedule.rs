@@ -10,7 +10,10 @@ use serde_json::{Value, json};
 
 use crate::batch::{BatchClassification, BatchJob, FinishedTerminal};
 use crate::canonical::{CanonicalError, IdentityHash, identity_hash};
-use crate::eligibility::{EligibilityGates, EligibilityReason, evaluate_eligibility};
+use crate::eligibility::{
+    EligibilityGates, EligibilityPolicy, EligibilityReason, eligibility_policy_for_manifest_jsons,
+    evaluate_eligibility_with_policy,
+};
 use crate::gauntlet::{
     DeckOutcomeCounts, GauntletError, GauntletGameResult, GauntletOrientation, GauntletPair,
     GauntletReport, OutcomeCounts, SeatOutcomeCounts, run_gauntlet, run_gauntlet_to_dir,
@@ -364,8 +367,9 @@ pub fn run_declared_pairs(
             "schedule completed no seat-swapped pairs",
         ));
     }
-    let gauntlet = merge_gauntlet_reports(&completed)?;
-    let summary = schedule_summary(&gauntlet, pairs.len())?;
+    let policy = schedule_eligibility_policy(pairs);
+    let gauntlet = merge_gauntlet_reports(&completed, policy)?;
+    let summary = schedule_summary(&gauntlet, pairs.len(), policy)?;
     Ok(ScheduleReport {
         classification: summary.eligibility,
         completed_seeds: planned_seeds
@@ -525,9 +529,18 @@ fn account_trials(
     Ok(trials)
 }
 
+fn schedule_eligibility_policy(pairs: &[GauntletPair<'_>]) -> EligibilityPolicy {
+    eligibility_policy_for_manifest_jsons(pairs.iter().flat_map(|pair| {
+        pair.orientations
+            .iter()
+            .map(|orientation| orientation.job.manifest_json)
+    }))
+}
+
 fn schedule_summary(
     gauntlet: &GauntletReport,
     planned_pairs: usize,
+    policy: EligibilityPolicy,
 ) -> Result<ScheduleSummary, ScheduleError> {
     let mut total_actions = 0_u64;
     let mut total_fights = 0_u64;
@@ -585,19 +598,22 @@ fn schedule_summary(
         replay_failed_games,
         replay_verified_games,
     };
-    let eligibility = evaluate_eligibility(EligibilityGates {
-        coverage: games > 0,
-        design: gauntlet.by_deck.len() >= 2,
-        execution: games > 0,
-        legality: true,
-        pinned_input: !gauntlet.seeds.is_empty()
-            && gauntlet
-                .games
-                .iter()
-                .all(|game| !game.result.manifest_id.as_str().is_empty()),
-        replay: reliability.all_replay_verified,
-        reporting: true,
-    });
+    let eligibility = evaluate_eligibility_with_policy(
+        EligibilityGates {
+            coverage: games > 0,
+            design: gauntlet.by_deck.len() >= 2,
+            execution: games > 0,
+            legality: true,
+            pinned_input: !gauntlet.seeds.is_empty()
+                && gauntlet
+                    .games
+                    .iter()
+                    .all(|game| !game.result.manifest_id.as_str().is_empty()),
+            replay: reliability.all_replay_verified,
+            reporting: true,
+        },
+        policy,
+    );
     Ok(ScheduleSummary {
         by_deck: gauntlet.by_deck.clone(),
         by_seat: gauntlet.by_seat,
@@ -623,7 +639,10 @@ fn schedule_summary(
     })
 }
 
-fn merge_gauntlet_reports(reports: &[GauntletReport]) -> Result<GauntletReport, ScheduleError> {
+fn merge_gauntlet_reports(
+    reports: &[GauntletReport],
+    policy: EligibilityPolicy,
+) -> Result<GauntletReport, ScheduleError> {
     let mut games = Vec::new();
     let mut by_deck = BTreeMap::<String, DeckOutcomeCounts>::new();
     let mut by_seat = SeatOutcomeCounts::default();
@@ -646,7 +665,7 @@ fn merge_gauntlet_reports(reports: &[GauntletReport]) -> Result<GauntletReport, 
             games.push(remapped);
         }
     }
-    average_report(by_deck, by_seat, games, seeds)
+    average_report(by_deck, by_seat, games, seeds, policy)
 }
 
 fn add_seat(total: &mut OutcomeCounts, add: OutcomeCounts) {
@@ -670,6 +689,7 @@ fn average_report(
     by_seat: SeatOutcomeCounts,
     games: Vec<GauntletGameResult>,
     seeds: Vec<u32>,
+    policy: EligibilityPolicy,
 ) -> Result<GauntletReport, ScheduleError> {
     let total_turns = games
         .iter()
@@ -684,15 +704,18 @@ fn average_report(
         u32::try_from(games.len())
             .map_err(|_| ScheduleError::Invalid("schedule game count overflowed"))?,
     );
-    let classification = evaluate_eligibility(EligibilityGates {
-        coverage: !games.is_empty(),
-        design: by_deck.len() >= 2,
-        execution: !games.is_empty(),
-        legality: true,
-        pinned_input: !seeds.is_empty(),
-        replay: games.iter().all(|game| game.result.report.replay_verified),
-        reporting: true,
-    })
+    let classification = evaluate_eligibility_with_policy(
+        EligibilityGates {
+            coverage: !games.is_empty(),
+            design: by_deck.len() >= 2,
+            execution: !games.is_empty(),
+            legality: true,
+            pinned_input: !seeds.is_empty(),
+            replay: games.iter().all(|game| game.result.report.replay_verified),
+            reporting: true,
+        },
+        policy,
+    )
     .classification;
     Ok(GauntletReport {
         average_turns,
