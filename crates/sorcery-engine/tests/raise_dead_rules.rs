@@ -219,9 +219,7 @@ fn south_establishes_domain_if_required(session: &mut Session) {
         .legal_actions()
         .expect("south opening actions")
         .iter()
-        .any(|action| {
-            action.descriptor["kind"] == "play-site" && action.descriptor["cell"] == "C1"
-        })
+        .any(|action| action.descriptor["kind"] == "play-site" && action.descriptor["cell"] == "C1")
     {
         accept_where(session, |descriptor| {
             descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
@@ -283,11 +281,7 @@ fn rule_catalog_0583_raise_dead_summons_a_random_cemetery_minion_to_a_legal_site
             && descriptor["manaCost"] == 0
             && descriptor["region"].is_null()
     });
-    assert!(
-        event_types(&summon_receipt)
-            .iter()
-            .any(|event| *event == "minion-summoned")
-    );
+    assert!(event_types(&summon_receipt).contains(&"minion-summoned"));
     let after = state(&session);
     assert!(
         after["realm"]["units"]
