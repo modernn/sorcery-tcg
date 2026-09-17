@@ -15170,6 +15170,64 @@
         "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
         "testName": "rule_catalog_0654_chosen_discard_cost_is_unoffered_without_another_hand_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0657",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Craterize-style Magic pays an Atlas discard, destroys an unprotected site into Rubble, and deals its printed grid damage to the occupant. Plain destroy-site Magic (0623) creates Rubble without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "damageUnitsAboveAndBelowTargetSiteByManhattanDistance"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-destroyed",
+        "rubble-created",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/protected_site_magic_rules.rs",
+        "testName": "rule_catalog_0657_craterize_destroys_an_unprotected_site_and_damages_its_occupant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0658",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Craterize-style Magic that would destroy a site that cannot be moved, destroyed, or modified is prevented, leaves the site in play, still pays the Atlas discard, still deals its grid damage to the occupant, and still resolves. Plain destroy-site protection (0624) has no damage companion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotBeMovedDestroyedOrModified",
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "damageUnitsAboveAndBelowTargetSiteByManhattanDistance"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-destruction-prevented",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/protected_site_magic_rules.rs",
+        "testName": "rule_catalog_0658_craterize_is_prevented_on_a_protected_site_but_still_deals_damage"
+      }
     }
   ]
 }
