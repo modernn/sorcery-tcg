@@ -1838,6 +1838,11 @@ impl Game {
         self.position
     }
 
+    #[doc(hidden)]
+    pub fn test_set_north_avatar_life(&mut self, life: u16) {
+        self.position.players[0].avatar.life = life;
+    }
+
     pub(crate) fn ensure_selfplay_supported(&self) -> Result<(), GameError> {
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {

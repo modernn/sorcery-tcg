@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890).
+//! 0885–0890, 0893).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -7,6 +7,7 @@
 //! is suppressed without enough mana, and hops cannot leave the caster region.
 //! 0885–0886 cover pay-life additional costs on Chain Magic resolution.
 //! 0887–0890 cover chosen-discard additional costs on Chain Magic.
+//! 0896 covers pay-life resolve gating when life drops after begin.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -14,7 +15,9 @@ use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
+use sorcery_engine::action::ActionDescriptor;
 use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::game::Game;
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -401,6 +404,14 @@ fn extend_ids(session: &Session) -> Vec<String> {
         .collect()
 }
 
+fn offers_resolve_chain_magic(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("staged Chain Magic actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-chain-magic")
+}
+
 fn sorted(mut ids: Vec<String>) -> Vec<String> {
     ids.sort_unstable();
     ids
@@ -695,6 +706,24 @@ fn offers_begin_pay_life_chain(session: &Session) -> bool {
         })
 }
 
+fn replay_game(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("replay legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .is_ok_and(|action| action.action_id == receipt.action_id)
+            })
+            .expect("recorded engine-issued action");
+        game.apply_action(&action).expect("replay action");
+    }
+    game
+}
+
 #[test]
 fn rule_catalog_0885_chain_magic_pay_life_is_paid_before_the_cast_resolves() {
     let (mut session, chain_id, target_id) = setup_pay_life_chain(20, 885);
@@ -758,6 +787,45 @@ fn rule_catalog_0886_deaths_door_cannot_begin_pay_life_chain_magic() {
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
     assert!(!state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
     assert!(!offers_begin_pay_life_chain(&session));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0896_chain_magic_resolve_is_unoffered_when_pay_life_cost_exceeds_current_life() {
+    let (mut session, chain_id, target_id) = setup_pay_life_chain(3, 896);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 3);
+    assert!(offers_begin_pay_life_chain(&session));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(staged["players"]["north"]["avatar"]["life"], 3);
+    assert!(offers_resolve_chain_magic(&session));
+
+    let checkpoint = create_game_checkpoint(&session).expect("staged pay-life checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let resumed = resume_game_checkpoint(&parsed).expect("resumed staged checkpoint");
+    assert_eq!(state(&resumed), staged);
+    assert!(offers_resolve_chain_magic(&resumed));
+
+    let mut branched = replay_game(&resumed);
+    branched.test_set_north_avatar_life(1);
+    assert_eq!(
+        branched.authoritative_state()["players"]["north"]["avatar"]["life"],
+        1
+    );
+    assert!(
+        !branched
+            .legal_actions()
+            .expect("branched legal actions")
+            .iter()
+            .any(|action| matches!(action.descriptor(), ActionDescriptor::ResolveChainMagic)),
+        "life below the pay-life cost must issue no resolve-chain-magic"
+    );
     assert_exact_replay(&session);
 }
 
@@ -1164,4 +1232,125 @@ fn rule_catalog_0890_chain_magic_issues_no_begin_without_a_chosen_discard_while_
         "every issued begin must carry the chosen discard identity"
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independently() {
+    const EXTRA_TARGET_MANA: u64 = 2;
+    let encoded = (893..893 + 256)
+        .map(hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+        })
+        .expect("bounded seed with Chain Magic and both nearby allies in the opening hand");
+    let mut hops = setup_hops(&encoded);
+    assert_eq!(hops.mana, EXTRA_TARGET_MANA);
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    assert_eq!(
+        state(&hops.session)["pendingChainMagic"]["targets"]
+            .as_array()
+            .expect("staged targets")
+            .len(),
+        1
+    );
+    assert!(offers_resolve_chain_magic(&hops.session));
+    assert_eq!(
+        sorted(extend_ids(&hops.session)),
+        sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()])
+    );
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["instanceId"] == hops.second_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["players"]["north"]["mana"], EXTRA_TARGET_MANA);
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"]
+            .as_array()
+            .expect("staged targets")
+            .len(),
+        2
+    );
+    assert!(
+        offers_resolve_chain_magic(&hops.session),
+        "two staged hops on a zero-cost chain cost {EXTRA_TARGET_MANA} mana to resolve"
+    );
+    assert!(
+        extend_ids(&hops.session).is_empty(),
+        "a third hop would cost {} mana",
+        EXTRA_TARGET_MANA * 3
+    );
+
+    let mut short = setup_hops_short(&encoded, true);
+    assert_eq!(short.mana, 1);
+    accept_where(&mut short.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == short.chain_id
+            && descriptor["target"]["instanceId"] == short.first_id
+    });
+    assert!(
+        offers_resolve_chain_magic(&short.session),
+        "one staged hop on a zero-cost chain resolves for free"
+    );
+    assert!(
+        extend_ids(&short.session).is_empty(),
+        "the next hop costs {EXTRA_TARGET_MANA} mana while the caster has one"
+    );
+    assert_exact_replay(&hops.session);
+    assert_exact_replay(&short.session);
+}
+
+fn setup_hops_short(encoded: &str, skip_last_site: bool) -> ChainHops {
+    let mut session = opening_main(encoded);
+    let (first, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-a"
+            && descriptor["cell"] == "C4"
+    });
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-b"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    if !skip_last_site {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+        });
+    }
+    let before = state(&session);
+    ChainHops {
+        avatar_id: before["players"]["north"]["avatar"]["card"]["instanceId"]
+            .as_str()
+            .expect("North Avatar identity")
+            .to_owned(),
+        chain_id: hand_instance(&before, "north-chain"),
+        first_id: first["cardInstanceId"]
+            .as_str()
+            .expect("first hop identity")
+            .to_owned(),
+        mana: before["players"]["north"]["mana"]
+            .as_u64()
+            .expect("North mana"),
+        second_id: second["cardInstanceId"]
+            .as_str()
+            .expect("second hop identity")
+            .to_owned(),
+        session,
+    }
 }
