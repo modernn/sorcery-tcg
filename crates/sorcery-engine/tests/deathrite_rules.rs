@@ -568,7 +568,7 @@ fn deathrite_area_damage_should_use_last_location_ward_reduction_and_lethal() {
 }
 
 #[test]
-fn deathrite_damage_should_preserve_source_power_until_resolution() {
+fn rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution() {
     let mut raw = base_manifest(171);
     set_all_minions(
         &mut raw,
