@@ -593,3 +593,63 @@ fn rule_catalog_0764_simultaneous_return_damage_above_u8_records_exact_total() {
     );
     exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0907_defend_simultaneous_lethal_kills_tougher_attacker() {
+    let mut lethal_defender = minion(1, false);
+    lethal_defender["lethal"] = json!(true);
+    let tough_attacker = attacker(1, 2);
+    let AttackSetup {
+        attacker_id,
+        defender_id,
+        mut session,
+        ..
+    } = declared_attack(143, &lethal_defender, &tough_attacker, false, 0);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == defender_id
+            && descriptor["to"]["cell"] == "C2"
+    });
+    let (_, fought) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == false
+    });
+    let state = &session.replay_value().expect("authoritative state")["state"];
+    let living_ids: Vec<&str> = state["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .filter_map(|unit| unit["instanceId"].as_str())
+        .collect();
+    let attacker_damage = fought.events.iter().find(|event| {
+        event.event_type == "damage-dealt" && event.payload["instanceId"] == attacker_id
+    });
+    let defender_damage = fought.events.iter().find(|event| {
+        event.event_type == "damage-dealt" && event.payload["instanceId"] == defender_id
+    });
+    assert!(
+        living_ids.is_empty()
+            && attacker_damage.is_some_and(|event| {
+                event.payload["amount"] == 1 && event.payload["accumulated"] == 1
+            })
+            && defender_damage.is_some_and(|event| event.payload["amount"] == 1)
+            && fought.events.iter().any(|event| {
+                event.event_type == "minion-died" && event.payload["instanceId"] == attacker_id
+            })
+            && fought.events.iter().any(|event| {
+                event.event_type == "minion-died" && event.payload["instanceId"] == defender_id
+            })
+            && fought
+                .events
+                .iter()
+                .filter(|event| event.event_type == "minion-died")
+                .count()
+                == 2,
+        "one printed-Lethal return strike in a simultaneous Defend fight must destroy a 2-defense attacker from a single damage: living={living_ids:?} events={:?}",
+        fought
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>()
+    );
+    exact_replay(&session);
+}
