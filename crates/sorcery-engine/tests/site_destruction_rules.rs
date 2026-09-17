@@ -73,13 +73,15 @@ fn manifest() -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
     let action = session
         .legal_actions()
-        .expect("legal actions")
+        .ok()?
         .into_iter()
-        .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .find(|action| predicate(&action.descriptor))?;
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -87,11 +89,15 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
             seat: action.seat,
             state_version: action.state_version,
         })
-        .expect("authoritative step")
+        .ok()?
     else {
-        panic!("engine-issued action must be accepted");
+        return None;
     };
-    (descriptor, receipt)
+    Some((descriptor, receipt))
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    try_accept_where(session, predicate).expect("expected engine-issued action")
 }
 
 fn keep(session: &mut Session) {
@@ -293,4 +299,248 @@ fn rule_catalog_1121_sinkhole_sacrifices_nearby_site_into_neutral_rubble() {
         StepResult::Rejected(rejection) if rejection.code == RejectionCode::StaleVersion
     ));
     assert!(destroyed.verify_replay().expect("exact Sinkhole replay"));
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_plain() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn finish_manifest(mut value: Value) -> String {
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn deathrite_site_destruction_manifest(seed: u32) -> String {
+    let fixture = "sinkhole-site-destruction-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            },
+            "north-rain": rain_spell(),
+            "north-site": {
+                "cardType": "site",
+                "elements": ["earth"],
+                "sacrificeToDestroyNearbySite": true,
+            },
+            "south-avatar": {
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            },
+            "south-deathrite": deathrite_plain(),
+            "south-site": { "cardType": "site", "elements": ["earth"] },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+fn offers_site_destruction(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == "activate-site-destruction")
+    })
+}
+
+fn assert_exact_replay(session: &Session) {
+    assert!(session.verify_replay().expect("verified exact replay"));
+}
+
+struct PendingDeathriteSiteDestructionSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    source_id: String,
+}
+
+fn try_pending_deathrite_with_site_destruction_legal(
+    encoded: &str,
+) -> Option<PendingDeathriteSiteDestructionSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    let played = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let source_id = played.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if !offers_site_destruction(&session) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSiteDestructionSetup {
+        deathrite_ids,
+        session,
+        source_id,
+    })
+}
+
+fn deathrite_site_destruction_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_site_destruction_manifest)
+        .find(|candidate| try_pending_deathrite_with_site_destruction_legal(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with legal Sinkhole site destruction")
+}
+
+#[test]
+fn rule_catalog_1129_activate_site_destruction_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_site_destruction_seed_with(1129);
+    let mut setup = try_pending_deathrite_with_site_destruction_legal(&encoded)
+        .expect("complete Sinkhole activate-site-destruction Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let source_id = setup.source_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["realm"]["sites"]["C4"]["instanceId"], source_id);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "end-turn"
+                    && action.descriptor["kind"] != "activate-site-destruction"
+            })
+    );
+    assert!(!offers_site_destruction(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["realm"]["sites"]["C4"]["instanceId"], source_id);
+    assert!(offers_site_destruction(session));
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-site-destruction"
+            && descriptor["sourceSiteInstanceId"] == source_id
+            && descriptor["targetCell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["site-sacrificed", "site-destroyed", "rubble-created"]
+    );
+    assert_eq!(state(session)["realm"]["sites"]["C4"]["rubble"], true);
+    assert_exact_replay(session);
 }
