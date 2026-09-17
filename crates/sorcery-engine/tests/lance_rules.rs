@@ -276,7 +276,7 @@ fn fire(
 }
 
 #[test]
-fn lance_should_buff_and_break_on_next_unit_strike_but_not_site_strike() {
+fn rule_catalog_0798_lance_buffs_and_breaks_on_unit_strike_not_site_strike() {
     let lancer = minion(json!({ "attack": 1, "defense": 1, "lanceCount": 1 }));
     let target = minion(json!({ "attack": 2, "defense": 2 }));
     let mut strike = prepare_lance(194, &lancer, &target, true, 6);
