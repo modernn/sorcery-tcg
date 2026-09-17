@@ -661,3 +661,324 @@ fn rule_catalog_0805_decline_offers_colocated_ready_interceptor_close_fight() {
     );
     exact_replay(&session);
 }
+
+fn intercept_deathrite_minion(extra: Value) -> Value {
+    let mut value = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra minion facts must be an object");
+    };
+    value.as_object_mut().expect("minion facts").extend(extra);
+    value
+}
+
+fn intercept_deathrite_manifest(seed: u32) -> String {
+    let fixture = "intercept-deathrite-order-withheld";
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-attacker": intercept_deathrite_minion(json!({
+                "lethal": true,
+                "mayRangedStrikeOnceDuringBasicMovement": true,
+                "movementBonus": 1,
+                "ranged": true,
+            })),
+            "north-avatar": json!({
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            }),
+            "north-shooter": intercept_deathrite_minion(json!({ "ranged": true })),
+            "north-site": json!({
+                "cardType": "site",
+                "elements": ["earth"],
+                "rangedUnitsHereRangeBonus": 1,
+            }),
+            "south-aura": intercept_deathrite_minion(json!({
+                "otherNearbyAlliesPowerBonus": 1,
+                "summonToAnySite": true,
+            })),
+            "south-avatar": json!({
+                "attack": 1,
+                "cardType": "avatar",
+                "defense": 1,
+                "drawSpell": false,
+                "life": 20,
+            }),
+            "south-deathrite": intercept_deathrite_minion(json!({
+                "deathriteDrawSite": true,
+                "summonToAnySite": true,
+            })),
+            "south-interceptor": intercept_deathrite_minion(json!({
+                "defense": 2,
+                "summonToAnySite": true,
+            })),
+            "south-site": json!({ "cardType": "site", "elements": ["earth"] }),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": ["north-shooter", "north-shooter", "north-attacker"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-aura",
+                    "south-deathrite",
+                    "south-deathrite",
+                    "south-interceptor",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+    canonical_json(&manifest).expect("canonical synthetic intercept Deathrite manifest")
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn fire_south_projectile(
+    session: &mut Session,
+    shooter_id: &str,
+    target_id: &str,
+) -> Option<Receipt> {
+    Some(
+        try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "shoot-projectile"
+                && descriptor["direction"] == "south"
+                && descriptor["shooterInstanceId"] == shooter_id
+                && descriptor["hit"]["instanceId"] == target_id
+        })?
+        .1,
+    )
+}
+
+fn no_intercept_window_actions(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .all(|action| {
+            let kind = action.descriptor["kind"].as_str().unwrap_or_default();
+            kind != "intercept" && kind != "decline-intercept" && kind != "close-intercept"
+        })
+}
+
+struct PendingInterceptDeathriteSetup {
+    attacker_id: String,
+    deathrite_ids: [String; 2],
+    interceptor_id: String,
+    session: Session,
+}
+
+fn try_pending_intercept_during_deathrite_order(
+    encoded: &str,
+) -> Option<PendingInterceptDeathriteSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let mut shooters = Vec::new();
+    for _ in 0..2 {
+        let (summon, _) = try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-shooter"
+                && descriptor["cell"] == "C4"
+        })?;
+        shooters.push(summon["cardInstanceId"].as_str()?.to_owned());
+    }
+    let attacker = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-attacker"
+            && descriptor["cell"] == "C4"
+    })?;
+    let attacker_id = attacker.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let aura = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-aura"
+            && descriptor["cell"] == "C2"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C2"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C2"
+    })?;
+    let interceptor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-interceptor"
+            && descriptor["cell"] == "C2"
+    })?;
+    let aura_id = aura.0["cardInstanceId"].as_str()?.to_owned();
+    let interceptor_id = interceptor.0["cardInstanceId"].as_str()?.to_owned();
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    fire_south_projectile(&mut session, &shooters[0], &deathrite_ids[0])?;
+    fire_south_projectile(&mut session, &shooters[1], &deathrite_ids[1])?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "C2", "region": "surface" },
+                ])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement"
+    })?;
+    fire_south_projectile(&mut session, &attacker_id, &aura_id)?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    Some(PendingInterceptDeathriteSetup {
+        attacker_id,
+        deathrite_ids,
+        interceptor_id,
+        session,
+    })
+}
+
+fn intercept_deathrite_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(intercept_deathrite_manifest)
+        .find(|candidate| try_pending_intercept_during_deathrite_order(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites before a co-located interceptor can act",
+        )
+}
+
+#[test]
+fn rule_catalog_1141_intercept_withheld_during_pending_deathrite_order() {
+    let encoded = intercept_deathrite_seed_with(1141);
+    let mut setup = try_pending_intercept_during_deathrite_order(&encoded)
+        .expect("complete intercept Deathrite withheld setup");
+    let attacker_id = setup.attacker_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let interceptor_id = setup.interceptor_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(no_intercept_window_actions(session));
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+                && descriptor["unitInstanceId"] == attacker_id
+        });
+    }
+    assert_eq!(state(session)["phase"], "attack");
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    let interceptors: Vec<Value> = session
+        .legal_actions()
+        .expect("Intercept actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "intercept")
+        .map(|action| action.descriptor)
+        .collect();
+    assert_eq!(
+        (
+            state(session)["phase"].clone(),
+            state(session)["decisionSeat"].clone(),
+            interceptors,
+        ),
+        (
+            json!("intercept"),
+            json!("south"),
+            vec![json!({ "kind": "intercept", "unitInstanceId": interceptor_id })],
+        )
+    );
+    exact_replay(session);
+}
