@@ -790,22 +790,31 @@ fn rule_catalog_1099_minor_explosion_withheld_during_pending_deathrite_order() {
     assert_eq!(unit(&resumed, &visitor_id)["location"], "C4");
     assert_eq!(unit(&resumed, &visitor_id)["damage"], 1);
     assert_eq!(explosion_locations(session), ["C4"]);
+    let avatar_id = resumed["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar")
+        .to_owned();
 
     let (_, receipt) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-explosion"
             && descriptor["targetLocation"]["cell"] == "C4"
     });
-    assert_eq!(
-        event_types(&receipt),
-        [
-            "magic-cast",
-            "magic-damage-allocated",
-            "damage-dealt",
-            "magic-resolved",
-        ]
-    );
+    let types = event_types(&receipt);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    let mut expected = vec![(avatar_id.clone(), 3), (visitor_id.clone(), 3)];
+    expected.sort();
+    assert_eq!(allocated_targets(&receipt), expected);
     assert_eq!(damage_dealt_amount(&receipt, &visitor_id), 3);
-    assert_eq!(unit(&state(session), &visitor_id)["damage"], 4);
+    assert_eq!(damage_dealt_amount(&receipt, &avatar_id), 3);
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-life-lost"
+            && event.payload["seat"] == "north"
+            && event.payload["amount"] == 3
+    }));
+    let after = state(session);
+    assert_eq!(unit(&after, &visitor_id)["damage"], 4);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 17);
     assert_exact_replay(session);
 }
