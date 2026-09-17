@@ -78,6 +78,18 @@ fn deathrite_minion() -> Value {
     })
 }
 
+fn tough_deathrite() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -182,6 +194,13 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .iter()
         .map(|event| event.event_type.as_str())
         .collect()
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn opening_spell_ids(encoded: &str) -> Vec<String> {
@@ -290,7 +309,7 @@ fn opening_with_ally(encoded: &str) -> (Session, String) {
     (session, ally_id)
 }
 
-fn south_summons_tough_at_c4(session: &mut Session) -> String {
+fn south_summons_at_c4(session: &mut Session, card_id: &str) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -300,7 +319,7 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
     });
     let (summoned, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "south-tough"
+            && descriptor["cardId"] == card_id
             && descriptor["cell"] == "C4"
             && descriptor["region"].is_null()
     });
@@ -312,6 +331,10 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
         .as_str()
         .expect("enemy identity")
         .to_owned()
+}
+
+fn south_summons_tough_at_c4(session: &mut Session) -> String {
+    south_summons_at_c4(session, "south-tough")
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -646,4 +669,141 @@ fn rule_catalog_1064_grant_lethal_then_draw_withheld_during_pending_deathrite_or
             .any(|card| card["instanceId"] == library_top)
     );
     assert_exact_replay(session);
+}
+
+fn deathrite_kill_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-lethal-then-draw-deathrite-kill" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-lethal-then-draw-deathrite-kill-v1",
+        },
+        "cards": {
+            "north-ally": ally(),
+            "north-avatar": avatar(),
+            "north-gift": gift(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": tough_deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-ally",
+                    "north-gift",
+                    "north-gift",
+                    "north-gift",
+                    "north-gift",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_ally_gift_and_deathrite() -> String {
+    (1081..1081 + 256)
+        .map(deathrite_kill_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-gift")
+        })
+        .expect("bounded seed with ally and gift Magic in the opening hand")
+}
+
+#[test]
+fn rule_catalog_1081_grant_lethal_then_draw_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_ally_gift_and_deathrite();
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    let enemy_id = south_summons_at_c4(&mut session, "south-deathrite");
+    let (_, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "lethal-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert!(
+        !event_types(&granted)
+            .iter()
+            .any(|event_type| *event_type == "site-drawn")
+    );
+
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let killed = session
+        .transcript()
+        .last()
+        .expect("lethal Deathrite strike receipt")
+        .clone();
+    let types = event_types(&killed);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died,
+        "expected damage-dealt, deathrite site-drawn, then minion-died before strike completes; got {types:?}"
+    );
+    if let Some(magic_resolved) = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+    {
+        assert!(
+            site_drawn < magic_resolved,
+            "magic-resolved must follow deathrite site-drawn; got {types:?}"
+        );
+        assert_eq!(types.last(), Some(&"magic-resolved"));
+    }
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+
+    let finished = state(&session);
+    assert!(
+        !finished["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|unit| unit["instanceId"] == enemy_id)
+    );
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
 }
