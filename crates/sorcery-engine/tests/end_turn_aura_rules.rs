@@ -1,4 +1,6 @@
-//! Direct proof for end-turn Aura random damage (RULE-CATALOG-0065).
+//! Direct proofs for end-turn Aura random damage (RULE-CATALOG-0065) and
+//! resolve-end-turn-aura-random withheld during deathrite-order
+//! (RULE-CATALOG-1157).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -25,6 +27,29 @@ fn minion() -> Value {
         "cardType": "minion",
         "defense": 10,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn pulser() -> Value {
+    json!({
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 10,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -333,4 +358,279 @@ fn rule_catalog_0065_end_turn_aura_damages_random_unit_before_optional_move() {
         "dispelled aura returns to cemetery"
     );
     assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn deathrite_manifest(seed: u32) -> String {
+    let fixture = "end-turn-aura-random-deathrite-withheld";
+    let mut base = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["spell-0", "spell-1", "spell-2", "spell-3", "spell-4", "spell-5"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    for spell in 0..=5 {
+        base["cards"][format!("spell-{spell}")] = minion();
+    }
+    let preview = Session::new(
+        &canonical_json(&{
+            let mut value = base.clone();
+            value["manifestId"] = json!(identity_hash(&value).expect("preview identity"));
+            value
+        })
+        .expect("preview manifest"),
+    )
+    .expect("preview session");
+    let preview_state = preview.replay_value().expect("preview state");
+    let hand = preview_state["state"]["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand");
+    let [charm_id, pulser_id, aura_id]: [&str; 3] = hand
+        .iter()
+        .map(|card| card["cardId"].as_str().expect("card id"))
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("three opening spellbook cards");
+    base["cards"][charm_id] = json!({
+        "bearerControllerChoosesExtraRandomOutcome": true,
+        "cardType": "artifact",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    base["cards"][pulser_id] = pulser();
+    base["cards"][aura_id] = json!({
+        "atEndOfControllerTurnDamageRandomUnitAtAffectedSitesThenMayMoveOneStep": 3,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    base["manifestId"] = json!(identity_hash(&base).expect("manifest identity"));
+    canonical_json(&base).expect("canonical synthetic manifest")
+}
+
+struct PendingDeathriteEndTurnAuraSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_end_turn_aura_random(
+    encoded: &str,
+) -> Option<PendingDeathriteEndTurnAuraSetup> {
+    let preview = Session::new(encoded).ok()?;
+    let preview_state = preview.replay_value().ok()?;
+    let hand = preview_state["state"]["players"]["north"]["hand"]["spellbook"].as_array()?;
+    let charm_id = hand.first()?["cardId"].as_str()?;
+    let pulser_id = hand.get(1)?["cardId"].as_str()?;
+    let aura_id = hand.get(2)?["cardId"].as_str()?;
+
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == charm_id
+            && descriptor["bearer"]["kind"] == "avatar"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == pulser_id
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "draw")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == aura_id
+            && descriptor["cells"] == json!(["B3", "B4", "C3", "C4"])
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-end-turn-aura-random")
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteEndTurnAuraSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_end_turn_aura_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_manifest)
+        .find(|candidate| try_pending_deathrite_with_end_turn_aura_random(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites before end-turn Aura random")
+}
+
+fn assert_exact_replay(session: &Session) {
+    let action_ids: Vec<_> = session
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect();
+    let replayed = Session::replay(session.manifest_json(), &action_ids).expect("exact replay");
+    assert_eq!(
+        replayed.replay_value().expect("replayed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_eq!(replayed.transcript(), session.transcript());
+    assert!(session.verify_replay().expect("verified replay"));
+}
+
+#[test]
+fn rule_catalog_1157_resolve_end_turn_aura_random_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_end_turn_aura_seed_with(1157);
+    let mut setup = try_pending_deathrite_with_end_turn_aura_random(&encoded)
+        .expect("complete end-turn Aura random Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-end-turn-aura-random"),
+        "deathrite-order must issue no resolve-end-turn-aura-random"
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "end-turn-aura");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "resolve-end-turn-aura-random"),
+        "resolve-end-turn-aura-random must return once deathrite-order clears"
+    );
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "resolve-end-turn-aura-random"
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-end-turn-damage-allocated")
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "resolve-end-turn-aura-move" && descriptor.get("cells").is_none()
+    });
+    assert_eq!(state(session)["phase"], "draw");
+    assert_exact_replay(session);
 }

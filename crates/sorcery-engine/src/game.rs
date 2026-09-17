@@ -10594,9 +10594,13 @@ impl Game {
                 unit_instance_id,
                 outcomes,
             ),
-            ActionDescriptor::OrderDeathrites { source_instance_id } => {
-                self.apply_deathrite_order_action(action.seat, source_instance_id, outcomes)
-            }
+            ActionDescriptor::OrderDeathrites { source_instance_id } => self
+                .apply_deathrite_order_action(
+                    action.seat,
+                    source_instance_id,
+                    outcomes,
+                    random_draws,
+                ),
             ActionDescriptor::ResolveEndTurnAuraRandom { .. } => {
                 self.apply_resolve_end_turn_aura_random_action(action, outcomes, random_draws)
             }
@@ -13680,7 +13684,7 @@ impl Game {
             return_decision_seat: self.position.decision_seat,
             return_phase: self.position.phase,
         };
-        self.drive_deathrites(pending, outcomes)
+        self.drive_deathrites(pending, outcomes, None)
     }
 
     fn begin_minion_deaths(
@@ -13729,7 +13733,7 @@ impl Game {
             return_decision_seat,
             return_phase,
         };
-        self.drive_deathrites(pending, outcomes)
+        self.drive_deathrites(pending, outcomes, None)
     }
 
     fn apply_deathrite_order_action(
@@ -13737,6 +13741,7 @@ impl Game {
         seat: Seat,
         source_instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         if self.position.phase != Phase::DeathriteOrder
             || seat != self.position.decision_seat
@@ -13757,7 +13762,7 @@ impl Game {
             "deathrite-order-committed",
             || json!({ "seat": seat, "sourceInstanceId": source_instance_id }),
         );
-        self.drive_deathrites(pending, outcomes)?;
+        self.drive_deathrites(pending, outcomes, random_draws)?;
         self.position.state_version += 1;
         Ok(())
     }
@@ -13810,10 +13815,11 @@ impl Game {
         &mut self,
         mut pending: PendingDeathrites,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         loop {
             let Some(batch) = pending.batches.first_mut() else {
-                return self.finish_deathrites(pending, outcomes);
+                return self.finish_deathrites(pending, outcomes, random_draws);
             };
             if batch.stage != DeathriteStage::Resolve {
                 let sources = match batch.stage {
@@ -14124,6 +14130,7 @@ impl Game {
         return_phase: Phase,
         return_decision_seat: Seat,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         let mut restore = || {
             self.position.phase = return_phase;
@@ -14139,13 +14146,19 @@ impl Game {
                 restore();
                 self.continue_drag_projectile(&continuation, false, outcomes)
             }
-            DeathriteContinuation::EndTurn(continuation) => self.continue_end_turn_effects(
-                continuation.seat,
-                &continuation.remaining_here_damage_ids,
-                &continuation.remaining_instance_ids,
-                outcomes,
-                None,
-            ),
+            DeathriteContinuation::EndTurn(continuation) => {
+                let mut local = Vec::new();
+                self.continue_end_turn_effects(
+                    continuation.seat,
+                    &continuation.remaining_here_damage_ids,
+                    &continuation.remaining_instance_ids,
+                    outcomes,
+                    Some(match random_draws {
+                        Some(draws) => draws,
+                        None => &mut local,
+                    }),
+                )
+            }
             DeathriteContinuation::FirstStrike(continuation) => {
                 self.continue_after_first_strike(continuation, outcomes)
             }
@@ -14167,6 +14180,7 @@ impl Game {
         &mut self,
         pending: PendingDeathrites,
         outcomes: &mut OutcomeLog<'_>,
+        random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
         let ordered_resolution = self.position.phase == Phase::DeathriteOrder;
         self.finish_corpses(pending.corpses, outcomes);
@@ -14229,6 +14243,7 @@ impl Game {
                 pending.return_phase,
                 pending.return_decision_seat,
                 outcomes,
+                random_draws,
             );
         } else {
             self.position.phase = pending.return_phase;
