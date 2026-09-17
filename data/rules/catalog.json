@@ -1102,7 +1102,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "genesis_draw_spell_should_keep_identity_private_and_deck_out_after_summon"
+        "testName": "rule_catalog_0838_genesis_draw_spell_private_identity_deck_out_after_summon"
       }
     },
     {
@@ -1123,7 +1123,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "numeric_genesis_spell_draws_should_preserve_top_order"
+        "testName": "rule_catalog_0839_numeric_genesis_spell_draws_preserve_top_order"
       }
     },
     {
@@ -1145,7 +1145,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "numeric_genesis_spell_draws_should_exhaust_before_deck_out"
+        "testName": "rule_catalog_0840_numeric_genesis_spell_draws_exhaust_before_deck_out"
       }
     },
     {
@@ -1209,7 +1209,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "genesis_life_loss_should_reach_but_not_cross_deaths_door"
+        "testName": "rule_catalog_0841_genesis_life_loss_reaches_but_not_crosses_deaths_door"
       }
     },
     {
@@ -1230,7 +1230,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "genesis_heal_should_cap_at_max_and_not_heal_deaths_door"
+        "testName": "rule_catalog_0842_genesis_heal_caps_at_max_and_skips_deaths_door"
       }
     },
     {
@@ -1254,7 +1254,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "site_genesis_mana_should_pay_summon_and_expire_to_site_count"
+        "testName": "rule_catalog_0844_site_genesis_mana_pays_summon_and_expires_to_site_count"
       }
     },
     {
@@ -1275,7 +1275,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "site_genesis_heal_should_target_both_nearby_avatars_in_seat_order_and_cap"
+        "testName": "rule_catalog_0845_site_genesis_heal_targets_nearby_avatars_in_seat_order_and_caps"
       }
     },
     {
@@ -1377,7 +1377,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "first_controlled_copy_site_genesis_mana_should_key_by_card_id"
+        "testName": "rule_catalog_0846_first_controlled_copy_site_genesis_mana_keys_by_card_id"
       }
     },
     {
@@ -1456,7 +1456,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "site_genesis_should_remove_only_enemy_stealth"
+        "testName": "rule_catalog_0847_site_genesis_removes_only_enemy_stealth"
       }
     },
     {
@@ -1623,7 +1623,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "undamaged_zero_defense_genesis_minion_should_survive_until_positive_damage"
+        "testName": "rule_catalog_0843_undamaged_zero_defense_genesis_survives_until_positive_damage"
       }
     },
     {
@@ -19475,6 +19475,219 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
         "testName": "rule_catalog_0837_drag_projectile_descriptors_match_typescript_contract"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0838",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Genesis draws a hidden spell and an empty Spellbook loses after summoning.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw",
+        "summon"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0838_genesis_draw_spell_private_identity_deck_out_after_summon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0839",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Numeric Genesis spell draw counts draw ordered hidden cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0839_numeric_genesis_spell_draws_preserve_top_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0840",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Numeric Genesis spell draws exhaust 2, 1, or 0 remaining cards before deck loss.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0840_numeric_genesis_spell_draws_exhaust_before_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0841",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Genesis life loss reaches but cannot cross Death's Door.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "deaths-door"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0841_genesis_life_loss_reaches_but_not_crosses_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0842",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Grain Sparrow Genesis gains controller life through shared healing semantics.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0842_genesis_heal_caps_at_max_and_skips_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0843",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "An undamaged 0/0 Genesis minion survives until it takes positive damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0843_undamaged_zero_defense_genesis_survives_until_positive_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0844",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis grants temporary mana once, pays a summon, and expires.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "summon",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "effect-expiry",
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0844_site_genesis_mana_pays_summon_and_expires_to_site_count"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0845",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis heals every nearby Avatar through shared life caps.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0845_site_genesis_heal_targets_nearby_avatars_in_seat_order_and_caps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0846",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Tower Genesis grants mana only for the first controlled copy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0846_first_controlled_copy_site_genesis_mana_keys_by_card_id"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0847",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Hunter's Lodge Genesis removes only enemy Stealth.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "stealth"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "stealth-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0847_site_genesis_removes_only_enemy_stealth"
       }
     }
   ]

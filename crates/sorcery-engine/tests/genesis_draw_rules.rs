@@ -297,7 +297,7 @@ fn rule_catalog_0796_genesis_draw_site_private_identity_deck_out_after_summon() 
 }
 
 #[test]
-fn genesis_draw_spell_should_keep_identity_private_and_deck_out_after_summon() {
+fn rule_catalog_0838_genesis_draw_spell_private_identity_deck_out_after_summon() {
     let mut genesis = minion(0, 0);
     genesis["genesisDrawSpells"] = json!(1);
     let manifest = scenario_manifest(127, &avatar(false, 20), &genesis, &minion(1, 1), 4, 4, 4);
@@ -330,7 +330,7 @@ fn genesis_draw_spell_should_keep_identity_private_and_deck_out_after_summon() {
 }
 
 #[test]
-fn numeric_genesis_spell_draws_should_preserve_top_order() {
+fn rule_catalog_0839_numeric_genesis_spell_draws_preserve_top_order() {
     let mut genesis = minion(0, 0);
     genesis["genesisDrawSpells"] = json!(3);
     let manifest = scenario_manifest(129, &avatar(false, 20), &genesis, &minion(1, 1), 4, 6, 4);
@@ -369,7 +369,7 @@ fn numeric_genesis_spell_draws_should_preserve_top_order() {
 }
 
 #[test]
-fn numeric_genesis_spell_draws_should_exhaust_before_deck_out() {
+fn rule_catalog_0840_numeric_genesis_spell_draws_exhaust_before_deck_out() {
     let mut genesis = minion(0, 0);
     genesis["genesisDrawSpells"] = json!(3);
     for remaining in 0..=2 {
@@ -432,7 +432,7 @@ fn mixed_genesis_manifest(seed: u32, life: u8) -> String {
 }
 
 #[test]
-fn genesis_life_loss_should_reach_but_not_cross_deaths_door() {
+fn rule_catalog_0841_genesis_life_loss_reaches_but_not_crosses_deaths_door() {
     let mut loss = minion(1, 1);
     loss["genesisLoseControllerLife"] = json!(2);
     let manifest = scenario_manifest(226, &avatar(false, 2), &loss, &minion(1, 1), 4, 4, 4);
@@ -467,7 +467,7 @@ fn genesis_life_loss_should_reach_but_not_cross_deaths_door() {
 }
 
 #[test]
-fn genesis_heal_should_cap_at_max_and_not_heal_deaths_door() {
+fn rule_catalog_0842_genesis_heal_caps_at_max_and_skips_deaths_door() {
     let manifest = mixed_genesis_manifest(227, 3);
     let mut session = first_main(&manifest);
     accept_where(&mut session, |descriptor| {
@@ -495,7 +495,7 @@ fn genesis_heal_should_cap_at_max_and_not_heal_deaths_door() {
 }
 
 #[test]
-fn undamaged_zero_defense_genesis_minion_should_survive_until_positive_damage() {
+fn rule_catalog_0843_undamaged_zero_defense_genesis_survives_until_positive_damage() {
     let mut attacker = minion(1, 2);
     attacker["charge"] = json!(true);
     attacker["summonToAnySite"] = json!(true);
@@ -1033,7 +1033,7 @@ fn rule_catalog_0501_spellbook_summon_draws_spell_then_heals_controller() {
 }
 
 #[test]
-fn site_genesis_mana_should_pay_summon_and_expire_to_site_count() {
+fn rule_catalog_0844_site_genesis_mana_pays_summon_and_expires_to_site_count() {
     let mut value = manifest_value(
         61,
         &avatar(false, 20),
@@ -1085,7 +1085,7 @@ fn site_heal_manifest(seed: u32) -> String {
 }
 
 #[test]
-fn site_genesis_heal_should_target_both_nearby_avatars_in_seat_order_and_cap() {
+fn rule_catalog_0845_site_genesis_heal_targets_nearby_avatars_in_seat_order_and_caps() {
     let manifest = site_heal_manifest(62);
     let mut session = Session::new(&manifest).expect("valid site-heal Genesis scenario");
     keep(&mut session);
@@ -1196,7 +1196,7 @@ fn first_copy_mana_manifest(seed: u32) -> String {
 }
 
 #[test]
-fn first_controlled_copy_site_genesis_mana_should_key_by_card_id() {
+fn rule_catalog_0846_first_controlled_copy_site_genesis_mana_keys_by_card_id() {
     let manifest = first_copy_mana_manifest(67);
     let mut session = Session::new(&manifest).expect("valid first-copy site Genesis scenario");
     keep(&mut session);
@@ -1237,7 +1237,7 @@ fn first_controlled_copy_site_genesis_mana_should_key_by_card_id() {
 }
 
 #[test]
-fn site_genesis_should_remove_only_enemy_stealth() {
+fn rule_catalog_0847_site_genesis_removes_only_enemy_stealth() {
     let mut stealth = minion(1, 2);
     stealth["stealth"] = json!(true);
     let mut value = manifest_value(71, &avatar(false, 20), &stealth, &stealth, 5, 5, 5);
