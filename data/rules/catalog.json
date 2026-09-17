@@ -24891,6 +24891,244 @@
         "file": "crates/sorcery-engine/tests/return_artifact_rules.rs",
         "testName": "rule_catalog_1072_return_artifact_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1073",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-aura-from-own-cemetery Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_aura_return_rules.rs",
+        "testName": "rule_catalog_1073_cemetery_aura_return_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1074",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-Stealth-to-an-allied-minion occupying an enemy site then draw-spell Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1074_grant_stealth_enemy_site_then_draw_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1075",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, Craterize-style destroy-target-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "damageUnitsAboveAndBelowTargetSiteByManhattanDistance"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "site-destroyed",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/craterize_rules.rs",
+        "testName": "rule_catalog_1075_craterize_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1076",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, ward-each-allied-minion-at-target-water-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1076_ward_water_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1077",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, ward-nearby-minion-or-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-warded",
+        "site-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1077_ward_nearby_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1078",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, burrow-all-minions-and-artifacts-at-target-land-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_rules.rs",
+        "testName": "rule_catalog_1078_cave_in_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1079",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, summon-token-to-each-controlled-site-bordering-enemy-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1079_border_militia_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1080",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, Pay Life additional-cost Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "life-paid",
+        "magic-cast"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pay_life_rules.rs",
+        "testName": "rule_catalog_1080_pay_life_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1081",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Lethal-this-turn then draw-spell Magic that leaves a Deathrite minion alive draws a site for that minion's controller when the granted Lethal strike kills it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "attack"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1081_grant_lethal_then_draw_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1082",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Craterize-style Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "damageUnitsAboveAndBelowTargetSiteByManhattanDistance",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "site-destroyed",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/protected_site_magic_rules.rs",
+        "testName": "rule_catalog_1082_craterize_deathrite_draws_for_controller_on_kill"
+      }
     }
   ]
 }

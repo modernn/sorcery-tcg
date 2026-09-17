@@ -596,7 +596,7 @@ fn rule_catalog_1074_grant_stealth_enemy_site_then_draw_withheld_during_pending_
     let mut offered = fade_ally_ids(session);
     offered.sort_unstable();
     offered.dedup();
-    assert_eq!(offered, [raid_id.clone()]);
+    assert_eq!(offered, vec![raid_id.clone()]);
 
     let library_top = resumed["players"]["north"]["spellbook"]
         .as_array()

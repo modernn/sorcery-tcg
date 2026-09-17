@@ -743,11 +743,7 @@ fn rule_catalog_1081_grant_lethal_then_draw_deathrite_draws_for_controller_on_ki
             "magic-resolved"
         ]
     );
-    assert!(
-        !event_types(&granted)
-            .iter()
-            .any(|event_type| *event_type == "site-drawn")
-    );
+    assert!(!event_types(&granted).contains(&"site-drawn"));
 
     let before = state(&session);
     let north_atlas = atlas_len(&before, "north");

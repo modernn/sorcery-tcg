@@ -6,7 +6,7 @@
 //! targeted destroy. While Deathrites wait for ordering, ward-nearby Magic
 //! stays withheld until the chain drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -658,11 +658,13 @@ fn rule_catalog_1077_ward_nearby_withheld_during_pending_deathrite_order() {
     }));
     assert!(realm_unit(&paused, &visitor_id).is_some());
     assert_eq!(unit(&paused, &visitor_id)["warded"], false);
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(bless_minion_ids(session).is_empty());
 
     let order_sources: Vec<_> = session

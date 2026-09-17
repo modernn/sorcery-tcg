@@ -278,7 +278,9 @@ struct PendingDeathritePayLifeSetup {
     session: Session,
 }
 
-fn try_pending_deathrite_with_pay_life_magic(encoded: &str) -> Option<PendingDeathritePayLifeSetup> {
+fn try_pending_deathrite_with_pay_life_magic(
+    encoded: &str,
+) -> Option<PendingDeathritePayLifeSetup> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
     keep(&mut session);
