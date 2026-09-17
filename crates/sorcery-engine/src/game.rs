@@ -27556,6 +27556,99 @@ pub mod catalog_proofs {
         assert_eq!(replay_resolved, resolved);
         assert_eq!(replay.authoritative_state(), final_state);
     }
+
+    pub fn rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for card_id in ["north-spell-1", "south-spell-1"] {
+                manifest["cards"][card_id] = json!({
+                    "attack": 2,
+                    "cardType": "minion",
+                    "defense": 4,
+                    "manaCost": 0,
+                    "occupiesSquareArea": 2,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let attacker_id = IdentityHash::parse(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .expect("attacker identity");
+        let target_id = IdentityHash::parse(
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .expect("target identity");
+        game.position.units = vec![
+            test_minion(
+                card_id("north-spell-1"),
+                attacker_id.as_str(),
+                Seat::North,
+                Cell::SQUARE_AREAS[4][0],
+                Some(Cell::SQUARE_AREAS[4]),
+            ),
+            test_minion(
+                card_id("south-spell-1"),
+                target_id.as_str(),
+                Seat::South,
+                Cell::SQUARE_AREAS[5][0],
+                Some(Cell::SQUARE_AREAS[5]),
+            ),
+        ];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Attack;
+        game.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
+            attacker_instance_id: attacker_id,
+            attacker_kind: UnitKind::Minion,
+            attacking_seat: Seat::North,
+            cell: Cell::parse("B2").expect("anchor"),
+            combatants: Vec::new(),
+            defenders: Vec::new(),
+            original_target: None,
+            region: Region::Surface,
+            target_removed: false,
+        });
+        let target = CombatTarget::Minion {
+            instance_id: target_id,
+            seat: Seat::South,
+        };
+        assert_eq!(
+            game.attack_targets().expect("attack targets"),
+            std::slice::from_ref(&target)
+        );
+
+        let mut outcomes = Vec::new();
+        game.apply_declare_attack_action(
+            Seat::North,
+            &target,
+            &mut OutcomeLog::Record(&mut outcomes),
+        )
+        .expect("declare oversized attack");
+        let contested = Cell::parse("B3").expect("lowest shared cell");
+        assert_eq!(
+            game.position
+                .pending_combat
+                .as_ref()
+                .expect("pending combat")
+                .cell,
+            contested
+        );
+        assert_eq!(outcomes[0].1["cell"], json!(contested));
+    }
 }
 
 #[cfg(test)]
@@ -29024,100 +29117,6 @@ mod tests {
             .expect("blocked giant");
         assert_eq!(unit.region, Region::Surface);
         assert_eq!(unit.occupied_cells, before.units[0].occupied_cells);
-    }
-
-    #[test]
-    fn oversized_attack_should_choose_the_lowest_shared_contested_cell() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for card_id in ["north-spell-1", "south-spell-1"] {
-                manifest["cards"][card_id] = json!({
-                    "attack": 2,
-                    "cardType": "minion",
-                    "defense": 4,
-                    "manaCost": 0,
-                    "occupiesSquareArea": 2,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized manifest");
-        let card_id = |id: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == id)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let attacker_id = IdentityHash::parse(
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        )
-        .expect("attacker identity");
-        let target_id = IdentityHash::parse(
-            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        )
-        .expect("target identity");
-        game.position.units = vec![
-            test_minion(
-                card_id("north-spell-1"),
-                attacker_id.as_str(),
-                Seat::North,
-                Cell::SQUARE_AREAS[4][0],
-                Some(Cell::SQUARE_AREAS[4]),
-            ),
-            test_minion(
-                card_id("south-spell-1"),
-                target_id.as_str(),
-                Seat::South,
-                Cell::SQUARE_AREAS[5][0],
-                Some(Cell::SQUARE_AREAS[5]),
-            ),
-        ];
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Attack;
-        game.position.pending_combat = Some(PendingCombat {
-            allocations: Vec::new(),
-            attacker_instance_id: attacker_id,
-            attacker_kind: UnitKind::Minion,
-            attacking_seat: Seat::North,
-            cell: Cell::parse("B2").expect("anchor"),
-            combatants: Vec::new(),
-            defenders: Vec::new(),
-            original_target: None,
-            region: Region::Surface,
-            target_removed: false,
-        });
-        let target = CombatTarget::Minion {
-            instance_id: target_id,
-            seat: Seat::South,
-        };
-        assert_eq!(
-            game.attack_targets().expect("attack targets"),
-            std::slice::from_ref(&target)
-        );
-
-        let mut outcomes = Vec::new();
-        game.apply_declare_attack_action(
-            Seat::North,
-            &target,
-            &mut OutcomeLog::Record(&mut outcomes),
-        )
-        .expect("declare oversized attack");
-        let contested = Cell::parse("B3").expect("lowest shared cell");
-        assert_eq!(
-            game.position
-                .pending_combat
-                .as_ref()
-                .expect("pending combat")
-                .cell,
-            contested
-        );
-        assert_eq!(outcomes[0].1["cell"], json!(contested));
     }
 
     fn only_action(

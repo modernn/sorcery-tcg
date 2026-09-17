@@ -2662,3 +2662,8 @@ fn rule_catalog_0386_oversized_spellcaster_extends_chain_magic_from_hop_footprin
     assert_eq!(session.transcript().len(), transcript_before + 3);
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell();
+}

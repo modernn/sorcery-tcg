@@ -16737,6 +16737,30 @@
         "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
         "testName": "rule_catalog_0714_water_replacement_resumes_site_genesis_after_ordered_deathrites"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0715",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "When two 2\u00d72 minions with overlapping footprints attack each other, declare-attack chooses the lowest shared contested cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "combat"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "attack-declared"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell"
+      }
     }
   ]
 }
