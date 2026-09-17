@@ -630,7 +630,7 @@ fn rule_catalog_0142_carried_lethal_should_kill_on_positive_strike_damage_and_dr
 }
 
 #[test]
-fn a_loose_lethal_artifact_should_not_grant_lethal_to_the_unit_standing_on_it() {
+fn rule_catalog_0765_loose_lethal_artifact_does_not_grant_lethal_to_occupant() {
     let mut session =
         Session::new(&lethal_strike_scenario()).expect("valid lethal strike scenario");
     keep(&mut session);

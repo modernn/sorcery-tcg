@@ -17960,6 +17960,92 @@
         "file": "crates/sorcery-engine/tests/defend_rules.rs",
         "testName": "rule_catalog_0764_simultaneous_return_damage_above_u8_records_exact_total"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0765",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A loose Lethal Artifact on a site does not grant Lethal to a minion fighting on that cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantsBearerLethal"
+      ],
+      "actionHints": [
+        "defend",
+        "close-defend"
+      ],
+      "eventHints": [
+        "minion-died",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0765_loose_lethal_artifact_does_not_grant_lethal_to_occupant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0766",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion with printed Stealth that is Disabled by Waterbound remains visible to enemy attack targeting.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "stealth",
+        "waterbound"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0766_disabled_raw_stealth_does_not_hide_attack_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0767",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged projectile actions require an enabled ready minion; disable-until-damaged suppresses issuance.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "genesisDisableSelfUntilDamaged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0767_ranged_issuance_requires_enabled_ready_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0768",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An Airborne minion with cannotDefend is excluded from Updraft Ridge free-departure Defend paths.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "cannotDefend",
+        "airborneMinionsAtopMoveFreelyAway"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0768_cannot_defend_airborne_cannot_use_updraft_departure"
+      }
     }
   ]
 }

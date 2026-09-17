@@ -217,7 +217,7 @@ fn attack_checkpoint_with_site(seed: u32, responder: &Value, south_site: &Value)
 }
 
 #[test]
-fn cannot_defend_airborne_minion_cannot_use_free_updraft_departure() {
+fn rule_catalog_0768_cannot_defend_airborne_cannot_use_updraft_departure() {
     let mut responder = minion();
     responder["airborne"] = json!(true);
     responder["cannotDefend"] = json!(true);

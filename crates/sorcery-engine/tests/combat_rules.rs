@@ -461,7 +461,7 @@ fn rule_catalog_0763_stealth_site_attack_reveals_after_strike_events() {
 }
 
 #[test]
-fn disabled_raw_stealth_should_not_hide_an_attack_target() {
+fn rule_catalog_0766_disabled_raw_stealth_does_not_hide_attack_target() {
     let base = scenario_manifest(125, 3, 5, false, 1, 20);
     let manifest = mutate_scenario_manifest(&base, |card_id, card| {
         if card_id.starts_with("south-spell-") {

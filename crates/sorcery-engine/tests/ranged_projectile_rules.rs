@@ -446,7 +446,7 @@ fn ranged_rays_should_use_site_range_skip_stealth_and_stop_at_first_visible_stac
 }
 
 #[test]
-fn ranged_issuance_should_require_an_enabled_ready_minion() {
+fn rule_catalog_0767_ranged_issuance_requires_enabled_ready_minion() {
     let ready = prepare_ranged(
         184,
         &minion(json!({ "ranged": true })),
