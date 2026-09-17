@@ -384,7 +384,7 @@ fn rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_death
 }
 
 #[test]
-fn leap_attack_deathrite_order_branches_match_after_checkpoint_resume() {
+fn rule_catalog_0799_leap_attack_deathrite_order_branches_match_after_checkpoint() {
     let encoded = seed_leap_deathrite(1695);
     let mut setup =
         try_setup_leap_deathrite(&encoded).expect("complete Leap Attack Deathrite setup");
