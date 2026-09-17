@@ -329,3 +329,76 @@ fn rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_s
         [EligibilityReason::UnverifiedAuthority]
     );
 }
+
+#[test]
+fn rule_catalog_1001_mixed_allowlisted_private_local_and_synthetic_batch_stays_unranked_for_both()
+{
+    let allowlisted_manifest = verified_private_local_manifest(31).expect("allowlisted manifest");
+    let synthetic_manifest = synthetic_demo_manifest_json(32).expect("synthetic manifest");
+
+    let allowlisted_game =
+        sorcery_engine::game::Game::from_manifest_json(&allowlisted_manifest).expect("game");
+    let allowlisted_policy = baseline_policy_snapshot(
+        allowlisted_game.rules().authority_hash(),
+        allowlisted_game.rules().engine_version(),
+    )
+    .expect("baseline policy");
+    let deck_id = IdentityHash::parse(BASELINE_POLICY_DECK_ID).expect("baseline deck id");
+    let allowlisted_record = record_policy_game(
+        &allowlisted_manifest,
+        &deck_id,
+        &allowlisted_policy,
+        &deck_id,
+        &allowlisted_policy,
+        MAX_GAME_ACTIONS,
+    )
+    .expect("allowlisted finished record");
+
+    assert!(allowlisted_record.replay_verified);
+    assert!(allowlisted_record.eligibility.gates.all_passed());
+    assert!(allowlisted_record.eligibility.ranked);
+    assert_eq!(
+        allowlisted_record.classification,
+        BatchClassification::Ranked
+    );
+
+    let synthetic_record = record_synthetic_demo(32).expect("seed-32 finished synthetic record");
+
+    assert!(synthetic_record.replay_verified);
+    assert!(synthetic_record.eligibility.gates.all_passed());
+    assert!(!synthetic_record.eligibility.ranked);
+    assert_eq!(
+        synthetic_record.classification,
+        BatchClassification::UnrankedUnverifiedAuthority
+    );
+
+    let batch_policy = eligibility_policy_for_manifest_jsons([
+        allowlisted_manifest.as_str(),
+        synthetic_manifest.as_str(),
+    ]);
+    assert!(!batch_policy.authority_verified);
+
+    let allowlisted_batch =
+        evaluate_eligibility_with_policy(allowlisted_record.eligibility.gates, batch_policy);
+    assert!(!allowlisted_batch.ranked);
+    assert_eq!(
+        allowlisted_batch.classification,
+        BatchClassification::UnrankedUnverifiedAuthority
+    );
+    assert_eq!(
+        allowlisted_batch.reasons,
+        [EligibilityReason::UnverifiedAuthority]
+    );
+
+    let synthetic_batch =
+        evaluate_eligibility_with_policy(synthetic_record.eligibility.gates, batch_policy);
+    assert!(!synthetic_batch.ranked);
+    assert_eq!(
+        synthetic_batch.classification,
+        BatchClassification::UnrankedUnverifiedAuthority
+    );
+    assert_eq!(
+        synthetic_batch.reasons,
+        [EligibilityReason::UnverifiedAuthority]
+    );
+}
