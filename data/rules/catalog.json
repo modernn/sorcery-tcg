@@ -789,17 +789,21 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand or resolves with none.",
+      "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand and does not offer an opposing cemetery minion. Distinct from 0593–0594, which never place an opposing cemetery minion.",
       "implementationStatus": "rust-supported",
-      "genericFactHints": [],
-      "actionHints": [],
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
       "eventHints": [
-        "cemetery-entry",
-        "resolution"
+        "minion-returned-to-hand",
+        "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rescue_should_issue_only_own_minion_choices_and_keep_the_return_hidden"
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_0681_rescue_offers_only_an_own_cemetery_minion_not_an_opposing_one"
       }
     },
     {
@@ -15760,6 +15764,53 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
         "testName": "rule_catalog_0678_cave_in_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0681",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic offers only the caster's own cemetery minion when an opposing cemetery minion is also present, and returns the chosen instance to the hidden Spellbook hand. Distinct from 0593, which never places an opposing cemetery minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_0681_rescue_offers_only_an_own_cemetery_minion_not_an_opposing_one"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0682",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic with an empty own cemetery still resolves as a paid no-op when the opponent's cemetery holds a minion. The opposing minion is not offered. Distinct from 0594, which has no cemetery minions at all.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_0682_rescue_ignores_an_opposing_cemetery_minion_when_own_cemetery_is_empty"
       }
     }
   ]
