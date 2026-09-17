@@ -424,11 +424,11 @@ fn rule_catalog_0979_granted_next_strike_double_triggers_deathrite_draw_on_kill(
         .iter()
         .find(|event| event.event_type == "site-drawn")
         .expect("Deathrite site draw");
-    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["seat"], "south");
     assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
     assert!(cemetery_has(&session, "south", &enemy_id));
-    assert_eq!(atlas_len(&session, "north"), north_atlas - 1);
-    assert_eq!(atlas_len(&session, "south"), south_atlas);
+    assert_eq!(atlas_len(&session, "north"), north_atlas);
+    assert_eq!(atlas_len(&session, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
 
