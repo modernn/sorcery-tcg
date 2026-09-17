@@ -17,7 +17,7 @@
 //! 0903 covers checkpoint resume preserving staged targets, discard choice,
 //! and legal resolve/extend actions mid-staged Chain Magic.
 //! 0914 covers Chain Magic phase routing: staged chains offer only
-//! extend-chain-magic and resolve-chain-magic from append_chain_magic_actions,
+//! extend-chain-magic and resolve-chain-magic from `append_chain_magic_actions`,
 //! not main-phase cast-magic, end-turn, or move-and-attack.
 
 use serde_json::{Value, json};
@@ -468,8 +468,11 @@ fn offers_resolve_chain_magic(session: &Session) -> bool {
         .any(|action| action.descriptor["kind"] == "resolve-chain-magic")
 }
 
-const CHAIN_MAGIC_PHASE_ACTION_KINDS: &[&str] =
-    &["begin-chain-magic", "extend-chain-magic", "resolve-chain-magic"];
+const CHAIN_MAGIC_PHASE_ACTION_KINDS: &[&str] = &[
+    "begin-chain-magic",
+    "extend-chain-magic",
+    "resolve-chain-magic",
+];
 
 const MAIN_ACTIONS_FORBIDDEN_WHILE_CHAIN_STAGED: &[&str] =
     &["cast-magic", "end-turn", "move-and-attack"];
@@ -1629,7 +1632,10 @@ fn rule_catalog_0913_resolve_chain_magic_is_withheld_after_extend_when_staged_ta
 
     let mut depleted = replay_game(&hops.session);
     depleted.test_set_north_mana(1);
-    assert_eq!(depleted.authoritative_state()["players"]["north"]["mana"], 1);
+    assert_eq!(
+        depleted.authoritative_state()["players"]["north"]["mana"],
+        1
+    );
     assert!(
         !depleted
             .legal_actions()

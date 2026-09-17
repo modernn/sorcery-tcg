@@ -21111,6 +21111,250 @@
         "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
         "testName": "rule_catalog_0912_later_drought_wins_over_flood_and_re_enables_square_landbound"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0913",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged zero-cost Chain Magic withholds resolve-chain-magic when staged target count raises total mana cost above the pool after a legal extend-chain-magic, even though resolve was legal at one staged target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0913_resolve_chain_magic_is_withheld_after_extend_when_staged_target_mana_exceeds_pool_while_resolve_was_legal_at_one_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0914",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "During Chain Magic phase after begin-chain-magic, legal actions issue only extend-chain-magic and resolve-chain-magic while the chain is staged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "discardCardAsAdditionalCost"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0914_chain_magic_phase_issues_only_chain_actions_while_staged"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0915",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both end-of-controller-turn Avatar life gain and life loss while the controller Avatar is already at printed life, the End Phase resolves gain first as a cap no-op, then life loss still applies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0915_end_turn_gain_noop_at_cap_then_loss_applies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0916",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and mill and exactly one Spellbook card remains at start turn, the Start Phase draws that sole card and the mill is a paid no-op on the empty library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnMillSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0916_start_turn_draw_then_mill_spells_mills_no_op_when_library_has_one_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0917",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that must attack a unit if able treats site strikes as insufficient when an enemy minion is also in range at the same location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0917_must_attack_a_unit_if_able_excludes_site_targets_when_both_are_in_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0918",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing a site on a void cell that is part of a 2×2 Voidwalk footprint, but not its anchor, banishes the void occupant in the same receipt instead of surfacing it on the partial square.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea",
+        "voidwalk"
+      ],
+      "actionHints": [
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-played",
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0918_playing_site_on_void_square_banishes_oversized_voidwalk_footprint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0919",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player discard Magic with a count above one keeps a pending Storyline open until each sequential discard-card choice completes; magic-resolved waits until the final required choice.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "discard-card"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "card-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_discard_rules.rs",
+        "testName": "rule_catalog_0919_multi_discard_storyline_defers_magic_resolved_until_each_choice"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0920",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 bearer that Drops a carried Artifact leaves it on the remembered pick-up cell, not its anchor cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "pick-up",
+        "drop"
+      ],
+      "eventHints": [
+        "artifacts-picked-up",
+        "artifacts-dropped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_0920_oversized_drop_leaves_artifact_on_remembered_pick_up_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0921",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Alternate summon payments are unoffered when printed thresholds are unmet, even with sufficient mana and eligible payment resources.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardRandomCardInsteadOfMana",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-sacrificed",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_0921_alternate_summon_payments_require_thresholds_before_offering"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0922",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "When Geomancer rubble replacement leaves one Atlas card and two ordered terrain Deathrites remain, the first Deathrite draws the last site, the second deck-outs, and deferred Genesis mana gain never fires.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "order-deathrites",
+        "replace-rubble-with-top-atlas-site"
+      ],
+      "eventHints": [
+        "deathrite-order-committed",
+        "site-drawn",
+        "minion-died",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_before_deferred_genesis_when_atlas_has_one_card"
+      }
     }
   ]
 }

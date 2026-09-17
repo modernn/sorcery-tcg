@@ -1494,6 +1494,10 @@ fn after_must_attack_unit_and_site_setup(seed: u32) -> Session {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "must-attack unit-vs-site scenario proof keeps setup and assertions inline"
+)]
 fn rule_catalog_0917_must_attack_a_unit_if_able_excludes_site_targets_when_both_are_in_range() {
     let mut session = after_must_attack_unit_and_site_setup(917);
     assert_eq!(state(&session)["phase"], "main");
@@ -1514,13 +1518,11 @@ fn rule_catalog_0917_must_attack_a_unit_if_able_excludes_site_targets_when_both_
     let site_instance_id = state(&session)["realm"]["sites"]["C3"]["instanceId"].clone();
     let legal = session.legal_actions().expect("mandatory unit attacks");
     assert!(!legal.is_empty());
-    assert!(
-        legal.iter().all(|action| {
-            action.descriptor["kind"] == "move-and-attack"
-                && action.descriptor["unitInstanceId"] == source_id
-                && action.descriptor["to"]["cell"] == "C3"
-        })
-    );
+    assert!(legal.iter().all(|action| {
+        action.descriptor["kind"] == "move-and-attack"
+            && action.descriptor["unitInstanceId"] == source_id
+            && action.descriptor["to"]["cell"] == "C3"
+    }));
     let checkpoint = session.clone();
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "move-and-attack"

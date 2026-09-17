@@ -716,8 +716,12 @@ fn setup_if_water_is_penultimate(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Geomancer penultimate-Atlas scenario proof keeps checkpoint branches inline"
+)]
 fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_before_deferred_genesis_when_atlas_has_one_card()
- {
+{
     let (mut session, top, deathrites, mana_before) = (244..1024)
         .map(penultimate_manifest_with_seed)
         .find_map(|manifest| {

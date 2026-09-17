@@ -206,6 +206,10 @@ fn rule_catalog_0729_alternate_summon_payments_should_be_admitted_and_require_th
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "alternate payment threshold gate proof covers blocked and allowed branches"
+)]
 fn rule_catalog_0921_alternate_summon_payments_require_thresholds_before_offering() {
     let blocked_discard = opening_main(&random_discard_manifest(921, &site("fire")));
     let before_discard = state(&blocked_discard);
