@@ -453,3 +453,263 @@ fn rule_catalog_0813_empty_normal_draw_immediately_loses() {
     );
     assert_exact_replay(&session);
 }
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn has_kind(session: &Session, kind: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == kind)
+}
+
+fn no_kind(session: &Session, kind: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .all(|action| action.descriptor["kind"] != kind)
+}
+
+fn avatar() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    })
+}
+
+fn site() -> Value {
+    json!({ "cardType": "site", "elements": ["earth"] })
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_avatar_draw_manifest(seed: u32) -> String {
+    let fixture = "avatar-site-draw-deathrite-withheld";
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-rain": rain(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-rain"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+struct PendingDeathriteAvatarDrawSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_avatar_site_draw(
+    encoded: &str,
+) -> Option<PendingDeathriteAvatarDrawSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let main_actions = session.legal_actions().ok()?;
+    if !main_actions
+        .iter()
+        .any(|action| action.descriptor["kind"] == "draw-site")
+        || !main_actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == "play-site")
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteAvatarDrawSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_avatar_draw_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_avatar_draw_manifest)
+        .find(|candidate| try_pending_deathrite_with_avatar_site_draw(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Avatar site draw legal")
+}
+
+#[test]
+fn rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_avatar_draw_seed_with(1132);
+    let mut setup = try_pending_deathrite_with_avatar_site_draw(&encoded)
+        .expect("complete Avatar site-draw Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
+    assert!(
+        paused["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .is_some_and(|hand| !hand.is_empty())
+    );
+    assert!(no_kind(session, "draw-site"));
+    assert!(no_kind(session, "play-site"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "draw" || action.descriptor["zone"] != "atlas"
+            })
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["players"]["north"]["avatar"]["tapped"], false);
+    assert!(has_kind(session, "draw-site"));
+    assert!(has_kind(session, "play-site"));
+    assert_exact_replay(session);
+}
