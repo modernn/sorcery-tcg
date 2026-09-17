@@ -23758,6 +23758,235 @@
         "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
         "testName": "rule_catalog_1022_grant_stealth_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1023",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, lure-enemy-minion-one-step-closer Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1023_lure_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1024",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, silence-and-tap-nearby-minion then may-draw-spell Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1024_silence_tap_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1025",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-minion-to-owner-hand Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bounce_rules.rs",
+        "testName": "rule_catalog_1025_bounce_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1026",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-Airborne-to-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1026_grant_airborne_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1027",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Random-unit-at-location damage that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageRandomUnitAtLocation",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
+        "testName": "rule_catalog_1027_random_bolt_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1028",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1028_destroy_water_site_minions_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1029",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic that banishes a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-banished",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1030",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A lance strike that kills a Deathrite minion draws a site for that minion's controller before the minion leaves play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "grantsBearerLance"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lance-broken",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_1030_lance_strike_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1031",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Extend-chain-magic omits a distant enemy minion beyond hop range as the second hop while still offering a nearby enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "chainMagic"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_1031_extend_chain_magic_omits_distant_enemy_minion_as_second_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1032",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, teleport-target-one-diagonal Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1032_teleport_one_diagonal_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

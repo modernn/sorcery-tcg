@@ -2413,7 +2413,10 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
         ]
     );
 
-    while matches!(state(&session)["phase"].as_str(), Some("attack" | "defend" | "allocate" | "intercept")) {
+    while matches!(
+        state(&session)["phase"].as_str(),
+        Some("attack" | "defend" | "allocate" | "intercept")
+    ) {
         if try_accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "close-defend"
         })

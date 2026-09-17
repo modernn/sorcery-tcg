@@ -207,8 +207,7 @@ fn lure_enemy_targets(session: &Session) -> Vec<(String, String)> {
         .expect("lure actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-lure"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-lure"
         })
         .filter_map(|action| {
             let ally = action.descriptor.get("ally")?;
