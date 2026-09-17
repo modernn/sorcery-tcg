@@ -1,5 +1,8 @@
 //! Direct proofs for banish-demon-and-undead-minions-at-location-within-two-steps
-//! Magic (RULE-CATALOG-0573–0574).
+//! Magic (RULE-CATALOG-0573–0574, 1029).
+//!
+//! 1029 covers exorcism banishing a Deathrite undead minion: the controller
+//! draws a site and magic-resolved only appears after deathrite settlement.
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal
 //! steps of the caster footprint and banishes every Demon or Undead minion
@@ -44,6 +47,18 @@ fn undead() -> Value {
     json!({
         "attack": 1,
         "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "undead": true,
+    })
+}
+
+fn deathrite_undead() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
         "defense": 3,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -103,6 +118,50 @@ fn exorcism_manifest(seed: u32) -> String {
                     "north-beast",
                     "north-exorcism",
                     "north-demon",
+                    "north-beast",
+                    "north-exorcism",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-undead"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn exorcism_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "banish-demon-undead-here-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-banish-demon-undead-here-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-beast": beast(),
+            "north-exorcism": exorcism(),
+            "north-site": earth_site(),
+            "north-undead": deathrite_undead(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+            "south-undead": undead(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-undead",
+                    "north-beast",
+                    "north-exorcism",
+                    "north-undead",
                     "north-beast",
                     "north-exorcism",
                 ],
@@ -222,13 +281,28 @@ fn exorcism_locations(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
+    seed_with_manifest(required, exorcism_manifest)
+}
+
+fn seed_with_deathrite(required: &[&str]) -> String {
+    seed_with_manifest(required, exorcism_deathrite_manifest)
+}
+
+fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
     (573..573 + 256)
-        .map(exorcism_manifest)
+        .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn summon_at(session: &mut Session, card_id: &str, cell: &str) -> String {
@@ -370,5 +444,84 @@ fn rule_catalog_0574_location_with_only_a_beast_is_a_paid_noop() {
     assert_eq!(unit(&after, &beast_id)["location"], "C4");
     assert_eq!(unit(&after, &beast_id)["damage"], 0);
     assert!(!cemetery_has(&after, "north", &beast_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill() {
+    let encoded = (1029..1029 + 256)
+        .map(exorcism_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-undead")
+                && hand.iter().any(|card| card == "north-exorcism")
+        })
+        .unwrap_or_else(|| seed_with_deathrite(&["north-undead", "north-exorcism"]));
+    let mut session = opening_main(&encoded);
+    let undead_id = summon_at(&mut session, "north-undead", "C4");
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, banished) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&banished),
+        [
+            "magic-cast",
+            "minion-banished",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    let banish = banished
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-banished")
+        .expect("minion-banished");
+    assert_eq!(banish.payload["cardId"], "north-undead");
+    assert_eq!(banish.payload["instanceId"], undead_id);
+    assert_eq!(banish.payload["owner"], "north");
+    let drawn = banished
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], undead_id);
+    let site_drawn = event_types(&banished)
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = event_types(&banished)
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(event_types(&banished).last(), Some(&"magic-resolved"));
+    assert!(
+        !banished
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
+
+    let after = state(&session);
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != undead_id)
+    );
+    assert!(!cemetery_has(&after, "north", &undead_id));
+    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&after, "south"), south_atlas);
     assert_exact_replay(&session);
 }
