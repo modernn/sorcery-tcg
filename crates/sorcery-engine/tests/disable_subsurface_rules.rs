@@ -1,11 +1,11 @@
 //! Direct proofs for Disable settling a subsurface burrower
-//! (RULE-CATALOG-0026, RULE-CATALOG-0698).
+//! (RULE-CATALOG-0026, RULE-CATALOG-0698, RULE-CATALOG-1127, RULE-CATALOG-1139).
 //!
 //! Freeze (`disableTargetNearbyMinionUntilNextTurn`) kills an underground
 //! Burrowing minion because Disable drops Burrowing and region settlement then
-//! removes the stranded unit. A surface Burrowing minion stays in play.
-//! Distinct from 0661–0662, which Freeze a surface minion until the next Start
-//! Phase or absorb into Ward.
+//! removes the stranded unit. A surface Burrowing minion stays in play,
+//! disabled but alive. Distinct from 0661–0662, which Freeze a surface minion
+//! until the next Start Phase or absorb into Ward.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -342,6 +342,38 @@ fn rule_catalog_1127_disable_leaves_surface_burrowing_minion_in_play() {
     );
     let after = state(&session);
     let unit = realm_unit(&after, &target_id).expect("Disabled surface burrower");
+    assert_eq!(unit["region"], "surface");
+    assert!(!unit["disableEffects"].is_null());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1139_freeze_leaves_surface_burrowing_minion_in_play() {
+    let encoded = surface_manifest(26);
+    let mut session = opening_main(&encoded);
+    let target_id = south_summons_at(&mut session, "south-burrower", "C4");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let before = state(&session);
+    assert_eq!(
+        realm_unit(&before, &target_id).expect("surface burrower")["region"],
+        "surface"
+    );
+    assert!(realm_unit(&before, &target_id).expect("surface burrower")["disableEffects"].is_null());
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    let after = state(&session);
+    let unit = realm_unit(&after, &target_id).expect("Frozen surface burrower");
     assert_eq!(unit["region"], "surface");
     assert!(!unit["disableEffects"].is_null());
     assert_exact_replay(&session);
