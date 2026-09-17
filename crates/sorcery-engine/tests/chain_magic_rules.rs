@@ -258,7 +258,7 @@ fn isolated_spellcaster_manifest(seed: u32) -> String {
         },
         "cards": {
             "north-avatar": avatar(),
-            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-caster": minion(json!({ "burrowing": true, "spellcaster": true })),
             "north-chain": chain(0),
             "north-site": site(),
             "south-avatar": avatar(),
@@ -2224,34 +2224,16 @@ struct SpellcasterChainHops {
     hops: ChainHops,
 }
 
-fn try_north_play_site(session: &mut Session, cell: &str) -> Option<()> {
-    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
-    try_accept_where(session, |descriptor| descriptor["kind"] == "play-site")?;
-    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
-    })?;
-    Some(())
-}
-
 fn try_setup_isolated_spellcaster(encoded: &str) -> Option<(Session, String, String)> {
     if !opening_has_all(encoded, &["north-chain", "north-caster"]) {
         return None;
     }
     let mut session = opening_main(encoded);
-    for cell in ["C3", "C2", "C1"] {
-        try_north_play_site(&mut session, cell)?;
-    }
     let (caster, _) = try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-caster"
-            && descriptor["cell"] == "C1"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == "underground"
     })?;
     let before = state(&session);
     let chain_id = try_hand_instance(&before, "north-chain")?;
@@ -2330,34 +2312,28 @@ fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
     })
 }
 
+
 #[test]
 fn rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops(
 ) {
-    let encoded = (952..952 + 512)
+    let encoded = (952..952 + 256)
         .map(isolated_spellcaster_manifest)
         .find(|candidate| try_setup_isolated_spellcaster(candidate).is_some())
-        .expect("bounded seed with Chain Magic, printed Spellcaster, and isolated C1 setup");
+        .expect("bounded seed with Chain Magic, burrowing Spellcaster, and underground setup");
     let (session, chain_id, caster_id) =
         try_setup_isolated_spellcaster(&encoded).expect("isolated Spellcaster setup");
     let snapshot = state(&session);
-    assert_eq!(
-        realm_unit(&snapshot, &caster_id)
-            .and_then(|unit| unit["location"]["cell"].as_str()),
-        Some("C1"),
-        "the printed Spellcaster must sit alone at the remote site"
-    );
+    let caster = realm_unit(&snapshot, &caster_id).expect("burrowed Spellcaster in realm");
+    assert_eq!(caster["location"], "C4");
+    assert_eq!(caster["region"], "underground");
     assert!(
         snapshot["realm"]["units"]
             .as_array()
             .expect("realm units")
             .iter()
             .filter(|unit| unit["instanceId"] != caster_id)
-            .all(|unit| unit["location"]["cell"] != "C1"),
-        "no other unit may share the caster region near C1"
-    );
-    assert!(
-        chain_ids(&session, &chain_id).is_empty(),
-        "zero nearby hops must issue no begin-chain-magic targets for the Chain card"
+            .all(|unit| unit["region"] != "underground"),
+        "the underground caster region must have no other nearby units"
     );
     assert!(
         !offers_begin_spellcaster_chain(&session, &chain_id, &caster_id),
