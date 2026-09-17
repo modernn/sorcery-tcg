@@ -15170,6 +15170,63 @@
         "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
         "testName": "rule_catalog_0654_chosen_discard_cost_is_unoffered_without_another_hand_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0659",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic transfers a minion and its Deathrite to the new controller. Targeted Magic is a non-unit source: killing the stolen minion draws a site for the thief, and the corpse still enters the owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite",
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "magic-damage-allocated",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_0659_mesmerism_transfers_a_minion_and_its_deathrite_to_the_new_controller"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0660",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic does not offer a far minion. Targeted Magic still kills that minion as a non-unit source and resolves Deathrite for the original controller.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite",
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_0660_mesmerism_does_not_steal_a_far_minion_and_deathrite_stays_with_controller"
+      }
     }
   ]
 }
