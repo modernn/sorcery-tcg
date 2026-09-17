@@ -1,5 +1,5 @@
 //! Direct proofs for damage-each-unit-at-location-within-two-steps Magic
-//! (RULE-CATALOG-0589–0590, RULE-CATALOG-0716, 1039).
+//! (RULE-CATALOG-0589–0590, RULE-CATALOG-0716, 1039, 1099).
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal steps
 //! of the caster footprint and deals 3 damage to every Unit there. Ward
@@ -7,7 +7,9 @@
 //! them. An empty offered location is a paid no-op.
 //!
 //! 1039 covers minor explosion killing a Deathrite minion: the controller draws
-//! a site and magic-resolved only appears after deathrite settlement.
+//! a site and magic-resolved only appears after deathrite settlement. 1099
+//! covers minor explosion withheld while Deathrites wait for ordering, until
+//! the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -60,6 +62,26 @@ fn deathrite_minion() -> Value {
         "cardType": "minion",
         "deathriteDrawSite": true,
         "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 5,
         "manaCost": 0,
         "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -577,4 +599,213 @@ fn rule_catalog_1039_minor_explosion_deathrite_draws_for_controller_on_kill() {
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
+}
+
+fn deathrite_explosion_manifest(seed: u32) -> String {
+    let fixture = "minor-explosion-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-explosion": explosion(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-explosion",
+                    "north-rain",
+                    "north-rain",
+                    "north-explosion",
+                    "north-rain",
+                    "north-explosion",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_explosion_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-explosion", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteExplosionSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    visitor_id: String,
+}
+
+fn try_pending_deathrite_with_ready_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteExplosionSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_explosion_and_rain(&state(&session)) {
+        return None;
+    }
+    if explosion_locations(&session) != ["C4"] {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    realm_unit(&state(&session), &visitor_id)?;
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteExplosionSetup {
+        deathrite_ids,
+        session,
+        visitor_id,
+    })
+}
+
+fn deathrite_explosion_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_explosion_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with minor explosion Magic in hand")
+}
+
+#[test]
+fn rule_catalog_1099_minor_explosion_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_explosion_seed_with(1099);
+    let mut setup = try_pending_deathrite_with_ready_visitor(&encoded)
+        .expect("complete minor explosion Deathrite withheld setup");
+    let visitor_id = setup.visitor_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &visitor_id)["location"], "C4");
+    assert_eq!(unit(&paused, &visitor_id)["damage"], 1);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(explosion_locations(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &visitor_id)["location"], "C4");
+    assert_eq!(unit(&resumed, &visitor_id)["damage"], 1);
+    assert_eq!(explosion_locations(session), ["C4"]);
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-explosion"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(damage_dealt_amount(&receipt, &visitor_id), 3);
+    assert_eq!(unit(&state(session), &visitor_id)["damage"], 4);
+    assert_exact_replay(session);
 }
