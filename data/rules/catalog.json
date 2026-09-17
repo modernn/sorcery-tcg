@@ -14216,6 +14216,56 @@
         "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
         "testName": "rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0621",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Bounce Magic returns a healthy same-region minion to its owner's hand and never offers an Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bounce_rules.rs",
+        "testName": "rule_catalog_0621_bounce_magic_returns_a_healthy_minion_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0622",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Bounce Magic that targets an enemy warded minion is absorbed. Ward breaks and the minion stays on the board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMinionToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bounce_rules.rs",
+        "testName": "rule_catalog_0622_bounce_magic_ward_absorbs_the_return"
+      }
     }
   ]
 }
