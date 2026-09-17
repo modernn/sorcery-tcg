@@ -13340,6 +13340,99 @@
         "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
         "testName": "rule_catalog_0578_detonate_is_unoffered_without_an_own_artifact"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0579",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-token-to-each-controlled-site-bordering-enemy-site Magic places one source-linked token on every controlled site that borders an enemy-controlled site, in stable cell order. After North controls C4, C3, C1 and South controls B2 with a minion there, casting summons foot-soldier tokens onto B3 and C3.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_0579_border_militia_summons_tokens_on_bordering_sites_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0580",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-token-to-each-controlled-site-bordering-enemy-site Magic still resolves when no controlled site borders an enemy site. Casting with only C4 in play is a paid no-op: no tokens appear and the spell still resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_0580_border_militia_without_bordering_sites_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0581",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Disable-target-nearby-minion-until-next-turn Magic offers a minion within nearby range of the caster footprint. Casting disables that minion until the caster's next Start Phase, blocking its actions while disabled, then the flag expires on that boundary.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled",
+        "minion-disable-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_0581_freeze_disables_nearby_minion_until_caster_next_start_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0582",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Disable-target-nearby-minion-until-next-turn Magic does not offer a minion three measured cardinal steps away from the caster footprint, even when a closer minion is legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "play-site"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_0582_freeze_does_not_offer_a_minion_three_steps_away"
+      }
     }
   ]
 }
