@@ -1,5 +1,5 @@
 //! Direct proofs for Flood and Drought terrain Auras (RULE-CATALOG-0266–0267,
-//! RULE-CATALOG-0775).
+//! RULE-CATALOG-0775, RULE-CATALOG-0912).
 //!
 //! Official Flood is a persistent 2×2 Aura: affected sites are flooded, so they
 //! are Water sites and still provide their other elemental affinities. Official
@@ -49,6 +49,18 @@ fn minion() -> Value {
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn square_landbound() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "landbound": true,
+        "manaCost": 0,
+        "occupiesSquareArea": 2,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -108,7 +120,17 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         .expect("legal actions")
         .into_iter()
         .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .unwrap_or_else(|| {
+            panic!(
+                "expected engine-issued action among {:?}",
+                session
+                    .legal_actions()
+                    .expect("legal actions")
+                    .iter()
+                    .map(|action| action.descriptor.clone())
+                    .collect::<Vec<_>>()
+            )
+        });
     let descriptor = action.descriptor.clone();
     let result = session
         .step(ActionRequest {
@@ -145,6 +167,137 @@ fn north_affinity(session: &Session) -> (u64, u64) {
             .as_u64()
             .expect("water affinity"),
     )
+}
+
+fn observed_unit(session: &Session, instance_id: &str) -> Value {
+    session.public_view(Seat::North).expect("North public view")["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("named unit")
+        .clone()
+}
+
+fn opening_spell_ids(session: &Session, seat: &str) -> Vec<String> {
+    state(session)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("spellbook")
+        .iter()
+        .filter_map(|card| card["cardId"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+fn composition_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "terrain-aura-composition" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-terrain-aura-composition-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-flood": flood(),
+            "north-site": site(),
+            "north-square-landbound": square_landbound(),
+            "south-avatar": avatar(),
+            "south-drought": drought(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-square-landbound",
+                    "north-flood",
+                    "north-flood",
+                    "north-flood",
+                    "north-flood",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drought",
+                    "south-drought",
+                    "south-drought",
+                    "south-drought",
+                    "south-minion",
+                    "south-minion",
+                    "south-minion",
+                    "south-minion",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn composition_opening() -> Session {
+    (1..=4096)
+        .map(composition_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("terrain Aura composition candidate");
+            let north_spells = opening_spell_ids(&session, "north");
+            let south_spells = opening_spell_ids(&session, "south");
+            (north_spells.iter().any(|card| card == "north-square-landbound")
+                && north_spells.iter().any(|card| card == "north-flood")
+                && south_spells.iter().any(|card| card == "south-drought"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with 2x2 Landbound, Flood, and Drought")
+}
+
+fn play_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn end_then_draw(session: &mut Session, zone: &str) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
+    });
+}
+
+fn summon_square_landbound_at_b3(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    play_site_at(session, "C4");
+    end_then_draw(session, "spellbook");
+    play_site_at(session, "C1");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "B4");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "C3");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    play_site_at(session, "B3");
+    end_then_draw(session, "spellbook");
+    end_then_draw(session, "atlas");
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-square-landbound"
+            && descriptor["cell"] == "B3"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("2x2 Landbound identity")
+        .to_owned()
 }
 
 fn cells_include(descriptor: &Value, cell: &str) -> bool {
@@ -287,5 +440,38 @@ fn rule_catalog_0775_later_flood_wins_when_it_enters_after_drought() {
     let after = state(&session);
     assert_eq!(after["realm"]["auras"][0]["cardId"], "north-drought");
     assert_eq!(after["realm"]["auras"][1]["cardId"], "south-flood");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0912_later_drought_wins_over_flood_and_re_enables_square_landbound() {
+    let mut session = composition_opening();
+    let bound_id = summon_square_landbound_at_b3(&mut session);
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-flood"
+            && cells_include(descriptor, "B3")
+            && cells_include(descriptor, "C4")
+    });
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], true);
+    assert_eq!(north_affinity(&session), (4, 4));
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "south-drought"
+            && cells_include(descriptor, "B3")
+            && cells_include(descriptor, "C4")
+    });
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    assert_eq!(observed_unit(&session, &bound_id)["location"], "B3");
+    assert_eq!(north_affinity(&session), (4, 0));
+    let after = state(&session);
+    assert_eq!(after["realm"]["auras"].as_array().expect("auras").len(), 2);
+    assert_eq!(after["realm"]["auras"][0]["cardId"], "north-flood");
+    assert_eq!(after["realm"]["auras"][1]["cardId"], "south-drought");
     assert_exact_replay(&session);
 }
