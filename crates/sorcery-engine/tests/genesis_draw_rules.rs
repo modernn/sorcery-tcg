@@ -7669,7 +7669,10 @@ fn try_pending_deathrite_during_genesis_spell_choice(
     if before["players"]["north"]["atlas"].as_array()?.len() < 3 {
         return None;
     }
-    if before["players"]["north"]["spellbook"].as_array()?.is_empty() {
+    if before["players"]["north"]["spellbook"]
+        .as_array()?
+        .is_empty()
+    {
         return None;
     }
     try_accept_where(&mut session, |descriptor| {
@@ -7697,9 +7700,7 @@ fn deathrite_genesis_spell_choice_seed_with(start: u32) -> String {
     (start..start + 2048)
         .map(deathrite_genesis_spell_choice_manifest)
         .find(|candidate| try_pending_deathrite_during_genesis_spell_choice(candidate).is_some())
-        .expect(
-            "bounded seed that reaches pending Deathrites before Genesis spell-draw choices",
-        )
+        .expect("bounded seed that reaches pending Deathrites before Genesis spell-draw choices")
 }
 
 #[test]
@@ -7774,9 +7775,6 @@ fn rule_catalog_1164_resolve_genesis_spell_withheld_during_pending_deathrite_ord
     let after = state(session);
     assert_eq!(after["phase"], "main");
     assert!(after["pendingGenesisSpell"].is_null());
-    assert_eq!(
-        after["players"]["north"]["spellbook"],
-        before_spellbook
-    );
+    assert_eq!(after["players"]["north"]["spellbook"], before_spellbook);
     assert_exact_replay(session);
 }
