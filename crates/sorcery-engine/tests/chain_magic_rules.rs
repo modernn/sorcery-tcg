@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896).
+//! 0885–0890, 0893–0894, 0896, 0904).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -9,6 +9,8 @@
 //! 0887–0890 cover chosen-discard additional costs on Chain Magic.
 //! 0894 covers chosen-discard resolve gating when the staged discard leaves hand.
 //! 0893 covers staged mana gates on resolve-chain-magic and extend-chain-magic.
+//! 0904 covers extend withheld for the next hop while resolve stays legal at the
+//! current staged count when mana covers resolve but not extend.
 //! 0896 covers pay-life resolve gating when life drops after begin.
 
 use serde_json::{Value, json};
@@ -1408,6 +1410,59 @@ fn rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independen
     );
     assert_exact_replay(&hops.session);
     assert_exact_replay(&short.session);
+}
+
+#[test]
+fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_pool_while_resolve_remains_legal(
+) {
+    const EXTRA_TARGET_MANA: u64 = 2;
+    let encoded = (904..904 + 256)
+        .map(hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+        })
+        .expect("bounded seed with Chain Magic and both nearby allies in the opening hand");
+    let mut hops = setup_hops_short(&encoded, true);
+    assert_eq!(hops.mana, 1);
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(staged["players"]["north"]["mana"], 1);
+    let chosen_count = staged["pendingChainMagic"]["targets"]
+        .as_array()
+        .expect("staged targets")
+        .len() as u64;
+    assert_eq!(chosen_count, 1);
+    let resolve_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
+    let extend_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count);
+    assert_eq!(resolve_mana, 0, "resolve uses mana_paid for the current count");
+    assert_eq!(
+        extend_mana, EXTRA_TARGET_MANA,
+        "extend uses next_mana for one more hop"
+    );
+    assert!(
+        offers_resolve_chain_magic(&hops.session),
+        "resolve-chain-magic stays legal at {resolve_mana} mana with one mana in pool"
+    );
+    assert!(
+        extend_ids(&hops.session).is_empty(),
+        "extend-chain-magic needs {extend_mana} mana for the next hop while the caster has one"
+    );
+    let legal = hops
+        .session
+        .legal_actions()
+        .expect("staged chain actions");
+    assert!(legal
+        .iter()
+        .any(|action| action.descriptor["kind"] == "resolve-chain-magic"));
+    assert!(!legal
+        .iter()
+        .any(|action| action.descriptor["kind"] == "extend-chain-magic"));
+    assert_exact_replay(&hops.session);
 }
 
 fn setup_hops_short(encoded: &str, skip_last_site: bool) -> ChainHops {
