@@ -13433,6 +13433,100 @@
         "file": "crates/sorcery-engine/tests/freeze_rules.rs",
         "testName": "rule_catalog_0582_freeze_does_not_offer_a_minion_three_steps_away"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0585",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic burrows a chosen minion on an Earth site. After a Burrowing minion occupies C1, casting moves that minion underground and it stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_0585_bury_survives_burrow_on_earth"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0586",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic still offers a minion on a Water site, then resolves as a paid no-op because no Underground layer exists. The minion stays on the surface unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_0586_bury_on_water_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0587",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic burrows every surface minion at the chosen land site in canonical instance-id order. After two Burrowing minions occupy C1, casting at that site moves both underground and they stay in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_rules.rs",
+        "testName": "rule_catalog_0587_cave_in_burrows_minions_at_land_site_in_canonical_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0588",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic does not offer a water-only site, because no Underground layer exists there. An Earth site remains offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "play-site"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_rules.rs",
+        "testName": "rule_catalog_0588_cave_in_does_not_offer_a_water_only_site"
+      }
     }
   ]
 }

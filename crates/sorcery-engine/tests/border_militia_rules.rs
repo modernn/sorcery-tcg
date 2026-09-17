@@ -226,9 +226,7 @@ fn summon_at(session: &mut Session, card_id: &str, cell: &str) -> String {
 }
 
 fn token_units_at<'a>(snapshot: &'a Value, cells: &[&str]) -> Vec<&'a Value> {
-    let units = snapshot["realm"]["units"]
-        .as_array()
-        .expect("realm units");
+    let units = snapshot["realm"]["units"].as_array().expect("realm units");
     cells
         .iter()
         .map(|cell| {
@@ -280,8 +278,9 @@ fn rule_catalog_0579_border_militia_summons_tokens_on_bordering_sites_in_order()
     let pre_cast_version = state(&session)["stateVersion"]
         .as_u64()
         .expect("pre-cast state version");
-    let (cast, receipt) =
-        accept_where(&mut session, |descriptor| descriptor["kind"] == "cast-magic");
+    let (cast, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+    });
     assert_eq!(
         event_types(&receipt),
         [
@@ -307,11 +306,7 @@ fn rule_catalog_0579_border_militia_summons_tokens_on_bordering_sites_in_order()
     let after = state(&session);
     let tokens = token_units_at(&after, &["B3", "C3"]);
     assert_eq!(tokens.len(), 2);
-    for ((ordinal, cell), token) in ["B3", "C3"]
-        .into_iter()
-        .enumerate()
-        .zip(tokens)
-    {
+    for ((ordinal, cell), token) in ["B3", "C3"].into_iter().enumerate().zip(tokens) {
         let expected_id = identity_hash(&json!({
             "cardId": "foot-soldier-token",
             "cell": cell,
