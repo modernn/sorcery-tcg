@@ -1,5 +1,5 @@
 //! Direct proofs for return-up-to-three-cemetery-cards-to-deck-bottom
-//! then draw-spell Magic (RULE-CATALOG-0549–0550).
+//! then draw-spell Magic (RULE-CATALOG-0549–0550, RULE-CATALOG-1005).
 //!
 //! Ordinary Magic can return up to three cards from the caster's cemetery
 //! to the bottoms of their owners' matching decks and then draw one spell.
@@ -36,6 +36,15 @@ fn nature() -> Value {
     })
 }
 
+fn destroy_site() -> Value {
+    json!({
+        "cardType": "magic",
+        "destroyTargetSite": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -62,6 +71,41 @@ fn nature_manifest(seed: u32) -> String {
                 "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
                 "spellbook": vec!["north-nature"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["north-nature"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn empty_library_nature_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cemetery-bottom-then-draw-empty" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cemetery-bottom-then-draw-empty-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_site(),
+            "north-nature": nature(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-nature", "north-nature", "north-destroy"],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
@@ -354,5 +398,82 @@ fn rule_catalog_0550_nature_still_draws_when_no_cemetery_card_is_returned() {
             .iter()
             .any(|card| card["instanceId"] == library_top)
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1005_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out() {
+    let encoded = empty_library_nature_manifest(1005);
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    let site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("C4 site identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C4"
+            && descriptor["targetSiteInstanceId"] == site_id
+    });
+    assert!(cemetery_ids(&state(&session), "north").contains(&site_id));
+    assert!(
+        nature_offers(&session)
+            .iter()
+            .any(|cards| cards == &vec![site_id.clone()])
+    );
+
+    let (cast, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-nature"
+            && descriptor["cemeteryCardInstanceIds"] == json!([site_id])
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "card-returned-to-deck-bottom",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    assert_eq!(granted.events[1].payload["instanceId"], site_id);
+    assert_eq!(granted.events[1].payload["zone"], "atlas");
+    assert_eq!(
+        granted.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    let after = state(&session);
+    assert!(!cemetery_ids(&after, "north").contains(&site_id));
+    assert_eq!(
+        after["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas after return")
+            .last()
+            .expect("bottom card")["instanceId"],
+        site_id
+    );
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_exact_replay(&session);
 }
