@@ -884,19 +884,22 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Drown forcefully submerges a target minion if able.",
+      "plainLanguage": "Drown forcefully submerges a non-Submerge minion at a Water site, then the minion dies underwater. Distinct from 0591 (Submerge minion survives) and 0592 (earth-only paid no-op).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "submerge"
+        "submergeTargetMinion"
       ],
       "actionHints": [
-        "choose-target",
-        "submerge"
+        "cast-magic"
       ],
-      "eventHints": [],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died",
+        "magic-resolved"
+      ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0045_drown_should_submerge_a_target_minion_only_when_able"
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_0693_drown_kills_a_non_submerge_minion_at_a_water_site"
       }
     },
     {
@@ -905,21 +908,21 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Healing Magic is targetless, capped, and cannot leave Death's Door.",
+      "plainLanguage": "Targetless healController Magic restores the caster Avatar through the printed-life cap and cannot leave Death's Door. Distinct from 0651–0652, which offer a chosen Avatar.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "deaths-door"
+        "healController"
       ],
       "actionHints": [
-        "heal"
+        "cast-magic"
       ],
       "eventHints": [
-        "death",
-        "healing"
+        "avatar-healed",
+        "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "healing_magic_should_cap_and_not_leave_deaths_door"
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_0694_heal_controller_caps_and_cannot_leave_deaths_door"
       }
     },
     {
@@ -16153,6 +16156,55 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
         "testName": "rule_catalog_0692_cave_in_burrows_then_orders_deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0693",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic offers a same-region minion at a Water site and forcefully submerges a minion without Submerge. After south summons at C1 on a Water site, casting Drown moves the minion underwater and it dies. Distinct from 0591, which keeps a Submerge minion in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_0693_drown_kills_a_non_submerge_minion_at_a_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0694",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Targetless healController Magic pays its cost with no target, restores the caster Avatar through the printed-life cap, and cannot leave Death's Door. Life stays at zero, the game stays active, and no healing event is emitted from Death's Door. Distinct from 0651–0652, which offer a chosen Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healController"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_0694_heal_controller_caps_and_cannot_leave_deaths_door"
       }
     }
   ]
