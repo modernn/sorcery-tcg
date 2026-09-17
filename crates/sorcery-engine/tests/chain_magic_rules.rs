@@ -696,9 +696,7 @@ fn rule_catalog_0924_resolve_chain_magic_allocates_all_targets_before_any_minion
         "each staged hop gets one magic-damage-allocated"
     );
     assert!(
-        allocations
-            .iter()
-            .all(|(index, _)| *index < first_death),
+        allocations.iter().all(|(index, _)| *index < first_death),
         "every magic-damage-allocated must precede the first minion-died"
     );
     assert_eq!(

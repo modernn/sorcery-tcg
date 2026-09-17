@@ -1257,7 +1257,8 @@ fn rule_catalog_0932_deathrite_area_damage_skips_self_and_hits_avatar_sharing_ce
                 .expect("cemetery entry")
     );
     let source_id = deathrite_id.clone();
-    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    let south_avatar_id =
+        state(&session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
     assert_eq!(allocations.len(), 2);
     for allocation in &allocations {
         assert_eq!(allocation.payload["amount"], 2);

@@ -21355,6 +21355,248 @@
         "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
         "testName": "rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_before_deferred_genesis_when_atlas_has_one_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0923",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After begin-chain-magic stages a hop, extend-chain-magic omits every unit already listed in pendingChainMagic.targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0923_extend_chain_magic_cannot_retarget_already_staged_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0924",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "resolve-chain-magic emits magic-damage-allocated for every staged target before any minion-died in the same receipt.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0924_resolve_chain_magic_allocates_all_targets_before_any_minion_died"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0925",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both end-of-controller-turn Avatar life gain and here-area damage while the controller Avatar is below printed life, partial life gain resolves first up to the printed cap, then here-area damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0925_end_turn_partial_gain_then_here_damage_on_same_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0926",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Spellbook draw and nearby-enemy lure, exactly one Spellbook card remains, and no enemy is nearby, the Start Phase draws that sole card and the lure is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0926_start_turn_draw_then_lure_draws_last_spell_when_lure_no_ops"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0927",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that enemies must attack if able treats site strikes as insufficient when that forced source and an enemy site are both in range at the same location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0927_enemies_must_attack_this_if_able_excludes_site_targets_when_both_are_in_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0928",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An Airborne minion with cannotDefend is excluded from Updraft movement Defend paths but may still Defend in place and Intercept an Airborne attacker when co-located.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "cannotDefend",
+        "airborneMinionsAtopMoveFreelyAway"
+      ],
+      "actionHints": [
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0928_airborne_cannot_defend_intercepts_airborne_attacker_without_movement_defend_paths"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0929",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Top-bottom connection does not bypass Mountain Pass occupied ground-minion entry blocking.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "blocksGroundMinionEntryWhileMinionAtop",
+        "connectsTopBottom"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "rule_catalog_0929_connected_ground_minion_cannot_wrap_enter_occupied_mountain_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0930",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "This-turn enemy-minion control may steal a distant Deathrite minion, and when the thief kills that minion before End Phase the Deathrite draws a site for the thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_0930_this_turn_control_transfers_distant_deathrite_to_thief_before_end_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0931",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "When Ignited mandatory end-phase death and Malakhim end-phase untap both trigger on the same turn, Ignited dies before Malakhim untaps and before turn cleanup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "diesAtEndOfControllerTurn",
+        "untapsAtEndOfControllerTurn"
+      ],
+      "actionHints": [
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-untapped",
+        "turn-ended",
+        "turn-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "rule_catalog_0931_ignited_death_precedes_malakhim_untap_on_same_end_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0932",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite area damage skips the dying source but still reaches the Avatar sharing its surface cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDamageEachUnitHere",
+        "genesisDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0932_deathrite_area_damage_skips_self_and_hits_avatar_sharing_cell"
+      }
     }
   ]
 }

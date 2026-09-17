@@ -1665,7 +1665,8 @@ fn enemies_must_attack_this_manifest(seed: u32) -> String {
 }
 
 fn after_enemies_must_attack_this_and_site_setup(seed: u32) -> Session {
-    let mut session = Session::new(&enemies_must_attack_this_manifest(seed)).expect("valid session");
+    let mut session =
+        Session::new(&enemies_must_attack_this_manifest(seed)).expect("valid session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -1728,8 +1729,8 @@ fn after_enemies_must_attack_this_and_site_setup(seed: u32) -> Session {
     clippy::too_many_lines,
     reason = "enemies-must-attack-this unit-vs-site scenario proof keeps setup and assertions inline"
 )]
-fn rule_catalog_0927_enemies_must_attack_this_if_able_excludes_site_targets_when_both_are_in_range(
-) {
+fn rule_catalog_0927_enemies_must_attack_this_if_able_excludes_site_targets_when_both_are_in_range()
+{
     let mut session = after_enemies_must_attack_this_and_site_setup(927);
     assert_eq!(state(&session)["phase"], "main");
     let source_id = state(&session)["realm"]["units"]

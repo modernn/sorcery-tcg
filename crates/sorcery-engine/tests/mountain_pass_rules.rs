@@ -281,9 +281,7 @@ fn paths_to_cell(session: &Session, instance_id: &str, cell: &str) -> Vec<Value>
             action.descriptor["kind"] == "move-and-attack"
                 && action.descriptor["unitInstanceId"] == instance_id
                 && action.descriptor["path"].as_array().is_some_and(|path| {
-                    path.last()
-                        .and_then(|location| location["cell"].as_str())
-                        == Some(cell)
+                    path.last().and_then(|location| location["cell"].as_str()) == Some(cell)
                 })
         })
         .map(|action| action.descriptor["path"].clone())
@@ -299,7 +297,8 @@ fn connection_manifest() -> String {
         "north-airborne",
         "north-occupant",
     ]);
-    value.as_object_mut()
+    value
+        .as_object_mut()
         .expect("manifest object")
         .remove("manifestId");
     value["manifestId"] = json!(identity_hash(&value).expect("connection manifest identity"));
@@ -546,16 +545,18 @@ fn rule_catalog_0808_ground_minion_leaves_occupied_mountain_pass() {
 #[test]
 fn rule_catalog_0929_connected_ground_minion_cannot_wrap_enter_occupied_mountain_pass() {
     let (mut session, connector_id) = prepare_occupied_pass_connection_entry();
-    assert!(paths_to_cell(&session, &connector_id, "C1")
-        .iter()
-        .any(|path| {
-            path.as_array().is_some_and(|locations| {
-                locations
-                    .iter()
-                    .map(|location| location["cell"].as_str().expect("path cell"))
-                    .eq(["C4", "C1"])
+    assert!(
+        paths_to_cell(&session, &connector_id, "C1")
+            .iter()
+            .any(|path| {
+                path.as_array().is_some_and(|locations| {
+                    locations
+                        .iter()
+                        .map(|location| location["cell"].as_str().expect("path cell"))
+                        .eq(["C4", "C1"])
+                })
             })
-        }));
+    );
     assert!(paths_to_cell(&session, &connector_id, "C2").is_empty());
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
@@ -566,7 +567,9 @@ fn rule_catalog_0929_connected_ground_minion_cannot_wrap_enter_occupied_mountain
                     .eq(["C4", "C1"])
             })
     });
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "decline-attack");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
     assert!(paths_to_cell(&session, &connector_id, "C2").is_empty());
     assert_exact_replay(&session);
 }

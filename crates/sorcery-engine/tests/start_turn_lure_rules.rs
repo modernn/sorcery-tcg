@@ -497,8 +497,8 @@ fn draw_lure_thin_library_manifest(seed: u32, north_spellbook: &[&str]) -> Strin
 }
 
 fn draw_lure_thin_library_start_turn(seed: u32, north_spellbook: &[&str]) -> Session {
-    let mut session =
-        Session::new(&draw_lure_thin_library_manifest(seed, north_spellbook)).expect("valid session");
+    let mut session = Session::new(&draw_lure_thin_library_manifest(seed, north_spellbook))
+        .expect("valid session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {

@@ -532,8 +532,8 @@ fn rule_catalog_0743_forward_only_minion_issues_exact_forward_defend_path() {
 }
 
 #[test]
-fn rule_catalog_0928_airborne_cannot_defend_intercepts_airborne_attacker_without_movement_defend_paths(
-) {
+fn rule_catalog_0928_airborne_cannot_defend_intercepts_airborne_attacker_without_movement_defend_paths()
+ {
     let mut attacker = minion();
     attacker["airborne"] = json!(true);
     let mut responder = minion();

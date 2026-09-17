@@ -643,6 +643,10 @@ fn combined_ignited_malakhim_cards(ignited: &Value, malakhim: &Value) -> Value {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Ignited and Malakhim same end-turn scenario proof keeps ordering inline"
+)]
 fn rule_catalog_0931_ignited_death_precedes_malakhim_untap_on_same_end_turn() {
     let ignited = minion(json!({
         "attack": 3,
@@ -695,7 +699,9 @@ fn rule_catalog_0931_ignited_death_precedes_malakhim_untap_on_same_end_turn() {
             && descriptor["from"]["cell"] == "C4"
             && descriptor["to"]["cell"] == "C3"
     });
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "decline-attack");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
     let (ignited_summon, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-ignited"
     });
