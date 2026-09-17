@@ -1,10 +1,12 @@
 //! Direct proofs for player-chosen additional Magic discard
-//! (RULE-CATALOG-0653–0654).
+//! (RULE-CATALOG-0653–0654, 0671–0672).
 //!
 //! A chosen-discard cost is a Storyline choice among every other Atlas or
 //! Spellbook hand card. It cannot select the spell being cast, pays
 //! `card-discarded` into the owner's cemetery before the cast is announced,
 //! then the companion effect resolves. An empty other-hand issues no cast.
+//! An Atlas leftover pays the same cost as a spell; every issued cast carries
+//! the chosen identity.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -394,6 +396,115 @@ fn rule_catalog_0654_chosen_discard_cost_is_unoffered_without_another_hand_card(
         !offers_cost(&session),
         "an empty other-hand must issue no chosen-discard cast"
     );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0671_chosen_discard_cost_may_discard_an_atlas_card() {
+    let encoded = seed_with(
+        &["north-cost", "north-fodder", "north-fodder"],
+        &["north-cost", "north-fodder"],
+        671,
+    );
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let cost_id = hand_card(&before, "spellbook", "north-cost");
+    let site_id = north_hand_ids(&before, "atlas")
+        .into_iter()
+        .next()
+        .expect("Atlas card");
+    let discard_ids = discard_cost_ids(&session);
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(discard_ids.iter().any(|id| id == &site_id));
+    let atlas_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cost"
+            && descriptor["discardCardInstanceId"] == site_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["cardId"], "north-site");
+    assert_eq!(receipt.events[0].payload["instanceId"], site_id);
+    assert_eq!(receipt.events[0].payload["owner"], "north");
+    assert_eq!(receipt.events[0].payload["seat"], "north");
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], cost_id);
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    assert_eq!(descriptor["discardCardInstanceId"], site_id);
+    assert_eq!(receipt.events[1].payload["discardCardInstanceId"], site_id);
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == site_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+    let checkpoint = create_game_checkpoint(&session).expect("atlas-discard checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized atlas-discard");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed atlas-discard");
+    assert_eq!(
+        resume_game_checkpoint(&parsed)
+            .expect("resumed atlas-discard session")
+            .state_hash()
+            .expect("resumed state hash"),
+        session.state_hash().expect("session state hash")
+    );
+}
+
+#[test]
+fn rule_catalog_0672_chosen_discard_cost_issues_no_choice_free_cast_while_atlas_remains() {
+    let encoded = seed_with(
+        &["north-cost", "north-fodder", "north-fodder"],
+        &["north-cost"],
+        672,
+    );
+    let mut session = opening_main(&encoded);
+    cast_all_fodder(&mut session);
+    let after = state(&session);
+    let cost_id = hand_card(&after, "spellbook", "north-cost");
+    let atlas_ids = north_hand_ids(&after, "atlas");
+    assert!(!atlas_ids.is_empty(), "Atlas leftovers still pay the cost");
+    assert_eq!(north_spell_card_ids(&after), ["north-cost".to_owned()]);
+    let cost_casts: Vec<_> = session
+        .legal_actions()
+        .expect("chosen-discard actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-cost"
+        })
+        .collect();
+    assert!(!cost_casts.is_empty());
+    assert!(
+        cost_casts
+            .iter()
+            .all(|action| action.descriptor.get("discardCardInstanceId").is_some()),
+        "there is no no-choice cast while another hand card remains"
+    );
+    let discard_ids = discard_cost_ids(&session);
+    assert!(discard_ids.iter().all(|id| id != &cost_id));
+    assert!(atlas_ids.iter().all(|id| discard_ids.contains(id)));
+    assert!(discard_ids.iter().all(|id| atlas_ids.contains(id)));
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
 }

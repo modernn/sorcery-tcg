@@ -15565,6 +15565,53 @@
         "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
         "testName": "rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0671",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "The same additional discard cost may take an Atlas card instead of a spell. Paying that Atlas identity puts the site in the owner's cemetery before the cast is announced, then the companion effect resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_0671_chosen_discard_cost_may_discard_an_atlas_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0672",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Every issued chosen-discard cast includes the chosen identity; there is no no-choice cast while another hand card remains. Atlas leftovers still pay after other spells are gone, and the spell being cast is never a legal discard.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_0672_chosen_discard_cost_issues_no_choice_free_cast_while_atlas_remains"
+      }
     }
   ]
 }
