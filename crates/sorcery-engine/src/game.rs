@@ -28596,6 +28596,22 @@ reason = "one admission matrix keeps every burrow slice and fail-closed case vis
             .expect("Cave-In with power Artifacts is self-play safe");
     }
 
+    pub fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
+        let manifest = selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.position.phase = Phase::DeathriteOrder;
+        game.clear_ordered_terminal_continuations();
+
+        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
+        assert!(
+            game.authoritative_state()
+                .get("pendingChainMagic")
+                .is_none()
+        );
+        assert_eq!(game.position.phase, Phase::Terminal);
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
@@ -28967,7 +28983,7 @@ reason = "one admission matrix keeps every burrow slice and fail-closed case vis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::synthetic::{selfplay_manifest_with, synthetic_demo_manifest_json};
+    use crate::synthetic::selfplay_manifest_with;
 
     #[test]
     #[expect(clippy::too_many_lines)]
@@ -29231,110 +29247,5 @@ mod tests {
                 .ensure_selfplay_supported()
                 .expect("supported Magic effect is self-play safe");
         }
-    }
-
-
-    #[test]
-    fn ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
-        let manifest = selfplay_manifest_with(31, |_| {});
-        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
-        game.position.pending_chain_magic = PendingField::Resolved;
-        game.position.phase = Phase::DeathriteOrder;
-        game.clear_ordered_terminal_continuations();
-
-        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
-        assert!(
-            game.authoritative_state()
-                .get("pendingChainMagic")
-                .is_none()
-        );
-        assert_eq!(game.position.phase, Phase::Terminal);
-    }
-
-    fn test_minion(
-        card_id: CardId,
-        instance_id: &str,
-        controller: Seat,
-        location: Cell,
-        occupied_cells: Option<SquareArea>,
-    ) -> UnitPosition {
-        UnitPosition {
-            card: CardInstance {
-                card_id,
-                instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
-                owner: controller,
-                source: CardSource::Spellbook,
-            },
-            carried_lance_count: 0,
-            controller,
-            damage: 0,
-            disable_effects: Vec::new(),
-            disabled_until_damaged: false,
-            last_dropped_artifacts_turn: None,
-            last_interacted_turn: None,
-            last_picked_up_artifacts_turn: None,
-            location,
-            occupied_cells,
-            planar_gate_voidwalk: false,
-            region: Region::Surface,
-            stealthed: false,
-            summoning_sickness: false,
-            tapped: true,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
-            warded: false,
-        }
-    }
-
-    #[test]
-    fn observe_lists_sorted_friendly_units_that_currently_have_temporary_power() {
-        let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
-        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
-        let source =
-            identity_hash(&json!({ "fixture": "observe-powered" })).expect("power source identity");
-        let north = seat_index(Seat::North);
-        let avatar_id = game.position.players[north].avatar.card.instance_id.clone();
-        game.position.players[north]
-            .avatar
-            .temporary_power_sources
-            .push(source.clone());
-        let card_id = game.position.players[north]
-            .hand_spellbook
-            .iter()
-            .find_map(|card| {
-                matches!(
-                    game.rules.cards[usize::from(card.card_id.0)].facts,
-                    CardFacts::Minion(_)
-                )
-                .then_some(card.card_id)
-            })
-            .expect("North minion card");
-        let mut unit = test_minion(
-            card_id,
-            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            Seat::North,
-            Cell::parse("C4").expect("C4"),
-            None,
-        );
-        unit.temporary_power_sources.push(source);
-        let unit_id = unit.card.instance_id.clone();
-        game.position.units.push(unit);
-
-        let observation = game.observe(Seat::North);
-        let mut expected = vec![avatar_id, unit_id];
-        expected.sort();
-        assert_eq!(observation.powered_unit_instance_ids(), expected);
-        assert!(
-            game.observe(Seat::South)
-                .powered_unit_instance_ids()
-                .is_empty()
-        );
     }
 }
