@@ -1,8 +1,8 @@
 //! Direct proof that a tapped area-damage minion blankets one adjacent location with its own
 //! power and its carried Lethal, without becoming a strike (RULE-CATALOG-0076).
 
-use serde_json::{Value, json};
-use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use serde_json::{json, Value};
+use sorcery_engine::canonical::{canonical_json, identity_hash, IdentityHash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -427,4 +427,265 @@ fn rule_catalog_0769_loose_lethal_artifact_does_not_lend_lethal_to_area_damage()
     );
     assert_eq!(settled["players"]["south"]["avatar"]["life"], 18);
     assert_exact_replay(&session);
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn avatar() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    })
+}
+
+fn site() -> Value {
+    json!({ "cardType": "site", "elements": ["fire"] })
+}
+
+fn deathrite_area_damage_manifest(seed: u32) -> String {
+    let fixture = "area-damage-deathrite-withheld";
+    let cards = json!({
+        "north-avatar": avatar(),
+        "north-rain": rain(),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "manaCost": 0,
+            "summonToAnySite": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+        "south-site": site(),
+        "vikings": minion(json!({
+            "attack": 4,
+            "defense": 4,
+            "manaCost": 0,
+            "tapToDamageEachUnitAtAdjacentLocation": 2,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        })),
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "vikings",
+                    "north-rain",
+                    "north-rain",
+                    "vikings",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+struct PendingDeathriteAreaDamageSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    source_id: String,
+}
+
+fn try_pending_deathrite_with_ready_area_damage(
+    encoded: &str,
+) -> Option<PendingDeathriteAreaDamageSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let source = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "vikings"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let source_id = source.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    // Area damage only blankets existing adjacent locations, so C3 must be in play
+    // before the ready Vikings copy can offer activate-area-damage.
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if area_damage_descriptors(&session, &source_id).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteAreaDamageSetup {
+        deathrite_ids,
+        session,
+        source_id,
+    })
+}
+
+fn deathrite_area_damage_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_area_damage_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_area_damage(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a ready area-damage minion on the board",
+        )
+}
+
+#[test]
+fn rule_catalog_1146_activate_area_damage_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_area_damage_seed_with(1146);
+    let mut setup = try_pending_deathrite_with_ready_area_damage(&encoded)
+        .expect("complete activate-area-damage Deathrite withheld setup");
+    let source_id = setup.source_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        realm_unit(&paused, &source_id).expect("ready source")["cardId"],
+        "vikings"
+    );
+    assert!(area_damage_descriptors(session, &source_id).is_empty());
+    assert!(session
+        .legal_actions()
+        .expect("paused legal actions")
+        .iter()
+        .all(|action| action.descriptor["kind"] != "activate-area-damage"));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(
+        realm_unit(&resumed, &source_id).expect("ready source")["cardId"],
+        "vikings"
+    );
+    assert!(!area_damage_descriptors(session, &source_id).is_empty());
+
+    let (_, blanketed) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-area-damage"
+            && descriptor["sourceInstanceId"] == source_id.as_str()
+            && descriptor["targetLocation"]["cell"] == "C3"
+    });
+    assert_eq!(event_types(&blanketed)[0], "area-damage-activated");
+    assert_exact_replay(session);
 }
