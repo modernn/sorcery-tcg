@@ -102,6 +102,7 @@ fn power_loss_manifest(
     north_spellbook: [&str; 3],
     south_spellbook: [&str; 3],
     north_atlas_len: usize,
+    south_atlas_len: usize,
 ) -> String {
     let mut value = json!({
         "authority": {
@@ -118,7 +119,7 @@ fn power_loss_manifest(
                 "spellbook": north_spellbook,
             },
             "south": {
-                "atlas": vec!["south-site"; 5],
+                "atlas": vec!["south-site"; south_atlas_len],
                 "avatar": "south-avatar",
                 "spellbook": south_spellbook,
             },
@@ -1029,6 +1030,7 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
         ["north-shooter", "north-shooter", "north-mover"],
         ["south-aura", "south-deathrite-a", "south-deathrite-b"],
         6,
+        5,
     );
     let mut session = Session::new(&encoded).expect("valid terminal movement scenario");
     keep(&mut session);
@@ -1201,6 +1203,7 @@ fn rule_catalog_0870_incremental_movement_power_loss_resolves_deathrite_and_resu
         ["north-mover", "north-ally", "north-damager"],
         ["south-filler", "south-filler", "south-filler"],
         6,
+        5,
     );
     let mut session = Session::new(&encoded).expect("valid movement power-loss scenario");
     keep(&mut session);
@@ -1329,6 +1332,7 @@ fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defe
         ["north-shooter", "north-aura", "north-damager"],
         ["south-filler", "south-filler", "south-filler"],
         7,
+        5,
     );
     let mut session = Session::new(&encoded).expect("valid derived-death Ranged scenario");
     keep(&mut session);
@@ -1545,5 +1549,208 @@ fn rule_catalog_0998_ranged_strike_deathrite_draws_for_minion_controller_on_kill
     );
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct scenario proves continue-basic-movement stays withheld until Deathrites are ordered"
+)]
+fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_order() {
+    let cards = json!({
+        "north-avatar": avatar(),
+        "north-mover": minion(json!({
+            "lethal": true,
+            "mayRangedStrikeOnceDuringBasicMovement": true,
+            "movementBonus": 1,
+            "ranged": true,
+        })),
+        "north-shooter": minion(json!({ "ranged": true })),
+        "north-site": site(json!({ "rangedUnitsHereRangeBonus": 1 })),
+        "south-avatar": avatar(),
+        "south-aura": minion(json!({
+            "defense": 1,
+            "otherNearbyAlliesPowerBonus": 1,
+            "summonToAnySite": true,
+        })),
+        "south-deathrite-a": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "south-deathrite-b": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "south-site": site(json!({})),
+    });
+    let encoded = power_loss_manifest(
+        198,
+        "synthetic-ranged-movement-deathrite-withheld-v1",
+        &cards,
+        ["north-shooter", "north-shooter", "north-mover"],
+        ["south-aura", "south-deathrite-a", "south-deathrite-b"],
+        6,
+        12,
+    );
+    let mut session = Session::new(&encoded).expect("valid movement Deathrite withheld scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let mut shooters = Vec::new();
+    for _ in 0..2 {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-shooter"
+                && descriptor["cell"] == "C4"
+        });
+        shooters.push(
+            summon["cardInstanceId"]
+                .as_str()
+                .expect("shooter identity")
+                .to_owned(),
+        );
+    }
+    let (mover, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-mover"
+            && descriptor["cell"] == "C4"
+    });
+    let mover_id = mover["cardInstanceId"]
+        .as_str()
+        .expect("mover identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let mut south_ids = Vec::new();
+    for card_id in ["south-aura", "south-deathrite-a", "south-deathrite-b"] {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C2"
+        });
+        south_ids.push(
+            summon["cardInstanceId"]
+                .as_str()
+                .expect("South minion identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    fire_south(&mut session, &shooters[0], &south_ids[1]);
+    fire_south(&mut session, &shooters[1], &south_ids[2]);
+    assert_eq!(unit(&state(&session), &south_ids[1])["damage"], 1);
+    assert_eq!(unit(&state(&session), &south_ids[2])["damage"], 1);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == mover_id
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "C2", "region": "surface" },
+                ])
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement"
+    });
+    assert_eq!(
+        unit(&state(&session), &south_ids[0])["cardId"],
+        "south-aura"
+    );
+    let shot = fire_south(&mut session, &mover_id, &south_ids[0]);
+    assert_eq!(
+        event_types(&shot),
+        ["projectile-shot", "strike-damage-allocated", "damage-dealt",]
+    );
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["pendingBasicMovement"]["sourceInstanceId"], mover_id);
+    assert!(paused.get("pendingRangedStep").is_none());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "continue-basic-movement")
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("Deathrite order actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "order-deathrites")
+    );
+    assert_checkpoint_round_trip(&session);
+
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "minion-died",
+        ]
+    );
+    let resumed = state(&session);
+    assert_eq!(resumed["phase"], "movement");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert_eq!(
+        resumed["pendingBasicMovement"]["sourceInstanceId"],
+        mover_id
+    );
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["terminal"]["status"], "active");
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "continue-basic-movement")
+    );
+
+    let (_, continued) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement" && descriptor["unitInstanceId"] == mover_id
+    });
+    assert_eq!(event_types(&continued), ["basic-movement-continued"]);
+    assert_eq!(state(&session)["pendingBasicMovement"]["pathIndex"], 2);
+    let (_, finished) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "continue-basic-movement" && descriptor["unitInstanceId"] == mover_id
+    });
+    assert_eq!(event_types(&finished), ["move-and-attack-activated"]);
+    assert_eq!(state(&session)["phase"], "attack");
+    assert!(state(&session)["pendingBasicMovement"].is_null());
     assert_exact_replay(&session);
 }
