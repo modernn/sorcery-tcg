@@ -856,3 +856,84 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
     }));
     assert_exact_replay(&restored);
 }
+
+#[test]
+fn rule_catalog_0940_penultimate_terrain_replacement_single_deathrite_draws_last_site_then_deferred_genesis_mana_fires()
+ {
+    let (mut session, top, deathrite, mana_before) = (244..1024)
+        .map(penultimate_manifest_with_seed)
+        .find_map(|manifest| {
+            let mut session = Session::new(&manifest).ok()?;
+            let (top, deathrites, mana_before) = setup_if_water_is_penultimate(&mut session, 1)?;
+            Some((session, top, deathrites.into_iter().next()?, mana_before))
+        })
+        .expect("bounded seed with water-site atop a two-card Atlas pile and one Deathrite");
+    let atlas_hand_before = state(&session)["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north hand atlas")
+        .len();
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "rubble-replaced",
+            "site-played",
+            "site-drawn",
+            "minion-died",
+            "mana-gained",
+        ]
+    );
+    assert_eq!(
+        resolved
+            .events
+            .iter()
+            .filter(|event| event.event_type == "site-drawn")
+            .count(),
+        1
+    );
+    assert_eq!(state(&session)["phase"], "main");
+    assert_eq!(state(&session)["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C3"]["instanceId"],
+        top["instanceId"]
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north hand atlas")
+            .len(),
+        atlas_hand_before + 1
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after deferred Genesis"),
+        mana_before + 2
+    );
+    assert_eq!(
+        resolved.events.last().expect("mana event").payload,
+        json!({
+            "amount": 1,
+            "seat": "north",
+            "sourceInstanceId": top["instanceId"],
+        })
+    );
+    assert!(
+        state(&session)["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == deathrite["instanceId"])
+    );
+    assert_exact_replay(&session);
+}

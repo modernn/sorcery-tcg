@@ -1973,6 +1973,10 @@ fn rule_catalog_0914_chain_magic_phase_issues_only_chain_actions_while_staged() 
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Atlas discard Chain Magic extend-through-resolve scenario proof keeps assertions inline"
+)]
 fn rule_catalog_0934_extend_chain_magic_preserves_staged_discard_through_resolve() {
     let encoded = (934..934 + 512)
         .map(atlas_discard_hops_manifest)
@@ -2054,7 +2058,10 @@ fn rule_catalog_0934_extend_chain_magic_preserves_staged_discard_through_resolve
     assert_eq!(resolved.events[0].payload["cardId"], site_card_id);
     assert_eq!(resolved.events[0].payload["instanceId"], atlas_id);
     assert_eq!(resolved.events[0].payload["zone"], "atlas");
-    assert_eq!(resolved.events[0].payload["sourceInstanceId"], hops.chain_id);
+    assert_eq!(
+        resolved.events[0].payload["sourceInstanceId"],
+        hops.chain_id
+    );
     assert_eq!(
         resolved.events[1].payload["discardCardInstanceId"],
         atlas_id
@@ -2119,10 +2126,7 @@ struct SpellcasterChainHops {
 }
 
 fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
-    if !opening_has_all(
-        encoded,
-        &["north-chain", "north-caster", "north-ally-a"],
-    ) {
+    if !opening_has_all(encoded, &["north-chain", "north-caster", "north-ally-a"]) {
         return None;
     }
     let mut session = opening_main(encoded);
@@ -2186,8 +2190,7 @@ fn rule_catalog_0933_chain_magic_withheld_when_staged_caster_is_not_a_legal_spel
     let mut setup = try_setup_spellcaster_hops(&encoded).expect("spellcaster hops setup");
     let hops = &mut setup.hops;
     assert!(
-        hops
-            .session
+        hops.session
             .legal_actions()
             .expect("main legal actions")
             .iter()

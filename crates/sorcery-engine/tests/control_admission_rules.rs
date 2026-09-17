@@ -407,7 +407,8 @@ fn rule_catalog_0930_this_turn_control_transfers_distant_deathrite_to_thief_befo
 }
 
 #[test]
-fn rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_before_stealth_lost() {
+fn rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_before_stealth_lost()
+ {
     let encoded = stealth_bound_seed_with(939);
     let mut session =
         Session::new(&encoded).expect("valid stealth-bound Deathrite control session");

@@ -21597,6 +21597,251 @@
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
         "testName": "rule_catalog_0932_deathrite_area_damage_skips_self_and_hits_avatar_sharing_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0933",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged Chain Magic withholds extend-chain-magic and resolve-chain-magic when the staged casterInstanceId is no longer a legal Spellcaster in the Realm, including after checkpoint resume.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0933_chain_magic_withheld_when_staged_caster_is_not_a_legal_spellcaster"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0934",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After begin-chain-magic stages a chosen Atlas discard, extend-chain-magic preserves pendingChainMagic.discardCardInstanceId through resolve-chain-magic, which discards that card before allocating damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-damage-allocated",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0934_extend_chain_magic_preserves_staged_discard_through_resolve"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0935",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries end-of-controller-turn Avatar life gain, Avatar life loss, and here-area damage while the controller Avatar is below printed life, partial life gain resolves first up to the printed cap, then life loss, then here-area damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "avatar-life-lost",
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0935_end_turn_partial_gain_loss_then_here_damage_on_same_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0936",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and random teleport, the draw resolves before the teleport on the same Start Phase trigger without Lucky Charm deferral.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0936_start_turn_draw_sites_then_teleport_resolves_in_order_without_lucky_charm"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0937",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion that must attack nearby if able still offers site Declare Attack targets when an enemy minion is also in range, unlike must-attack-a-unit-if-able.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackNearbyIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "undefended-site-struck"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0937_nearby_must_attack_if_able_still_offers_site_targets_when_a_unit_is_also_in_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0938",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "In a three-way simultaneous Defend split, a Ward on the attacking minion absorbs the aggregated return damage once and strips Ward without dealing damage to any defender.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ward"
+      ],
+      "actionHints": [
+        "defend",
+        "close-defend",
+        "allocate-strike"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0938_warded_attacker_absorbs_three_way_simultaneous_return_split"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0939",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Stealth-bound control Magic can transfer a distant enemy Deathrite minion to the thief, and when the thief kills that minion before End Phase the Deathrite draws a site for the thief while Stealth remains until lost.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionWhileStealthBound",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "minion-stealthed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_before_stealth_lost"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0940",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "When Geomancer rubble replacement leaves one Atlas card and a single ordered terrain Deathrite remains, that Deathrite draws the last site and deferred Genesis mana gain fires before the game continues.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "replace-rubble-with-top-atlas-site"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "site-drawn",
+        "minion-died",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_0940_penultimate_terrain_replacement_single_deathrite_draws_last_site_then_deferred_genesis_mana_fires"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0941",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion Airborne this turn and then draws a spell ends the game in deck-out when the Spellbook is empty after the grant resolves, without drawing a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0941_airborne_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0942",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A finished verified-authority game downgrades to unranked_unverified_authority when evaluated under batch policy that also includes a synthetic manifest.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0942_mixed_verified_and_synthetic_batch_downgrades_verified_game"
+      }
     }
   ]
 }

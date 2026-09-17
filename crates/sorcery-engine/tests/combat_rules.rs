@@ -1999,10 +1999,6 @@ fn after_nearby_must_attack_mask_and_site_setup() -> Session {
 }
 
 #[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "nearby-must-attack site-target scenario proof keeps setup and assertions inline"
-)]
 fn rule_catalog_0937_nearby_must_attack_if_able_still_offers_site_targets_when_a_unit_is_also_in_range()
  {
     let mut session = after_nearby_must_attack_mask_and_site_setup();
@@ -2056,13 +2052,11 @@ fn rule_catalog_0937_nearby_must_attack_if_able_still_offers_site_targets_when_a
         }),
         "nearby-must-attack must still offer a site Declare Attack when a unit is also in range"
     );
-    assert!(
-        attack_actions.iter().any(|action| {
-            action.descriptor["kind"] == "declare-attack"
-                && action.descriptor["target"]["kind"] == "minion"
-                && action.descriptor["target"]["instanceId"] == target_id
-        })
-    );
+    assert!(attack_actions.iter().any(|action| {
+        action.descriptor["kind"] == "declare-attack"
+            && action.descriptor["target"]["kind"] == "minion"
+            && action.descriptor["target"]["instanceId"] == target_id
+    }));
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "declare-attack"
             && descriptor["target"]["kind"] == "site"

@@ -3,8 +3,9 @@
 //! draws (RULE-CATALOG-0241–0242), stacked library triggers
 //! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392, RULE-CATALOG-0393–0394,
 //! RULE-CATALOG-0397–0398), library-plus-teleport stacks
-//! (RULE-CATALOG-0401–0402), and thin-library draw-then-mill edges
-//! (RULE-CATALOG-0916).
+//! (RULE-CATALOG-0401–0402), thin-library draw-then-mill edges
+//! (RULE-CATALOG-0916), and direct draw-sites-then-teleport ordering
+//! (RULE-CATALOG-0936).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2650,4 +2651,131 @@ fn rule_catalog_0402_start_turn_draw_sites_then_teleport_resolves_through_lucky_
         location_before
     );
     assert!(committed.verify_replay().expect("verified replay"));
+}
+
+fn draw_sites_teleport_direct_manifest(seed: u32, north_atlas: &[&str]) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-sites-teleport-direct" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-sites-teleport-direct-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(json!({})),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSites": 1,
+                "atStartOfControllerTurnTeleportToRandomSiteOrVoid": true,
+                "attack": 3,
+                "voidwalk": true,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": north_atlas,
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_sites_teleport_direct_start_turn(seed: u32, north_atlas: &[&str]) -> Session {
+    let mut session = Session::new(&draw_sites_teleport_direct_manifest(seed, north_atlas))
+        .expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0936_start_turn_draw_sites_then_teleport_resolves_in_order_without_lucky_charm() {
+    let mut session = draw_sites_teleport_direct_start_turn(936, &["north-site"; 6]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let location_before = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == source_id)
+        .expect("source before teleport")["location"]
+        .clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "site-drawn")
+        .expect("site-drawn event");
+    let teleport_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "unit-teleported")
+        .expect("unit-teleported event");
+    assert!(
+        draw_index < teleport_index,
+        "Atlas draw must resolve before random teleport on the same minion without Lucky Charm deferral"
+    );
+    assert_eq!(
+        receipt.events[draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(
+        receipt.events[teleport_index].payload["sourceInstanceId"],
+        source_id
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_ne!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == source_id)
+            .expect("source after teleport")["location"],
+        location_before
+    );
+    assert_exact_replay(&session);
 }
