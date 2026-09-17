@@ -1,5 +1,7 @@
 //! TEST-04 eligibility: no result is ranked unless every gate passes.
 
+use std::sync::OnceLock;
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -181,7 +183,34 @@ fn manifest_uses_verified_private_local_authority(manifest: &Value) -> bool {
     authority
         .get("contentHash")
         .and_then(Value::as_str)
-        .is_some_and(|content_hash| VERIFIED_PRIVATE_LOCAL_AUTHORITY_HASHES.contains(&content_hash))
+        .is_some_and(verified_private_local_authority_hash_is_allowlisted)
+}
+
+fn verified_private_local_authority_hash_is_allowlisted(content_hash: &str) -> bool {
+    VERIFIED_PRIVATE_LOCAL_AUTHORITY_HASHES.contains(&content_hash)
+        || runtime_verified_private_local_authority_hashes()
+            .iter()
+            .any(|hash| hash == content_hash)
+}
+
+fn runtime_verified_private_local_authority_hashes() -> &'static [String] {
+    static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        std::env::var("SORCERY_VERIFIED_AUTHORITY_HASHES_FILE")
+            .ok()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|content| parse_verified_authority_hash_lines(&content))
+            .unwrap_or_default()
+    })
+}
+
+fn parse_verified_authority_hash_lines(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && line.starts_with("sha256:"))
+        .map(str::to_owned)
+        .collect()
 }
 
 const fn classification_for_policy(policy: EligibilityPolicy, ranked: bool) -> BatchClassification {
@@ -300,6 +329,43 @@ mod tests {
             },
         }));
         assert!(!policy.authority_verified);
+    }
+
+    #[test]
+    fn synthetic_manifest_rejects_allowlisted_hash_without_private_local_mode() {
+        let policy = eligibility_policy_for_manifest(&json!({
+            "authority": {
+                "contentHash": TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
+                "mode": "synthetic",
+            },
+        }));
+        assert!(!policy.authority_verified);
+    }
+
+    #[test]
+    fn private_local_manifest_rejects_non_allowlisted_hash() {
+        let policy = eligibility_policy_for_manifest(&json!({
+            "authority": {
+                "contentHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                "mode": "private-local",
+            },
+        }));
+        assert!(!policy.authority_verified);
+    }
+
+    #[test]
+    fn parse_verified_authority_hash_lines_skips_blank_and_non_sha256_rows() {
+        assert_eq!(
+            super::parse_verified_authority_hash_lines(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\nnot-a-hash\n sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \n"
+            ),
+            vec![
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_owned(),
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                    .to_owned(),
+            ]
+        );
     }
 
     #[test]

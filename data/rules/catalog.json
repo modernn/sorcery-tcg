@@ -20415,6 +20415,36 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0882_mixed_manifest_batch_keeps_unverified_authority_policy"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0883",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A synthetic manifest cannot rank by reusing an allowlisted private-local authority hash without private-local mode.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0883_synthetic_mode_rejects_allowlisted_authority_hash"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0884",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A private-local manifest with a non-allowlisted authority hash stays unverified for ranking.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0884_private_local_non_allowlisted_hash_stays_unverified"
+      }
     }
   ]
 }

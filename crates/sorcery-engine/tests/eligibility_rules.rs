@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use sorcery_engine::batch::{BatchClassification, MAX_GAME_ACTIONS};
 use sorcery_engine::canonical::{CanonicalError, IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::eligibility::{
-    EligibilityReason, TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
+    EligibilityReason, TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH, eligibility_policy_for_manifest,
     eligibility_policy_for_manifest_jsons,
 };
 use sorcery_engine::game_record::record_policy_game;
@@ -89,4 +89,26 @@ fn rule_catalog_0882_mixed_manifest_batch_keeps_unverified_authority_policy() {
 
     let synthetic_only = eligibility_policy_for_manifest_jsons([synthetic.as_str()]);
     assert!(!synthetic_only.authority_verified);
+}
+
+#[test]
+fn rule_catalog_0883_synthetic_mode_rejects_allowlisted_authority_hash() {
+    let policy = eligibility_policy_for_manifest(&json!({
+        "authority": {
+            "contentHash": TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH,
+            "mode": "synthetic",
+        },
+    }));
+    assert!(!policy.authority_verified);
+}
+
+#[test]
+fn rule_catalog_0884_private_local_non_allowlisted_hash_stays_unverified() {
+    let policy = eligibility_policy_for_manifest(&json!({
+        "authority": {
+            "contentHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "mode": "private-local",
+        },
+    }));
+    assert!(!policy.authority_verified);
 }
