@@ -470,7 +470,10 @@
       ],
       "plainLanguage": "Lash damages then untaps only a surviving nearby minion target.",
       "implementationStatus": "rust-supported",
-      "genericFactHints": [],
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
       "actionHints": [
         "choose-target",
         "untap"
@@ -480,8 +483,8 @@
         "untap"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0024_lash_damages_then_untaps_only_a_surviving_nearby_minion"
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_0699_lash_damages_then_untaps_only_a_surviving_nearby_minion"
       }
     },
     {
@@ -646,15 +649,16 @@
       "plainLanguage": "Overpower changes current power for source-aware prevention until the current End Phase.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "derived-power"
+        "derived-power",
+        "grantPowerToAllyThisTurn"
       ],
       "actionHints": [],
       "eventHints": [
         "power"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0033_overpower_changes_current_power_until_the_current_end_phase"
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase"
       }
     },
     {
@@ -16316,6 +16320,60 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/disable_subsurface_rules.rs",
         "testName": "rule_catalog_0698_disable_kills_an_underground_burrowing_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0699",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Lash damage-then-untap Magic offers only a nearby minion, deals printed damage, and untaps the target only when it survives. A distant minion is not offered. Distinct from 0595, which has no nearby filter and does not untap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "untap"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-untapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_0699_lash_damages_then_untaps_only_a_surviving_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0700",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "grantPowerToAllyThisTurn Magic offers controlled allies, raises current derived power by +2 per source until the current End Phase, and feeds source-aware prevention. Stacked grants expire together before turn-ended. Distinct from 0529–0530, which grant to a minion then draw and do not offer Avatars.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerToAllyThisTurn",
+        "derived-power"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted",
+        "power-expired",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase"
       }
     }
   ]
