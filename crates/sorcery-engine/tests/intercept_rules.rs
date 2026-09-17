@@ -13,7 +13,7 @@ fn minion() -> Value {
     })
 }
 
-fn scenario_manifest(seed: u32, responder: &Value, south_site: &Value) -> String {
+fn scenario_manifest(seed: u32, attacker: &Value, responder: &Value, south_site: &Value) -> String {
     let avatar = json!({
         "attack": 1,
         "cardType": "avatar",
@@ -30,7 +30,7 @@ fn scenario_manifest(seed: u32, responder: &Value, south_site: &Value) -> String
             "revisionId": "synthetic-intercept-rules-v1",
         },
         "cards": {
-            "north-attacker": minion(),
+            "north-attacker": attacker,
             "north-avatar": avatar,
             "north-site": site,
             "south-avatar": avatar,
@@ -122,13 +122,19 @@ struct AttackSetup {
 fn attack_checkpoint(seed: u32, responder: &Value) -> AttackSetup {
     attack_checkpoint_with_site(
         seed,
+        &minion(),
         responder,
         &json!({ "cardType": "site", "elements": ["earth"] }),
     )
 }
 
-fn attack_checkpoint_with_site(seed: u32, responder: &Value, south_site: &Value) -> AttackSetup {
-    let manifest = scenario_manifest(seed, responder, south_site);
+fn attack_checkpoint_with_site(
+    seed: u32,
+    attacker: &Value,
+    responder: &Value,
+    south_site: &Value,
+) -> AttackSetup {
+    let manifest = scenario_manifest(seed, attacker, responder, south_site);
     let mut session = Session::new(&manifest).expect("valid Intercept scenario");
     keep(&mut session);
     keep(&mut session);
@@ -223,6 +229,7 @@ fn rule_catalog_0768_cannot_defend_airborne_cannot_use_updraft_departure() {
     responder["cannotDefend"] = json!(true);
     let setup = attack_checkpoint_with_site(
         50,
+        &minion(),
         &responder,
         &json!({
             "airborneMinionsAtopMoveFreelyAway": true,
@@ -261,6 +268,7 @@ fn rule_catalog_0756_adjacent_updraft_sites_keep_airborne_defend_paths_bounded()
     responder["airborne"] = json!(true);
     let setup = attack_checkpoint_with_site(
         51,
+        &minion(),
         &responder,
         &json!({
             "airborneMinionsAtopMoveFreelyAway": true,
@@ -521,6 +529,78 @@ fn rule_catalog_0743_forward_only_minion_issues_exact_forward_defend_path() {
         })
     );
     exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0928_airborne_cannot_defend_intercepts_airborne_attacker_without_movement_defend_paths(
+) {
+    let mut attacker = minion();
+    attacker["airborne"] = json!(true);
+    let mut responder = minion();
+    responder["airborne"] = json!(true);
+    responder["cannotDefend"] = json!(true);
+    let setup = attack_checkpoint_with_site(
+        52,
+        &attacker,
+        &responder,
+        &json!({
+            "airborneMinionsAtopMoveFreelyAway": true,
+            "cardType": "site",
+            "elements": ["earth", "air"],
+        }),
+    );
+
+    let mut defend = setup.session.clone();
+    let target_site_id = site_id(&defend);
+    accept_where(&mut defend, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "site"
+            && descriptor["target"]["instanceId"] == target_site_id
+    });
+    assert!(
+        defend
+            .legal_actions()
+            .expect("Defend actions")
+            .into_iter()
+            .all(|action| {
+                action.descriptor["kind"] != "defend"
+                    || action.descriptor["unitInstanceId"] != setup.distant_responder_id
+            })
+    );
+    let (stationary_defend, _) = accept_where(&mut defend, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == setup.target_id
+            && descriptor["path"]
+                .as_array()
+                .is_some_and(|path| path.len() == 1)
+    });
+
+    let mut intercept = setup.session;
+    accept_where(&mut intercept, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    let interceptors: Vec<Value> = intercept
+        .legal_actions()
+        .expect("Intercept actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "intercept")
+        .map(|action| action.descriptor)
+        .collect();
+
+    assert_eq!(
+        (
+            stationary_defend["path"].clone(),
+            interceptors,
+            state(&intercept)["phase"].clone(),
+        ),
+        (
+            json!([{ "cell": "C2", "region": "surface" }]),
+            vec![json!({ "kind": "intercept", "unitInstanceId": setup.target_id })],
+            json!("intercept"),
+        )
+    );
+    exact_replay(&defend);
+    exact_replay(&intercept);
 }
 
 #[test]
