@@ -14265,6 +14265,52 @@
         "file": "crates/sorcery-engine/tests/grant_ward_rules.rs",
         "testName": "rule_catalog_0616_grant_ward_magic_is_a_paid_noop_when_already_warded"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0617",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth Magic hides an enemy minion from later targeting.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-stealthed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_0617_grant_stealth_magic_hides_an_enemy_minion_from_later_targeting"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0618",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-Stealth Magic does not offer an already-stealthed enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_0618_grant_stealth_magic_cannot_target_an_enemy_already_stealthed"
+      }
     }
   ]
 }
