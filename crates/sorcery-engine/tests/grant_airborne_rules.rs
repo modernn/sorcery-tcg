@@ -1,10 +1,13 @@
-//! Direct proofs for grant-Airborne-this-turn Magic (RULE-CATALOG-0274–0275).
+//! Direct proofs for grant-Airborne-this-turn Magic (RULE-CATALOG-0274–0275,
+//! RULE-CATALOG-0665–0666).
 //!
 //! Official Magic can grant Airborne for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, is lost while the
 //! minion is Disabled or grounded, and expires through the shared End Phase
 //! temporary-effect cleanup. Grounded attackers cannot strike Airborne minions
-//! until they themselves become Airborne.
+//! until they themselves become Airborne. A printed-Airborne ally still takes
+//! the temporary source; End Phase expiry removes that source and leaves the
+//! printed keyword.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -31,6 +34,17 @@ fn site() -> Value {
 
 fn grounded() -> Value {
     json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_airborne() -> Value {
+    json!({
+        "airborne": true,
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
@@ -66,9 +80,9 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn manifest(south_spell: &str) -> String {
+fn manifest(north_ally: &Value, south_spell: &str) -> String {
     let mut cards = json!({
-        "north-ally": grounded(),
+        "north-ally": north_ally,
         "north-avatar": avatar(),
         "north-grant": grant(),
         "north-site": site(),
@@ -205,7 +219,11 @@ fn can_strike_minion(session: &Session, attacker_id: &str, enemy_id: &str) -> bo
 }
 
 fn opening_main(south_spell: &str) -> Session {
-    let mut session = Session::new(&manifest(south_spell)).expect("grant Airborne");
+    opening_with(&grounded(), south_spell)
+}
+
+fn opening_with(north_ally: &Value, south_spell: &str) -> Session {
+    let mut session = Session::new(&manifest(north_ally, south_spell)).expect("grant Airborne");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -347,5 +365,83 @@ fn rule_catalog_0275_granted_airborne_is_required_to_strike_an_airborne_enemy() 
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0665_grant_airborne_makes_a_grounded_minion_airborne() {
+    let mut session = opening_main("south-grounded");
+    let ally_id = summon_north_ally(&mut session);
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryAirborneSources")
+            .is_none()
+    );
+    assert!(!public_airborne(&session, &ally_id));
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-grant"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "airborne-granted", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(public_airborne(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
+    let mut session = opening_with(&printed_airborne(), "south-grounded");
+    let ally_id = summon_north_ally(&mut session);
+    assert!(public_airborne(&session, &ally_id));
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryAirborneSources")
+            .is_none()
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-grant"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "airborne-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(public_airborne(&session, &ally_id));
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "airborne-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
+    }));
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryAirborneSources")
+            .is_none()
+    );
+    assert!(
+        public_airborne(&session, &ally_id),
+        "printed Airborne remains after the temporary grant expires"
+    );
     assert_exact_replay(&session);
 }
