@@ -16787,6 +16787,57 @@
         "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
         "testName": "rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0717",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic checks every cell of a 2\u00d72 footprint for bury eligibility. Rubble counts as land, so a mixed land-and-rubble square still burrows and kills a non-Burrowing minion. Distinct from ordinary 1\u00d71 Bury death (0655) and Burrowing survivor Bury (0585).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "occupiesSquareArea",
+        "rubble"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_oversized_rules.rs",
+        "testName": "rule_catalog_0717_bury_checks_every_oversized_cell_and_treats_rubble_as_land"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0718",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic still offers a 2\u00d72 minion on an all-Water footprint, then resolves as a paid no-op because no Underground layer exists. The minion stays on the surface with its full footprint unchanged. Distinct from 1\u00d71 Water no-op (0656) and mixed land-and-rubble oversized bury (0717).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_oversized_rules.rs",
+        "testName": "rule_catalog_0718_bury_on_all_water_oversized_footprint_is_a_paid_noop"
+      }
     }
   ]
 }
