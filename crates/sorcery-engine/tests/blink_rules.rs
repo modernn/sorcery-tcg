@@ -557,7 +557,7 @@ fn rule_catalog_1124_blink_keeps_aura_when_ally_never_leaves_neighbor() {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_settle_interrupting_deathrites_before_its_draw() {
+fn rule_catalog_1125_blink_settles_interrupting_deathrites_before_draw() {
     let mut checkpoint = blink_scenario(false, true);
     let drawn = state(&checkpoint.session)["players"]["north"]["spellbook"][0]["instanceId"]
         .as_str()
