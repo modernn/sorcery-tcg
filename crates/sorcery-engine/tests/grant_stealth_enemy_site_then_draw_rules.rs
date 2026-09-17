@@ -1,10 +1,11 @@
 //! Direct proofs for grant-Stealth-to-an-allied-minion occupying an enemy
-//! site then draw-spell Magic (RULE-CATALOG-0541–0542).
+//! site then draw-spell Magic (RULE-CATALOG-0541–0542, RULE-CATALOG-1074).
 //!
 //! Ordinary Magic can give Stealth to one allied minion that occupies an
 //! enemy-controlled site and then draw one spell. Allies on friendly sites,
 //! Avatars, and enemy minions are not offered. When no allied minion occupies
-//! an enemy site, the grant is a paid no-op that still draws.
+//! an enemy site, the grant is a paid no-op that still draws. While Deathrites
+//! wait for ordering, Fade Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -54,6 +55,27 @@ fn fade() -> Value {
         "cardType": "magic",
         "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell": true,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -388,4 +410,226 @@ fn rule_catalog_0542_fade_still_draws_when_no_ally_occupies_an_enemy_site() {
             .any(|card| card["instanceId"] == library_top)
     );
     assert_exact_replay(&session);
+}
+
+fn deathrite_fade_manifest(seed: u32) -> String {
+    let fixture = "grant-stealth-enemy-site-then-draw-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-fade": fade(),
+            "north-raider": raider(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-raider",
+                    "north-fade",
+                    "north-rain",
+                    "north-rain",
+                    "north-fade",
+                    "north-raider",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_fade_rain_and_raider(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-fade", "north-rain", "north-raider"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteFadeSetup {
+    deathrite_ids: [String; 2],
+    raid_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_visitor(encoded: &str) -> Option<PendingDeathriteFadeSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_fade_rain_and_raider(&state(&session)) {
+        return None;
+    }
+    let raid = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-raider"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let raid_id = raid.0["cardInstanceId"].as_str()?.to_owned();
+    if !fade_ally_ids(&session).contains(&raid_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteFadeSetup {
+        deathrite_ids,
+        raid_id,
+        session,
+    })
+}
+
+fn deathrite_fade_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_fade_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Fade Magic in hand")
+}
+
+#[test]
+fn rule_catalog_1074_grant_stealth_enemy_site_then_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_fade_seed_with(1074);
+    let mut setup = try_pending_deathrite_with_ready_visitor(&encoded)
+        .expect("complete Fade Deathrite withheld setup");
+    let raid_id = setup.raid_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &raid_id)["stealthed"], false);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(fade_ally_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &raid_id)["stealthed"], false);
+    let mut offered = fade_ally_ids(session);
+    offered.sort_unstable();
+    offered.dedup();
+    assert_eq!(offered, [raid_id.clone()]);
+
+    let library_top = resumed["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("card to draw")["instanceId"]
+        .as_str()
+        .expect("drawn identity")
+        .to_owned();
+
+    let (_, granted) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-fade"
+            && descriptor["ally"]["instanceId"] == raid_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-stealthed",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(granted.events[1].payload["instanceId"], raid_id);
+    let after = state(session);
+    assert_eq!(unit(&after, &raid_id)["stealthed"], true);
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand after draw")
+            .iter()
+            .any(|card| card["instanceId"] == library_top)
+    );
+    assert_exact_replay(session);
 }
