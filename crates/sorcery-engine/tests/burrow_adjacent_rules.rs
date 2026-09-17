@@ -1,8 +1,10 @@
 //! Direct proofs for burrow-target-adjacent-minion Magic
-//! (RULE-CATALOG-0559–0560).
+//! (RULE-CATALOG-0559–0560, RULE-CATALOG-1055).
 //!
 //! Ordinary Magic burrows one minion that borders the caster. Same-cell
-//! and far minions are not offered. A Water site is a paid no-op.
+//! and far minions are not offered. A Water site is a paid no-op. While
+//! Deathrites wait for ordering, burrow-adjacent Magic stays withheld
+//! until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -49,6 +51,27 @@ fn raider() -> Value {
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
         "manaCost": 0,
         "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -299,6 +322,148 @@ fn setup_adjacent_board(encoded: &str) -> (Session, String, String, String) {
     (session, adjacent_id, here_id, far_id)
 }
 
+fn deathrite_burrow_adjacent_manifest(seed: u32) -> String {
+    let fixture = "burrow-adjacent-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": burrower(),
+            "north-avatar": avatar(),
+            "north-bury": bury(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-bury",
+                    "north-rain",
+                    "north-rain",
+                    "north-bury",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_bury_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-bury", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteBurrowAdjacentSetup {
+    adjacent_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_adjacent_target(
+    encoded: &str,
+) -> Option<PendingDeathriteBurrowAdjacentSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()?
+        .iter()
+        .any(|card| card["cardId"] == "north-ally")
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let adjacent = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    })?;
+    let adjacent_id = adjacent.0["cardInstanceId"].as_str()?.to_owned();
+    if !north_has_bury_and_rain(&state(&session)) {
+        return None;
+    }
+    let offered = bury_target_ids(&session);
+    if offered.is_empty() || !offered.contains(&adjacent_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteBurrowAdjacentSetup {
+        adjacent_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_burrow_adjacent_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_burrow_adjacent_manifest)
+        .find(|candidate| try_pending_deathrite_with_adjacent_target(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with burrow-adjacent Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0559_burrow_targets_an_adjacent_minion_on_earth() {
     let encoded = seed_with(false, 559);
@@ -347,4 +512,81 @@ fn rule_catalog_0560_burrow_adjacent_is_a_paid_noop_on_water() {
     assert_eq!(unit(&state(&session), &here_id)["region"], "surface");
     assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1055_burrow_adjacent_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_burrow_adjacent_seed_with(1055);
+    let mut setup = try_pending_deathrite_with_adjacent_target(&encoded)
+        .expect("complete burrow-adjacent Deathrite withheld setup");
+    let adjacent_id = setup.adjacent_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &adjacent_id)["location"], "C3");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(bury_target_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &adjacent_id)["location"], "C3");
+    assert_eq!(bury_target_ids(session), [adjacent_id.as_str()]);
+
+    let (cast, burrowed) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["instanceId"] == adjacent_id
+    });
+    assert_eq!(
+        event_types(&burrowed),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert_eq!(burrowed.events[1].payload["cell"], "C3");
+    assert_eq!(burrowed.events[1].payload["instanceId"], adjacent_id);
+    assert_eq!(burrowed.events[1].payload["seat"], "north");
+    assert_eq!(
+        burrowed.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    assert_eq!(
+        unit(&state(session), &adjacent_id)["region"],
+        "underground"
+    );
+    assert_exact_replay(session);
 }
