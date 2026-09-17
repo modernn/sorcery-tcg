@@ -1505,3 +1505,277 @@ fn rule_catalog_0833_mana_and_thresholds_gate_without_spending_affinity() {
         assert!(session.verify_replay().expect("verified replay"));
     }
 }
+
+fn magic(effect: (&str, Value)) -> Value {
+    let mut value = json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "thresholds": thresholds(None, 0),
+    });
+    value
+        .as_object_mut()
+        .expect("Magic facts")
+        .insert(effect.0.to_owned(), effect.1);
+    value
+}
+
+fn deathrite_minion() -> Value {
+    let mut value = minion(0, &thresholds(None, 0));
+    value["deathriteDrawSite"] = json!(true);
+    value["summonToAnySite"] = json!(true);
+    value
+}
+
+fn visitor() -> Value {
+    let mut value = minion(0, &thresholds(None, 0));
+    value["defense"] = json!(3);
+    value["summonToAnySite"] = json!(true);
+    value
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn heal_minion_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("heal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-heal"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn deathrite_heal_manifest(seed: u32) -> String {
+    let fixture = "summon-minion-deathrite-withheld";
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar.clone(),
+            "north-damage": magic(("damageTargetUnit", json!(1))),
+            "north-heal": magic(("healTargetMinion", json!(1))),
+            "north-minion": minion(0, &thresholds(None, 0)),
+            "north-rain": magic(("damageEachAbovegroundMinion", json!(1))),
+            "north-site": site("earth", false),
+            "south-avatar": avatar,
+            "south-minion": deathrite_minion(),
+            "south-site": site("earth", false),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-damage",
+                    "north-heal",
+                    "north-rain",
+                    "north-minion",
+                    "north-damage",
+                    "north-heal",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn north_has_damage_heal_rain_and_minion(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-damage", "north-heal", "north-rain", "north-minion"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteHealSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_wounded_visitor(encoded: &str) -> Option<PendingDeathriteHealSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_damage_heal_rain_and_minion(&state(&session)) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-damage"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == visitor_id
+    })?;
+    if heal_minion_targets(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteHealSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_heal_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_heal_manifest)
+        .find(|candidate| try_pending_deathrite_with_wounded_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with a summonable minion in hand")
+}
+
+fn assert_exact_replay(session: &Session) {
+    let action_ids: Vec<_> = session
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect();
+    let replayed = Session::replay(session.manifest_json(), &action_ids).expect("exact replay");
+    assert_eq!(
+        replayed.replay_value().expect("replayed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_eq!(replayed.transcript(), session.transcript());
+    assert!(session.verify_replay().expect("verified replay"));
+}
+
+#[test]
+fn rule_catalog_1168_summon_minion_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_heal_seed_with(1168);
+    let mut setup = try_pending_deathrite_with_wounded_visitor(&encoded)
+        .expect("complete summon-minion Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        paused["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-minion"))
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "summon-minion")
+    );
+    assert_exact_replay(session);
+}
