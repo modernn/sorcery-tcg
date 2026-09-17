@@ -1,4 +1,4 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946, 0965).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
@@ -295,7 +295,10 @@ fn try_setup_duel(encoded: &str) -> Option<(Session, String, String, String)> {
     Some((session, ally_id, caster_id, enemy_id))
 }
 
-fn try_setup_duel_with_nearby_mask(encoded: &str) -> Option<(Session, String, String, String)> {
+fn try_setup_duel_with_mask(
+    encoded: &str,
+    mask_on_enemy_bearer: bool,
+) -> Option<(Session, String, String, String)> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
     keep(&mut session);
@@ -338,11 +341,20 @@ fn try_setup_duel_with_nearby_mask(encoded: &str) -> Option<(Session, String, St
             && descriptor["cell"] == "C3"
     })?;
     let enemy_id = enemy_summon["cardInstanceId"].as_str()?.to_owned();
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-artifact"
-            && descriptor["cardId"] == "south-mask"
-            && descriptor["bearer"]["instanceId"] == enemy_id
-    })?;
+    if mask_on_enemy_bearer {
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-artifact"
+                && descriptor["cardId"] == "south-mask"
+                && descriptor["bearer"]["instanceId"] == enemy_id
+        })?;
+    } else {
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-artifact"
+                && descriptor["cardId"] == "south-mask"
+                && descriptor["cell"] == "C1"
+                && descriptor["bearer"].is_null()
+        })?;
+    }
     try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -532,15 +544,18 @@ fn seed_with(ward: bool, start: u32) -> String {
         .expect("bounded seed with complete Duel setup")
 }
 
-fn seed_duel_with_nearby_mask(start: u32) -> String {
+fn seed_duel_with_mask(start: u32, mask_on_enemy_bearer: bool) -> String {
     (start..start + 512)
         .map(duel_nearby_mask_manifest)
-        .find(|candidate| try_setup_duel_with_nearby_mask(candidate).is_some())
-        .expect("bounded seed with complete nearby-Mask Duel setup")
+        .find(|candidate| try_setup_duel_with_mask(candidate, mask_on_enemy_bearer).is_some())
+        .expect("bounded seed with complete Mask Duel setup")
 }
 
-fn setup_duel_with_nearby_mask(encoded: &str) -> (Session, String, String, String) {
-    try_setup_duel_with_nearby_mask(encoded).expect("complete nearby-Mask Duel setup")
+fn setup_duel_with_mask(
+    encoded: &str,
+    mask_on_enemy_bearer: bool,
+) -> (Session, String, String, String) {
+    try_setup_duel_with_mask(encoded, mask_on_enemy_bearer).expect("complete Mask Duel setup")
 }
 
 #[test]
@@ -707,8 +722,8 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
 
 #[test]
 fn rule_catalog_0946_duel_magic_fight_strike_deals_double_damage_when_struck_unit_is_nearby_mask() {
-    let encoded = seed_duel_with_nearby_mask(946);
-    let (mut session, ally_id, caster_id, enemy_id) = setup_duel_with_nearby_mask(&encoded);
+    let encoded = seed_duel_with_mask(946, true);
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel_with_mask(&encoded, true);
 
     let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -724,6 +739,32 @@ fn rule_catalog_0946_duel_magic_fight_strike_deals_double_damage_when_struck_uni
     assert_eq!(
         realm_unit(&state(&session), &ally_id).expect("ally survives the doubled return strike")["damage"],
         2
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0965_duel_magic_fight_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask() {
+    let encoded = seed_duel_with_mask(965, false);
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel_with_mask(&encoded, false);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    assert!(event_types(&receipt).contains(&"fight-started"));
+    assert_eq!(damage_dealt_amount(&receipt, &enemy_id), 1);
+    assert!(!event_types(&receipt).contains(&"minion-died"));
+    let after = state(&session);
+    let enemy = realm_unit(&after, &enemy_id)
+        .expect("2-defense minion survives an undoubled 1-power Duel strike");
+    assert_eq!(enemy["damage"], 1);
+    assert_eq!(
+        realm_unit(&after, &ally_id).expect("ally survives the return strike")["damage"],
+        1
     );
     assert_exact_replay(&session);
 }
