@@ -10314,7 +10314,13 @@ impl Game {
     /// Returns [`GameError::IllegalAction`] when the action is stale, belongs to
     /// another decision, or is not valid for the current phase.
     pub fn apply_action(&mut self, action: &IssuedAction) -> Result<(), GameError> {
-        self.apply_action_with_log(action, &mut OutcomeLog::Ignore, None, None)
+        let mut random_draws = Vec::new();
+        self.apply_action_with_log(
+            action,
+            &mut OutcomeLog::Ignore,
+            Some(&mut random_draws),
+            None,
+        )
     }
 
     #[expect(
