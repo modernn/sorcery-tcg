@@ -1,6 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010).
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010, 1020).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -55,6 +55,8 @@
 //! 1010 covers begin-chain-magic staging a nearby enemy minion as the first hop,
 //! then extend-chain-magic adding a second nearby enemy minion before resolve.
 //! Distinct from 0986, which uses Avatar as the first hop.
+//! 1020 covers begin-chain-magic omitting a distant enemy minion as the first
+//! hop while a nearby enemy minion remains eligible.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -3415,6 +3417,106 @@ fn try_setup_spellcaster_begin_minion_extend_minion_hop(
     ))
 }
 
+fn try_setup_spellcaster_distant_minion_hop(
+    encoded: &str,
+) -> Option<(Session, String, String, String, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-caster"]) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "B1"
+    })?;
+    let (distant_minion, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "B1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (nearby_minion, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (caster, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    })?;
+    let before = state(&session);
+    let distant_minion_id = distant_minion["cardInstanceId"]
+        .as_str()
+        .expect("distant minion identity")
+        .to_owned();
+    let nearby_minion_id = nearby_minion["cardInstanceId"]
+        .as_str()
+        .expect("nearby minion identity")
+        .to_owned();
+    if distant_minion_id == nearby_minion_id {
+        return None;
+    }
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let caster_id = caster["cardInstanceId"]
+        .as_str()
+        .expect("printed caster identity")
+        .to_owned();
+    let caster_unit = realm_unit(&before, &caster_id)?;
+    let nearby_unit = realm_unit(&before, &nearby_minion_id)?;
+    let distant_unit = realm_unit(&before, &distant_minion_id)?;
+    if caster_unit["location"] != "C4" || caster_unit["region"] != "surface" {
+        return None;
+    }
+    if nearby_unit["location"] != "C3" || nearby_unit["region"] != "surface" {
+        return None;
+    }
+    if distant_unit["location"] != "B1" || distant_unit["region"] != "surface" {
+        return None;
+    }
+    let begin_targets = chain_ids(&session, &chain_id);
+    if !begin_targets.contains(&nearby_minion_id) {
+        return None;
+    }
+    if begin_targets.contains(&distant_minion_id) {
+        return None;
+    }
+    Some((
+        session,
+        chain_id,
+        caster_id,
+        nearby_minion_id,
+        distant_minion_id,
+    ))
+}
+
 #[test]
 fn rule_catalog_0986_begin_chain_magic_avatar_first_hop_then_extend_minion_second_hop() {
     let encoded = (986..986 + 512)
@@ -3622,6 +3724,48 @@ fn rule_catalog_1010_begin_chain_magic_minion_first_hop_then_extend_second_minio
     assert!(after["pendingChainMagic"].is_null());
     assert!(realm_unit(&after, &first_minion_id).is_none());
     assert!(realm_unit(&after, &second_minion_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1020_begin_chain_magic_omits_distant_enemy_minion_as_first_hop() {
+    let encoded = (1020..1020 + 512)
+        .map(spellcaster_avatar_manifest)
+        .find(|candidate| try_setup_spellcaster_distant_minion_hop(candidate).is_some())
+        .expect(
+            "bounded seed with Chain Magic, printed Spellcaster at C4, nearby South minion at C3, and distant South minion at B1",
+        );
+    let (mut session, chain_id, caster_id, nearby_minion_id, distant_minion_id) =
+        try_setup_spellcaster_distant_minion_hop(&encoded)
+            .expect("spellcaster distant minion hop setup");
+    let begin_targets = chain_ids(&session, &chain_id);
+    assert!(
+        begin_targets.contains(&nearby_minion_id),
+        "append_main must offer the nearby enemy minion as a first hop"
+    );
+    assert!(
+        !begin_targets.contains(&distant_minion_id),
+        "append_main must omit the distant enemy minion as a first hop"
+    );
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == nearby_minion_id
+    });
+    assert!(begin.events.is_empty());
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": nearby_minion_id,
+            "kind": "minion",
+            "seat": "south",
+        }])
+    );
     assert_exact_replay(&session);
 }
 
