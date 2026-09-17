@@ -1,5 +1,5 @@
 //! Direct proofs for burrow-target-minion-or-artifact Magic
-//! (RULE-CATALOG-0585–0586).
+//! (RULE-CATALOG-0585–0586, RULE-CATALOG-0730).
 //!
 //! Ordinary Magic burrows a chosen minion on Earth. A Burrowing minion
 //! survives underground. A Water site is still offered, then resolves as a
@@ -288,4 +288,9 @@ fn rule_catalog_0586_bury_on_water_is_a_paid_noop() {
     assert_eq!(event_types(&resolved), ["magic-cast", "magic-resolved"]);
     assert_eq!(unit(&state(&session), &target_id), &before);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards();
 }

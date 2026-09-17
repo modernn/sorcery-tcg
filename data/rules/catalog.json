@@ -17079,6 +17079,48 @@
         "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
         "testName": "rule_catalog_0729_alternate_summon_payments_should_be_admitted_and_require_their_costs"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0730",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact and burrow-all-minions-and-artifacts-at-target-land-site Magic pass self-play admission when paired with ordinary minions, Burrowing, Submerge, Waterbound, Landbound, Voidwalk, start-turn and end-turn triggers, Deathrite library effects, forced-attack facts, and common Artifact bearer modifiers including composed Mask effects.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "burrowing",
+        "submerge",
+        "waterbound",
+        "landbound",
+        "voidwalk",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnMillSites",
+        "deathriteDrawSpells",
+        "deathriteMillSpells",
+        "deathriteMillSites",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "doesNotUntapDuringControllersStartPhase",
+        "mustAttackAUnitIfAble",
+        "enemiesMustAttackThisIfAble",
+        "grantsBearerPower",
+        "grantsBearerLethal",
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards"
+      }
     }
   ]
 }
