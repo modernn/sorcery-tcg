@@ -1185,3 +1185,103 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
     assert!(resolved.random_draws.is_empty());
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0932_deathrite_area_damage_skips_self_and_hits_avatar_sharing_cell() {
+    let seed = 312;
+    let mut manifest = base_manifest(seed);
+    let preview_manifest = finish_manifest(manifest.clone(), "synthetic-deathrite-self-preview-v1");
+    let preview = Session::new(&preview_manifest).expect("preview session");
+    let genesis_card_id = card_ids_in_hand(&preview, "north", 1)
+        .pop()
+        .expect("Genesis source card");
+    let deathrite_card_id = card_ids_in_hand(&preview, "south", 1)
+        .pop()
+        .expect("Deathrite minion card");
+    manifest["cards"][&genesis_card_id] = minion(&json!({
+        "defense": 10,
+        "genesisDamageEachOtherUnitHere": 1,
+        "summonToAnySite": true,
+    }));
+    manifest["cards"][&deathrite_card_id] = minion(&json!({
+        "defense": 1,
+        "deathriteDamageEachUnitHere": 2,
+        "summonToAnySite": true,
+    }));
+    let manifest = finish_manifest(manifest, "synthetic-deathrite-self-skip-v1");
+    let mut session = Session::new(&manifest).expect("valid self-skip Deathrite scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (deathrite, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == deathrite_card_id
+            && descriptor["cell"] == "C1"
+    });
+    let deathrite_id = deathrite["cardInstanceId"]
+        .as_str()
+        .expect("Deathrite minion identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == genesis_card_id
+            && descriptor["cell"] == "C1"
+    });
+    let types = event_types(&resolved);
+    let allocations: Vec<_> = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "deathrite-damage-allocated")
+        .collect();
+    assert!(
+        types
+            .iter()
+            .rposition(|kind| *kind == "deathrite-damage-allocated")
+            .expect("Deathrite allocation")
+            < types
+                .iter()
+                .position(|kind| *kind == "minion-died")
+                .expect("cemetery entry")
+    );
+    let source_id = deathrite_id.clone();
+    let south_avatar_id = state(&session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    assert_eq!(allocations.len(), 2);
+    for allocation in &allocations {
+        assert_eq!(allocation.payload["amount"], 2);
+        assert_eq!(allocation.payload["sourceInstanceId"], source_id);
+        assert_ne!(
+            allocation.payload["sourceInstanceId"],
+            allocation.payload["targetInstanceId"]
+        );
+    }
+    let targets: Vec<_> = allocations
+        .iter()
+        .map(|allocation| allocation.payload["targetInstanceId"].clone())
+        .collect();
+    assert!(targets.contains(&south_avatar_id));
+    assert!(!targets.contains(&json!(deathrite_id)));
+    let avatar_damage: Vec<_> = resolved
+        .events
+        .iter()
+        .filter(|event| {
+            event.event_type == "damage-dealt" && event.payload["instanceId"] == south_avatar_id
+        })
+        .map(|event| event.payload["amount"].clone())
+        .collect();
+    assert_eq!(avatar_damage, [json!(1), json!(2)]);
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 17);
+    assert_exact_replay(&session);
+}
