@@ -778,7 +778,7 @@ fn genesis_sleep_should_require_real_damage_and_not_strike_retroactively() {
 }
 
 #[test]
-fn simultaneous_strike_should_snapshot_every_target_before_awakening_an_aura() {
+fn rule_catalog_0744_first_strike_snapshots_targets_before_awakening_nearby_aura() {
     let sleeper = minion(json!({
         "attack": 1,
         "defense": 10,

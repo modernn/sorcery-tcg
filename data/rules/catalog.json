@@ -17396,6 +17396,103 @@
         "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
         "testName": "rule_catalog_0740_cave_in_keeps_minion_carried_artifact_attached_while_burrowing"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0741",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Missed Ranged shots and fixed-damage projectiles retain Lance without adding its strike bonus or breaking the mark.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance",
+        "ranged",
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-projectile",
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_0741_missed_and_fixed_projectiles_retain_lance_without_bonus_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0742",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Lance breaks before a lethal Deathrite draw that would deck out the controller, and terminal replay preserves that ordering.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "defend",
+        "allocate-strike"
+      ],
+      "eventHints": [
+        "lance-broken",
+        "minion-died",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0743",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Forward-only minions with top-bottom connection and movement bonus issue exact forward Defend paths without sideways or backward steps.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movesOnlyForward",
+        "connectsTopBottom",
+        "movementBonus"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0743_forward_only_minion_issues_exact_forward_defend_path"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0744",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Attacking first strike snapshots every defender before a nearby disable-until-damaged aura awakens and changes strike allocations.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "genesisDisableSelfUntilDamaged",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "allocate-strike",
+        "defend"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0744_first_strike_snapshots_targets_before_awakening_nearby_aura"
+      }
     }
   ]
 }

@@ -484,7 +484,7 @@ fn cannot_defend_or_intercept_should_exclude_both_response_actions() {
 }
 
 #[test]
-fn forward_only_should_issue_exact_forward_defend_path() {
+fn rule_catalog_0743_forward_only_minion_issues_exact_forward_defend_path() {
     let mut phalanx = minion();
     phalanx["connectsTopBottom"] = json!(true);
     phalanx["movementBonus"] = json!(1);

@@ -447,7 +447,7 @@ fn rule_catalog_0739_ranged_lance_breaks_ward_and_uses_unmodified_power_for_prev
 }
 
 #[test]
-fn missed_and_fixed_projectiles_should_retain_lance_without_adding_its_damage() {
+fn rule_catalog_0741_missed_and_fixed_projectiles_retain_lance_without_bonus_damage() {
     let ranged = minion(json!({ "lanceCount": 1, "ranged": true }));
     let target = minion(json!({}));
     let mut miss = prepare_lance(199, &ranged, &target, true, 6);
@@ -499,7 +499,7 @@ fn missed_and_fixed_projectiles_should_retain_lance_without_adding_its_damage() 
 }
 
 #[test]
-fn lance_break_should_precede_deathrite_deck_out_and_terminal_replay() {
+fn rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay() {
     let lancer = minion(json!({ "attack": 1, "defense": 1, "lanceCount": 1 }));
     let deathrite = minion(json!({ "deathriteDrawSite": true, "defense": 2 }));
     let mut setup = prepare_lance(201, &lancer, &deathrite, true, 3);
