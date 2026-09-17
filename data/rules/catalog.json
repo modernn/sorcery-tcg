@@ -27155,6 +27155,47 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1172_multi_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1174",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during attack phase, decline-attack is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "decline-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_1174_decline_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1178",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "When Flood enters after Drought on the same site footprint, a Waterbound minion regains enabled movement on that site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "waterbound",
+        "affectedSitesAreFlooded",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/waterbound_rules.rs",
+        "testName": "rule_catalog_1178_flood_after_drought_restores_waterbound_movement_on_site"
+      }
     }
   ]
 }

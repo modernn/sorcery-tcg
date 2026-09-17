@@ -2695,6 +2695,10 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
         "C2"
     );
     assert!(no_kind(session, "declare-attack"));
+    assert!(
+        no_kind(session, "decline-attack"),
+        "deathrite-order must issue no decline-attack"
+    );
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
@@ -2722,12 +2726,40 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
         offers_kind(session, "declare-attack"),
         "Declare Attack must be offered again once deathrite-order clears"
     );
+    assert!(
+        offers_kind(session, "decline-attack"),
+        "Decline Attack must be offered again once deathrite-order clears"
+    );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "site"
     });
     if offers_kind(session, "close-defend") {
         accept_where(session, |descriptor| descriptor["kind"] == "close-defend");
     }
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1174_decline_attack_withheld_during_pending_deathrite_order() {
+    let encoded = declare_attack_deathrite_seed_with(1174);
+    let mut setup = try_pending_declare_attack_during_deathrite_order(&encoded)
+        .expect("complete decline-attack Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "attack");
+    assert!(no_kind(session, "declare-attack"));
+    assert!(no_kind(session, "decline-attack"));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    assert_eq!(state(session)["phase"], "attack");
+    assert!(offers_kind(session, "decline-attack"));
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
     assert_exact_replay(session);
 }
 
