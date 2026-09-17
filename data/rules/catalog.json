@@ -13967,6 +13967,56 @@
         "file": "crates/sorcery-engine/tests/duel_rules.rs",
         "testName": "rule_catalog_0604_duel_magic_breaks_ward_without_entering_combat"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0605",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-each-aboveground-minion Magic simultaneously damages every aboveground minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_0605_rain_of_arrows_damages_every_aboveground_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0606",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-each-aboveground-minion Magic lets Ward absorb the damage on a surviving minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_0606_rain_of_arrows_lets_ward_absorb_the_damage"
+      }
     }
   ]
 }
