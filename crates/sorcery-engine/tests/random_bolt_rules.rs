@@ -1,8 +1,12 @@
-//! Direct proofs for damage-random-unit-at-location Magic (RULE-CATALOG-0607–0608).
+//! Direct proofs for damage-random-unit-at-location Magic (RULE-CATALOG-0607–0608, 1027).
 //!
 //! Lightning Bolt-style Magic picks a surface location, then deterministically
 //! damages one random unit there. Ward absorbs the hit when the random draw
 //! selects a warded minion.
+//!
+//! 1027 covers damage-random-unit-at-location Magic killing a Deathrite minion:
+//! the controller draws a site and magic-resolved only appears after deathrite
+//! settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -41,6 +45,13 @@ fn minion(extra: Value) -> Value {
     value
 }
 
+fn deathrite_minion() -> Value {
+    minion(json!({
+        "deathriteDrawSite": true,
+        "defense": 1,
+    }))
+}
+
 fn bolt() -> Value {
     json!({
         "cardType": "magic",
@@ -54,6 +65,41 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn bolt_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "random-bolt-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-random-bolt-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bolt": bolt(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-bolt"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn bolt_manifest(seed: u32, ward: bool) -> String {
@@ -215,6 +261,26 @@ fn two_minions_at_c2(session: &mut Session) -> Vec<String> {
     candidates
 }
 
+fn seed_with_deathrite(start: u32) -> String {
+    (start..start + 256)
+        .map(bolt_deathrite_manifest)
+        .find(|candidate| {
+            Session::new(candidate).ok().is_some_and(|preview| {
+                state(&preview)["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-bolt"))
+            })
+        })
+        .expect("bounded seed with random bolt Deathrite setup")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 fn one_minion_at_c2(session: &mut Session) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -332,5 +398,75 @@ fn rule_catalog_0608_random_bolt_lets_ward_absorb_the_random_hit() {
     let warded = realm_unit(&snapshot, &target_id).expect("warded survivor");
     assert_eq!(warded["damage"], 0);
     assert_eq!(warded["warded"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1027_random_bolt_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_deathrite(1027);
+    let mut session = opening_main(&encoded);
+    let target_id = one_minion_at_c2(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bolt"
+            && descriptor["targetLocation"]["cell"] == "C2"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    let types = event_types(&receipt);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &target_id).is_none());
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
