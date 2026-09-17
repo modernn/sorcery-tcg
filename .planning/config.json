@@ -1,7 +1,14 @@
 {
   "model_profile": "inherit",
   "commit_docs": true,
-  "parallelization": false,
+  "parallelization": {
+    "enabled": true,
+    "plan_level": true,
+    "task_level": false,
+    "skip_checkpoints": true,
+    "max_concurrent_agents": 10,
+    "min_plans_for_parallel": 2
+  },
   "search_gitignored": false,
   "git": {
     "branching_strategy": "none"
