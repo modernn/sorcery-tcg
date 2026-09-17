@@ -16446,7 +16446,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Sinkhole destruction on a Water site preserves relative subsurface: drowned minions die, Burrowing survivors and loose Artifacts settle underground, and terminal Atlas loss ends the game after Rubble. Distinct from 0703 protected and existing-Rubble branches.",
+      "plainLanguage": "Sinkhole destruction on a Water site preserves relative subsurface: drowned minions die, Burrowing survivors and loose Artifacts settle underground, and terminal Atlas loss ends the game after Rubble. Distinct from 0703 land, protected, and existing-Rubble branches.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "rubble",
@@ -16550,7 +16550,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Raise Dead free placement accepts only engine-issued cells, fails oversized footprints with no legal location, and raises enemy-owned corpses at zero mana with Genesis billing on the controller. Distinct from 0583 single-site summon replay.",
+      "plainLanguage": "Raise Dead fails a 2x2 footprint summon when no legal location exists: the selected corpse stays in its cemetery, emits minion-summon-failed with no-legal-location, and the Magic still resolves. Distinct from 0707 empty-pool and free-placement branches.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "summonRandomMinionFromAnyCemetery",
@@ -16560,13 +16560,11 @@
         "summon-minion"
       ],
       "eventHints": [
-        "minion-summon-failed",
-        "minion-summoned",
-        "avatar-life-lost"
+        "minion-summon-failed"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
-        "testName": "rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon"
+        "testName": "rule_catalog_0708_raise_dead_blocked_footprint_summon"
       }
     }
   ]

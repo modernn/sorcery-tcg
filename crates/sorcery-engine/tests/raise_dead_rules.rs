@@ -336,6 +336,6 @@ fn rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_place
 }
 
 #[test]
-fn rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon() {
-    sorcery_engine::game::catalog_proofs::rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon();
+fn rule_catalog_0708_raise_dead_blocked_footprint_summon() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0708_raise_dead_blocked_footprint_summon();
 }
