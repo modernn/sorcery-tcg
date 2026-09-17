@@ -790,7 +790,7 @@ fn resolve_healing_fight(life: u8, seed: u32) -> (AttackSetup, Receipt) {
 }
 
 #[test]
-fn deathrite_healing_should_cap_skip_deaths_door_and_precede_cemetery_entry() {
+fn rule_catalog_0803_deathrite_healing_caps_skips_deaths_door_precedes_cemetery() {
     let (capped, capped_receipt) = resolve_healing_fight(5, 56);
     let healed = capped_receipt
         .events

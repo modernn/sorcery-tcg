@@ -444,7 +444,7 @@ fn rule_catalog_0797_immobile_defends_and_attacks_in_place_without_moving() {
 }
 
 #[test]
-fn cannot_defend_or_intercept_should_exclude_both_response_actions() {
+fn rule_catalog_0804_cannot_defend_or_intercept_excludes_both_response_actions() {
     let mut prohibited = minion();
     prohibited["cannotDefendOrIntercept"] = json!(true);
     let setup = attack_checkpoint(112, &prohibited);
@@ -524,7 +524,7 @@ fn rule_catalog_0743_forward_only_minion_issues_exact_forward_defend_path() {
 }
 
 #[test]
-fn decline_should_offer_only_colocated_ready_interceptor_and_close_into_fight() {
+fn rule_catalog_0805_decline_offers_colocated_ready_interceptor_close_fight() {
     let setup = attack_checkpoint(59, &minion());
     let mut session = setup.session;
     let (_, declined) = accept_where(&mut session, |descriptor| {

@@ -189,7 +189,7 @@ fn rule_catalog_0801_mulligan_returns_chosen_cards_to_deck_bottom() {
 }
 
 #[test]
-fn first_player_skips_draw_then_second_player_chooses_deck() {
+fn rule_catalog_0809_first_player_skips_draw_second_chooses_deck() {
     let mut session = Session::new(&scenario_manifest(13, 30, 50)).expect("valid session");
     keep(&mut session);
     let second_keep = keep(&mut session);
@@ -263,7 +263,7 @@ fn first_player_skips_draw_then_second_player_chooses_deck() {
 }
 
 #[test]
-fn sites_expand_through_unoccupied_orthogonal_cells() {
+fn rule_catalog_0810_sites_expand_through_unoccupied_orthogonal_cells() {
     let mut session = north_second_main(23, false);
     let before = state(&session);
     let card = before["players"]["north"]["hand"]["atlas"][0].clone();
@@ -306,7 +306,7 @@ fn sites_expand_through_unoccupied_orthogonal_cells() {
 }
 
 #[test]
-fn avatar_draws_private_site_and_pays_tap_cost() {
+fn rule_catalog_0811_avatar_draws_private_site_pays_tap_cost() {
     let mut session = north_second_main(29, false);
     let before = state(&session);
     let drawn = before["players"]["north"]["atlas"][0].clone();
@@ -349,7 +349,7 @@ fn avatar_draws_private_site_and_pays_tap_cost() {
 }
 
 #[test]
-fn empty_atlas_avatar_draw_pays_tap_cost_and_loses() {
+fn rule_catalog_0812_empty_atlas_avatar_draw_pays_tap_and_loses() {
     let mut session = north_second_main(31, true);
     assert_eq!(state(&session)["players"]["north"]["atlas"], json!([]));
     assert!(

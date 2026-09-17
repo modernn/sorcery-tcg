@@ -88,7 +88,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "first_player_skips_draw_then_second_player_chooses_deck"
+        "testName": "rule_catalog_0809_first_player_skips_draw_second_chooses_deck"
       }
     },
     {
@@ -103,7 +103,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "sites_expand_through_unoccupied_orthogonal_cells"
+        "testName": "rule_catalog_0810_sites_expand_through_unoccupied_orthogonal_cells"
       }
     },
     {
@@ -137,7 +137,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "avatar_draws_private_site_and_pays_tap_cost"
+        "testName": "rule_catalog_0811_avatar_draws_private_site_pays_tap_cost"
       }
     },
     {
@@ -180,7 +180,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "empty_atlas_avatar_draw_pays_tap_cost_and_loses"
+        "testName": "rule_catalog_0812_empty_atlas_avatar_draw_pays_tap_and_loses"
       }
     },
     {
@@ -2029,7 +2029,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/intercept_rules.rs",
-        "testName": "cannot_defend_or_intercept_should_exclude_both_response_actions"
+        "testName": "rule_catalog_0804_cannot_defend_or_intercept_excludes_both_response_actions"
       }
     },
     {
@@ -2678,7 +2678,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "deathrite_healing_should_cap_skip_deaths_door_and_precede_cemetery_entry"
+        "testName": "rule_catalog_0803_deathrite_healing_caps_skips_deaths_door_precedes_cemetery"
       }
     },
     {
@@ -2760,7 +2760,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/intercept_rules.rs",
-        "testName": "decline_should_offer_only_colocated_ready_interceptor_and_close_into_fight"
+        "testName": "rule_catalog_0805_decline_offers_colocated_ready_interceptor_close_fight"
       }
     },
     {
@@ -18778,6 +18778,197 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
         "testName": "rule_catalog_0802_zero_air_threshold_taps_without_rng_or_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0803",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Deathrite healing caps at maximum, fails at Death's Door, and precedes cemetery entry.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathrite",
+        "deaths-door"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "death",
+        "cemetery-entry",
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0803_deathrite_healing_caps_skips_deaths_door_precedes_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0804",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A fully prohibited minion cannot use Defend or Intercept.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0804_cannot_defend_or_intercept_excludes_both_response_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0805",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Declining an attack gives only co-located ready enemies an Intercept window.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "attack",
+        "intercept",
+        "decline"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0805_decline_offers_colocated_ready_interceptor_close_fight"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0806",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An oversized ground minion manifest with Mountain Pass is admitted by the footprint core.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mountainPass"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "rule_catalog_0806_oversized_ground_minion_mountain_pass_manifest_admitted"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0807",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Mountain Pass blocks ground-minion entry when a friendly minion already occupies it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mountainPass"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "rule_catalog_0807_mountain_pass_blocks_friendly_occupant_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0808",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ground minion already on Mountain Pass may leave the occupied pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mountainPass"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "rule_catalog_0808_ground_minion_leaves_occupied_mountain_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0809",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "First player skips its draw, establishes a domain, then second player chooses a deck.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0809_first_player_skips_draw_second_chooses_deck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0810",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sites expand through unoccupied orthogonal cells controlled by their player.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0810_sites_expand_through_unoccupied_orthogonal_cells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0811",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The Avatar may draw a private site instead of playing one.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0811_avatar_draws_private_site_pays_tap_cost"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0812",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Drawing a site from an empty Atlas pays the tap cost and loses.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "tap",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0812_empty_atlas_avatar_draw_pays_tap_and_loses"
       }
     }
   ]

@@ -394,7 +394,7 @@ fn rule_catalog_0800_mountain_pass_blocks_only_occupied_ground_minion_entry() {
 }
 
 #[test]
-fn oversized_mountain_pass_manifest_should_be_admitted() {
+fn rule_catalog_0806_oversized_ground_minion_mountain_pass_manifest_admitted() {
     let mut oversized: Value = serde_json::from_str(&manifest()).expect("synthetic manifest value");
     oversized["cards"]["north-ground"]["occupiesSquareArea"] = json!(2);
     oversized
@@ -408,7 +408,7 @@ fn oversized_mountain_pass_manifest_should_be_admitted() {
 }
 
 #[test]
-fn mountain_pass_should_block_entry_with_a_friendly_occupant() {
+fn rule_catalog_0807_mountain_pass_blocks_friendly_occupant_entry() {
     let setup = prepare_mountain_pass();
     let mut session = setup.session;
     begin_north_turn(&mut session);
@@ -426,7 +426,7 @@ fn mountain_pass_should_block_entry_with_a_friendly_occupant() {
 }
 
 #[test]
-fn ground_minion_should_be_allowed_to_leave_occupied_mountain_pass() {
+fn rule_catalog_0808_ground_minion_leaves_occupied_mountain_pass() {
     let setup = prepare_mountain_pass();
     let mut session = setup.session;
     let leaver_id = summon(&mut session, &setup.south_leaver_card_id, "C2");
