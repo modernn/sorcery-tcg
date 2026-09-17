@@ -1,11 +1,12 @@
 //! Direct proofs for grant-double-damage-next-strike Magic (RULE-CATALOG-0565–0566,
-//! RULE-CATALOG-0979).
+//! RULE-CATALOG-0979, RULE-CATALOG-1090).
 //!
 //! Official Magic can mark an ally so its next unit strike this turn deals
 //! double damage. The grant uses the shared ally choice, doubles only unit
 //! strikes, is consumed after that strike, and expires through the shared End
 //! Phase temporary-effect cleanup. An attack-2 minion kills a defense-3 enemy
-//! only while the mark remains.
+//! only while the mark remains. While deathrite-order is pending, the grant is
+//! withheld until the chain completes.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -59,6 +60,27 @@ fn deathrite_any_site() -> Value {
         "defense": 3,
         "manaCost": 0,
         "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_deathrite() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -149,13 +171,15 @@ fn deathrite_manifest() -> String {
     }))
 }
 
-fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
     let action = session
         .legal_actions()
-        .expect("legal actions")
+        .ok()?
         .into_iter()
-        .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .find(|action| predicate(&action.descriptor))?;
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -163,11 +187,15 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
             seat: action.seat,
             state_version: action.state_version,
         })
-        .expect("authoritative step")
+        .ok()?
     else {
-        panic!("engine-issued action must be accepted");
+        return None;
     };
-    (descriptor, receipt)
+    Some((descriptor, receipt))
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    try_accept_where(session, predicate).expect("expected engine-issued action")
 }
 
 fn keep(session: &mut Session) {
@@ -239,6 +267,23 @@ fn grant_double(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
             && descriptor["cardId"] == "north-grant"
             && descriptor["ally"]["instanceId"] == ally_id
     })
+}
+
+fn grant_ally_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("grant actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-grant"
+        })
+        .filter_map(|action| {
+            action.descriptor["ally"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect()
 }
 
 fn south_summons_enemy_at_c4(session: &mut Session, card_id: &str) -> String {
@@ -486,4 +531,212 @@ fn rule_catalog_0566_next_strike_double_expires_before_a_later_strike() {
             .expect("resumed state hash"),
         session.state_hash().expect("session state hash")
     );
+}
+
+fn deathrite_grant_double_manifest(seed: u32) -> String {
+    let fixture = "grant-next-strike-double-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": striker(),
+            "north-avatar": avatar(),
+            "north-grant": grant(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": rain_deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-grant",
+                    "north-rain",
+                    "north-rain",
+                    "north-grant",
+                    "north-grant",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_grant_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-grant", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteGrantDoubleSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_allied_minion(
+    encoded: &str,
+) -> Option<PendingDeathriteGrantDoubleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_grant_and_rain(&state(&session)) {
+        return None;
+    }
+    if !grant_ally_ids(&session).contains(&ally_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteGrantDoubleSetup {
+        ally_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_grant_double_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_grant_double_manifest)
+        .find(|candidate| try_pending_deathrite_with_allied_minion(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with grant-next-strike-double Magic in hand")
+}
+
+#[test]
+fn rule_catalog_1090_grant_next_strike_double_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_grant_double_seed_with(1090);
+    let mut setup = try_pending_deathrite_with_allied_minion(&encoded)
+        .expect("complete grant-next-strike-double Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(unit(&paused, &ally_id).is_object());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(grant_ally_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(unit(&resumed, &ally_id).is_object());
+    assert!(grant_ally_ids(session).contains(&ally_id));
+    assert!(
+        unit(&resumed, &ally_id)
+            .get("temporaryNextStrikeDoubleSources")
+            .is_none()
+    );
+
+    let (descriptor, receipt) = grant_double(session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
+    assert_eq!(receipt.events[1].payload["seat"], "north");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert_eq!(
+        unit(&state(session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert_exact_replay(session);
 }
