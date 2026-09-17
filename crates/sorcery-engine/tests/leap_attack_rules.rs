@@ -1,7 +1,10 @@
-//! Direct proofs for leap-attack-ally Magic (RULE-CATALOG-0599–0600).
+//! Direct proofs for leap-attack-ally Magic (RULE-CATALOG-0599–0600,
+//! RULE-CATALOG-1046).
 //!
 //! Leap Attack optionally steps a controlled ally before striking every enemy
 //! at the destination. Immobile allies may only stay and strike where they stand.
+//! While Deathrites wait for ordering, leap Magic stays withheld until the
+//! chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -46,6 +49,27 @@ fn leap() -> Value {
         "cardType": "magic",
         "leapAttackAlly": true,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -244,6 +268,177 @@ fn setup_step_leap(encoded: &str) -> (Session, String, String) {
     try_setup_step_leap(encoded).expect("complete Leap Attack setup")
 }
 
+fn deathrite_leap_manifest(seed: u32) -> String {
+    let fixture = "leap-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": ally(json!({})),
+            "north-avatar": avatar(),
+            "north-leap": leap(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": ally(json!({ "attack": 2, "defense": 3 })),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-leap",
+                    "north-rain",
+                    "north-leap",
+                    "north-rain",
+                    "north-leap",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-enemy", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_leap_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-leap", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+fn leap_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("leap actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-leap"
+        })
+        .filter_map(|action| {
+            action.descriptor["ally"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+struct PendingDeathriteLeapSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    enemy_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_leap(encoded: &str) -> Option<PendingDeathriteLeapSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let enemy = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C3"
+    })?;
+    let enemy_id = enemy.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_leap_and_rain(&state(&session)) {
+        return None;
+    }
+    if leap_targets(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteLeapSetup {
+        ally_id,
+        deathrite_ids,
+        enemy_id,
+        session,
+    })
+}
+
+fn deathrite_leap_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_leap_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_leap(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Leap Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0599_leap_attack_steps_an_ally_and_strikes_enemies_at_the_destination() {
     let encoded = (599..599 + 512)
@@ -330,4 +525,74 @@ fn rule_catalog_0600_leap_attack_lets_an_immobile_ally_only_stay_and_strike() {
     assert!(!event_types(&receipt).contains(&"unit-stepped"));
     assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1046_leap_attack_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_leap_seed_with(1046);
+    let mut setup = try_pending_deathrite_with_ready_leap(&encoded)
+        .expect("complete leap Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let enemy_id = setup.enemy_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(realm_unit(&paused, &ally_id).is_some());
+    assert!(realm_unit(&paused, &enemy_id).is_some());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(leap_targets(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(realm_unit(&resumed, &ally_id).is_some());
+    assert!(realm_unit(&resumed, &enemy_id).is_some());
+    assert!(leap_targets(session).contains(&ally_id));
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-leap"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == "C3"
+    });
+    assert!(event_types(&receipt).contains(&"unit-stepped"));
+    assert!(event_types(&receipt).contains(&"strike-damage-allocated"));
+    assert!(event_types(&receipt).contains(&"magic-resolved"));
+    assert!(realm_unit(&state(session), &enemy_id).is_none());
+    assert_exact_replay(session);
 }
