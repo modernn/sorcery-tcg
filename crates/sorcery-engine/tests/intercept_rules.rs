@@ -301,7 +301,7 @@ fn site_id(session: &Session) -> String {
 }
 
 #[test]
-fn cannot_defend_should_block_movement_but_allow_stationary_defend_and_intercept() {
+fn rule_catalog_0779_cannot_defend_blocks_movement_allows_stationary_response() {
     let mut responder = minion();
     responder["cannotDefend"] = json!(true);
     let setup = attack_checkpoint(50, &responder);
