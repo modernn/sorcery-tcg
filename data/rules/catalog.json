@@ -1133,22 +1133,21 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Genesis resolves simultaneous area damage and enemy strikes.",
+      "plainLanguage": "Genesis strike-each-enemy-here hits every enemy sharing the newcomer's cell, including the Avatar standing on its own site. Co-located allies and the striker are skipped. Ward absorbs a strike without dealing damage.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "genesis"
+        "genesisStrikeEachEnemyHere"
       ],
       "actionHints": [
-        "strike"
+        "summon-minion"
       ],
       "eventHints": [
-        "damage",
-        "resolution",
-        "strike"
+        "strike-damage-allocated",
+        "ward-broken"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers_cell"
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0675_genesis_strike_hits_every_enemy_sharing_the_newcomers_cell"
       }
     },
     {
@@ -2976,16 +2975,23 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Fatality kills only a wounded minion in the caster region.",
+      "plainLanguage": "Fatality kills only a wounded minion in the caster region. A wounded underground minion is not offered when the caster is on the surface. Distinct from 0609–0610, which prove wounded-versus-healthy on the surface only.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "region"
+        "killTargetWoundedMinion"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0147_fatality_should_kill_only_a_wounded_minion_in_the_caster_region"
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0673_fatality_kills_a_wounded_minion_in_the_caster_region_not_underground"
       }
     },
     {
@@ -3268,8 +3274,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0161_cave_in_burrows_artifacts_with_minions_in_canonical_order"
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0677_cave_in_burrows_a_loose_artifact_at_the_land_site"
       }
     },
     {
@@ -5041,8 +5047,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0236_chosen_discard_cost_may_discard_an_atlas_card"
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_0671_chosen_discard_cost_may_discard_an_atlas_card"
       }
     },
     {
@@ -15611,6 +15617,149 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
         "testName": "rule_catalog_0672_chosen_discard_cost_issues_no_choice_free_cast_while_atlas_remains"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0673",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic kills a wounded minion in the caster region and does not offer a wounded minion in a different region. After two surface minions are wounded, burrowing one underground leaves only the surface copy as a legal Fatality target. Distinct from 0609, which never places a wounded minion off the caster's region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-killed",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0673_fatality_kills_a_wounded_minion_in_the_caster_region_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0674",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers no target when the only wounded minion occupies a different region from the caster. A wounded underground minion is excluded even though that same minion was a legal surface target before it was burrowed. Distinct from 0610, which proves the all-healthy surface case.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_0674_fatality_offers_no_target_for_a_wounded_underground_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0675",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here hits every enemy sharing the newcomer's cell, including the Avatar standing on its own site. Co-located allies and the striker are skipped. Ward absorbs a strike without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated",
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0675_genesis_strike_hits_every_enemy_sharing_the_newcomers_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0676",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here does not strike co-located allies or the striker, and it does not reach enemies occupying a different cell. Summoning onto the controller's own site emits no strike when every enemy is elsewhere.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0676_genesis_strike_skips_allies_and_far_enemies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0677",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic burrows a loose Artifact at the chosen land site. After an uncarried Artifact occupies C1, casting at that site moves the Artifact underground in place. This is distinct from minion-only Cave-In (0587) and from targeted Bury (0043).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0677_cave_in_burrows_a_loose_artifact_at_the_land_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0678",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic detaches an Avatar-carried Artifact at the chosen land site and burrows it independently. The Avatar stays on the surface. A minion-only Cave-In (0587) has no Artifact to detach.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
+        "testName": "rule_catalog_0678_cave_in_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
       }
     }
   ]
