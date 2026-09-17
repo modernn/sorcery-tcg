@@ -667,6 +667,133 @@ fn ordered_blink_scenario() -> OrderedBlink {
     }
 }
 
+/// Area damage kills two Deathrite allies before Blink is cast, pausing in deathrite-order.
+fn external_deathrite_blink_scenario() -> OrderedBlink {
+    let mut session = Session::new(&ordered_manifest()).expect("valid external Blink scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site(&mut session, "C4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    play_site(&mut session, "C1");
+    end_turn(&mut session);
+
+    draw(&mut session, "spellbook");
+    play_site(&mut session, "D4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    end_turn(&mut session);
+
+    draw(&mut session, "spellbook");
+    play_site(&mut session, "E4");
+    end_turn(&mut session);
+
+    draw(&mut session, "atlas");
+    end_turn(&mut session);
+
+    draw(&mut session, "spellbook");
+    let fragile = [
+        summon(&mut session, "north-fragile", "C4"),
+        summon(&mut session, "north-fragile", "C4"),
+    ];
+    let storm = hand_in(&session, "spellbook", "north-storm");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardInstanceId"] == storm.as_str()
+    });
+    let spell = hand_in(&session, "spellbook", "north-blink");
+    OrderedBlink {
+        fragile,
+        session,
+        sparkmage: String::new(),
+        spell,
+    }
+}
+
+#[test]
+fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
+    let mut checkpoint = external_deathrite_blink_scenario();
+    let deathrite_ids = checkpoint.fragile.clone();
+    let spell = checkpoint.spell.clone();
+    let session = &mut checkpoint.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "north");
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|instance_id| realm_unit(session, instance_id).is_none()),
+        "area damage must have sent both Deathrite allies to the cemetery"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "cast-magic"
+                    || action.descriptor["cardInstanceId"] != spell.as_str()
+            }),
+        "Blink must stay withheld until the external Deathrite chain completes"
+    );
+
+    let mut order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    order_sources.sort_unstable();
+    let mut expected = deathrite_ids.clone();
+    expected.sort_unstable();
+    assert_eq!(order_sources, expected);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == expected[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert_eq!(resumed["pendingDeathrites"], Value::Null);
+
+    let sparkmage = summon(session, "north-sparkmage", "D4");
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .into_iter()
+            .any(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardInstanceId"] == spell.as_str()
+            }),
+        "Blink must be offered again once deathrite-order clears"
+    );
+
+    let receipt = cast_blink(session, &spell, &sparkmage, "E4", "atlas");
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "site-drawn",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(
+        realm_unit(session, &sparkmage).expect("blinked ally")["location"],
+        "E4"
+    );
+    assert!(session.verify_replay().expect("verified exact replay"));
+}
+
 #[test]
 fn rule_catalog_0040_blink_should_owe_its_draw_until_ordered_deathrites_are_chosen() {
     let mut checkpoint = ordered_blink_scenario();
