@@ -14978,6 +14978,55 @@
         "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
         "testName": "rule_catalog_0646_draw_spells_magic_exhausts_then_loses_on_empty_library"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0647",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic pays its cost, draws the printed number of hidden Atlas cards in deck order, and enters its owner's cemetery. The opponent sees only the new Atlas hand count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_0647_draw_sites_magic_draws_hidden_atlas_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0648",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic draws every remaining Atlas card it can, then loses immediately when a required draw finds an empty library.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-drawn",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_0648_draw_sites_magic_exhausts_then_loses_on_empty_library"
+      }
     }
   ]
 }
