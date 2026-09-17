@@ -1133,22 +1133,21 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Genesis resolves simultaneous area damage and enemy strikes.",
+      "plainLanguage": "Genesis strike-each-enemy-here hits every enemy sharing the newcomer's cell, including the Avatar standing on its own site. Co-located allies and the striker are skipped. Ward absorbs a strike without dealing damage.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "genesis"
+        "genesisStrikeEachEnemyHere"
       ],
       "actionHints": [
-        "strike"
+        "summon-minion"
       ],
       "eventHints": [
-        "damage",
-        "resolution",
-        "strike"
+        "strike-damage-allocated",
+        "ward-broken"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0057_genesis_strike_should_hit_every_enemy_sharing_the_newcomers_cell"
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0675_genesis_strike_hits_every_enemy_sharing_the_newcomers_cell"
       }
     },
     {
@@ -15564,6 +15563,52 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
         "testName": "rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0675",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here hits every enemy sharing the newcomer's cell, including the Avatar standing on its own site. Co-located allies and the striker are skipped. Ward absorbs a strike without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated",
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0675_genesis_strike_hits_every_enemy_sharing_the_newcomers_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0676",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here does not strike co-located allies or the striker, and it does not reach enemies occupying a different cell. Summoning onto the controller's own site emits no strike when every enemy is elsewhere.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_0676_genesis_strike_skips_allies_and_far_enemies"
       }
     }
   ]
