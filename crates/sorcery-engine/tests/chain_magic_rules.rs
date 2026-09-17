@@ -997,6 +997,50 @@ fn try_setup_atlas_discard_chain(
     ))
 }
 
+fn atlas_discard_chain_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-atlas-discard" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-atlas-discard-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-chain": discard_chain(),
+            "north-fodder": fodder(),
+            "north-ally": minion(json!({})),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-ally",
+                    "north-fodder",
+                    "north-chain",
+                    "north-ally",
+                    "north-fodder",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn chain_discard_begin_ids(session: &Session, chain_id: &str) -> Vec<String> {
     session
         .legal_actions()
@@ -1016,51 +1060,8 @@ fn chain_discard_begin_ids(session: &Session, chain_id: &str) -> Vec<String> {
 
 #[test]
 fn rule_catalog_0889_chain_magic_discard_may_discard_an_atlas_card() {
-    let spellbook = [
-        "north-chain",
-        "north-ally",
-        "north-fodder",
-        "north-chain",
-        "north-ally",
-        "north-fodder",
-    ];
     let encoded = (889..889 + 512)
-        .map(|seed| {
-            finish_manifest(json!({
-                "authority": {
-                    "contentHash": identity_hash(&json!({ "fixture": "chain-magic-atlas-discard" }))
-                        .expect("synthetic authority identity"),
-                    "mode": "synthetic",
-                    "revisionId": "synthetic-chain-magic-atlas-discard-v1",
-                },
-                "cards": {
-                    "north-avatar": avatar(),
-                    "north-chain": discard_chain(),
-                    "north-fodder": fodder(),
-                    "north-ally": minion(json!({})),
-                    "north-site": site(),
-                    "south-avatar": avatar(),
-                    "south-minion": minion(json!({ "summonToAnySite": true })),
-                    "south-site": site(),
-                },
-                "decks": {
-                    "north": {
-                        "atlas": vec!["north-site"; 6],
-                        "avatar": "north-avatar",
-                        "spellbook": spellbook,
-                    },
-                    "south": {
-                        "atlas": vec!["south-site"; 6],
-                        "avatar": "south-avatar",
-                        "spellbook": vec!["south-minion"; 6],
-                    },
-                },
-                "engineVersion": "sorcery-core-v1",
-                "firstSeat": "north",
-                "schemaVersion": 1,
-                "seed": seed,
-            }))
-        })
+        .map(atlas_discard_chain_manifest)
         .find(|candidate| {
             opening_has_all(candidate, &["north-chain", "north-ally"])
                 && try_setup_atlas_discard_chain(candidate).is_some()

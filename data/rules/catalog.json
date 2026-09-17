@@ -20583,6 +20583,36 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0890_chain_magic_issues_no_begin_without_a_chosen_discard_while_atlas_remains"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0891",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "SORCERY_VERIFIED_AUTHORITY_HASHES_FILE extends the private-local authority allowlist at process start so a listed hash classifies as verified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_runtime_hash_file_rules.rs",
+        "testName": "rule_catalog_0891_runtime_hash_file_extends_private_local_allowlist"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0892",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A runtime hash file containing only blank and invalid rows does not verify unknown private-local authority hashes; the compile-time fixture hash still verifies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_runtime_hash_invalid_rules.rs",
+        "testName": "rule_catalog_0892_runtime_hash_file_skips_invalid_lines_without_widening_allowlist"
+      }
     }
   ]
 }

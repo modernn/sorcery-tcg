@@ -193,15 +193,27 @@ fn verified_private_local_authority_hash_is_allowlisted(content_hash: &str) -> b
             .any(|hash| hash == content_hash)
 }
 
+static RUNTIME_AUTHORITY_HASH_FILE_OVERRIDE: OnceLock<Option<String>> = OnceLock::new();
+
+/// Isolated eligibility tests call this before the runtime allowlist cache initializes.
+#[doc(hidden)]
+pub fn prime_runtime_authority_hash_file_for_tests(path: String) {
+    let _ = RUNTIME_AUTHORITY_HASH_FILE_OVERRIDE.set(Some(path));
+}
+
 fn runtime_verified_private_local_authority_hashes() -> &'static [String] {
     static CACHE: OnceLock<Vec<String>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        std::env::var("SORCERY_VERIFIED_AUTHORITY_HASHES_FILE")
-            .ok()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|content| parse_verified_authority_hash_lines(&content))
-            .unwrap_or_default()
-    })
+    CACHE.get_or_init(load_runtime_verified_private_local_authority_hashes)
+}
+
+fn load_runtime_verified_private_local_authority_hashes() -> Vec<String> {
+    let path = RUNTIME_AUTHORITY_HASH_FILE_OVERRIDE
+        .get()
+        .and_then(Option::clone)
+        .or_else(|| std::env::var("SORCERY_VERIFIED_AUTHORITY_HASHES_FILE").ok());
+    path.and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|content| parse_verified_authority_hash_lines(&content))
+        .unwrap_or_default()
 }
 
 fn parse_verified_authority_hash_lines(content: &str) -> Vec<String> {
