@@ -14608,6 +14608,48 @@
         "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
         "testName": "rule_catalog_0630_mill_sites_is_a_paid_noop_on_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0633",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-artifact Magic offers every Artifact in the caster region whether loose or carried, moves a real Artifact into its owner's cemetery, and leaves no later Artifact target once the realm is empty of them.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-destroyed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_0633_destroy_target_artifact_moves_a_loose_artifact_to_its_owners_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0634",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Destroy-artifact Magic offers no target when no Artifact occupies the caster region, including when only a minion is in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_0634_destroy_target_artifact_offers_no_target_without_an_artifact"
+      }
     }
   ]
 }
