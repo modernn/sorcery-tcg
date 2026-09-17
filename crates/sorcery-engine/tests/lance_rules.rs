@@ -536,3 +536,63 @@ fn rule_catalog_0742_lance_break_precedes_deathrite_deck_out_and_terminal_replay
     );
     assert_exact_replay(&setup.session);
 }
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+#[test]
+fn rule_catalog_1030_lance_strike_deathrite_draws_for_controller_on_kill() {
+    let lancer = minion(json!({ "attack": 1, "defense": 1, "lanceCount": 1 }));
+    let deathrite = minion(json!({ "deathriteDrawSite": true, "defense": 1 }));
+    let mut setup = prepare_lance(1030, &lancer, &deathrite, true, 6);
+    let target_id = setup.target_id.clone().expect("Deathrite target");
+    let before = state(&setup.session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    declare_attack(&mut setup, "minion");
+    let receipt = close_defend(&mut setup.session, true);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "defend-window-closed",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "lance-broken",
+            "site-drawn",
+            "minion-died",
+        ]
+    );
+    assert_eq!(receipt.events[2].payload["targetInstanceId"], target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    let types = event_types(&receipt);
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    assert!(
+        site_drawn < minion_died,
+        "expected site-drawn before minion-died; got {types:?}"
+    );
+
+    let finished = state(&setup.session);
+    assert!(unit(&finished, &target_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas);
+    assert_exact_replay(&setup.session);
+}
