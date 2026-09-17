@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0914).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -11,6 +11,8 @@
 //! 0893 covers staged mana gates on resolve-chain-magic and extend-chain-magic.
 //! 0904 covers extend withheld for the next hop while resolve stays legal at the
 //! current staged count when mana covers resolve but not extend.
+//! 0913 covers resolve withheld after a legal extend when staged target count
+//! raises total mana cost above the pool while resolve was legal at one target.
 //! 0896 covers pay-life resolve gating when life drops after begin.
 //! 0903 covers checkpoint resume preserving staged targets, discard choice,
 //! and legal resolve/extend actions mid-staged Chain Magic.
@@ -1549,6 +1551,103 @@ fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_p
         !legal
             .iter()
             .any(|action| action.descriptor["kind"] == "extend-chain-magic")
+    );
+    assert_exact_replay(&hops.session);
+}
+
+#[test]
+fn rule_catalog_0913_resolve_chain_magic_is_withheld_after_extend_when_staged_target_mana_exceeds_pool_while_resolve_was_legal_at_one_target()
+ {
+    const EXTRA_TARGET_MANA: u64 = 2;
+    let encoded = (913..913 + 256)
+        .map(hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+        })
+        .expect("bounded seed with Chain Magic and both nearby allies in the opening hand");
+    let mut hops = setup_hops(&encoded);
+    assert_eq!(hops.mana, EXTRA_TARGET_MANA);
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(staged["players"]["north"]["mana"], EXTRA_TARGET_MANA);
+    let chosen_count = staged["pendingChainMagic"]["targets"]
+        .as_array()
+        .expect("staged targets")
+        .len() as u64;
+    assert_eq!(chosen_count, 1);
+    let resolve_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
+    let extend_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count);
+    assert_eq!(
+        resolve_mana, 0,
+        "resolve uses mana_paid for the current count"
+    );
+    assert_eq!(
+        extend_mana, EXTRA_TARGET_MANA,
+        "extend uses next_mana for one more hop"
+    );
+    assert!(
+        offers_resolve_chain_magic(&hops.session),
+        "resolve-chain-magic stays legal at {resolve_mana} mana with {EXTRA_TARGET_MANA} mana in pool"
+    );
+    assert_eq!(
+        sorted(extend_ids(&hops.session)),
+        sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()]),
+        "extend-chain-magic needs exactly {extend_mana} mana for the next hop"
+    );
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["instanceId"] == hops.second_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["players"]["north"]["mana"], EXTRA_TARGET_MANA);
+    let chosen_count = staged["pendingChainMagic"]["targets"]
+        .as_array()
+        .expect("staged targets")
+        .len() as u64;
+    assert_eq!(chosen_count, 2);
+    let resolve_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
+    let extend_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count);
+    assert_eq!(
+        resolve_mana, EXTRA_TARGET_MANA,
+        "resolve uses mana_paid for the current count"
+    );
+    assert_eq!(
+        extend_mana,
+        EXTRA_TARGET_MANA * 2,
+        "extend uses next_mana for one more hop"
+    );
+    assert!(
+        extend_ids(&hops.session).is_empty(),
+        "a third hop would cost {extend_mana} mana while the caster has {EXTRA_TARGET_MANA}"
+    );
+
+    let mut depleted = replay_game(&hops.session);
+    depleted.test_set_north_mana(1);
+    assert_eq!(depleted.authoritative_state()["players"]["north"]["mana"], 1);
+    assert!(
+        !depleted
+            .legal_actions()
+            .expect("depleted staged chain actions")
+            .iter()
+            .any(|action| matches!(action.descriptor(), ActionDescriptor::ResolveChainMagic)),
+        "two staged hops need {resolve_mana} mana to resolve while the caster has one"
+    );
+    assert!(
+        !depleted
+            .legal_actions()
+            .expect("depleted staged chain actions")
+            .iter()
+            .any(|action| matches!(
+                action.descriptor(),
+                ActionDescriptor::ExtendChainMagic { .. }
+            )),
+        "a third hop would exceed the one-mana pool"
     );
     assert_exact_replay(&hops.session);
 }
