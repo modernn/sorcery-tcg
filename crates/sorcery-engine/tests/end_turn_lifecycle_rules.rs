@@ -231,7 +231,7 @@ fn advance_to_tapped_malakhim(session: &mut Session, instance_id: &str) {
 }
 
 #[test]
-fn malakhim_should_untap_only_when_tapped_and_enabled() {
+fn rule_catalog_0780_malakhim_untap_only_when_tapped_and_enabled() {
     let malakhim = minion(json!({
         "airborne": true,
         "attack": 4,
