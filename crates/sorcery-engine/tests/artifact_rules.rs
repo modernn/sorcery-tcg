@@ -939,7 +939,7 @@ fn rule_catalog_0143_siege_ballista_should_tap_bearer_and_ally_for_measured_arti
 }
 
 #[test]
-fn a_siege_ballista_should_shoot_the_ally_that_paid_its_second_tap() {
+fn rule_catalog_0759_siege_ballista_may_shoot_the_ally_that_paid_its_second_tap() {
     let mut session = Session::new(&ballista_scenario()).expect("valid Siege Ballista scenario");
     let ballista = ballista_position(&mut session);
 

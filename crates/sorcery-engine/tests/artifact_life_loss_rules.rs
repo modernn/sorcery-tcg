@@ -490,12 +490,11 @@ fn end_turn_artifact_life_loss_should_use_its_carried_cell_and_survive_bearer_di
     let walked = state(&session);
     assert_eq!(life(&walked, "north"), json!(17));
     assert_exact_replay(&session);
-
-    carried_egg_should_outlast_a_disabled_bearer();
 }
 
 /// A Disabled bearer stops dying and acting, but the Artifact it holds keeps charging its site.
-fn carried_egg_should_outlast_a_disabled_bearer() {
+#[test]
+fn rule_catalog_0757_carried_artifact_life_loss_outlasts_disabled_bearer() {
     let bearer = minion(json!({ "diesAtEndOfControllerTurn": true }));
     let mut session = Session::new(&manifest(
         5,
@@ -697,8 +696,6 @@ fn end_turn_artifact_life_loss_should_respect_regions_rubble_stacking_and_deaths
     assert_eq!(life(&survived, "north"), json!(0));
     assert_eq!(survived["terminal"]["status"], "active");
     assert_exact_replay(&session);
-
-    end_turn_artifact_life_loss_should_charge_a_submerged_bearers_site();
 }
 
 /// Rubble has no controller, so an Artifact resting on it charges nobody.
@@ -762,7 +759,8 @@ fn rule_catalog_0753_end_turn_artifact_life_loss_skips_rubble() {
 }
 
 /// Only the Void escapes the charge: a subsurface Artifact still charges the site above it.
-fn end_turn_artifact_life_loss_should_charge_a_submerged_bearers_site() {
+#[test]
+fn rule_catalog_0758_carried_artifact_life_loss_charges_submerged_bearers_site() {
     let cards = json!({
         "north-avatar": avatar(20, json!({})),
         "north-bearer": minion(json!({ "submerge": true })),

@@ -630,7 +630,7 @@ fn rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order() {
 }
 
 #[test]
-fn terminal_end_turn_deathrite_should_not_start_another_turn() {
+fn rule_catalog_0760_terminal_end_turn_deathrite_suppresses_turn_transition() {
     let manifest = manifest(
         112,
         &end_turn_deathrite_cards(true),
