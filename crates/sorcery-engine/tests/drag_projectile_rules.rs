@@ -1,4 +1,4 @@
-//! Direct proofs for Pudge drag projectile (RULE-CATALOG-0092 / 0093).
+//! Direct proofs for Pudge drag projectile (RULE-CATALOG-0092 / 0093 / 1136).
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -99,6 +99,29 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -735,4 +758,215 @@ fn rule_catalog_0837_drag_projectile_descriptors_match_typescript_contract() {
     ] {
         assert!(serde_json::from_value::<ActionDescriptor>(invalid).is_err());
     }
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_drag_manifest(seed: u32) -> String {
+    let fixture = "drag-shoot-deathrite-withheld";
+    let cards = json!({
+        "north-avatar": avatar(),
+        "north-pudge": pudge(),
+        "north-rain": rain(),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "south-site": site(),
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pudge",
+                    "north-rain",
+                    "north-rain",
+                    "north-pudge",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+struct PendingDeathriteDragSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    shooter_id: String,
+}
+
+fn try_pending_deathrite_with_ready_pudge(encoded: &str) -> Option<PendingDeathriteDragSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let shooter = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pudge"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let shooter_id = shooter.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if drag_actions(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDragSetup {
+        deathrite_ids,
+        session,
+        shooter_id,
+    })
+}
+
+fn deathrite_drag_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_drag_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_pudge(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a ready Pudge shooter on the board",
+        )
+}
+
+#[test]
+fn rule_catalog_1136_shoot_drag_projectile_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_drag_seed_with(1136);
+    let mut setup = try_pending_deathrite_with_ready_pudge(&encoded)
+        .expect("complete shoot-drag-projectile Deathrite withheld setup");
+    let shooter_id = setup.shooter_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        unit_by_card(&paused, "north-pudge")["instanceId"],
+        shooter_id
+    );
+    assert!(drag_actions(session).is_empty());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "shoot-drag-projectile")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+    assert_checkpoint_round_trip(session);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(
+        unit_by_card(&resumed, "north-pudge")["instanceId"],
+        shooter_id
+    );
+    assert!(!drag_actions(session).is_empty());
+
+    let (_, shot) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "shoot-drag-projectile"
+            && descriptor["shooterInstanceId"] == shooter_id
+    });
+    assert_eq!(event_types(&shot)[0], "projectile-shot");
+    assert_exact_replay(session);
 }
