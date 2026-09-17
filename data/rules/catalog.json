@@ -13435,6 +13435,54 @@
       }
     },
     {
+      "ruleId": "RULE-CATALOG-0583",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-random-minion-from-any-cemetery Magic selects one random minion from either cemetery, then offers free placement onto a legal site. After a minion dies to the cemetery, casting Raise Dead returns that minion to C4 at zero mana.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "dead-minion-selected",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_0583_raise_dead_summons_a_random_cemetery_minion_to_a_legal_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0584",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Summon-random-minion-from-any-cemetery Magic still resolves when both cemeteries hold no minions. Casting with empty cemeteries is a paid no-op: magic-cast and magic-resolved only.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_0584_raise_dead_with_empty_cemetery_is_a_paid_noop"
+      }
+    },
+    {
       "ruleId": "RULE-CATALOG-0585",
       "requirementIds": [
         "RULE-02",
