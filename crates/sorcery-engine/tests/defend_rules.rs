@@ -1074,3 +1074,60 @@ fn rule_catalog_1135_defend_withheld_during_pending_deathrite_order() {
     );
     exact_replay(session);
 }
+
+#[test]
+fn rule_catalog_1158_close_defend_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_defend_seed_with(1158);
+    let mut setup = try_pending_deathrite_during_defend(&encoded)
+        .expect("complete close-defend Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "north");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "defend");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == aura_id)
+            .expect("joined aura")["location"],
+        "C2"
+    );
+    assert!(no_kind(session, "close-defend"));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "defend");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(offers_kind(session, "close-defend"));
+    exact_replay(session);
+}
