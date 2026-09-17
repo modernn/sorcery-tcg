@@ -537,10 +537,7 @@ fn rule_catalog_1049_ally_takes_two_steps_withheld_during_pending_deathrite_orde
     assert_eq!(resumed["phase"], "main");
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
-    assert_eq!(
-        tactical_destinations(session, &ally_id),
-        ["C2", "C3", "C4"]
-    );
+    assert_eq!(tactical_destinations(session, &ally_id), ["C2", "C3", "C4"]);
 
     let (_, stepped) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"

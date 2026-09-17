@@ -744,10 +744,7 @@ fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_ord
     let (chosen, zone) = if let Some(card) = south_spells.first() {
         (card.clone(), "spellbook")
     } else {
-        (
-            south_sites[0].clone(),
-            "atlas",
-        )
+        (south_sites[0].clone(), "atlas")
     };
 
     let (_, cast) = accept_where(session, |descriptor| {

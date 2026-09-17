@@ -354,8 +354,7 @@ fn try_pending_deathrite_with_mill_ready(encoded: &str) -> Option<PendingDeathri
     }
     let south_atlas = state(&session)["players"]["south"]["atlas"]
         .as_array()
-        .map(|atlas| atlas.len())
-        .unwrap_or(0);
+        .map_or(0, std::vec::Vec::len);
     if south_atlas < 4 {
         return None;
     }

@@ -704,17 +704,12 @@ fn duel_targets(session: &Session) -> Vec<(String, String, String)> {
         .expect("duel actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-duel"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-duel"
         })
         .filter_map(|action| {
             Some((
-                action.descriptor["ally"]["instanceId"]
-                    .as_str()?
-                    .to_owned(),
-                action.descriptor["casterInstanceId"]
-                    .as_str()?
-                    .to_owned(),
+                action.descriptor["ally"]["instanceId"].as_str()?.to_owned(),
+                action.descriptor["casterInstanceId"].as_str()?.to_owned(),
                 action.descriptor["target"]["instanceId"]
                     .as_str()?
                     .to_owned(),

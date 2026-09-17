@@ -333,8 +333,7 @@ fn leap_targets(session: &Session) -> Vec<String> {
         .expect("leap actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-leap"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-leap"
         })
         .filter_map(|action| {
             action.descriptor["ally"]["instanceId"]

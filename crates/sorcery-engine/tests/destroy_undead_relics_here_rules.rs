@@ -511,9 +511,7 @@ fn rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kil
                 && hand.iter().any(|card| card == "north-relic")
                 && hand.iter().any(|card| card == "north-unravel")
         })
-        .unwrap_or_else(|| {
-            seed_with_deathrite(&["north-undead", "north-relic", "north-unravel"])
-        });
+        .unwrap_or_else(|| seed_with_deathrite(&["north-undead", "north-relic", "north-unravel"]));
     let mut session = opening_main(&encoded);
     south_plays_c1_and_ends(&mut session);
     accept_where(&mut session, |descriptor| {

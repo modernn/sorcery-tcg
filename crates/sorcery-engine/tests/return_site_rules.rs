@@ -51,7 +51,6 @@ fn return_spell() -> Value {
     })
 }
 
-
 fn rain_spell() -> Value {
     json!({
         "cardType": "magic",
@@ -134,7 +133,6 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
     };
     (descriptor, receipt)
 }
-
 
 fn try_accept_where(
     session: &mut Session,
@@ -277,7 +275,6 @@ fn stage_south_minion(session: &mut Session) -> String {
     });
     enemy_id
 }
-
 
 fn deathrite_return_manifest(seed: u32) -> String {
     let fixture = "return-site-deathrite-withheld";
