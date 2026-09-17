@@ -1,5 +1,8 @@
 //! Direct proofs for destroy-own-artifact-at-location-for-area-damage Magic
-//! (RULE-CATALOG-0577–0578).
+//! (RULE-CATALOG-0577–0578, 1040).
+//!
+//! 1040 covers detonate killing a Deathrite minion: the controller draws a site
+//! and magic-resolved only appears after deathrite settlement.
 //!
 //! Ordinary Magic offers each Artifact the caster controls, loose or carried,
 //! paired with that Artifact's location. Casting destroys the chosen Artifact
@@ -42,6 +45,18 @@ fn raider() -> Value {
         "attack": 1,
         "cardType": "minion",
         "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
         "manaCost": 0,
         "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -104,6 +119,57 @@ fn detonate_manifest(seed: u32) -> String {
                     "south-raider",
                     "south-raider",
                     "south-raider",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn detonate_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "detonate-own-artifact-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-detonate-own-artifact-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-detonate": detonate(),
+            "north-relic": relic(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_minion(),
+            "south-relic": relic(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-relic",
+                    "north-relic",
+                    "north-relic",
+                    "north-detonate",
+                    "north-detonate",
+                    "north-detonate",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-relic",
+                    "south-relic",
+                    "south-relic",
+                    "south-deathrite",
+                    "south-deathrite",
+                    "south-deathrite",
                 ],
             },
         },
@@ -194,6 +260,24 @@ fn seed_with(required: &[&str]) -> String {
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn seed_with_deathrite(start: u32) -> String {
+    (start..start + 256)
+        .map(detonate_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-detonate")
+                && hand.iter().any(|card| card == "north-relic")
+        })
+        .expect("bounded seed with detonate Deathrite setup")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn end_and_draw(session: &mut Session) {
@@ -395,5 +479,99 @@ fn rule_catalog_0578_detonate_is_unoffered_without_an_own_artifact() {
             .any(|card| card["cardId"] == "north-detonate")
     );
     assert!(detonate_casts(&session).is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1040_detonate_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_deathrite(1040);
+    let mut session = opening_main(&encoded);
+    south_ends_after_c1(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == "C3"
+    });
+    let relic_id = artifact_at(&session, "north-relic", "C3");
+    end_and_draw(&mut session);
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let enemy_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy instance identity")
+        .to_owned();
+    end_and_draw(&mut session);
+
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-detonate"
+            && descriptor["targetArtifactInstanceId"] == relic_id
+            && descriptor["targetLocation"]["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "artifact-destroyed",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(receipt.events[2].payload["targetInstanceId"], enemy_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+    let types = event_types(&receipt);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("south cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
