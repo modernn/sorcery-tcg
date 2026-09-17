@@ -1431,3 +1431,59 @@ fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defe
     );
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_0899_attacking_first_strike_does_not_replace_ranged_post_strike_step() {
+    let setup = prepare_ranged(
+        201,
+        &minion(json!({
+            "attack": 3,
+            "mayStepAfterRangedStrike": true,
+            "ranged": true,
+            "strikesFirstWhileAttacking": true,
+        })),
+        &minion(json!({ "defense": 1, "summonToAnySite": true })),
+        &minion(json!({})),
+        &site(json!({})),
+        Some("C3"),
+        None,
+        6,
+    );
+    let target_id = setup.near_target_id.as_ref().expect("step target");
+    let mut session = setup.session;
+    let receipt = fire_south(&mut session, &setup.shooter_id, target_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "projectile-shot",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+        ]
+    );
+    let position = state(&session);
+    assert_eq!(position["phase"], "ranged-step");
+    assert_eq!(
+        position["pendingRangedStep"]["sourceInstanceId"],
+        setup.shooter_id
+    );
+    assert_eq!(unit(&position, &setup.shooter_id)["damage"], 0);
+    assert!(
+        session
+            .legal_actions()
+            .expect("Ranged step actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "resolve-ranged-step"
+                    && action.descriptor["choice"] == "step"
+            })
+    );
+    let (_, stepped) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-ranged-step" && descriptor["choice"] == "step"
+    });
+    assert_eq!(event_types(&stepped), ["unit-stepped"]);
+    assert_eq!(unit(&state(&session), &setup.shooter_id)["location"], "C3");
+    assert_eq!(state(&session)["phase"], "main");
+    assert!(state(&session)["pendingRangedStep"].is_null());
+    assert_exact_replay(&session);
+}
