@@ -1,11 +1,13 @@
 //! Direct proofs for target-player discard Magic (RULE-CATALOG-0643–0644,
-//! RULE-CATALOG-0919).
+//! RULE-CATALOG-0919, RULE-CATALOG-1050).
 //!
 //! Target-player discard offers only both Avatars. After the cast is
 //! announced, the targeted player chooses one of their own Atlas or
 //! Spellbook hand cards. An empty hand is a paid no-op, never a random
 //! discard and never a deck-out. A count above one keeps the pending
-//! Storyline open until each sequential choice is taken.
+//! Storyline open until each sequential choice is taken. While Deathrites
+//! wait for ordering, target-player discard Magic stays withheld until
+//! the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -49,6 +51,27 @@ fn discard_spell(count: u8) -> Value {
         "manaCost": 0,
         "targetPlayerDiscardsCards": count,
         "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
 
@@ -112,6 +135,29 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -317,6 +363,125 @@ fn assert_stored_checkpoint(session: &Session) {
     );
 }
 
+fn deathrite_discard_manifest(seed: u32) -> String {
+    let fixture = "target-player-discard-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-discard": discard_spell(1),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-discard",
+                    "north-rain",
+                    "north-rain",
+                    "north-discard",
+                    "north-rain",
+                    "north-discard",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_discard_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-discard", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteDiscardSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_discard_magic(encoded: &str) -> Option<PendingDeathriteDiscardSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_discard_and_rain(&state(&session)) {
+        return None;
+    }
+    if !discard_targets(&session).iter().any(|seat| seat == "south") {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDiscardSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_discard_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_discard_manifest)
+        .find(|candidate| try_pending_deathrite_with_discard_magic(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with discard Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0643_target_player_discard_lets_the_targeted_player_choose() {
     let encoded = seed_with(1, 6, 643);
@@ -519,4 +684,89 @@ fn rule_catalog_0919_multi_discard_storyline_defers_magic_resolved_until_each_ch
         1
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_discard_seed_with(1050);
+    let mut setup = try_pending_deathrite_with_discard_magic(&encoded)
+        .expect("complete target-player discard Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(discard_targets(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    let south_avatar = resumed["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    assert!(discard_targets(session).iter().any(|seat| seat == "south"));
+
+    let before = state(session);
+    let south_spells = hand_ids(&before, "south", "spellbook");
+    let south_sites = hand_ids(&before, "south", "atlas");
+    let (chosen, zone) = if let Some(card) = south_spells.first() {
+        (card.clone(), "spellbook")
+    } else {
+        (
+            south_sites[0].clone(),
+            "atlas",
+        )
+    };
+
+    let (_, cast) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(event_types(&cast), ["magic-cast"]);
+    assert_eq!(state(session)["phase"], "discard-card");
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == chosen
+            && descriptor["zone"] == zone
+    });
+    assert_eq!(event_types(&receipt), ["card-discarded", "magic-resolved"]);
+    assert_eq!(state(session)["phase"], "main");
+    assert!(state(session).get("pendingDiscardCards").is_none());
+    assert_exact_replay(session);
 }
