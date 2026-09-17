@@ -94,7 +94,7 @@ Merge onto `cursor/source-bound-control-0005` @ `dcd350b`, resolve catalog-order
 | Branch | Worktree | Commit | Catalog IDs | Proof files |
 |--------|----------|--------|-------------|-------------|
 | `cursor/burrow-magic-0005` | `../sorcery-tcg-burrow-magic` | `b728af7` | 0585–0588 | `bury_rules.rs`, `cave_in_rules.rs` |
-| `cursor/minor-explosion-0005` | `../sorcery-tcg-minor-explosion` | `362423b` | 0589–0590 | `minor_explosion_rules.rs` |
+| `cursor/minor-explosion-0005` | `../sorcery-tcg-minor-explosion` | `4df8cf5` | 0589–0590 | `minor_explosion_rules.rs` |
 
 **Gap:** `0583`–`0584` Raise Dead (`summonRandomMinionFromAnyCemetery` basic cemetery summon + empty-cemetery no-op) is still unassigned. `0329`–`0330` only cover prospective power on free placement.
 
