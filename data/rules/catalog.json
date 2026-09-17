@@ -26260,6 +26260,236 @@
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
         "testName": "rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1133",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, an Avatar's private spell draw is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw-spell",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1134",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, a ready minion's shoot-damage-projectile action is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_1134_shoot_damage_projectile_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1135",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts a Defend window, defend and close-defend are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "defend",
+        "close-defend",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_1135_defend_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1136",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, a ready minion's shoot-drag-projectile action is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "dragProjectile"
+      ],
+      "actionHints": [
+        "shoot-drag-projectile",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "unit-dragged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
+        "testName": "rule_catalog_1136_shoot_drag_projectile_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1137",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-sparkmage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_1137_activate_sparkmage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1138",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An Airborne minion may Defend along a diagonal path to join a site strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [
+        "defender-joined"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/airborne_rules.rs",
+        "testName": "rule_catalog_1138_airborne_defends_along_a_diagonal_defend_path"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1139",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Freeze Magic leaves a surface Burrowing minion in play rather than killing it underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetMinionWithinTwoStepsUntilDamaged",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_subsurface_rules.rs",
+        "testName": "rule_catalog_1139_freeze_leaves_surface_burrowing_minion_in_play"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1140",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Overpower +2 power expires after End Phase damage cleanup and before turn-started, clearing temporary power and End Phase damage together.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn"
+      ],
+      "eventHints": [
+        "power-granted",
+        "power-expired",
+        "turn-ended",
+        "turn-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1141",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts an Intercept window, Intercept and close-intercept are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "intercept",
+        "close-intercept",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_1141_intercept_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1142",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A carried Rolling Boulder relocates loose to its roll endpoint when pushed, detaching from the pusher.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "pick-up-artifacts",
+        "activate-artifact-roll-damage"
+      ],
+      "eventHints": [
+        "artifacts-picked-up",
+        "artifact-rolled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rolling_boulder_rules.rs",
+        "testName": "rule_catalog_1142_rolling_boulder_carried_artifact_relocates_with_pusher"
+      }
     }
   ]
 }
