@@ -830,7 +830,10 @@ fn rule_catalog_1007_duel_kill_triggers_deathrite_draw_before_magic_resolved() {
     let before = state(&session);
     let north_atlas = atlas_len(&before, "north");
     let south_atlas = atlas_len(&before, "south");
-    assert_eq!(south_atlas, 1, "thin South atlas leaves one site before the Duel kill");
+    assert_eq!(
+        south_atlas, 1,
+        "thin South atlas leaves one site before the Duel kill"
+    );
 
     let (_, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -863,9 +866,7 @@ fn rule_catalog_1007_duel_kill_triggers_deathrite_draw_before_magic_resolved() {
         .position(|event_type| *event_type == "magic-resolved")
         .expect("magic-resolved index");
     assert!(
-        fight_damage < site_drawn
-            && site_drawn < minion_died
-            && minion_died < magic_resolved,
+        fight_damage < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
         "expected fight damage, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
     );
 
@@ -884,4 +885,3 @@ fn rule_catalog_1007_duel_kill_triggers_deathrite_draw_before_magic_resolved() {
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
-

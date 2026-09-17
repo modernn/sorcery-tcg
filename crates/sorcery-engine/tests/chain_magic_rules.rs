@@ -3512,6 +3512,7 @@ fn rule_catalog_0986_begin_chain_magic_avatar_first_hop_then_extend_minion_secon
 }
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "one direct scenario proves minion-only two-hop Chain Magic")]
 fn rule_catalog_1010_begin_chain_magic_minion_first_hop_then_extend_second_minion() {
     let encoded = (1010..1010 + 512)
         .map(spellcaster_avatar_manifest)

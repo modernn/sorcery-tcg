@@ -23297,6 +23297,237 @@
         "file": "crates/sorcery-engine/tests/drag_projectile_rules.rs",
         "testName": "rule_catalog_1002_drag_projectile_deathrite_draws_for_minion_controller_on_kill"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1003",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, untap-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_1003_untap_target_minion_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1004",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase from an external source, Blink Magic in hand is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "blinkTeleportThenDraw"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_rules.rs",
+        "testName": "rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1005",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic decks out when the Spellbook is empty even if a cemetery return succeeds.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-returned",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1005_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1006",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order is pending during incremental basic movement, continue-basic-movement is not offered until the Deathrite chain completes, then movement resumes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "mayRangedStrikeOnceDuringBasicMovement"
+      ],
+      "actionHints": [
+        "continue-basic-movement",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "basic-movement-continued",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1007",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Duel Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "duelMagic"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "fight-started",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_1007_duel_kill_triggers_deathrite_draw_before_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1008",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Area damage that kills a Deathrite minion draws a site for that minion's controller before the minion leaves play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1008_area_damage_deathrite_draws_for_minion_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1009",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap Attack that kills Deathrite minions pauses in deathrite-order, draws sites for each controller, then resumes the pending leap strike before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_1009_leap_attack_kill_triggers_deathrite_draw_before_strike_resumes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1010",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic may begin on an adjacent enemy minion as the first hop and extend to a second adjacent enemy minion as the second hop, resolving both before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "chainMagic"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_1010_begin_chain_magic_minion_first_hop_then_extend_second_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1011",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1011_ally_strike_here_deathrite_draws_for_minion_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1012",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A batch mixing allowlisted private-local, non-allowlisted private-local, and synthetic manifests keeps every finished game unranked with unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1012_three_way_verified_private_synthetic_batch_downgrades_all_games"
+      }
     }
   ]
 }

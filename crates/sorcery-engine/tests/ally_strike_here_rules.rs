@@ -79,14 +79,14 @@ fn finish_manifest(mut value: Value) -> String {
 }
 
 fn spin_manifest(seed: u32) -> String {
-    spin_manifest_with_raider(seed, raider())
+    spin_manifest_with_raider(seed, &raider())
 }
 
 fn spin_deathrite_manifest(seed: u32) -> String {
-    spin_manifest_with_raider(seed, deathrite_raider())
+    spin_manifest_with_raider(seed, &deathrite_raider())
 }
 
-fn spin_manifest_with_raider(seed: u32, south_raider: Value) -> String {
+fn spin_manifest_with_raider(seed: u32, south_raider: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "ally-strike-here" }))

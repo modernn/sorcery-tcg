@@ -62,14 +62,14 @@ fn rain_manifest(seed: u32, ward: bool) -> String {
         minion(json!({ "summonToAnySite": true }))
     };
     let fixture = if ward { "rain-ward" } else { "rain-lethal" };
-    rain_manifest_with_target(seed, fixture, south_target)
+    rain_manifest_with_target(seed, fixture, &south_target)
 }
 
 fn rain_deathrite_manifest(seed: u32) -> String {
     rain_manifest_with_target(
         seed,
         "rain-deathrite",
-        minion(json!({
+        &minion(json!({
             "deathriteDrawSite": true,
             "defense": 1,
             "summonToAnySite": true,
@@ -77,7 +77,7 @@ fn rain_deathrite_manifest(seed: u32) -> String {
     )
 }
 
-fn rain_manifest_with_target(seed: u32, fixture: &str, south_target: Value) -> String {
+fn rain_manifest_with_target(seed: u32, fixture: &str, south_target: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": fixture }))
