@@ -1,5 +1,6 @@
 //! Control Magic admission matrix (RULE-CATALOG-0735) and runtime proofs beyond
-//! admission for distant enemy-minion control (RULE-CATALOG-0513–0514).
+//! admission for distant enemy-minion control (RULE-CATALOG-0513–0514 and
+//! RULE-CATALOG-0515–0516).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -34,6 +35,15 @@ fn betrayal() -> Value {
     })
 }
 
+fn infiltrate() -> Value {
+    json!({
+        "cardType": "magic",
+        "gainControlOfTargetEnemyMinionUntilStealthLost": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn lash() -> Value {
     json!({
         "cardType": "magic",
@@ -59,6 +69,49 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn stealth_bound_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "stealth-bound-control-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-stealth-bound-control-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-infiltrate": infiltrate(),
+            "north-lash": lash(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_far(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-infiltrate",
+                    "north-lash",
+                    "north-infiltrate",
+                    "north-lash",
+                    "north-infiltrate",
+                    "north-lash",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn this_turn_deathrite_manifest(seed: u32) -> String {
@@ -161,6 +214,15 @@ fn north_has_both_spells(snapshot: &Value) -> bool {
         .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
 }
 
+fn north_has_infiltrate_and_lash(snapshot: &Value) -> bool {
+    let hand = snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook");
+    ["north-infiltrate", "north-lash"]
+        .into_iter()
+        .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+}
+
 fn seed_with(start: u32) -> String {
     (start..start + 256)
         .map(this_turn_deathrite_manifest)
@@ -170,6 +232,17 @@ fn seed_with(start: u32) -> String {
                 .is_some_and(|preview| north_has_both_spells(&state(&preview)))
         })
         .expect("bounded seed with Betrayal and Lash in the opening hand")
+}
+
+fn stealth_bound_seed_with(start: u32) -> String {
+    (start..start + 256)
+        .map(stealth_bound_deathrite_manifest)
+        .find(|candidate| {
+            Session::new(candidate)
+                .ok()
+                .is_some_and(|preview| north_has_infiltrate_and_lash(&state(&preview)))
+        })
+        .expect("bounded seed with Infiltrate and Lash in the opening hand")
 }
 
 fn stage_far_deathrite(session: &mut Session) -> String {
@@ -204,6 +277,26 @@ fn betrayal_targets(session: &Session) -> Vec<String> {
         .filter(|action| {
             action.descriptor["kind"] == "cast-magic"
                 && action.descriptor["cardId"] == "north-betrayal"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn infiltrate_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("Infiltrate actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-infiltrate"
         })
         .filter_map(|action| {
             action.descriptor["target"]["instanceId"]
@@ -271,6 +364,82 @@ fn rule_catalog_0930_this_turn_control_transfers_distant_deathrite_to_thief_befo
     let transferred = realm_unit(&stolen_state, &far_id).expect("stolen minion");
     assert_eq!(transferred["controller"], "north");
     assert_eq!(transferred["owner"], "south");
+
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == far_id
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], far_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &far_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas);
+    assert!(cemetery_has(&finished, "south", &far_id));
+    assert!(!cemetery_has(&finished, "north", &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0939_stealth_bound_control_transfers_distant_deathrite_to_thief_before_stealth_lost() {
+    let encoded = stealth_bound_seed_with(939);
+    let mut session =
+        Session::new(&encoded).expect("valid stealth-bound Deathrite control session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let far_id = stage_far_deathrite(&mut session);
+    assert_eq!(infiltrate_targets(&session), [far_id.as_str()]);
+
+    let (_, stolen) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-infiltrate"
+            && descriptor["target"]["instanceId"] == far_id
+    });
+    assert_eq!(
+        event_types(&stolen),
+        [
+            "magic-cast",
+            "minion-control-changed",
+            "minion-stealthed",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    let stolen_state = state(&session);
+    let transferred = realm_unit(&stolen_state, &far_id).expect("stolen minion");
+    assert_eq!(transferred["controller"], "north");
+    assert_eq!(transferred["owner"], "south");
+    assert_eq!(transferred["tapped"], true);
+    assert_eq!(transferred["stealthed"], true);
 
     let before = state(&session);
     let north_atlas = atlas_len(&before, "north");
