@@ -1,9 +1,12 @@
 //! Direct proofs for Genesis strike-each-enemy-here (RULE-CATALOG-0057,
-//! RULE-CATALOG-0675–0676).
+//! RULE-CATALOG-0675–0676, 1016).
 //!
 //! On entry, a minion strikes every enemy sharing its location, including the
 //! Avatar standing on that site. Allies and the striker are skipped. Ward
 //! absorbs a strike. Enemies on a different cell are not reached.
+//!
+//! 1016 covers genesis strike here killing a Deathrite minion: the controller
+//! draws a site and the summon receipt finishes only after deathrite settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -71,6 +74,18 @@ fn warded() -> Value {
     })
 }
 
+fn deathrite_plain() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -119,6 +134,41 @@ fn strike_manifest(seed: u32) -> String {
                     "south-plain",
                     "south-warded",
                 ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn strike_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "genesis-strike-here-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-genesis-strike-here-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-titan": titan(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_plain(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-titan"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -227,6 +277,44 @@ fn seed_with(required_north: &[&str], required_south: &[&str]) -> String {
             has("north", required_north) && has("south", required_south)
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn seed_with_deathrite() -> String {
+    (1016..1016 + 256)
+        .map(strike_deathrite_manifest)
+        .next()
+        .expect("bounded deathrite genesis strike seed")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+fn south_deathrite_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("deathrite enemy identity")
+        .to_owned()
 }
 
 fn enemies_at_c1(session: &mut Session) -> Vec<String> {
@@ -357,5 +445,62 @@ fn rule_catalog_0676_genesis_strike_skips_allies_and_far_enemies() {
     assert_eq!(unit(&resolved, &titan_id)["damage"], 0);
     assert_eq!(resolved["players"]["south"]["avatar"]["life"], 20);
     assert_eq!(resolved["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1016_genesis_strike_here_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_deathrite();
+    let mut session = opening_main(&encoded);
+    let enemy_id = south_deathrite_at_c1(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (titan_id, receipt) = summon_at(&mut session, "north-titan", "C1");
+    let types = event_types(&receipt);
+    assert_eq!(types.first(), Some(&"minion-summoned"));
+    assert_eq!(types.last(), Some(&"minion-died"));
+    let deathrite_strike = receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "strike-damage-allocated"
+                && event.payload["targetInstanceId"] == enemy_id
+        })
+        .expect("Deathrite minion struck");
+    assert_eq!(deathrite_strike.payload["amount"], 3);
+    assert_eq!(deathrite_strike.payload["strikerInstanceId"], titan_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    assert!(
+        site_drawn < minion_died,
+        "summon receipt must finish only after deathrite site-drawn"
+    );
+
+    let finished = state(&session);
+    assert_eq!(unit(&finished, &titan_id)["damage"], 0);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
