@@ -13818,6 +13818,56 @@
         "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
         "testName": "rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_in_play"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0599",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic optionally steps a controlled ally before striking every enemy at the destination cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "strike"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-stepped",
+        "strike-damage-allocated",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_0599_leap_attack_steps_an_ally_and_strikes_enemies_at_the_destination"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0600",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic lets an immobile ally only stay and strike at its current location without stepping.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "immobile"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_0600_leap_attack_lets_an_immobile_ally_only_stay_and_strike"
+      }
     }
   ]
 }
