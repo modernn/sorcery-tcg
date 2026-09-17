@@ -368,7 +368,11 @@ fn north_has_return_and_rain(snapshot: &Value) -> bool {
 fn cemetery_has_card(snapshot: &Value, owner: &str, instance_id: &str) -> bool {
     snapshot["players"][owner]["cemetery"]
         .as_array()
-        .is_some_and(|cemetery| cemetery.iter().any(|card| card["instanceId"] == instance_id))
+        .is_some_and(|cemetery| {
+            cemetery
+                .iter()
+                .any(|card| card["instanceId"] == instance_id)
+        })
 }
 
 struct PendingDeathriteCemeteryArtifactSetup {

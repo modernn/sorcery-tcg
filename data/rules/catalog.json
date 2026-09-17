@@ -24440,6 +24440,230 @@
         "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
         "testName": "rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kill"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1053",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-power-to-ally-this-turn Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "power-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_1053_overpower_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1054",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, summon-random-minion-from-any-cemetery Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1054_raise_dead_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1055",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, burrow-target-adjacent-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1055_burrow_adjacent_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1056",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, ally-submerges-target-nearby-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1056_ally_submerge_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1057",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, target-player-life-loss Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_1057_target_player_life_loss_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1058",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, target-player-life-gain Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_1058_target_player_life_gain_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1059",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-magic-from-own-cemetery Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_1059_cemetery_magic_return_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1060",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-artifact-from-own-cemetery Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_artifact_return_rules.rs",
+        "testName": "rule_catalog_1060_cemetery_artifact_return_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1061",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-+2-this-turn-then-draw-spell Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerTwoToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "power-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_power_then_draw_rules.rs",
+        "testName": "rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1062",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, damage-target-unit-then-untap Lash Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_1062_lash_magic_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

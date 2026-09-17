@@ -593,9 +593,11 @@ fn rule_catalog_1056_ally_submerge_magic_withheld_during_pending_deathrite_order
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert_eq!(unit(&resumed, &nearby_id)["region"], "surface");
-    assert!(trial_pairs(session)
-        .iter()
-        .any(|(ally, target)| ally == &ally_id && target == &nearby_id));
+    assert!(
+        trial_pairs(session)
+            .iter()
+            .any(|(ally, target)| ally == &ally_id && target == &nearby_id)
+    );
 
     let (_, submerged) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"

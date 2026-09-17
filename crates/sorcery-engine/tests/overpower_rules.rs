@@ -480,7 +480,9 @@ struct PendingDeathriteOverpowerSetup {
     visitor_id: String,
 }
 
-fn try_pending_deathrite_with_ready_visitor(encoded: &str) -> Option<PendingDeathriteOverpowerSetup> {
+fn try_pending_deathrite_with_ready_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteOverpowerSetup> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
     keep(&mut session);

@@ -584,9 +584,6 @@ fn rule_catalog_1055_burrow_adjacent_magic_withheld_during_pending_deathrite_ord
         burrowed.events[1].payload["sourceInstanceId"],
         cast["cardInstanceId"]
     );
-    assert_eq!(
-        unit(&state(session), &adjacent_id)["region"],
-        "underground"
-    );
+    assert_eq!(unit(&state(session), &adjacent_id)["region"], "underground");
     assert_exact_replay(session);
 }
