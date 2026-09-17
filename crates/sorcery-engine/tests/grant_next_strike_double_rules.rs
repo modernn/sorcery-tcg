@@ -1,4 +1,5 @@
-//! Direct proofs for grant-double-damage-next-strike Magic (RULE-CATALOG-0565–0566).
+//! Direct proofs for grant-double-damage-next-strike Magic (RULE-CATALOG-0565–0566,
+//! RULE-CATALOG-0979).
 //!
 //! Official Magic can mark an ally so its next unit strike this turn deals
 //! double damage. The grant uses the shared ally choice, doubles only unit
@@ -50,6 +51,18 @@ fn tough_any_site() -> Value {
     })
 }
 
+fn deathrite_any_site() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn grant() -> Value {
     json!({
         "cardType": "magic",
@@ -65,6 +78,19 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+fn manifest_cards(enemy_card: &str, enemy: Value) -> Value {
+    let mut cards = json!({
+        "north-ally": striker(),
+        "north-avatar": avatar(),
+        "north-grant": grant(),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-site": site(),
+    });
+    cards[enemy_card] = enemy;
+    cards
+}
+
 fn manifest() -> String {
     finish_manifest(json!({
         "authority": {
@@ -73,15 +99,7 @@ fn manifest() -> String {
             "mode": "synthetic",
             "revisionId": "synthetic-grant-next-strike-double-v1",
         },
-        "cards": {
-            "north-ally": striker(),
-            "north-avatar": avatar(),
-            "north-grant": grant(),
-            "north-site": site(),
-            "south-avatar": avatar(),
-            "south-tough": tough_any_site(),
-            "south-site": site(),
-        },
+        "cards": manifest_cards("south-tough", tough_any_site()),
         "decks": {
             "north": {
                 "atlas": vec!["north-site"; 6],
@@ -92,6 +110,36 @@ fn manifest() -> String {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-tough"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 1,
+    }))
+}
+
+fn deathrite_manifest() -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({
+                "fixture": "grant-next-strike-double-deathrite"
+            }))
+            .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-next-strike-double-deathrite-v1",
+        },
+        "cards": manifest_cards("south-deathrite", deathrite_any_site()),
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-ally", "north-grant", "north-grant"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -159,14 +207,18 @@ fn cemetery_has(session: &Session, seat: &str, instance_id: &str) -> bool {
         .any(|card| card["instanceId"] == instance_id)
 }
 
-fn opening_main() -> Session {
-    let mut session = Session::new(&manifest()).expect("grant next-strike double");
+fn opening_main_with(manifest: &str) -> Session {
+    let mut session = Session::new(manifest).expect("grant next-strike double");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
     session
+}
+
+fn opening_main() -> Session {
+    opening_main_with(&manifest())
 }
 
 fn summon_north_ally(session: &mut Session) -> String {
@@ -189,7 +241,7 @@ fn grant_double(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
     })
 }
 
-fn south_summons_tough_at_c4(session: &mut Session) -> String {
+fn south_summons_enemy_at_c4(session: &mut Session, card_id: &str) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -201,7 +253,7 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
     });
     let (summoned, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "south-tough"
+            && descriptor["cardId"] == card_id
             && descriptor["cell"] == "C4"
     });
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -210,6 +262,17 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
         .as_str()
         .expect("enemy identity")
         .to_owned()
+}
+
+fn south_summons_tough_at_c4(session: &mut Session) -> String {
+    south_summons_enemy_at_c4(session, "south-tough")
+}
+
+fn atlas_len(session: &Session, seat: &str) -> usize {
+    state(session)["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn strike_minion(session: &mut Session, attacker_id: &str, enemy_id: &str) -> Receipt {
@@ -330,6 +393,42 @@ fn rule_catalog_0565_granted_next_strike_double_kills_a_tougher_minion() {
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0979_granted_next_strike_double_triggers_deathrite_draw_on_kill() {
+    let mut session = opening_main_with(&deathrite_manifest());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_enemy_at_c4(&mut session, "south-deathrite");
+    let (_, receipt) = grant_double(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+
+    let north_atlas = atlas_len(&session, "north");
+    let south_atlas = atlas_len(&session, "south");
+    let doubled = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(doubled.events.iter().any(|event| {
+        event.event_type == "strike-damage-allocated"
+            && event.payload["amount"] == 4
+            && event.payload["targetInstanceId"] == enemy_id
+    }));
+    assert!(doubled.events.iter().any(|event| {
+        event.event_type == "next-strike-double-consumed"
+            && event.payload["instanceId"] == ally_id
+    }));
+    let drawn = doubled
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(atlas_len(&session, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&session, "south"), south_atlas);
     assert_exact_replay(&session);
 }
 
