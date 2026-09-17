@@ -401,7 +401,7 @@ fn moves_bound(bound_id: &str) -> impl Fn(&Value) -> bool + '_ {
     }
 }
 
-fn moves_bound_to(bound_id: &str, cell: &str) -> impl Fn(&Value) -> bool + '_ {
+fn moves_bound_to<'a>(bound_id: &'a str, cell: &'a str) -> impl Fn(&Value) -> bool + 'a {
     move |descriptor: &Value| {
         descriptor["kind"] == "move-and-attack"
             && descriptor["unitInstanceId"] == bound_id
