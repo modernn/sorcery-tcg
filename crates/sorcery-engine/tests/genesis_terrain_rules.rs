@@ -640,3 +640,215 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
     }));
     assert_exact_replay(&session);
 }
+
+fn penultimate_manifest_with_seed(seed: u32) -> String {
+    let mut value: Value = serde_json::from_str(&manifest_with_seed(seed)).expect("manifest JSON");
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    value["decks"]["north"]["atlas"] = json!([
+        "north-site",
+        "north-site",
+        "north-site",
+        "water-site",
+        "north-site",
+    ]);
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical penultimate terrain manifest identity"));
+    canonical_json(&value).expect("canonical penultimate terrain manifest")
+}
+
+fn setup_if_water_is_penultimate(
+    session: &mut Session,
+    deathrite_count: usize,
+) -> Option<(Value, Vec<Value>, u64)> {
+    keep(session);
+    keep(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    for ordinal in 0..deathrite_count {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cell"] == "C3"
+                && descriptor["region"] == "underground"
+                && descriptor["cardId"] == format!("deathrite-{}", ordinal + 1)
+        });
+    }
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    end_turn_and_draw_spellbook(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-site-destruction" && descriptor["targetCell"] == "C3"
+    });
+    let before = state(session);
+    let atlas = before["players"]["north"]["atlas"].as_array()?;
+    if atlas.len() != 2 || atlas[0]["cardId"] != "water-site" {
+        return None;
+    }
+    let deathrites = before["realm"]["units"]
+        .as_array()?
+        .iter()
+        .filter(|unit| unit["cardId"] == "deathrite-1" || unit["cardId"] == "deathrite-2")
+        .cloned()
+        .collect::<Vec<_>>();
+    if deathrites.len() != deathrite_count {
+        return None;
+    }
+    Some((
+        atlas[0].clone(),
+        deathrites,
+        before["players"]["north"]["mana"]
+            .as_u64()
+            .expect("north mana"),
+    ))
+}
+
+#[test]
+fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_before_deferred_genesis_when_atlas_has_one_card()
+ {
+    let (mut session, top, deathrites, mana_before) = (244..1024)
+        .map(penultimate_manifest_with_seed)
+        .find_map(|manifest| {
+            let mut session = Session::new(&manifest).ok()?;
+            let (top, deathrites, mana_before) = setup_if_water_is_penultimate(&mut session, 2)?;
+            Some((session, top, deathrites, mana_before))
+        })
+        .expect("bounded seed with water-site atop a two-card Atlas pile and two Deathrites");
+    let atlas_hand_before = state(&session)["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north hand atlas")
+        .len();
+    let (_, interrupted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "replace-rubble-with-top-atlas-site"
+            && descriptor["targetCell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&interrupted),
+        ["rubble-replaced", "site-played"]
+    );
+    assert!(!event_types(&interrupted).contains(&"mana-gained"));
+    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["decisionSeat"], "north");
+    assert_eq!(
+        state(&session)["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north atlas")
+            .len(),
+        1
+    );
+    assert_eq!(
+        state(&session)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after replacement"),
+        mana_before + 1
+    );
+    assert_eq!(
+        state(&session)["pendingDeathrites"]["continuation"]["kind"],
+        "site-genesis"
+    );
+    assert_eq!(
+        state(&session)["pendingDeathrites"]["continuation"]["genesisGainMana"],
+        1
+    );
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C3"]["instanceId"],
+        top["instanceId"]
+    );
+    assert!(deathrites.iter().all(|unit| {
+        !state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .any(|candidate| candidate["instanceId"] == unit["instanceId"])
+    }));
+
+    let checkpoint = create_game_checkpoint(&session).expect("captured checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let mut restored =
+        resume_game_checkpoint(&parse_game_checkpoint(&serialized).expect("parsed checkpoint"))
+            .expect("restored checkpoint");
+    assert_eq!(state(&restored), state(&session));
+    let orders = restored
+        .legal_actions()
+        .expect("restored Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .collect::<Vec<_>>();
+    assert_eq!(orders.len(), 2);
+
+    let chosen = orders[0].descriptor["sourceInstanceId"]
+        .as_str()
+        .expect("chosen source");
+    let (_, terminal) = accept_where(&mut restored, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == chosen
+    });
+    assert_eq!(
+        event_types(&terminal),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "game-ended",
+        ]
+    );
+    assert_eq!(
+        terminal
+            .events
+            .iter()
+            .filter(|event| event.event_type == "site-drawn")
+            .count(),
+        1
+    );
+    assert!(!event_types(&terminal).contains(&"mana-gained"));
+    assert_eq!(state(&restored)["phase"], "terminal");
+    assert_eq!(state(&restored)["pendingDeathrites"], Value::Null);
+    assert_eq!(
+        state(&restored)["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        state(&restored)["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north hand atlas")
+            .len(),
+        atlas_hand_before + 1
+    );
+    assert_eq!(
+        state(&restored)["players"]["north"]["mana"]
+            .as_u64()
+            .expect("mana after deck-out"),
+        mana_before + 1
+    );
+    assert_eq!(
+        terminal.events.last().expect("game ended").payload["reason"],
+        "deck_empty"
+    );
+    assert_eq!(
+        terminal.events.last().expect("game ended").payload["loser"],
+        "north"
+    );
+    assert!(deathrites.iter().all(|unit| {
+        state(&restored)["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == unit["instanceId"])
+    }));
+    assert_exact_replay(&restored);
+}
