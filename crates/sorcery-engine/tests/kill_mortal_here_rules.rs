@@ -1,5 +1,8 @@
 //! Direct proofs for kill-mortal-minions-at-location-within-two-steps Magic
-//! (RULE-CATALOG-0567–0568).
+//! (RULE-CATALOG-0567–0568, 1017).
+//!
+//! 1017 covers kill mortal here killing a Deathrite minion: the controller
+//! draws a site and magic-resolved only appears after deathrite settlement.
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal
 //! steps of the caster footprint and kills every Mortal minion there.
@@ -39,6 +42,18 @@ fn mortal() -> Value {
     })
 }
 
+fn deathrite_mortal() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 3,
+        "manaCost": 0,
+        "mortal": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn beast() -> Value {
     json!({
         "attack": 2,
@@ -64,7 +79,15 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
+fn mortality_deathrite_manifest(seed: u32) -> String {
+    mortality_manifest_with_mortal(seed, &deathrite_mortal())
+}
+
 fn mortality_manifest(seed: u32) -> String {
+    mortality_manifest_with_mortal(seed, &mortal())
+}
+
+fn mortality_manifest_with_mortal(seed: u32, north_mortal: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "kill-mortal-here" }))
@@ -75,7 +98,7 @@ fn mortality_manifest(seed: u32) -> String {
         "cards": {
             "north-avatar": avatar(),
             "north-beast": beast(),
-            "north-mortal": mortal(),
+            "north-mortal": north_mortal.clone(),
             "north-mortality": mortality(),
             "north-site": earth_site(),
             "south-avatar": avatar(),
@@ -210,8 +233,16 @@ fn mortality_locations(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
+    seed_with_manifest(required, mortality_manifest)
+}
+
+fn seed_with_deathrite(required: &[&str]) -> String {
+    seed_with_manifest(required, mortality_deathrite_manifest)
+}
+
+fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
     (567..567 + 256)
-        .map(mortality_manifest)
+        .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
@@ -246,6 +277,13 @@ fn south_plays_c1_and_summons(session: &mut Session) -> String {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
     far_id
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
@@ -360,5 +398,70 @@ fn rule_catalog_0568_location_with_only_a_non_mortal_is_a_paid_noop() {
     assert_eq!(unit(&after, &beast_id)["location"], "C4");
     assert_eq!(unit(&after, &beast_id)["damage"], 0);
     assert!(!cemetery_has(&after, "north", &beast_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1017_kill_mortal_here_deathrite_draws_for_controller_on_kill() {
+    let encoded = (1017..1017 + 256)
+        .map(mortality_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-mortal")
+                && hand.iter().any(|card| card == "north-mortality")
+        })
+        .unwrap_or_else(|| seed_with_deathrite(&["north-mortal", "north-mortality"]));
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mortality"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    let kill = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("minion-killed");
+    assert_eq!(kill.payload["instanceId"], mortal_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], mortal_id);
+    let site_drawn = event_types(&killed)
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = event_types(&killed)
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(event_types(&killed).last(), Some(&"magic-resolved"));
+
+    let after = state(&session);
+    assert!(cemetery_has(&after, "north", &mortal_id));
+    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&after, "south"), south_atlas);
     assert_exact_replay(&session);
 }
