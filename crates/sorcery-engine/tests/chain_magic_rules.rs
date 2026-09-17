@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0934).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -24,6 +24,8 @@
 //! 0923 covers pending.targets dedup: extend-chain-magic never re-lists an
 //! already-staged hop. Distinct from 0696 resolve flow, 0903 checkpoint resume,
 //! 0913 post-extend mana gating, and 0914 phase routing.
+//! 0933 covers extend/resolve withheld when the staged caster is no longer a
+//! legal Spellcaster (checkpoint branch after the printed Spellcaster leaves).
 //! 0934 covers extend-chain-magic preserving the staged discardCardInstanceId
 //! from begin through resolve when a second hop is added. Distinct from 0889
 //! single-hop atlas discard resolve and 0903 checkpoint resume.
@@ -226,6 +228,50 @@ fn discard_hops_manifest(seed: u32) -> String {
                     "north-fodder",
                     "north-chain",
                     "north-fodder",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn spellcaster_hops_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-spellcaster-hops" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-spellcaster-hops-v1",
+        },
+        "cards": {
+            "north-ally-a": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-chain": chain(0),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-caster",
+                    "north-ally-a",
+                    "north-ally-a",
+                    "north-chain",
+                    "north-ally-a",
                 ],
             },
             "south": {
@@ -2063,6 +2109,130 @@ fn rule_catalog_0923_extend_chain_magic_cannot_retarget_already_staged_hop() {
     assert_eq!(
         sorted(extend_ids(&hops.session)),
         sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()])
+    );
+    assert_exact_replay(&hops.session);
+}
+
+struct SpellcasterChainHops {
+    caster_id: String,
+    hops: ChainHops,
+}
+
+fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
+    if !opening_has_all(
+        encoded,
+        &["north-chain", "north-caster", "north-ally-a"],
+    ) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let (caster, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = caster["cardInstanceId"]
+        .as_str()
+        .expect("printed caster identity")
+        .to_owned();
+    let (first, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-a"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    Some(SpellcasterChainHops {
+        caster_id,
+        hops: ChainHops {
+            avatar_id: avatar_id.clone(),
+            chain_id: hand_instance(&before, "north-chain"),
+            first_id: first["cardInstanceId"]
+                .as_str()
+                .expect("first hop identity")
+                .to_owned(),
+            mana: before["players"]["north"]["mana"]
+                .as_u64()
+                .expect("North mana"),
+            second_id: avatar_id,
+            session,
+        },
+    })
+}
+
+#[test]
+fn rule_catalog_0933_chain_magic_withheld_when_staged_caster_is_not_a_legal_spellcaster() {
+    let encoded = (933..933 + 256)
+        .map(spellcaster_hops_manifest)
+        .find(|candidate| try_setup_spellcaster_hops(candidate).is_some())
+        .expect("bounded seed with printed Spellcaster, allies, and Chain Magic draw");
+    let mut setup = try_setup_spellcaster_hops(&encoded).expect("spellcaster hops setup");
+    let hops = &mut setup.hops;
+    assert!(
+        hops
+            .session
+            .legal_actions()
+            .expect("main legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "begin-chain-magic"
+                    && action.descriptor["cardInstanceId"] == hops.chain_id
+                    && action.descriptor["casterInstanceId"] == setup.caster_id
+            }),
+        "append_main must issue begin-chain-magic for the printed Spellcaster caster"
+    );
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["casterInstanceId"] == setup.caster_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["casterInstanceId"],
+        setup.caster_id
+    );
+    assert!(offers_resolve_chain_magic(&hops.session));
+    assert!(!extend_ids(&hops.session).is_empty());
+
+    let checkpoint = create_game_checkpoint(&hops.session).expect("staged caster checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized caster checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed caster checkpoint");
+    let resumed = resume_game_checkpoint(&parsed).expect("resumed staged caster session");
+    assert_eq!(state(&resumed), staged);
+    assert!(offers_resolve_chain_magic(&resumed));
+
+    let mut branched = replay_game(&resumed);
+    assert!(
+        branched.test_remove_realm_unit(&setup.caster_id),
+        "checkpoint branch must remove the staged Spellcaster from the Realm"
+    );
+    assert!(
+        realm_unit(&branched.authoritative_state(), &setup.caster_id).is_none(),
+        "staged caster must leave the Realm before legal_actions is reissued"
+    );
+    assert!(
+        branched.legal_actions().is_err(),
+        "append_chain_magic_actions must fail when pending.caster_instance_id is not a legal Spellcaster"
     );
     assert_exact_replay(&hops.session);
 }

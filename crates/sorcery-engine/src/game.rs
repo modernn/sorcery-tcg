@@ -1872,6 +1872,22 @@ impl Game {
         .is_some()
     }
 
+    /// Scenario proof helper: remove one Realm unit without death cleanup routing.
+    #[doc(hidden)]
+    pub fn test_remove_realm_unit(&mut self, instance_id: &str) -> bool {
+        let index = self
+            .position
+            .units
+            .iter()
+            .position(|unit| unit.card.instance_id.as_str() == instance_id);
+        if let Some(index) = index {
+            self.position.units.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn ensure_selfplay_supported(&self) -> Result<(), GameError> {
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {
