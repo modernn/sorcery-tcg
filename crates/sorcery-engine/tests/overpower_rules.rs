@@ -781,6 +781,84 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
 }
 
 #[test]
+fn rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup() {
+    let encoded = seed_with(1140);
+    let mut session = opening_main(&encoded);
+    let (fighter_id, enemy_id, _) = play_to_powered_board(&mut session);
+
+    let (cast, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-overpower"
+            && descriptor["ally"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    let source_id = cast["cardInstanceId"]
+        .as_str()
+        .expect("Overpower identity")
+        .to_owned();
+    assert_eq!(observed_unit(&observed(&session), &fighter_id)["attack"], 4);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == fighter_id
+            && descriptor["path"]
+                .as_array()
+                .is_some_and(|path| path.len() == 1)
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    let wounded_state = state(&session);
+    let wounded = realm_unit(&wounded_state, &fighter_id);
+    assert_eq!(wounded["damage"], 2);
+    assert_eq!(wounded["temporaryPowerSources"], json!([source_id]));
+    assert_eq!(observed_unit(&observed(&session), &fighter_id)["attack"], 4);
+
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let expiry = ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "power-expired")
+        .expect("power expiry");
+    let turn_ended = ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "turn-ended")
+        .expect("turn ended");
+    let turn_started = ended
+        .events
+        .iter()
+        .position(|event| event.event_type == "turn-started")
+        .expect("next turn started");
+    assert!(expiry < turn_ended);
+    assert!(turn_ended < turn_started);
+    assert_eq!(
+        ended.events[expiry].payload,
+        json!({
+            "amount": 2,
+            "instanceId": fighter_id,
+            "seat": "north",
+            "sourceInstanceId": source_id,
+        })
+    );
+    let cleaned_state = state(&session);
+    let cleaned = realm_unit(&cleaned_state, &fighter_id);
+    assert_eq!(cleaned["damage"], 0);
+    assert!(cleaned["temporaryPowerSources"].is_null());
+    assert_eq!(observed_unit(&observed(&session), &fighter_id)["attack"], 2);
+    assert_eq!(cleaned_state["activeSeat"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_stats() {
     let encoded = seed_for_power_observed(722);
     let mut session = opening_main(&encoded);
