@@ -1,6 +1,6 @@
 //! Direct proofs that nearby doubled unit strikes apply to Ranged projectiles,
-//! Genesis strikes (RULE-CATALOG-0252–0255), Leap Attack strikes
-//! (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947).
+//! Genesis strikes (RULE-CATALOG-0252–0255, RULE-CATALOG-0953), Leap Attack
+//! strikes (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947).
 //!
 //! Official Mask of Mayhem FAQ doubles a strike when the struck unit is nearby
 //! the source, including distant Ranged strikers. Ordinary combat already uses
@@ -566,6 +566,48 @@ fn after_south_holds_c4(carry_mask: bool) -> Session {
     session
 }
 
+fn after_south_pair_shares_c4_with_mask(carry_mask: bool) -> Session {
+    let mut session = Session::new(genesis_opening_manifest()).expect("valid genesis session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    cast_south_mask(&mut session, carry_mask);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    session
+}
+
 #[test]
 fn rule_catalog_0252_ranged_strike_deals_double_damage_when_the_struck_unit_is_nearby() {
     let mut session = after_ranged_ready(true);
@@ -666,6 +708,46 @@ fn rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_n
         .find(|unit| unit["instanceId"] == target_id)
         .expect("south minion survives an undoubled 1-power Genesis strike");
     assert_eq!(target["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0953_genesis_strike_deals_double_damage_when_enemies_share_the_newcomers_cell_with_nearby_mask(
+) {
+    let mut session = after_south_pair_shares_c4_with_mask(true);
+    let first_target = unit_id(&session, "south-minion");
+    let second_target = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "south-minion" && unit["instanceId"] != first_target)
+        .expect("second south minion at C4")["instanceId"]
+        .clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-titan"
+            && descriptor["cell"] == "C4"
+    });
+    let doubled: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 2);
+            event.payload["targetInstanceId"].clone()
+        })
+        .collect();
+    assert_eq!(doubled.len(), 2);
+    assert!(doubled.contains(&first_target));
+    assert!(doubled.contains(&second_target));
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .all(|unit| unit["instanceId"] != first_target && unit["instanceId"] != second_target),
+        "each nearby-doubled Genesis strike must deal 2 and kill a 2-defense minion"
+    );
     assert_exact_replay(&session);
 }
 
