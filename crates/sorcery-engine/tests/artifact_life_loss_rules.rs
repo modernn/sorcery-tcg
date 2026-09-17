@@ -1,6 +1,6 @@
 //! Direct proofs for the life an Artifact costs its current site controller as each turn ends
-//! (RULE-CATALOG-0155), the carried cell that loss follows and the bearer Disable it survives
-//! (RULE-CATALOG-0156), and the regions, Rubble, stacking, and Death's Door it respects
+//! (RULE-CATALOG-0155), the carried cell that end-turn loss follows when the bearer moves
+//! (RULE-CATALOG-0782), and the regions, Rubble, stacking, and Death's Door it respects
 //! (RULE-CATALOG-0157), and the oversized bearer cell that attribution follows (0726).
 
 use serde_json::{Value, json};
@@ -430,8 +430,10 @@ fn carried_egg_cards(bearer: &Value) -> Value {
     })
 }
 
+/// End-turn life loss on a carried Artifact charges the site its bearer currently occupies,
+/// following the bearer when it walks to a new cell.
 #[test]
-fn end_turn_artifact_life_loss_should_use_its_carried_cell_and_survive_bearer_disable() {
+fn rule_catalog_0782_carried_artifact_life_loss_uses_cell_survives_bearer_disable() {
     let mut session = Session::new(&manifest(
         4,
         &carried_egg_cards(&minion(json!({}))),
