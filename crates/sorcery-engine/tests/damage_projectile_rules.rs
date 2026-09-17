@@ -28,6 +28,15 @@ fn site() -> Value {
     json!({ "cardType": "site", "elements": ["earth"] })
 }
 
+fn double_mask() -> Value {
+    json!({
+        "cardType": "artifact",
+        "manaCost": 0,
+        "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn minion(extra: Value) -> Value {
     let mut value = json!({
         "attack": 1,
@@ -131,6 +140,32 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .iter()
         .map(|event| event.event_type.as_str())
         .collect()
+}
+
+fn strike_amount(receipt: &Receipt, target_id: &str) -> i64 {
+    receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "strike-damage-allocated"
+                && event.payload["targetInstanceId"] == target_id
+        })
+        .expect("strike allocation")
+        .payload["amount"]
+        .as_i64()
+        .expect("strike amount")
+}
+
+fn unit_id(session: &Session, card_id: &str) -> String {
+    state(session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == card_id)
+        .expect("expected unit")["instanceId"]
+        .as_str()
+        .expect("unit identity")
+        .to_owned()
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -604,5 +639,141 @@ fn rule_catalog_0911_fixed_projectile_ray_extends_past_ranged_two_step_cap() {
     );
     assert_eq!(receipt.events[1].payload["amount"], 3);
     assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 17);
+    assert_exact_replay(&session);
+}
+
+fn mask_fixed_projectile_manifest() -> String {
+    (1..=4096)
+        .map(|seed| {
+            let cards = json!({
+                "north-avatar": avatar(),
+                "north-shooter": minion(json!({ "tapToShootProjectileDamage": 1 })),
+                "north-site": site(),
+                "south-avatar": avatar(),
+                "south-mask": double_mask(),
+                "south-minion": minion(json!({ "defense": 2, "summonToAnySite": true })),
+                "south-site": site(),
+            });
+            let mut value = json!({
+                "authority": {
+                    "contentHash": identity_hash(&json!({
+                        "fixture": "synthetic-nearby-fixed-projectile-double-strike-v1"
+                    }))
+                    .expect("synthetic authority identity"),
+                    "mode": "synthetic",
+                    "revisionId": "synthetic-nearby-fixed-projectile-double-strike-v1",
+                },
+                "cards": cards,
+                "decks": {
+                    "north": {
+                        "atlas": vec!["north-site"; 6],
+                        "avatar": "north-avatar",
+                        "spellbook": vec!["north-shooter"; 6],
+                    },
+                    "south": {
+                        "atlas": vec!["south-site"; 6],
+                        "avatar": "south-avatar",
+                        "spellbook": [
+                            "south-mask",
+                            "south-minion",
+                            "south-minion",
+                            "south-mask",
+                            "south-minion",
+                            "south-minion",
+                        ],
+                    },
+                },
+                "engineVersion": "sorcery-core-v1",
+                "firstSeat": "north",
+                "schemaVersion": 1,
+                "seed": seed,
+            });
+            value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+            canonical_json(&value).expect("canonical synthetic manifest")
+        })
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("opening candidate"));
+            let hand = opening["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .expect("south opening spellbook");
+            hand.iter().any(|card| card["cardId"] == "south-mask")
+                && hand.iter().any(|card| card["cardId"] == "south-minion")
+        })
+        .expect("bounded seed opening with a Mask and a south minion")
+}
+
+fn cast_south_mask(session: &mut Session, bearer_id: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-mask"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    });
+}
+
+fn after_fixed_projectile_mask_ready() -> Session {
+    let mut session =
+        Session::new(&mask_fixed_projectile_manifest()).expect("valid fixed-projectile mask session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-shooter"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    });
+    let bearer_id = unit_id(&session, "south-minion");
+    cast_south_mask(&mut session, &bearer_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    session
+}
+
+#[test]
+fn rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask(
+) {
+    let mut session = after_fixed_projectile_mask_ready();
+    let shooter_id = unit_id(&session, "north-shooter");
+    let target_id = unit_id(&session, "south-minion");
+    let receipt = fire_south(&mut session, &shooter_id, &target_id);
+    assert_eq!(strike_amount(&receipt, &target_id), 2);
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .all(|unit| unit["instanceId"] != target_id),
+        "a 1-damage nearby fixed projectile strike must deal 2 and kill a 2-defense minion"
+    );
     assert_exact_replay(&session);
 }
