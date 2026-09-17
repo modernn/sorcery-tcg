@@ -6,7 +6,7 @@
 //! site for their controller before magic-resolved. While Deathrites wait for
 //! ordering, kill-target Magic stays withheld until the chain drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -488,11 +488,13 @@ fn rule_catalog_0619_kill_target_minion_destroys_a_healthy_minion_and_excludes_a
 
     let finished = state(&session);
     assert!(realm_unit(&finished, &enemy_id).is_none());
-    assert!(finished["players"]["south"]["cemetery"]
-        .as_array()
-        .expect("South cemetery")
-        .iter()
-        .any(|card| card["instanceId"] == enemy_id));
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == enemy_id)
+    );
     assert_exact_replay(&session);
 }
 
@@ -522,10 +524,12 @@ fn rule_catalog_0620_kill_target_minion_ward_absorbs_the_kill() {
         .find(|event| event.event_type == "ward-broken")
         .expect("Ward absorption");
     assert_eq!(broken.payload["instanceId"], enemy_id);
-    assert!(!receipt
-        .events
-        .iter()
-        .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died"));
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
 
     let after = state(&session);
     let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
@@ -614,11 +618,13 @@ fn rule_catalog_1085_kill_target_minion_withheld_during_pending_deathrite_order(
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
     assert!(realm_unit(&paused, &visitor_id).is_some());
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(kill_targets(session).is_empty());
 
     let order_sources: Vec<_> = session

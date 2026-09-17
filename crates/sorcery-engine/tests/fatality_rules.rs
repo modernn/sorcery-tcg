@@ -6,7 +6,7 @@
 //! filter wounded copies; Ward absorbs without killing. While Deathrites wait
 //! for ordering, Fatality Magic stays withheld until the chain drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -346,11 +346,13 @@ fn rule_catalog_0609_fatality_kills_a_wounded_minion_in_the_caster_region() {
         realm_unit(&finished, &healthy_id).expect("survivor")["damage"],
         0
     );
-    assert!(finished["players"]["south"]["cemetery"]
-        .as_array()
-        .expect("South cemetery")
-        .iter()
-        .any(|card| card["instanceId"] == wounded_id.as_str()));
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == wounded_id.as_str())
+    );
     assert_exact_replay(&session);
 }
 
@@ -563,9 +565,7 @@ fn try_pending_deathrite_with_wounded_visitor(
     if state(&session)["phase"] != "deathrite-order" {
         return None;
     }
-    if realm_unit(&state(&session), &visitor_id).is_none() {
-        return None;
-    }
+    realm_unit(&state(&session), &visitor_id)?;
     let mut deathrite_ids = [
         first.0["cardInstanceId"].as_str()?.to_owned(),
         second.0["cardInstanceId"].as_str()?.to_owned(),
@@ -607,11 +607,13 @@ fn rule_catalog_1091_fatality_magic_withheld_during_pending_deathrite_order() {
         realm_unit(&paused, &visitor_id).expect("wounded visitor")["damage"],
         1
     );
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(fatality_targets(session).is_empty());
 
     let order_sources: Vec<_> = session

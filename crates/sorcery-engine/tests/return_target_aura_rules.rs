@@ -6,7 +6,7 @@
 //! target, and an empty realm offers no cast. While Deathrites wait for
 //! ordering, return-aura Magic stays withheld until the chain drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
@@ -459,11 +459,13 @@ fn rule_catalog_0669_return_target_aura_returns_flood_to_its_owners_hand() {
         std::slice::from_ref(&aura_id)
     );
     assert_eq!(before["realm"]["auras"][0]["cardId"], "south-flood");
-    assert!(!session
-        .legal_actions()
-        .expect("return-aura actions")
-        .iter()
-        .any(|action| action.descriptor.get("cemeteryMinionInstanceId").is_some()));
+    assert!(
+        !session
+            .legal_actions()
+            .expect("return-aura actions")
+            .iter()
+            .any(|action| action.descriptor.get("cemeteryMinionInstanceId").is_some())
+    );
 
     let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -488,20 +490,24 @@ fn rule_catalog_0669_return_target_aura_returns_flood_to_its_owners_hand() {
         returned.payload["sourceInstanceId"],
         descriptor["cardInstanceId"]
     );
-    assert!(!receipt
-        .events
-        .iter()
-        .any(|event| event.event_type == "aura-destroyed"
-            || event.event_type == "aura-dispelled"
-            || event.event_type == "aura-banished"));
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-destroyed"
+                || event.event_type == "aura-dispelled"
+                || event.event_type == "aura-banished")
+    );
 
     let after = state(&session);
     assert!(after["realm"].get("auras").is_none());
-    assert!(after["players"]["south"]["hand"]["spellbook"]
-        .as_array()
-        .expect("South Spellbook hand")
-        .iter()
-        .any(|card| card["instanceId"] == aura_id));
+    assert!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("South Spellbook hand")
+            .iter()
+            .any(|card| card["instanceId"] == aura_id)
+    );
     assert_eq!(
         after["players"]["south"]["hand"]["spellbook"]
             .as_array()
@@ -509,11 +515,13 @@ fn rule_catalog_0669_return_target_aura_returns_flood_to_its_owners_hand() {
             .len(),
         south_hand_before + 1
     );
-    assert!(!after["players"]["south"]["cemetery"]
-        .as_array()
-        .expect("South cemetery")
-        .iter()
-        .any(|card| card["instanceId"] == aura_id));
+    assert!(
+        !after["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == aura_id)
+    );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(
         north_view["players"]["south"]["hand"]["spellbook"],
@@ -529,29 +537,37 @@ fn rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura() 
     let mut session = opening_main(&return_aura_manifest(670, false));
     let minion_id = stage_south_minion(&mut session);
     let before = state(&session);
-    assert!(before["realm"]
-        .get("auras")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty));
+    assert!(
+        before["realm"]
+            .get("auras")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    );
     assert_eq!(return_aura_targets(&session), Vec::<String>::new());
-    assert!(!session
-        .legal_actions()
-        .expect("post-staging actions")
-        .iter()
-        .any(|action| action.descriptor["kind"] == "cast-magic"
-            && action.descriptor["cardId"] == "north-return"));
+    assert!(
+        !session
+            .legal_actions()
+            .expect("post-staging actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-return")
+    );
 
     let after = state(&session);
-    assert!(after["realm"]["units"]
-        .as_array()
-        .expect("realm units")
-        .iter()
-        .any(|unit| unit["instanceId"] == minion_id));
-    assert!(after["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("North Spellbook hand")
-        .iter()
-        .any(|card| card["cardId"] == "north-return"));
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == minion_id)
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("North Spellbook hand")
+            .iter()
+            .any(|card| card["cardId"] == "north-return")
+    );
     assert_exact_replay(&session);
 }
 
@@ -574,11 +590,13 @@ fn rule_catalog_1084_return_target_aura_withheld_during_pending_deathrite_order(
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
     assert!(realm_has_aura(&paused, &aura_id));
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(return_aura_targets(session).is_empty());
 
     let order_sources: Vec<_> = session
