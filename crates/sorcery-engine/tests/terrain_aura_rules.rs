@@ -1,4 +1,5 @@
-//! Direct proofs for Flood and Drought terrain Auras (RULE-CATALOG-0266–0267).
+//! Direct proofs for Flood and Drought terrain Auras (RULE-CATALOG-0266–0267,
+//! RULE-CATALOG-0775).
 //!
 //! Official Flood is a persistent 2×2 Aura: affected sites are flooded, so they
 //! are Water sites and still provide their other elemental affinities. Official
@@ -265,7 +266,7 @@ fn rule_catalog_0267_later_drought_wins_over_flood() {
 }
 
 #[test]
-fn later_flood_wins_when_it_enters_after_drought() {
+fn rule_catalog_0775_later_flood_wins_when_it_enters_after_drought() {
     let mut session = after_mulligans("north-drought", "south-flood");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
