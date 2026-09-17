@@ -1,15 +1,19 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0888).
+//! 0885–0890).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
 //! every chosen unit in one resolve. 0709 is the edge slice: paid Chain Magic
 //! is suppressed without enough mana, and hops cannot leave the caster region.
 //! 0885–0886 cover pay-life additional costs on Chain Magic resolution.
-//! 0887–0888 cover chosen-discard additional costs on Chain Magic.
+//! 0887–0890 cover chosen-discard additional costs on Chain Magic.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -958,6 +962,205 @@ fn rule_catalog_0888_chain_magic_discard_is_unoffered_without_another_hand_card(
     assert!(
         !offers_discard_chain(&session),
         "an empty other-hand must issue no discard Chain Magic"
+    );
+    assert_exact_replay(&session);
+}
+
+fn try_setup_atlas_discard_chain(
+    encoded: &str,
+) -> Option<(Session, String, String, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let opening = state(&session);
+    let atlas_id = north_hand_ids(&opening, "atlas").into_iter().next()?;
+    let (target, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let before = state(&session);
+    if north_hand_ids(&before, "atlas").is_empty() {
+        return None;
+    }
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let target_id = target["cardInstanceId"].as_str()?.to_owned();
+    Some((
+        session,
+        chain_id,
+        atlas_id,
+        target_id,
+        "north-site".to_owned(),
+    ))
+}
+
+fn chain_discard_begin_ids(session: &Session, chain_id: &str) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardInstanceId"] == chain_id
+        })
+        .filter_map(|action| {
+            action.descriptor["discardCardInstanceId"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn rule_catalog_0889_chain_magic_discard_may_discard_an_atlas_card() {
+    let spellbook = [
+        "north-chain",
+        "north-ally",
+        "north-fodder",
+        "north-chain",
+        "north-ally",
+        "north-fodder",
+    ];
+    let encoded = (889..889 + 512)
+        .map(|seed| {
+            finish_manifest(json!({
+                "authority": {
+                    "contentHash": identity_hash(&json!({ "fixture": "chain-magic-atlas-discard" }))
+                        .expect("synthetic authority identity"),
+                    "mode": "synthetic",
+                    "revisionId": "synthetic-chain-magic-atlas-discard-v1",
+                },
+                "cards": {
+                    "north-avatar": avatar(),
+                    "north-chain": discard_chain(),
+                    "north-fodder": fodder(),
+                    "north-ally": minion(json!({})),
+                    "north-site": site(),
+                    "south-avatar": avatar(),
+                    "south-minion": minion(json!({ "summonToAnySite": true })),
+                    "south-site": site(),
+                },
+                "decks": {
+                    "north": {
+                        "atlas": vec!["north-site"; 6],
+                        "avatar": "north-avatar",
+                        "spellbook": spellbook,
+                    },
+                    "south": {
+                        "atlas": vec!["south-site"; 6],
+                        "avatar": "south-avatar",
+                        "spellbook": vec!["south-minion"; 6],
+                    },
+                },
+                "engineVersion": "sorcery-core-v1",
+                "firstSeat": "north",
+                "schemaVersion": 1,
+                "seed": seed,
+            }))
+        })
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally"])
+                && try_setup_atlas_discard_chain(candidate).is_some()
+        })
+        .expect("bounded seed with Chain Magic, ally, and Atlas discard setup");
+    let (mut session, chain_id, atlas_id, target_id, site_card_id) =
+        try_setup_atlas_discard_chain(&encoded).expect("Atlas discard Chain Magic setup");
+    let atlas_before = state(&session)["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let discard_ids = chain_discard_begin_ids(&session, &chain_id);
+    assert!(discard_ids.iter().any(|id| id == &atlas_id));
+    assert!(discard_ids.iter().all(|id| id != &chain_id));
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["discardCardInstanceId"] == atlas_id
+    });
+    assert_eq!(begin.events.len(), 0);
+    let checkpoint = create_game_checkpoint(&session).expect("staged chain checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized chain checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed chain checkpoint");
+    let mut session = resume_game_checkpoint(&parsed).expect("resumed chain session");
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "card-discarded",
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(resolved.events[0].payload["cardId"], site_card_id);
+    assert_eq!(resolved.events[0].payload["instanceId"], atlas_id);
+    assert_eq!(resolved.events[0].payload["zone"], "atlas");
+    assert_eq!(resolved.events[0].payload["sourceInstanceId"], chain_id);
+    assert_eq!(
+        resolved.events[1].payload["discardCardInstanceId"],
+        atlas_id
+    );
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == atlas_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before - 1
+    );
+    assert!(realm_unit(&after, &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0890_chain_magic_issues_no_begin_without_a_chosen_discard_while_atlas_remains() {
+    let encoded = seed_with_discard_chain(
+        &[
+            "north-chain",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+        ],
+        &["north-chain"],
+        890,
+    );
+    let session = opening_main(&encoded);
+    let chain_id = hand_instance(&state(&session), "north-chain");
+    assert!(!north_hand_ids(&state(&session), "atlas").is_empty());
+    assert!(offers_discard_chain(&session));
+    let discard_ids = chain_discard_begin_ids(&session, &chain_id);
+    assert!(
+        !discard_ids.is_empty(),
+        "Atlas leftovers still pay the discard cost"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("legal actions")
+            .iter()
+            .filter(|action| {
+                action.descriptor["kind"] == "begin-chain-magic"
+                    && action.descriptor["cardInstanceId"] == chain_id
+            })
+            .all(|action| action.descriptor["discardCardInstanceId"].is_string()),
+        "every issued begin must carry the chosen discard identity"
     );
     assert_exact_replay(&session);
 }

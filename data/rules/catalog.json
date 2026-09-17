@@ -20538,6 +20538,51 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0888_chain_magic_discard_is_unoffered_without_another_hand_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0889",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a chosen-discard additional cost may discard an Atlas hand card before magic-cast, including after checkpoint resume of a staged chain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0889_chain_magic_discard_may_discard_an_atlas_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0890",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a chosen-discard additional cost issues no begin-chain-magic without a discardCardInstanceId while Atlas leftovers remain in hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0890_chain_magic_issues_no_begin_without_a_chosen_discard_while_atlas_remains"
+      }
     }
   ]
 }
