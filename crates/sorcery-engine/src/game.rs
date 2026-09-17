@@ -27306,6 +27306,349 @@ pub mod catalog_proofs {
                 .any(|unit| unit.card.instance_id == oversized.south_corpse)
         );
     }
+
+    fn fixture_card_id(rules: &RulesContext, name: &str) -> CardId {
+        CardId(
+            u16::try_from(
+                rules
+                    .cards
+                    .iter()
+                    .position(|card| card.id == name)
+                    .expect("fixture card"),
+            )
+            .expect("fixture card index"),
+        )
+    }
+
+    pub fn rule_catalog_0713_water_replacement_preserves_underwater_deathrite_source_region() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "attack": 1,
+                "burrowing": true,
+                "cardType": "minion",
+                "deathriteDamageEachUnitHere": 1,
+                "defense": 1,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            manifest["cards"]["north-spell-2"] = json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 10,
+                "manaCost": 0,
+                "submerge": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("north-site-{ordinal}")]["elements"] = json!(["water"]);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid region fixture");
+        let cell = Cell::parse("C4").expect("C4");
+        let site = game.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: site,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        let spell_one = fixture_card_id(&game.rules, "north-spell-1");
+        let spell_two = fixture_card_id(&game.rules, "north-spell-2");
+        let source_id = "sha256:8888888888888888888888888888888888888888888888888888888888888888";
+        let target_id = "sha256:9999999999999999999999999999999999999999999999999999999999999999";
+        let mut source = test_minion(spell_one, source_id, Seat::North, cell, None);
+        source.region = Region::Underground;
+        let mut target = test_minion(spell_two, target_id, Seat::North, cell, None);
+        target.region = Region::Underground;
+        game.position.units = vec![source, target];
+
+        let mut replay = game.clone();
+        for settled in [&mut game, &mut replay] {
+            settled.settle_covered_layers(cell, true);
+            let mut events = Vec::new();
+            settled
+                .settle_region_occupancy(&mut OutcomeLog::Record(&mut events))
+                .expect("underwater settlement");
+            assert!(settled.position.units.iter().all(|unit| {
+                unit.card.instance_id.as_str() != source_id
+                    && unit.region == Region::Underwater
+                    && unit.damage == 1
+            }));
+            assert!(events.iter().any(|(event_type, payload)| {
+                event_type == "deathrite-damage-allocated"
+                    && payload["targetInstanceId"] == target_id
+            }));
+        }
+        assert_eq!(replay.position.units, game.position.units);
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct continuation proof keeps Water replacement, ordered Deathrites, and Genesis together"
+    )]
+    pub fn rule_catalog_0714_water_replacement_resumes_site_genesis_after_ordered_deathrites() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("north-site-{ordinal}")] = json!({
+                    "cardType": "site",
+                    "elements": ["water"],
+                    "genesisGainMana": 1,
+                });
+            }
+            for ordinal in 1..=2 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "attack": 1,
+                    "burrowing": true,
+                    "cardType": "minion",
+                    "deathriteDrawSite": true,
+                    "defense": 1,
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid continuation fixture");
+        let cell = Cell::parse("C4").expect("C4");
+        let rubble_id =
+            identity_hash(&json!({ "fixture": "water-genesis-rubble" })).expect("Rubble identity");
+        game.position.rubble[cell.index()] = Some(rubble_id);
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = cell;
+        north.avatar.tapped = false;
+        north.domain_established = false;
+        let spell_ids = [
+            fixture_card_id(&game.rules, "north-spell-1"),
+            fixture_card_id(&game.rules, "north-spell-2"),
+        ];
+        let source_ids = [
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ];
+        game.position.units = source_ids
+            .iter()
+            .enumerate()
+            .map(|(index, instance_id)| {
+                let mut unit = test_minion(spell_ids[index], instance_id, Seat::North, cell, None);
+                unit.region = Region::Underground;
+                unit
+            })
+            .collect();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let play = game
+            .legal_actions()
+            .expect("Water site actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::PlaySite { cell: target, .. } if target == cell
+                )
+            })
+            .expect("replace Rubble with Water site");
+        let (placement, _) = game
+            .apply_action_recorded(&play)
+            .expect("Water replacement");
+        assert_eq!(
+            placement
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["rubble-replaced", "site-played"]
+        );
+        assert_eq!(game.position.phase, Phase::DeathriteOrder);
+        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
+        assert_eq!(
+            game.authoritative_state()["pendingDeathrites"]["continuation"]["kind"],
+            "site-genesis"
+        );
+        assert_eq!(
+            game.authoritative_state()["pendingDeathrites"]["continuation"]["genesisGainMana"],
+            1
+        );
+
+        let order = game
+            .legal_actions()
+            .expect("Deathrite order")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::OrderDeathrites { source_instance_id }
+                        if source_instance_id.as_str() == source_ids[0]
+                )
+            })
+            .expect("canonical first Deathrite source");
+        let (resolved, _) = game
+            .apply_action_recorded(&order)
+            .expect("ordered Deathrites and Genesis");
+        assert_eq!(
+            resolved
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "deathrite-order-committed",
+                "site-drawn",
+                "site-drawn",
+                "minion-died",
+                "minion-died",
+                "mana-gained",
+            ]
+        );
+        assert_eq!(game.position.phase, Phase::Main);
+        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 2);
+
+        let final_state = game.authoritative_state();
+        let mut replay = Game::from_manifest_json(&manifest).expect("replay fixture");
+        replay.position.rubble[cell.index()] = Some(
+            identity_hash(&json!({ "fixture": "water-genesis-rubble" })).expect("Rubble identity"),
+        );
+        let replay_north = &mut replay.position.players[seat_index(Seat::North)];
+        replay_north.avatar.location = cell;
+        replay_north.avatar.tapped = false;
+        replay_north.domain_established = false;
+        replay.position.units = source_ids
+            .iter()
+            .enumerate()
+            .map(|(index, instance_id)| {
+                let mut unit = test_minion(spell_ids[index], instance_id, Seat::North, cell, None);
+                unit.region = Region::Underground;
+                unit
+            })
+            .collect();
+        replay.position.active_seat = Seat::North;
+        replay.position.decision_seat = Seat::North;
+        replay.position.phase = Phase::Main;
+        let replay_play = replay
+            .legal_actions()
+            .expect("replay Water site actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::PlaySite { cell: target, .. } if target == cell
+                )
+            })
+            .expect("replay replace Rubble with Water site");
+        let (replay_placement, _) = replay
+            .apply_action_recorded(&replay_play)
+            .expect("replay Water replacement");
+        assert_eq!(replay_placement, placement);
+        let replay_order = replay
+            .legal_actions()
+            .expect("replay Deathrite order")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::OrderDeathrites { source_instance_id }
+                        if source_instance_id.as_str() == source_ids[0]
+                )
+            })
+            .expect("replay canonical first Deathrite source");
+        let (replay_resolved, _) = replay
+            .apply_action_recorded(&replay_order)
+            .expect("replay ordered Deathrites and Genesis");
+        assert_eq!(replay_resolved, resolved);
+        assert_eq!(replay.authoritative_state(), final_state);
+    }
+
+    pub fn rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            for card_id in ["north-spell-1", "south-spell-1"] {
+                manifest["cards"][card_id] = json!({
+                    "attack": 2,
+                    "cardType": "minion",
+                    "defense": 4,
+                    "manaCost": 0,
+                    "occupiesSquareArea": 2,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized manifest");
+        let card_id = |id: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let attacker_id = IdentityHash::parse(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .expect("attacker identity");
+        let target_id = IdentityHash::parse(
+            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .expect("target identity");
+        game.position.units = vec![
+            test_minion(
+                card_id("north-spell-1"),
+                attacker_id.as_str(),
+                Seat::North,
+                Cell::SQUARE_AREAS[4][0],
+                Some(Cell::SQUARE_AREAS[4]),
+            ),
+            test_minion(
+                card_id("south-spell-1"),
+                target_id.as_str(),
+                Seat::South,
+                Cell::SQUARE_AREAS[5][0],
+                Some(Cell::SQUARE_AREAS[5]),
+            ),
+        ];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Attack;
+        game.position.pending_combat = Some(PendingCombat {
+            allocations: Vec::new(),
+            attacker_instance_id: attacker_id,
+            attacker_kind: UnitKind::Minion,
+            attacking_seat: Seat::North,
+            cell: Cell::parse("B2").expect("anchor"),
+            combatants: Vec::new(),
+            defenders: Vec::new(),
+            original_target: None,
+            region: Region::Surface,
+            target_removed: false,
+        });
+        let target = CombatTarget::Minion {
+            instance_id: target_id,
+            seat: Seat::South,
+        };
+        assert_eq!(
+            game.attack_targets().expect("attack targets"),
+            std::slice::from_ref(&target)
+        );
+
+        let mut outcomes = Vec::new();
+        game.apply_declare_attack_action(
+            Seat::North,
+            &target,
+            &mut OutcomeLog::Record(&mut outcomes),
+        )
+        .expect("declare oversized attack");
+        let contested = Cell::parse("B3").expect("lowest shared cell");
+        assert_eq!(
+            game.position
+                .pending_combat
+                .as_ref()
+                .expect("pending combat")
+                .cell,
+            contested
+        );
+        assert_eq!(outcomes[0].1["cell"], json!(contested));
+    }
 }
 
 #[cfg(test)]
@@ -28785,304 +29128,6 @@ mod tests {
             .expect("blocked giant");
         assert_eq!(unit.region, Region::Surface);
         assert_eq!(unit.occupied_cells, before.units[0].occupied_cells);
-    }
-
-    #[test]
-    fn water_replacement_should_preserve_the_underwater_deathrite_source_region() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["north-spell-1"] = json!({
-                "attack": 1,
-                "burrowing": true,
-                "cardType": "minion",
-                "deathriteDamageEachUnitHere": 1,
-                "defense": 1,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-            manifest["cards"]["north-spell-2"] = json!({
-                "attack": 1,
-                "cardType": "minion",
-                "defense": 10,
-                "manaCost": 0,
-                "submerge": true,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-            for ordinal in 1..=30 {
-                manifest["cards"][format!("north-site-{ordinal}")]["elements"] = json!(["water"]);
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid region fixture");
-        let cell = Cell::parse("C4").expect("C4");
-        let site = game.position.players[seat_index(Seat::North)]
-            .hand_atlas
-            .remove(0);
-        game.position.sites[cell.index()] = Some(SitePosition {
-            card: site,
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        });
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let source_id = "sha256:8888888888888888888888888888888888888888888888888888888888888888";
-        let target_id = "sha256:9999999999999999999999999999999999999999999999999999999999999999";
-        let mut source = test_minion(card_id("north-spell-1"), source_id, Seat::North, cell, None);
-        source.region = Region::Underground;
-        let mut target = test_minion(card_id("north-spell-2"), target_id, Seat::North, cell, None);
-        target.region = Region::Underground;
-        game.position.units = vec![source, target];
-
-        game.settle_covered_layers(cell, true);
-        let mut events = Vec::new();
-        game.settle_region_occupancy(&mut OutcomeLog::Record(&mut events))
-            .expect("underwater settlement");
-
-        assert!(game.position.units.iter().all(|unit| {
-            unit.card.instance_id.as_str() != source_id
-                && unit.region == Region::Underwater
-                && unit.damage == 1
-        }));
-        assert!(events.iter().any(|(event_type, payload)| {
-            event_type == "deathrite-damage-allocated" && payload["targetInstanceId"] == target_id
-        }));
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one direct continuation proof keeps Water replacement, ordered Deathrites, and Genesis together"
-    )]
-    fn water_replacement_should_resume_site_genesis_after_ordered_deathrites() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for ordinal in 1..=30 {
-                manifest["cards"][format!("north-site-{ordinal}")] = json!({
-                    "cardType": "site",
-                    "elements": ["water"],
-                    "genesisGainMana": 1,
-                });
-            }
-            for ordinal in 1..=2 {
-                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                    "attack": 1,
-                    "burrowing": true,
-                    "cardType": "minion",
-                    "deathriteDrawSite": true,
-                    "defense": 1,
-                    "manaCost": 0,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid continuation fixture");
-        let cell = Cell::parse("C4").expect("C4");
-        let rubble_id =
-            identity_hash(&json!({ "fixture": "water-genesis-rubble" })).expect("Rubble identity");
-        game.position.rubble[cell.index()] = Some(rubble_id);
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.location = cell;
-        north.avatar.tapped = false;
-        north.domain_established = false;
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let source_ids = [
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        ];
-        game.position.units = source_ids
-            .iter()
-            .enumerate()
-            .map(|(index, instance_id)| {
-                let mut unit = test_minion(
-                    card_id(&format!("north-spell-{}", index + 1)),
-                    instance_id,
-                    Seat::North,
-                    cell,
-                    None,
-                );
-                unit.region = Region::Underground;
-                unit
-            })
-            .collect();
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        let play = game
-            .legal_actions()
-            .expect("Water site actions")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::PlaySite { cell: target, .. } if target == cell
-                )
-            })
-            .expect("replace Rubble with Water site");
-        let (placement, _) = game
-            .apply_action_recorded(&play)
-            .expect("Water replacement");
-        assert_eq!(
-            placement
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            ["rubble-replaced", "site-played"]
-        );
-        assert_eq!(game.position.phase, Phase::DeathriteOrder);
-        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
-        assert_eq!(
-            game.authoritative_state()["pendingDeathrites"]["continuation"]["kind"],
-            "site-genesis"
-        );
-        assert_eq!(
-            game.authoritative_state()["pendingDeathrites"]["continuation"]["genesisGainMana"],
-            1
-        );
-
-        let order = game
-            .legal_actions()
-            .expect("Deathrite order")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::OrderDeathrites { source_instance_id }
-                        if source_instance_id.as_str() == source_ids[0]
-                )
-            })
-            .expect("canonical first Deathrite source");
-        let (resolved, _) = game
-            .apply_action_recorded(&order)
-            .expect("ordered Deathrites and Genesis");
-        assert_eq!(
-            resolved
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "deathrite-order-committed",
-                "site-drawn",
-                "site-drawn",
-                "minion-died",
-                "minion-died",
-                "mana-gained",
-            ]
-        );
-        assert_eq!(game.position.phase, Phase::Main);
-        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 2);
-    }
-
-    #[test]
-    fn oversized_attack_should_choose_the_lowest_shared_contested_cell() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for card_id in ["north-spell-1", "south-spell-1"] {
-                manifest["cards"][card_id] = json!({
-                    "attack": 2,
-                    "cardType": "minion",
-                    "defense": 4,
-                    "manaCost": 0,
-                    "occupiesSquareArea": 2,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid oversized manifest");
-        let card_id = |id: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == id)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let attacker_id = IdentityHash::parse(
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        )
-        .expect("attacker identity");
-        let target_id = IdentityHash::parse(
-            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        )
-        .expect("target identity");
-        game.position.units = vec![
-            test_minion(
-                card_id("north-spell-1"),
-                attacker_id.as_str(),
-                Seat::North,
-                Cell::SQUARE_AREAS[4][0],
-                Some(Cell::SQUARE_AREAS[4]),
-            ),
-            test_minion(
-                card_id("south-spell-1"),
-                target_id.as_str(),
-                Seat::South,
-                Cell::SQUARE_AREAS[5][0],
-                Some(Cell::SQUARE_AREAS[5]),
-            ),
-        ];
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Attack;
-        game.position.pending_combat = Some(PendingCombat {
-            allocations: Vec::new(),
-            attacker_instance_id: attacker_id,
-            attacker_kind: UnitKind::Minion,
-            attacking_seat: Seat::North,
-            cell: Cell::parse("B2").expect("anchor"),
-            combatants: Vec::new(),
-            defenders: Vec::new(),
-            original_target: None,
-            region: Region::Surface,
-            target_removed: false,
-        });
-        let target = CombatTarget::Minion {
-            instance_id: target_id,
-            seat: Seat::South,
-        };
-        assert_eq!(
-            game.attack_targets().expect("attack targets"),
-            std::slice::from_ref(&target)
-        );
-
-        let mut outcomes = Vec::new();
-        game.apply_declare_attack_action(
-            Seat::North,
-            &target,
-            &mut OutcomeLog::Record(&mut outcomes),
-        )
-        .expect("declare oversized attack");
-        let contested = Cell::parse("B3").expect("lowest shared cell");
-        assert_eq!(
-            game.position
-                .pending_combat
-                .as_ref()
-                .expect("pending combat")
-                .cell,
-            contested
-        );
-        assert_eq!(outcomes[0].1["cell"], json!(contested));
     }
 
     #[test]
