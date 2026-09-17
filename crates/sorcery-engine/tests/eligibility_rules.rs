@@ -193,3 +193,36 @@ fn rule_catalog_0950_verified_only_batch_keeps_verified_game_ranked() {
     );
     assert!(batch_eligibility.reasons.is_empty());
 }
+
+#[test]
+fn rule_catalog_0961_synthetic_only_batch_keeps_synthetic_game_unranked() {
+    let synthetic_manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
+    let other_synthetic = synthetic_demo_manifest_json(32).expect("other synthetic manifest");
+    let record = record_synthetic_demo(31).expect("seed-31 finished synthetic record");
+
+    assert!(record.replay_verified);
+    assert!(record.eligibility.gates.all_passed());
+    assert!(!record.eligibility.ranked);
+    assert_eq!(
+        record.classification,
+        BatchClassification::UnrankedUnverifiedAuthority
+    );
+
+    let batch_policy = eligibility_policy_for_manifest_jsons([
+        synthetic_manifest.as_str(),
+        other_synthetic.as_str(),
+    ]);
+    assert!(!batch_policy.authority_verified);
+
+    let batch_eligibility =
+        evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+    assert!(!batch_eligibility.ranked);
+    assert_eq!(
+        batch_eligibility.classification,
+        BatchClassification::UnrankedUnverifiedAuthority
+    );
+    assert_eq!(
+        batch_eligibility.reasons,
+        [EligibilityReason::UnverifiedAuthority]
+    );
+}
