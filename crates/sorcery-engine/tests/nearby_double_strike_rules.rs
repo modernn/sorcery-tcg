@@ -1,7 +1,7 @@
 //! Direct proofs that nearby doubled unit strikes apply to Ranged projectiles,
 //! Genesis strikes (RULE-CATALOG-0252–0255, RULE-CATALOG-0953, RULE-CATALOG-0969), Leap Attack
-//! strikes (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947,
-//! RULE-CATALOG-0966).
+//! strikes (RULE-CATALOG-0945, RULE-CATALOG-0964), and ally-strike-here Magic
+//! (RULE-CATALOG-0947, RULE-CATALOG-0966).
 //!
 //! Official Mask of Mayhem FAQ doubles a strike when the struck unit is nearby
 //! the source, including distant Ranged strikers. Ordinary combat already uses
@@ -688,6 +688,29 @@ fn rule_catalog_0945_leap_attack_strike_deals_double_damage_when_the_struck_unit
             .all(|unit| unit["instanceId"] != target_id),
         "a 1-power nearby Leap Attack strike must deal 2 and kill a 2-defense minion"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0964_leap_attack_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask() {
+    let mut session = after_leap_ready(false);
+    let ally_id = unit_id(&session, "north-ally");
+    let target_id = unit_id(&session, "south-minion");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-leap"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == "C4"
+    });
+    assert_eq!(strike_amount(&receipt, &target_id), 1);
+    let after = state(&session);
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("south minion survives an undoubled 1-power Leap Attack strike");
+    assert_eq!(target["damage"], 1);
     assert_exact_replay(&session);
 }
 
