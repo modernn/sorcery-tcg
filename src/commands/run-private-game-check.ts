@@ -6196,6 +6196,8 @@ function buildManifest(
       card.stableId === input.poisonousDagger.stableId,
       card.stableId === input.huntersLodge.stableId,
       card.stableId === input.vikings.stableId,
+      false,
+      false,
       card.stableId === input.mesmerism.stableId,
       card.stableId === input.malakhim.stableId,
       card.stableId === input.fatality.stableId,
