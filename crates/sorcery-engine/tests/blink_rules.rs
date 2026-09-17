@@ -474,7 +474,7 @@ fn rule_catalog_0040_blink_should_resolve_deaths_before_a_private_spellbook_draw
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_draw_a_site_when_the_caster_chooses_its_atlas() {
+fn rule_catalog_1115_blink_draws_site_when_caster_chooses_atlas() {
     let mut checkpoint = blink_checkpoint(false);
     let drawn = state(&checkpoint.session)["players"]["north"]["atlas"][0]["instanceId"]
         .as_str()
