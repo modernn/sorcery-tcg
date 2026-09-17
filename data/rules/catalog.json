@@ -15170,6 +15170,53 @@
         "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
         "testName": "rule_catalog_0654_chosen_discard_cost_is_unoffered_without_another_hand_card"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0655",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic burrows a chosen ordinary minion on an Earth site. The minion has no Burrowing, so region settlement kills it immediately after the burrow and it goes to its owner's cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_magic_rules.rs",
+        "testName": "rule_catalog_0655_bury_burrows_then_kills_an_ordinary_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0656",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic still offers an ordinary minion on a Water site, then resolves as a paid no-op because no Underground layer exists. The minion stays on the surface unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_magic_rules.rs",
+        "testName": "rule_catalog_0656_bury_ordinary_minion_on_water_is_a_paid_noop"
+      }
     }
   ]
 }
