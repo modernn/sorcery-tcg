@@ -28354,7 +28354,7 @@ pub mod catalog_proofs {
 
     #[expect(
         clippy::too_many_lines,
-reason = "one admission matrix keeps every burrow slice and fail-closed case visible"
+        reason = "one admission matrix keeps every burrow slice and fail-closed case visible"
     )]
     pub fn rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards() {
         let bury_manifest = |extra: &[(&str, Value)]| {
