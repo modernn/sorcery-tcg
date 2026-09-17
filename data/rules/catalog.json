@@ -828,8 +828,8 @@
         "resolution"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0042_bury_moves_and_immediately_settles_a_minion"
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_0691_bury_immediately_settles_a_deathrite_minion"
       }
     },
     {
@@ -869,8 +869,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0044_cave_in_minion_slice_should_burrow_in_canonical_order"
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_0692_cave_in_burrows_then_orders_deathrites"
       }
     },
     {
@@ -15986,6 +15986,64 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
         "testName": "rule_catalog_0686_targeted_magic_reaches_deaths_door_then_defeats_the_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0691",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic immediately settles a chosen Deathrite minion on an Earth site. The minion has no Burrowing, so the same receipt burrows it, draws a site for its controller, and kills it. The game stays in main; there is no Deathrite-order prompt. Distinct from ordinary-minion Bury death (0655) and from Cave-In Deathrite ordering (0692).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_0691_bury_immediately_settles_a_deathrite_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0692",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic burrows every Deathrite minion at the chosen land site in canonical instance-id order, then pauses in deathrite-order before both die. Magic-resolved is deferred until the order is chosen. Distinct from Cave-In survivor order (0587) and from single-target Bury Deathrite settlement (0691).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-burrowed",
+        "deathrite-order-committed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_0692_cave_in_burrows_then_orders_deathrites"
       }
     }
   ]
