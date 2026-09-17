@@ -28210,6 +28210,373 @@ pub mod catalog_proofs {
             Some(0)
         );
     }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
+    )]
+    pub fn rule_catalog_0727_pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units()
+    {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+            manifest["cards"]["north-spell-2"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Pick Up fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        for (cell, fixture) in [(c3, "pickup-c3"), (c4, "pickup-c4")] {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: CardInstance {
+                    card_id: card_id("north-site-1"),
+                    instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site"),
+                    owner: Seat::North,
+                    source: CardSource::Atlas,
+                },
+                controller: Seat::North,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        let bearer_id = identity_hash(&json!({ "fixture": "pickup-bearer" })).expect("bearer");
+        let local_south =
+            identity_hash(&json!({ "fixture": "pickup-south" })).expect("south-owned");
+        let local_north =
+            identity_hash(&json!({ "fixture": "pickup-north" })).expect("north-owned");
+        let remote_id = identity_hash(&json!({ "fixture": "pickup-remote" })).expect("remote");
+        let underwater_id =
+            identity_hash(&json!({ "fixture": "pickup-underwater" })).expect("underwater");
+        let carried_id = identity_hash(&json!({ "fixture": "pickup-carried" })).expect("carried");
+        let mut bearer = test_minion(
+            card_id("north-spell-1"),
+            bearer_id.as_str(),
+            Seat::North,
+            c4,
+            None,
+        );
+        bearer.tapped = true;
+        game.position.units = vec![bearer];
+        let artifact = |instance_id: IdentityHash, owner: Seat, placement| ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("north-spell-2"),
+                instance_id,
+                owner,
+                source: CardSource::Spellbook,
+            },
+            placement,
+        };
+        let avatar = UnitTarget::Avatar {
+            instance_id: game.position.players[seat_index(Seat::North)]
+                .avatar
+                .card
+                .instance_id
+                .clone(),
+            seat: Seat::North,
+        };
+        game.position.artifacts = vec![
+            artifact(
+                local_south.clone(),
+                Seat::South,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                local_north.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                remote_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c3,
+                    region: Region::Surface,
+                },
+            ),
+            artifact(
+                underwater_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Loose {
+                    location: c4,
+                    region: Region::Underwater,
+                },
+            ),
+            artifact(
+                carried_id,
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar.clone(),
+                    cell: None,
+                },
+            ),
+        ];
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.turn_number = 1;
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.domain_established = true;
+
+        let local_ids = {
+            let mut ids = [local_south.clone(), local_north.clone()];
+            ids.sort();
+            ids
+        };
+        let expected = {
+            let mut keys = vec![
+                local_ids[0].as_str().to_owned(),
+                local_ids[1].as_str().to_owned(),
+                format!("{},{}", local_ids[0], local_ids[1]),
+            ];
+            keys.sort();
+            keys
+        };
+        let subset_keys = |actions: &[IssuedAction], kind: &str| {
+            let mut keys: Vec<String> = actions
+                .iter()
+                .filter_map(|action| match &action.descriptor {
+                    ActionDescriptor::PickUpArtifacts {
+                        artifact_instance_ids,
+                        unit,
+                        ..
+                    }
+                    | ActionDescriptor::DropArtifacts {
+                        artifact_instance_ids,
+                        unit,
+                    } if unit.kind() == kind => Some(
+                        artifact_instance_ids
+                            .iter()
+                            .map(IdentityHash::as_str)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    ),
+                    _ => None,
+                })
+                .collect();
+            keys.sort();
+            keys
+        };
+        let pickups = game.legal_actions().expect("Pick Up actions");
+        let pickups: Vec<_> = pickups
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
+            .collect();
+        assert_eq!(pickups.len(), 6);
+        assert_eq!(subset_keys(&pickups, "avatar"), expected);
+        assert_eq!(subset_keys(&pickups, "minion"), expected);
+        assert!(pickups.iter().all(|action| {
+            match &action.descriptor {
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids,
+                    ..
+                } => artifact_instance_ids
+                    .iter()
+                    .all(|instance_id| local_ids.contains(instance_id)),
+                _ => false,
+            }
+        }));
+
+        let mut enemy_owned = game.clone();
+        let enemy_pick = only_action(&pickups, |descriptor| {
+            matches!(
+                descriptor,
+                ActionDescriptor::PickUpArtifacts {
+                    artifact_instance_ids,
+                    unit: UnitTarget::Minion { .. },
+                    ..
+                } if artifact_instance_ids.as_slice() == [local_south.clone()]
+            )
+        })
+        .clone();
+        let (events, random_draws) = enemy_owned
+            .apply_action_recorded(&enemy_pick)
+            .expect("enemy-owned Pick Up");
+        assert!(random_draws.is_empty());
+        assert_eq!(event_types(&events), ["artifacts-picked-up"]);
+        assert_eq!(
+            enemy_owned
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == local_south)
+                .expect("south-owned Artifact")
+                .card
+                .owner,
+            Seat::South
+        );
+        assert!(enemy_owned.position.units[0].tapped);
+
+        let minion = UnitTarget::Minion {
+            instance_id: bearer_id.clone(),
+            seat: Seat::North,
+        };
+        let mut drop_ready = game.clone();
+        drop_ready.position.players[seat_index(Seat::North)]
+            .avatar
+            .last_interacted_turn = None;
+        drop_ready.position.artifacts = vec![
+            artifact(
+                local_south.clone(),
+                Seat::South,
+                ArtifactPlacement::Carried {
+                    bearer: minion.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                local_north.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: minion.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                remote_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar.clone(),
+                    cell: None,
+                },
+            ),
+            artifact(
+                underwater_id.clone(),
+                Seat::North,
+                ArtifactPlacement::Carried {
+                    bearer: avatar,
+                    cell: None,
+                },
+            ),
+        ];
+        let drops = drop_ready.legal_actions().expect("Drop actions");
+        let drops: Vec<_> = drops
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::DropArtifacts { .. }))
+            .collect();
+        assert_eq!(drops.len(), 6);
+        assert_eq!(subset_keys(&drops, "minion"), expected);
+        let mut avatar_keys = vec![
+            remote_id.as_str().to_owned(),
+            underwater_id.as_str().to_owned(),
+            {
+                let mut pair = [remote_id.as_str(), underwater_id.as_str()];
+                pair.sort_unstable();
+                format!("{},{}", pair[0], pair[1])
+            },
+        ];
+        avatar_keys.sort();
+        assert_eq!(subset_keys(&drops, "avatar"), avatar_keys);
+
+        let mut dropped_once = drop_ready.clone();
+        let one_drop = only_action(&drops, |descriptor| {
+            matches!(
+                descriptor,
+                ActionDescriptor::DropArtifacts {
+                    artifact_instance_ids,
+                    unit: UnitTarget::Minion { .. },
+                } if artifact_instance_ids.as_slice() == [local_south.clone()]
+            )
+        })
+        .clone();
+        dropped_once
+            .apply_action_recorded(&one_drop)
+            .expect("one Drop");
+        assert!(
+            !dropped_once
+                .legal_actions()
+                .expect("after Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
+
+        let mut disabled = game.clone();
+        disabled.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::South,
+                source_instance_id: bearer_id.clone(),
+            });
+        let disabled_pickups: Vec<_> = disabled
+            .legal_actions()
+            .expect("disabled Pick Up")
+            .into_iter()
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
+            .collect();
+        assert_eq!(
+            disabled_pickups
+                .iter()
+                .map(|action| match &action.descriptor {
+                    ActionDescriptor::PickUpArtifacts { unit, .. } => unit.kind(),
+                    _ => unreachable!("filtered Pick Up"),
+                })
+                .collect::<Vec<_>>(),
+            ["avatar", "avatar", "avatar"]
+        );
+
+        let mut disabled_drop = drop_ready.clone();
+        disabled_drop.position.units[0]
+            .disable_effects
+            .push(DisableEffect {
+                expires_at_seat: Seat::South,
+                source_instance_id: bearer_id.clone(),
+            });
+        assert!(
+            !disabled_drop
+                .legal_actions()
+                .expect("disabled Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
+
+        drop_ready.position.units[0].last_interacted_turn = Some(1);
+        assert!(
+            !drop_ready
+                .legal_actions()
+                .expect("interacted Drop")
+                .iter()
+                .any(|action| matches!(
+                    &action.descriptor,
+                    ActionDescriptor::DropArtifacts {
+                        unit: UnitTarget::Minion { .. },
+                        ..
+                    }
+                ))
+        );
+    }
 }
 
 #[cfg(test)]
@@ -28969,390 +29336,6 @@ mod tests {
             game.observe(Seat::South)
                 .powered_unit_instance_ids()
                 .is_empty()
-        );
-    }
-
-    fn only_action(
-        actions: &[IssuedAction],
-        matches: impl Fn(&ActionDescriptor) -> bool,
-    ) -> &IssuedAction {
-        let mut found = actions.iter().filter(|action| matches(&action.descriptor));
-        let action = found.next().expect("expected one issued action");
-        assert!(found.next().is_none(), "expected exactly one issued action");
-        action
-    }
-
-    fn event_types(events: &[(String, Value)]) -> Vec<&str> {
-        events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect()
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
-    )]
-    fn pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
-            manifest["cards"]["north-spell-2"] = json!({
-                "cardType": "artifact",
-                "grantsBearerPower": 2,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Pick Up fixture");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let c3 = Cell::parse("C3").expect("C3");
-        let c4 = Cell::parse("C4").expect("C4");
-        for (cell, fixture) in [(c3, "pickup-c3"), (c4, "pickup-c4")] {
-            game.position.sites[cell.index()] = Some(SitePosition {
-                card: CardInstance {
-                    card_id: card_id("north-site-1"),
-                    instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site"),
-                    owner: Seat::North,
-                    source: CardSource::Atlas,
-                },
-                controller: Seat::North,
-                last_flight_turn: None,
-                warded: false,
-            });
-        }
-        let bearer_id = identity_hash(&json!({ "fixture": "pickup-bearer" })).expect("bearer");
-        let local_south =
-            identity_hash(&json!({ "fixture": "pickup-south" })).expect("south-owned");
-        let local_north =
-            identity_hash(&json!({ "fixture": "pickup-north" })).expect("north-owned");
-        let remote_id = identity_hash(&json!({ "fixture": "pickup-remote" })).expect("remote");
-        let underwater_id =
-            identity_hash(&json!({ "fixture": "pickup-underwater" })).expect("underwater");
-        let carried_id = identity_hash(&json!({ "fixture": "pickup-carried" })).expect("carried");
-        let mut bearer = test_minion(
-            card_id("north-spell-1"),
-            bearer_id.as_str(),
-            Seat::North,
-            c4,
-            None,
-        );
-        bearer.tapped = true;
-        game.position.units = vec![bearer];
-        let artifact = |instance_id: IdentityHash, owner: Seat, placement| ArtifactPosition {
-            card: CardInstance {
-                card_id: card_id("north-spell-2"),
-                instance_id,
-                owner,
-                source: CardSource::Spellbook,
-            },
-            placement,
-        };
-        let avatar = UnitTarget::Avatar {
-            instance_id: game.position.players[seat_index(Seat::North)]
-                .avatar
-                .card
-                .instance_id
-                .clone(),
-            seat: Seat::North,
-        };
-        game.position.artifacts = vec![
-            artifact(
-                local_south.clone(),
-                Seat::South,
-                ArtifactPlacement::Loose {
-                    location: c4,
-                    region: Region::Surface,
-                },
-            ),
-            artifact(
-                local_north.clone(),
-                Seat::North,
-                ArtifactPlacement::Loose {
-                    location: c4,
-                    region: Region::Surface,
-                },
-            ),
-            artifact(
-                remote_id.clone(),
-                Seat::North,
-                ArtifactPlacement::Loose {
-                    location: c3,
-                    region: Region::Surface,
-                },
-            ),
-            artifact(
-                underwater_id.clone(),
-                Seat::North,
-                ArtifactPlacement::Loose {
-                    location: c4,
-                    region: Region::Underwater,
-                },
-            ),
-            artifact(
-                carried_id,
-                Seat::North,
-                ArtifactPlacement::Carried {
-                    bearer: avatar.clone(),
-                    cell: None,
-                },
-            ),
-        ];
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        game.position.turn_number = 1;
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.location = c4;
-        north.domain_established = true;
-
-        let local_ids = {
-            let mut ids = [local_south.clone(), local_north.clone()];
-            ids.sort();
-            ids
-        };
-        let expected = {
-            let mut keys = vec![
-                local_ids[0].as_str().to_owned(),
-                local_ids[1].as_str().to_owned(),
-                format!("{},{}", local_ids[0], local_ids[1]),
-            ];
-            keys.sort();
-            keys
-        };
-        let subset_keys = |actions: &[IssuedAction], kind: &str| {
-            let mut keys: Vec<String> = actions
-                .iter()
-                .filter_map(|action| match &action.descriptor {
-                    ActionDescriptor::PickUpArtifacts {
-                        artifact_instance_ids,
-                        unit,
-                        ..
-                    }
-                    | ActionDescriptor::DropArtifacts {
-                        artifact_instance_ids,
-                        unit,
-                    } if unit.kind() == kind => Some(
-                        artifact_instance_ids
-                            .iter()
-                            .map(IdentityHash::as_str)
-                            .collect::<Vec<_>>()
-                            .join(","),
-                    ),
-                    _ => None,
-                })
-                .collect();
-            keys.sort();
-            keys
-        };
-        let pickups = game.legal_actions().expect("Pick Up actions");
-        let pickups: Vec<_> = pickups
-            .into_iter()
-            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
-            .collect();
-        assert_eq!(pickups.len(), 6);
-        assert_eq!(subset_keys(&pickups, "avatar"), expected);
-        assert_eq!(subset_keys(&pickups, "minion"), expected);
-        assert!(pickups.iter().all(|action| {
-            match &action.descriptor {
-                ActionDescriptor::PickUpArtifacts {
-                    artifact_instance_ids,
-                    ..
-                } => artifact_instance_ids
-                    .iter()
-                    .all(|instance_id| local_ids.contains(instance_id)),
-                _ => false,
-            }
-        }));
-
-        let mut enemy_owned = game.clone();
-        let enemy_pick = only_action(&pickups, |descriptor| {
-            matches!(
-                descriptor,
-                ActionDescriptor::PickUpArtifacts {
-                    artifact_instance_ids,
-                    unit: UnitTarget::Minion { .. },
-                    ..
-                } if artifact_instance_ids.as_slice() == [local_south.clone()]
-            )
-        })
-        .clone();
-        let (events, random_draws) = enemy_owned
-            .apply_action_recorded(&enemy_pick)
-            .expect("enemy-owned Pick Up");
-        assert!(random_draws.is_empty());
-        assert_eq!(event_types(&events), ["artifacts-picked-up"]);
-        assert_eq!(
-            enemy_owned
-                .position
-                .artifacts
-                .iter()
-                .find(|artifact| artifact.card.instance_id == local_south)
-                .expect("south-owned Artifact")
-                .card
-                .owner,
-            Seat::South
-        );
-        assert!(enemy_owned.position.units[0].tapped);
-
-        let minion = UnitTarget::Minion {
-            instance_id: bearer_id.clone(),
-            seat: Seat::North,
-        };
-        let mut drop_ready = game.clone();
-        drop_ready.position.players[seat_index(Seat::North)]
-            .avatar
-            .last_interacted_turn = None;
-        drop_ready.position.artifacts = vec![
-            artifact(
-                local_south.clone(),
-                Seat::South,
-                ArtifactPlacement::Carried {
-                    bearer: minion.clone(),
-                    cell: None,
-                },
-            ),
-            artifact(
-                local_north.clone(),
-                Seat::North,
-                ArtifactPlacement::Carried {
-                    bearer: minion.clone(),
-                    cell: None,
-                },
-            ),
-            artifact(
-                remote_id.clone(),
-                Seat::North,
-                ArtifactPlacement::Carried {
-                    bearer: avatar.clone(),
-                    cell: None,
-                },
-            ),
-            artifact(
-                underwater_id.clone(),
-                Seat::North,
-                ArtifactPlacement::Carried {
-                    bearer: avatar,
-                    cell: None,
-                },
-            ),
-        ];
-        let drops = drop_ready.legal_actions().expect("Drop actions");
-        let drops: Vec<_> = drops
-            .into_iter()
-            .filter(|action| matches!(action.descriptor, ActionDescriptor::DropArtifacts { .. }))
-            .collect();
-        assert_eq!(drops.len(), 6);
-        assert_eq!(subset_keys(&drops, "minion"), expected);
-        let mut avatar_keys = vec![
-            remote_id.as_str().to_owned(),
-            underwater_id.as_str().to_owned(),
-            {
-                let mut pair = [remote_id.as_str(), underwater_id.as_str()];
-                pair.sort_unstable();
-                format!("{},{}", pair[0], pair[1])
-            },
-        ];
-        avatar_keys.sort();
-        assert_eq!(subset_keys(&drops, "avatar"), avatar_keys);
-
-        let mut dropped_once = drop_ready.clone();
-        let one_drop = only_action(&drops, |descriptor| {
-            matches!(
-                descriptor,
-                ActionDescriptor::DropArtifacts {
-                    artifact_instance_ids,
-                    unit: UnitTarget::Minion { .. },
-                } if artifact_instance_ids.as_slice() == [local_south.clone()]
-            )
-        })
-        .clone();
-        dropped_once
-            .apply_action_recorded(&one_drop)
-            .expect("one Drop");
-        assert!(
-            !dropped_once
-                .legal_actions()
-                .expect("after Drop")
-                .iter()
-                .any(|action| matches!(
-                    &action.descriptor,
-                    ActionDescriptor::DropArtifacts {
-                        unit: UnitTarget::Minion { .. },
-                        ..
-                    }
-                ))
-        );
-
-        let mut disabled = game.clone();
-        disabled.position.units[0]
-            .disable_effects
-            .push(DisableEffect {
-                expires_at_seat: Seat::South,
-                source_instance_id: bearer_id.clone(),
-            });
-        let disabled_pickups: Vec<_> = disabled
-            .legal_actions()
-            .expect("disabled Pick Up")
-            .into_iter()
-            .filter(|action| matches!(action.descriptor, ActionDescriptor::PickUpArtifacts { .. }))
-            .collect();
-        assert_eq!(
-            disabled_pickups
-                .iter()
-                .map(|action| match &action.descriptor {
-                    ActionDescriptor::PickUpArtifacts { unit, .. } => unit.kind(),
-                    _ => unreachable!("filtered Pick Up"),
-                })
-                .collect::<Vec<_>>(),
-            ["avatar", "avatar", "avatar"]
-        );
-
-        let mut disabled_drop = drop_ready.clone();
-        disabled_drop.position.units[0]
-            .disable_effects
-            .push(DisableEffect {
-                expires_at_seat: Seat::South,
-                source_instance_id: bearer_id.clone(),
-            });
-        assert!(
-            !disabled_drop
-                .legal_actions()
-                .expect("disabled Drop")
-                .iter()
-                .any(|action| matches!(
-                    &action.descriptor,
-                    ActionDescriptor::DropArtifacts {
-                        unit: UnitTarget::Minion { .. },
-                        ..
-                    }
-                ))
-        );
-
-        drop_ready.position.units[0].last_interacted_turn = Some(1);
-        assert!(
-            !drop_ready
-                .legal_actions()
-                .expect("interacted Drop")
-                .iter()
-                .any(|action| matches!(
-                    &action.descriptor,
-                    ActionDescriptor::DropArtifacts {
-                        unit: UnitTarget::Minion { .. },
-                        ..
-                    }
-                ))
         );
     }
 }

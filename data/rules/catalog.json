@@ -17031,6 +17031,30 @@
         "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
         "testName": "rule_catalog_0728_end_turn_cleanup_resets_both_players_air_threshold_counts"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0727",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pick Up and Drop ignore non-local Artifacts and disabled units. Extends 0140.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact",
+        "disabled"
+      ],
+      "actionHints": [
+        "pick-up",
+        "drop"
+      ],
+      "eventHints": [
+        "artifacts-picked-up",
+        "artifacts-dropped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_0727_pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units"
+      }
     }
   ]
 }
