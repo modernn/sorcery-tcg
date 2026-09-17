@@ -804,3 +804,59 @@ fn rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_
     assert_eq!(target["damage"], 1);
     assert_exact_replay(&session);
 }
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+#[test]
+fn rule_catalog_0990_fixed_projectile_deathrite_draws_for_minion_controller_on_kill() {
+    let setup = prepare_projectile(
+        90,
+        &minion(json!({ "tapToShootProjectileDamage": 4 })),
+        &minion(json!({})),
+        &minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        false,
+    );
+    let before = state(&setup.session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    let mut session = setup.session;
+    let receipt = fire_south(&mut session, &setup.shooter_id, &setup.far_target_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "projectile-shot",
+            "projectile-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], setup.far_target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], setup.far_target_id);
+    let finished = state(&session);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == setup.far_target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
+}
