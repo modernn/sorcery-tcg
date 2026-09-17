@@ -1,11 +1,12 @@
 //! Direct proofs for nearby-control Magic range (RULE-CATALOG-0146,
-//! RULE-CATALOG-0683–0684).
+//! RULE-CATALOG-0683–0684, RULE-CATALOG-1042).
 //!
 //! After the caster Avatar steps from C4 to C3, `gainControlOfTargetNearbyMinion`
 //! offers the adjacent C2 minion and not the two-step C1 minion. Stealing the
 //! adjacent minion transfers its Deathrite; the two-step minion stays with its
 //! controller. Distinct from 0659–0660, which prove same-cell nearby and a
-//! far-only board three steps from an unmoved caster.
+//! far-only board three steps from an unmoved caster. While Deathrites wait for
+//! ordering, Mesmerism Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -59,6 +60,38 @@ fn lash() -> Value {
         "cardType": "magic",
         "damageTargetUnit": 1,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -442,6 +475,139 @@ fn rule_catalog_0684_mesmerism_does_not_offer_a_two_step_minion_while_an_adjacen
     assert_exact_replay(&session);
 }
 
+fn deathrite_mesmerism_manifest(seed: u32) -> String {
+    let fixture = "mesmerism-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mesmerism": mesmerism(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-mesmerism",
+                    "north-rain",
+                    "north-rain",
+                    "north-mesmerism",
+                    "north-rain",
+                    "north-mesmerism",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_mesmerism_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-mesmerism", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteMesmerismSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    visitor_id: String,
+}
+
+fn try_pending_deathrite_with_nearby_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteMesmerismSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_mesmerism_and_rain(&state(&session)) {
+        return None;
+    }
+    if !mesmerism_targets(&session).contains(&visitor_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteMesmerismSetup {
+        deathrite_ids,
+        session,
+        visitor_id,
+    })
+}
+
+fn deathrite_mesmerism_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_mesmerism_manifest)
+        .find(|candidate| try_pending_deathrite_with_nearby_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Mesmerism Magic in hand")
+}
+
 fn try_accept_where(
     session: &mut Session,
     predicate: impl Fn(&Value) -> bool,
@@ -548,4 +714,74 @@ fn rule_catalog_0910_mesmerism_ward_absorbs_control_without_transferring_control
     assert_eq!(after["owner"], "south");
     assert_eq!(after["warded"], false);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1042_mesmerism_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_mesmerism_seed_with(1042);
+    let mut setup = try_pending_deathrite_with_nearby_visitor(&encoded)
+        .expect("complete Mesmerism Deathrite withheld setup");
+    let visitor_id = setup.visitor_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(realm_unit(&paused, &visitor_id).is_some());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(mesmerism_targets(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(realm_unit(&resumed, &visitor_id).is_some());
+    assert_eq!(mesmerism_targets(session), [visitor_id.as_str()]);
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mesmerism"
+            && descriptor["target"]["instanceId"] == visitor_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-control-changed", "magic-resolved"]
+    );
+    assert_eq!(
+        realm_unit(&state(session), &visitor_id).expect("stolen visitor")["controller"],
+        "north"
+    );
+    assert_exact_replay(session);
 }
