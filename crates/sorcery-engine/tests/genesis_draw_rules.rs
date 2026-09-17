@@ -260,7 +260,7 @@ fn rule_catalog_0792_avatar_draw_spell_pays_tap_keeps_identity_private() {
 }
 
 #[test]
-fn genesis_draw_site_should_keep_identity_private_and_deck_out_after_summon() {
+fn rule_catalog_0796_genesis_draw_site_private_identity_deck_out_after_summon() {
     let mut genesis = minion(0, 0);
     genesis["genesisDrawSite"] = json!(true);
     let manifest = scenario_manifest(40, &avatar(false, 20), &genesis, &minion(1, 1), 4, 4, 4);
