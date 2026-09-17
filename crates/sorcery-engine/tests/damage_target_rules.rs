@@ -1,8 +1,12 @@
-//! Direct proofs for damage-target-unit Magic (RULE-CATALOG-0595–0596).
+//! Direct proofs for damage-target-unit Magic (RULE-CATALOG-0595–0596, 1015).
 //!
 //! Ordinary targeted damage Magic offers same-region minions, deals printed
 //! damage through the shared Ward and death pipeline, and enters its owner's
 //! cemetery after resolution.
+//!
+//! 1015 covers damage-target-unit Magic killing a Deathrite minion: the
+//! controller draws a site and magic-resolved only appears after deathrite
+//! settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -49,6 +53,18 @@ fn warded() -> Value {
     })
 }
 
+fn deathrite_target() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn zap() -> Value {
     json!({
         "cardType": "magic",
@@ -62,6 +78,41 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn zap_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "zap-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-zap-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-zap": zap(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_target(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-zap"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn zap_manifest(seed: u32, ward: bool) -> String {
@@ -165,6 +216,26 @@ fn seed_with(ward: bool, start: u32) -> String {
         .expect("bounded seed with Zap in the opening hand")
 }
 
+fn seed_with_deathrite(start: u32) -> String {
+    (start..start + 256)
+        .map(zap_deathrite_manifest)
+        .find(|candidate| {
+            Session::new(candidate).ok().is_some_and(|preview| {
+                state(&preview)["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-zap"))
+            })
+        })
+        .expect("bounded seed with Zap Deathrite setup")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 fn south_plays_c1_and_summons(session: &mut Session) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -255,5 +326,81 @@ fn rule_catalog_0596_zap_ward_absorbs_the_damage() {
     let after = state(&session);
     assert_eq!(unit(&after, &target_id)["warded"], false);
     assert_eq!(unit(&after, &target_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1015_damage_target_minion_deathrite_draws_for_controller_before_magic_resolved()
+{
+    let encoded = seed_with_deathrite(1015);
+    let (mut session, target_id) = setup_zap_target(&encoded);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-zap"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    let types = event_types(&receipt);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert!(
+        !finished["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == target_id)
+    );
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
