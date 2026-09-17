@@ -1,5 +1,5 @@
 //! Direct proofs for Genesis strike-each-enemy-here (RULE-CATALOG-0057,
-//! RULE-CATALOG-0675–0676, 1016).
+//! RULE-CATALOG-0675–0676, 1016, 1101).
 //!
 //! On entry, a minion strikes every enemy sharing its location, including the
 //! Avatar standing on that site. Allies and the striker are skipped. Ward
@@ -7,6 +7,8 @@
 //!
 //! 1016 covers genesis strike here killing a Deathrite minion: the controller
 //! draws a site and the summon receipt finishes only after deathrite settlement.
+//! While Deathrites wait for ordering, summoning a genesis strike-here minion
+//! stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -82,6 +84,15 @@ fn deathrite_plain() -> Value {
         "defense": 1,
         "manaCost": 0,
         "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -197,6 +208,29 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -503,4 +537,202 @@ fn rule_catalog_1016_genesis_strike_here_deathrite_draws_for_controller_on_kill(
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
+}
+
+fn deathrite_genesis_manifest(seed: u32) -> String {
+    let fixture = "genesis-strike-here-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "north-titan": titan(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_plain(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-titan",
+                    "north-rain",
+                    "north-rain",
+                    "north-titan",
+                    "north-rain",
+                    "north-titan",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_titan_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-titan", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+fn titan_summon_offered(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-titan"
+        })
+    })
+}
+
+struct PendingDeathriteGenesisSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_titan_in_hand(encoded: &str) -> Option<PendingDeathriteGenesisSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_titan_and_rain(&state(&session)) {
+        return None;
+    }
+    if !titan_summon_offered(&session) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteGenesisSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_genesis_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_genesis_manifest)
+        .find(|candidate| try_pending_deathrite_with_titan_in_hand(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with genesis strike titan in hand")
+}
+
+#[test]
+fn rule_catalog_1101_genesis_strike_here_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_genesis_seed_with(1101);
+    let mut setup = try_pending_deathrite_with_titan_in_hand(&encoded)
+        .expect("complete genesis-strike Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "end-turn"
+                    && action.descriptor["kind"] != "summon-minion"
+            })
+    );
+    assert!(!titan_summon_offered(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(titan_summon_offered(session));
+
+    let (titan_id, receipt) = summon_at(session, "north-titan", "C1");
+    let enemy_avatar_id = avatar_id(&state(session), "south");
+    let strike = receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "strike-damage-allocated"
+                && event.payload["targetInstanceId"] == enemy_avatar_id
+        })
+        .expect("genesis strike on the co-located enemy Avatar");
+    assert_eq!(strike.payload["amount"], 3);
+    assert_eq!(strike.payload["strikerInstanceId"], titan_id);
+    assert_eq!(state(session)["players"]["south"]["avatar"]["life"], 17);
+    assert_exact_replay(session);
 }
