@@ -7851,14 +7851,6 @@ fn deathrite_genesis_spell_order_manifest(seed: u32) -> String {
     }))
 }
 
-fn try_end_turn_draw_spellbook(session: &mut Session) -> Option<()> {
-    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
-    Some(())
-}
-
 fn resolve_genesis_spell_order_offered(session: &Session) -> bool {
     session.legal_actions().ok().is_some_and(|actions| {
         actions

@@ -26936,6 +26936,225 @@
         "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
         "testName": "rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1163",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts Start Phase, resolve-start-turn-trigger is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "life-gained",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1164",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts pending Genesis spell-draw choices, resolve-genesis-spell is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisMayBottomNextSpell"
+      ],
+      "actionHints": [
+        "resolve-genesis-spell",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "spell-kept",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_1164_resolve_genesis_spell_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1165",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts pending Genesis spell ordering, resolve-genesis-spell-order is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisReorderNextSpells"
+      ],
+      "actionHints": [
+        "resolve-genesis-spell-order",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "spells-reordered",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_1165_resolve_genesis_spell_order_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1166",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts a pending target-player discard Storyline, discard-card is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerDiscardsCards"
+      ],
+      "actionHints": [
+        "discard-card",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_discard_rules.rs",
+        "testName": "rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1167",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts a pending Lucky Charm random-choice phase, resolve-random-outcome is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "randomOutcome"
+      ],
+      "actionHints": [
+        "resolve-random-outcome",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "random-outcome-resolved",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lucky_charm_footprint_rules.rs",
+        "testName": "rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1168",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during main phase, summon-minion is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_1168_summon_minion_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1169",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "When Drought enters after Flood on the same site, a Landbound minion regains legal movement on that earth site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "flood",
+        "drought"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-moved",
+        "terrain-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_1169_drought_after_flood_restores_landbound_movement_on_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1170",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts main phase, move-and-attack paths required by must-attack-a-unit-if-able are not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "mustAttackAUnitIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_1170_must_attack_move_and_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1171",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during main phase, end-turn is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_1171_end_turn_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1172",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of multiple synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1172_multi_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
