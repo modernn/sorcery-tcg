@@ -1,7 +1,9 @@
-//! Direct proofs for kill-target-wounded-minion Magic (RULE-CATALOG-0609–0610).
+//! Direct proofs for kill-target-wounded-minion Magic (RULE-CATALOG-0609–0610,
+//! RULE-CATALOG-0721).
 //!
 //! Fatality kills only a wounded minion in the caster region. Healthy minions
-//! are never offered as legal targets.
+//! are never offered as legal targets. Enemy Stealth and underground region
+//! filter wounded copies; Ward absorbs without killing.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -305,4 +307,9 @@ fn rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy() {
         );
     }
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies();
 }

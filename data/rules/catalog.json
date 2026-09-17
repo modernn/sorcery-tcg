@@ -16875,6 +16875,34 @@
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
         "testName": "rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0721",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic breaks Ward without killing the warded target. Healthy, enemy-stealthed, and underground wounded copies are filtered from targets; allied wounded minions remain legal even when stealthed. One proof combines Ward absorption with the healthy, Stealth, underground, and allied filter matrix. Distinct from 0609\u20130610 (wounded versus healthy), 0673\u20130674 (region only), and 0620 (unconditional kill Ward).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "ward",
+        "stealth",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies"
+      }
     }
   ]
 }
