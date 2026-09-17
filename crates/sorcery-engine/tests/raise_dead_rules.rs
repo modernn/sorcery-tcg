@@ -111,7 +111,17 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         .expect("legal actions")
         .into_iter()
         .find(|action| predicate(&action.descriptor))
-        .expect("expected engine-issued action");
+        .unwrap_or_else(|| {
+            panic!(
+                "expected engine-issued action among {:?}",
+                session
+                    .legal_actions()
+                    .expect("legal actions")
+                    .iter()
+                    .map(|action| action.descriptor.clone())
+                    .collect::<Vec<_>>()
+            )
+        });
     let descriptor = action.descriptor.clone();
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
@@ -204,22 +214,35 @@ fn end_and_draw_spellbook(session: &mut Session) {
     });
 }
 
+fn south_establishes_domain_if_required(session: &mut Session) {
+    if session
+        .legal_actions()
+        .expect("south opening actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site" && action.descriptor["cell"] == "C1"
+        })
+    {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        });
+    }
+}
+
 fn setup_south_victim_in_cemetery(session: &mut Session) -> String {
     end_and_draw_spellbook(session);
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
-    });
+    south_establishes_domain_if_required(session);
+    // Co-locate on north's C4 site so Zap can reach the victim on north's next turn.
     let (summoned, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "south-victim"
-            && descriptor["cell"] == "C1"
+            && descriptor["cell"] == "C4"
             && descriptor["region"].is_null()
     });
     let victim_id = summoned["cardInstanceId"]
         .as_str()
         .expect("victim identity")
         .to_owned();
-    end_and_draw_spellbook(session);
     end_and_draw_spellbook(session);
     let (_, kill) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -258,6 +281,7 @@ fn rule_catalog_0583_raise_dead_summons_a_random_cemetery_minion_to_a_legal_site
             && descriptor["cardId"] == "south-victim"
             && descriptor["cell"] == "C4"
             && descriptor["manaCost"] == 0
+            && descriptor["region"].is_null()
     });
     assert!(
         event_types(&summon_receipt)
@@ -272,7 +296,15 @@ fn rule_catalog_0583_raise_dead_summons_a_random_cemetery_minion_to_a_legal_site
             .iter()
             .any(|unit| unit["instanceId"] == victim_id && unit["location"] == "C4")
     );
-    assert_eq!(cast["cardInstanceId"], cast_receipt.events[0].payload["sourceInstanceId"]);
+    assert_eq!(
+        summon_receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "minion-summoned")
+            .expect("minion-summoned")
+            .payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
     assert_exact_replay(&session);
 }
 
