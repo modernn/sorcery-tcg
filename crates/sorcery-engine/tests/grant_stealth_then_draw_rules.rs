@@ -8,7 +8,7 @@
 //! ordering, grant-Stealth-then-draw Magic stays withheld until the chain
 //! drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
@@ -346,24 +346,30 @@ fn rule_catalog_0539_stealth_then_draw_stealths_allied_minions_not_enemies() {
         granted.events[1].payload["sourceInstanceId"],
         cast["cardInstanceId"]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "minion-stealthed"
-            && (event.payload["instanceId"] == enemy_id
-                || event.payload["instanceId"] == north_avatar)));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-stealthed"
+                && (event.payload["instanceId"] == enemy_id
+                    || event.payload["instanceId"] == north_avatar))
+    );
     let after = state(&session);
     assert_eq!(unit(&after, &ally_id)["stealthed"], true);
     assert_eq!(unit(&after, &enemy_id)["stealthed"], false);
-    assert!(after["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("north hand after draw")
-        .iter()
-        .any(|card| card["instanceId"] == library_top));
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand after draw")
+            .iter()
+            .any(|card| card["instanceId"] == library_top)
+    );
     let south_view = session.public_view(Seat::South).expect("South public view");
-    assert!(!serde_json::to_string(&south_view)
-        .expect("view JSON")
-        .contains(&library_top));
+    assert!(
+        !serde_json::to_string(&south_view)
+            .expect("view JSON")
+            .contains(&library_top)
+    );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
     assert_exact_replay(&session);
@@ -383,10 +389,12 @@ fn rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions() {
         .expect("drawn identity")
         .to_owned();
     assert_targetless_vanish(&session);
-    assert!(before["realm"]["units"]
-        .as_array()
-        .expect("realm units")
-        .is_empty());
+    assert!(
+        before["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .is_empty()
+    );
 
     let (_, granted) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -398,16 +406,20 @@ fn rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions() {
         event_types(&granted),
         ["magic-cast", "spell-drawn", "magic-resolved"]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "minion-stealthed"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-stealthed")
+    );
     let after = state(&session);
-    assert!(after["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("north hand after draw")
-        .iter()
-        .any(|card| card["instanceId"] == library_top));
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand after draw")
+            .iter()
+            .any(|card| card["instanceId"] == library_top)
+    );
     assert_exact_replay(&session);
 }
 
@@ -561,11 +573,13 @@ fn rule_catalog_1067_grant_stealth_then_draw_withheld_during_pending_deathrite_o
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
     assert_eq!(unit(&paused, &ally_id)["stealthed"], false);
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(vanish_casts(session).is_empty());
 
     let order_sources: Vec<_> = session
@@ -621,10 +635,12 @@ fn rule_catalog_1067_grant_stealth_then_draw_withheld_during_pending_deathrite_o
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(session);
     assert_eq!(unit(&after, &ally_id)["stealthed"], true);
-    assert!(after["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .expect("north hand after draw")
-        .iter()
-        .any(|card| card["instanceId"] == library_top));
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand after draw")
+            .iter()
+            .any(|card| card["instanceId"] == library_top)
+    );
     assert_exact_replay(session);
 }

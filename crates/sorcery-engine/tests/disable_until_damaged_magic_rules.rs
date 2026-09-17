@@ -8,7 +8,7 @@
 //! offered. Enemy Stealth is excluded. While Deathrites wait for ordering,
 //! Sleep Magic stays withheld until the chain drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -689,11 +689,13 @@ fn rule_catalog_1063_disable_until_damaged_withheld_during_pending_deathrite_ord
         unit(&paused, &visitor_id)["disabledUntilDamaged"],
         Value::Null
     );
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert!(sleep_target_ids(session).is_empty());
 
     let order_sources: Vec<_> = session
