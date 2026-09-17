@@ -1,6 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010, 1020).
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010, 1020, 1031).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -57,6 +57,8 @@
 //! Distinct from 0986, which uses Avatar as the first hop.
 //! 1020 covers begin-chain-magic omitting a distant enemy minion as the first
 //! hop while a nearby enemy minion remains eligible.
+//! 1031 covers extend-chain-magic omitting a distant enemy minion as the second
+//! hop after begin-chain-magic stages a nearby enemy minion.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -3768,6 +3770,48 @@ fn rule_catalog_1020_begin_chain_magic_omits_distant_enemy_minion_as_first_hop()
             "kind": "minion",
             "seat": "south",
         }])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1031_extend_chain_magic_omits_distant_enemy_minion_as_second_hop() {
+    let encoded = (1031..1031 + 512)
+        .map(spellcaster_avatar_manifest)
+        .find(|candidate| try_setup_spellcaster_distant_minion_hop(candidate).is_some())
+        .expect(
+            "bounded seed with Chain Magic, printed Spellcaster at C4, nearby South minion at C3, and distant South minion at B1 for extend",
+        );
+    let (mut session, chain_id, caster_id, nearby_minion_id, distant_minion_id) =
+        try_setup_spellcaster_distant_minion_hop(&encoded)
+            .expect("spellcaster distant minion hop setup");
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == nearby_minion_id
+    });
+    assert!(begin.events.is_empty());
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": nearby_minion_id,
+            "kind": "minion",
+            "seat": "south",
+        }])
+    );
+    let extensions = extend_ids(&session);
+    assert!(
+        !extensions.contains(&distant_minion_id),
+        "extend-chain-magic must omit the distant enemy minion as a second hop"
+    );
+    assert!(
+        !extensions.contains(&nearby_minion_id),
+        "extend-chain-magic must omit the already-staged minion hop"
     );
     assert_exact_replay(&session);
 }
