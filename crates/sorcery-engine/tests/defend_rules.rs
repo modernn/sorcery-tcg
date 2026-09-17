@@ -750,3 +750,327 @@ fn rule_catalog_0938_warded_attacker_absorbs_three_way_simultaneous_return_split
     );
     exact_replay(&session);
 }
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn state(session: &Session) -> Value {
+    session.replay_value().expect("authoritative replay")["state"].clone()
+}
+
+fn offers_kind(session: &Session, kind: &str) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == kind)
+    })
+}
+
+fn try_end_and_draw_spellbook(session: &mut Session) -> Option<()> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn no_kind(session: &Session, kind: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .all(|action| action.descriptor["kind"] != kind)
+}
+
+fn deathrite_plain() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn defend_aura() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "movementBonus": 1,
+        "otherNearbyAlliesPowerBonus": 1,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn tough_attacker() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_defend_manifest(seed: u32) -> String {
+    let avatar = json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    });
+    let site = json!({ "cardType": "site", "elements": ["earth"] });
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "defend-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-defend-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-aura": defend_aura(),
+            "north-avatar": avatar,
+            "north-deathrite": deathrite_plain(),
+            "north-site": site,
+            "south-attacker": tough_attacker(),
+            "south-avatar": avatar,
+            "south-rain": rain_spell(),
+            "south-site": site,
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-deathrite",
+                    "north-deathrite",
+                    "north-aura",
+                    "north-deathrite",
+                    "north-aura",
+                    "north-deathrite",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-attacker",
+                    "south-attacker",
+                    "south-rain",
+                    "south-rain",
+                    "south-rain",
+                    "south-rain",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+    canonical_json(&manifest).expect("canonical synthetic manifest")
+}
+
+struct PendingDeathriteDefendSetup {
+    aura_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_during_defend(encoded: &str) -> Option<PendingDeathriteDefendSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-deathrite"
+            && descriptor["cell"] == "C4"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-deathrite"
+            && descriptor["cell"] == "C4"
+    })?;
+    let aura = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-aura"
+            && descriptor["cell"] == "C4"
+    })?;
+    let aura_id = aura.0["cardInstanceId"].as_str()?.to_owned();
+    try_end_and_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let attacker = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-attacker"
+            && descriptor["cell"] == "C1"
+    })?;
+    let attacker_id = attacker.0["cardInstanceId"].as_str()?.to_owned();
+    try_end_and_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_end_and_draw_spellbook(&mut session)?;
+    try_end_and_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    try_end_and_draw_spellbook(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "south-rain"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C1", "region": "surface" },
+                    { "cell": "C2", "region": "surface" },
+                ])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "site"
+    })?;
+    if state(&session)["phase"] != "defend"
+        || !offers_kind(&session, "defend")
+        || !offers_kind(&session, "close-defend")
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "defend"
+            && descriptor["unitInstanceId"] == aura_id
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "C2", "region": "surface" },
+                ])
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDefendSetup {
+        aura_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_defend_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_defend_manifest)
+        .find(|candidate| try_pending_deathrite_during_defend(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites mid-Defend window")
+}
+
+#[test]
+fn rule_catalog_1135_defend_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_defend_seed_with(1135);
+    let mut setup = try_pending_deathrite_during_defend(&encoded)
+        .expect("complete Defend Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "north");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "defend");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .find(|unit| unit["instanceId"] == aura_id)
+            .expect("joined aura")["location"],
+        "C2"
+    );
+    assert!(no_kind(session, "defend"));
+    assert!(no_kind(session, "close-defend"));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "defend");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(offers_kind(session, "close-defend"));
+
+    let (_, closed) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == false
+    });
+    assert!(
+        closed
+            .events
+            .iter()
+            .any(|event| event.event_type == "defend-window-closed")
+    );
+    exact_replay(session);
+}
