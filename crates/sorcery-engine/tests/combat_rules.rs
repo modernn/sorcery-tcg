@@ -1183,7 +1183,7 @@ fn rule_catalog_0773_terminal_outcome_exposes_winner_and_loser() {
 }
 
 #[test]
-fn surviving_minion_damage_should_persist_until_end_phase() {
+fn rule_catalog_0786_surviving_minion_damage_persists_until_end_phase() {
     let AttackSetup {
         attacker_instance_id,
         mut session,
