@@ -795,7 +795,7 @@ fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_owe_its_draw_until_ordered_deathrites_are_chosen() {
+fn rule_catalog_1117_blink_draw_deferred_until_deathrites_ordered() {
     let mut checkpoint = ordered_blink_scenario();
     assert!(
         checkpoint.fragile.iter().all(|instance_id| {
