@@ -1,5 +1,6 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
-//! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905).
+//! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
+//! RULE-CATALOG-0915).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -421,6 +422,34 @@ fn after_north_source_ready_to_end_turn() -> Session {
     session
 }
 
+fn after_north_source_ready_at_printed_cap() -> Session {
+    let mut session = Session::new(&life_stack_manifest()).expect("valid stacked life session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    session
+}
+
 fn after_north_ready_to_end_turn_with_triple_pulser() -> Session {
     let mut session = Session::new(&triple_pulse_manifest()).expect("valid triple-pulse session");
     keep(&mut session);
@@ -585,6 +614,36 @@ fn event_index(receipt: &Receipt, event_type: &str) -> Option<usize> {
         .events
         .iter()
         .position(|event| event.event_type == event_type)
+}
+
+#[test]
+fn rule_catalog_0915_end_turn_gain_noop_at_cap_then_loss_applies() {
+    let mut session = after_north_source_ready_at_printed_cap();
+    let source_id = unit_id(&session, "north-source");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(before["phase"], "main");
+    assert_eq!(before["activeSeat"], "north");
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-healed"),
+        "life gain at printed cap must not emit avatar-healed"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-life-lost"
+            && event.payload["amount"] == 2
+            && event.payload["life"] == 18
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 18);
+    assert!(after["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
 }
 
 #[test]
