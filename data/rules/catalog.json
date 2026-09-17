@@ -17010,6 +17010,27 @@
         "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
         "testName": "rule_catalog_0726_carried_artifact_life_loss_should_follow_oversized_bearer_cell"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0728",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "End-turn cleanup resets both players' air-threshold cast counters to zero, not just the ending player. Extends 0149.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_0728_end_turn_cleanup_resets_both_players_air_threshold_counts"
+      }
     }
   ]
 }
