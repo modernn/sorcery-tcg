@@ -1429,7 +1429,7 @@ fn rule_catalog_0144_payload_trebuchet_should_discard_a_card_for_measured_locati
 }
 
 #[test]
-fn a_discarded_site_should_pay_the_trebuchet_for_a_harmless_zero_damage_payload() {
+fn rule_catalog_0761_discarded_site_pays_trebuchet_zero_damage_payload() {
     let mut session =
         Session::new(&trebuchet_scenario()).expect("valid Payload Trebuchet scenario");
     let trebuchet = trebuchet_position(&mut session);
@@ -1471,7 +1471,7 @@ fn a_discarded_site_should_pay_the_trebuchet_for_a_harmless_zero_damage_payload(
 }
 
 #[test]
-fn a_payload_trebuchet_should_blanket_the_cell_its_own_cost_units_stand_on() {
+fn rule_catalog_0762_payload_trebuchet_blankets_its_own_origin_cell() {
     let mut session =
         Session::new(&trebuchet_scenario()).expect("valid Payload Trebuchet scenario");
     let trebuchet = trebuchet_position(&mut session);

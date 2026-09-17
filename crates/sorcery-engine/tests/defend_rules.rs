@@ -537,7 +537,7 @@ fn rule_catalog_0750_joining_defend_preserves_stealth_until_fight_interaction() 
 }
 
 #[test]
-fn simultaneous_return_damage_above_u8_should_record_exact_total() {
+fn rule_catalog_0764_simultaneous_return_damage_above_u8_records_exact_total() {
     let mut powerful_defender = minion(1, false);
     powerful_defender["attack"] = json!(100);
     powerful_defender["defense"] = json!(1);

@@ -17872,6 +17872,94 @@
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
         "testName": "rule_catalog_0760_terminal_end_turn_deathrite_suppresses_turn_transition"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0761",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Payload Trebuchet discarding a Site pays zero damage to every unit at the target location and does not break Ward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-discard-area-damage"
+      ],
+      "eventHints": [
+        "artifact-discard-area-damage-allocated",
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0761_discarded_site_pays_trebuchet_zero_damage_payload"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0762",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Payload Trebuchet area damage includes the origin cell where its bearer, helper, and Avatar stand, using the discarded card's mana cost as damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-discard-area-damage"
+      ],
+      "eventHints": [
+        "artifact-discard-area-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_0762_payload_trebuchet_blankets_its_own_origin_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0763",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Stealthed attacker loses Stealth only after undefended-site strike and life-loss events complete.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "stealth"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "undefended-site-struck",
+        "avatar-life-lost",
+        "stealth-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0763_stealth_site_attack_reveals_after_strike_events"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0764",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Simultaneous return damage above 255 aggregates the exact total on damage-dealt without u8 overflow.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "allocate-strike",
+        "defend"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0764_simultaneous_return_damage_above_u8_records_exact_total"
+      }
     }
   ]
 }

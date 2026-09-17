@@ -431,7 +431,7 @@ fn rule_catalog_0104_stealth_hides_until_the_attacker_interacts() {
 }
 
 #[test]
-fn stealth_site_attack_should_reveal_after_strike_events() {
+fn rule_catalog_0763_stealth_site_attack_reveals_after_strike_events() {
     let base = scenario_manifest(124, 3, 5, false, 1, 20);
     let manifest = mutate_scenario_manifest(&base, |card_id, card| {
         if card_id.starts_with("north-spell-") {
