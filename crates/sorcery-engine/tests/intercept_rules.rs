@@ -359,7 +359,7 @@ fn rule_catalog_0779_cannot_defend_blocks_movement_allows_stationary_response() 
 }
 
 #[test]
-fn immobile_should_defend_and_attack_in_place_without_moving() {
+fn rule_catalog_0797_immobile_defends_and_attacks_in_place_without_moving() {
     let mut immobile = minion();
     immobile["connectsTopBottom"] = json!(true);
     immobile["immobile"] = json!(true);

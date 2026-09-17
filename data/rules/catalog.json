@@ -69,7 +69,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
-        "testName": "mulligan_returns_chosen_card_to_deck_bottom"
+        "testName": "rule_catalog_0801_mulligan_returns_chosen_cards_to_deck_bottom"
       }
     },
     {
@@ -1078,7 +1078,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "genesis_draw_site_should_keep_identity_private_and_deck_out_after_summon"
+        "testName": "rule_catalog_0796_genesis_draw_site_private_identity_deck_out_after_summon"
       }
     },
     {
@@ -1768,7 +1768,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/lance_rules.rs",
-        "testName": "lance_should_buff_and_break_on_next_unit_strike_but_not_site_strike"
+        "testName": "rule_catalog_0798_lance_buffs_and_breaks_on_unit_strike_not_site_strike"
       }
     },
     {
@@ -2011,7 +2011,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/intercept_rules.rs",
-        "testName": "immobile_should_defend_and_attack_in_place_without_moving"
+        "testName": "rule_catalog_0797_immobile_defends_and_attacks_in_place_without_moving"
       }
     },
     {
@@ -2106,7 +2106,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
-        "testName": "mountain_pass_should_block_only_occupied_ground_minion_entry"
+        "testName": "rule_catalog_0800_mountain_pass_blocks_only_occupied_ground_minion_entry"
       }
     },
     {
@@ -2654,7 +2654,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "deathrite_damage_should_preserve_source_power_until_resolution"
+        "testName": "rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution"
       }
     },
     {
@@ -2741,7 +2741,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/defend_rules.rs",
-        "testName": "takes_less_damage_should_prevent_each_simultaneous_lethal_source"
+        "testName": "rule_catalog_0795_takes_less_damage_prevents_each_simultaneous_lethal_source"
       }
     },
     {
@@ -2822,7 +2822,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
-        "testName": "later_undefended_site_strikes_should_not_deliver_deaths_door_death_blows"
+        "testName": "rule_catalog_0793_later_undefended_site_strikes_skip_deaths_door_death_blows"
       }
     },
     {
@@ -3037,7 +3037,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
-        "testName": "zero_air_threshold_activation_without_another_unit_should_tap_without_rng_or_damage"
+        "testName": "rule_catalog_0802_zero_air_threshold_taps_without_rng_or_damage"
       }
     },
     {
@@ -18574,6 +18574,210 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0792_avatar_draw_spell_pays_tap_keeps_identity_private"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0793",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Later undefended site strikes cannot deliver Death's Door death blows.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deaths-door"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0793_later_undefended_site_strikes_skip_deaths_door_death_blows"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0794",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Deathrite damage preserves each source's power until resolution.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0795",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Takes-less prevention applies to each simultaneous damage source before Lethal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0795_takes_less_damage_prevents_each_simultaneous_lethal_source"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0796",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis draws a hidden site and an empty Atlas loses after summoning.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "draw",
+        "summon"
+      ],
+      "eventHints": [
+        "loss",
+        "card-draw",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0796_genesis_draw_site_private_identity_deck_out_after_summon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0797",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Immobile units attack and Defend in place but cannot move themselves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "immobile"
+      ],
+      "actionHints": [
+        "attack",
+        "defend"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0797_immobile_defends_and_attacks_in_place_without_moving"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0798",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Lance buffs and breaks on the next unit strike but not a site strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lance"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lance_rules.rs",
+        "testName": "rule_catalog_0798_lance_buffs_and_breaks_on_unit_strike_not_site_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0799",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Leap Attack Deathrite order branches match after checkpoint resume.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttack"
+      ],
+      "actionHints": [
+        "leap-attack"
+      ],
+      "eventHints": [
+        "death",
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_0799_leap_attack_deathrite_order_branches_match_after_checkpoint"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0800",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Mountain Pass blocks only occupied ground-minion entry.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "blocksGroundMinionEntryWhileMinionAtop"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mountain_pass_rules.rs",
+        "testName": "rule_catalog_0800_mountain_pass_blocks_only_occupied_ground_minion_entry"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0801",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Mulligan returns chosen cards to the deck bottom in stable order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "mulligan"
+      ],
+      "eventHints": [
+        "card-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_0801_mulligan_returns_chosen_cards_to_deck_bottom"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0802",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sparkmage may tap for zero damage at a nearby location with no other unit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_0802_zero_air_threshold_taps_without_rng_or_damage"
       }
     }
   ]
