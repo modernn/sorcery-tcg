@@ -3,8 +3,9 @@
 //! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), the
 //! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
 //! (RULE-CATALOG-0143), Siege Ballista activation withheld during deathrite-order
-//! (RULE-CATALOG-1144), and the measured location a Payload Trebuchet blankets for those same two
-//! taps plus a discarded card (RULE-CATALOG-0144).
+//! (RULE-CATALOG-1144), the measured location a Payload Trebuchet blankets for those same two
+//! taps plus a discarded card (RULE-CATALOG-0144), and Payload Trebuchet activation withheld
+//! during deathrite-order (RULE-CATALOG-1145).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -1737,4 +1738,208 @@ fn rule_catalog_0762_payload_trebuchet_blankets_its_own_origin_cell() {
         0
     );
     assert_exact_replay(&session);
+}
+
+fn deathrite_trebuchet_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-rain": {
+            "cardType": "magic",
+            "damageEachAbovegroundMinion": 1,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "payload-trebuchet": {
+            "cardType": "artifact",
+            "manaCost": 0,
+            "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps": true,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "trebuchet-avatar": avatar(),
+        "trebuchet-bearer": minion(json!({ "defense": 2 })),
+        "trebuchet-north-site": { "cardType": "site", "elements": ["earth"] },
+        "trebuchet-south-site": { "cardType": "site", "elements": ["earth"] },
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["trebuchet-north-site"; 6],
+            "avatar": "trebuchet-avatar",
+            "spellbook": [
+                "payload-trebuchet",
+                "trebuchet-bearer",
+                "north-rain",
+                "north-rain",
+                "payload-trebuchet",
+                "trebuchet-bearer",
+            ],
+        },
+        "south": {
+            "atlas": vec!["trebuchet-south-site"; 6],
+            "avatar": "trebuchet-avatar",
+            "spellbook": vec!["south-minion"; 6],
+        },
+    });
+    manifest(
+        "synthetic-payload-trebuchet-deathrite-withheld-v1",
+        &cards,
+        &decks,
+        seed,
+    )
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+struct PendingDeathriteTrebuchetSetup {
+    artifact_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_trebuchet(
+    encoded: &str,
+) -> Option<PendingDeathriteTrebuchetSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let bearer = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "trebuchet-bearer"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let bearer_id = bearer.0["cardInstanceId"].as_str()?.to_owned();
+    let (cast, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "payload-trebuchet"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    })?;
+    let artifact_id = cast["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if trebuchet_offers(&session, &artifact_id).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteTrebuchetSetup {
+        artifact_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_trebuchet_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_trebuchet_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_trebuchet(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a ready Payload Trebuchet on the board",
+        )
+}
+
+#[test]
+fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pending_deathrite_order()
+{
+    let encoded = deathrite_trebuchet_seed_with(1145);
+    let mut setup = try_pending_deathrite_with_ready_trebuchet(&encoded)
+        .expect("complete activate-artifact-discard-area-damage Deathrite withheld setup");
+    let artifact_id = setup.artifact_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        realm_artifacts(&paused)
+            .iter()
+            .find(|artifact| artifact["instanceId"] == artifact_id)
+            .expect("ready Trebuchet")["cardId"],
+        "payload-trebuchet"
+    );
+    assert!(trebuchet_offers(session, &artifact_id).is_empty());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-artifact-discard-area-damage")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(!trebuchet_offers(session, &artifact_id).is_empty());
+    assert!(!descriptors_of_kind(session, "activate-artifact-discard-area-damage").is_empty());
+    assert_exact_replay(session);
 }
