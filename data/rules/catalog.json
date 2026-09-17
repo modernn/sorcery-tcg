@@ -449,21 +449,18 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Magic targets stay in the caster region and exclude enemy Stealth.",
+      "plainLanguage": "Magic targeting excludes enemy Stealth. Own Stealth stays targetable. Distinct from 0617–0618 (Grant-Stealth) and from 0697 (caster-region confinement).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "stealth",
-        "region"
+        "stealth"
       ],
       "actionHints": [
-        "choose-target"
+        "cast-magic"
       ],
-      "eventHints": [
-        "stealth-change"
-      ],
+      "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0023_magic_targets_should_stay_in_the_caster_region_and_exclude_enemy_stealth"
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_0023_magic_targets_exclude_enemy_stealth"
       }
     },
     {
@@ -515,19 +512,23 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Disabling a subsurface minion immediately settles its region.",
+      "plainLanguage": "Disabling a subsurface minion immediately settles its region. Freeze on an underground Burrowing minion emits minion-disabled then minion-died. Distinct from 0661–0662 (surface Freeze / Ward absorb).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled",
-        "region"
+        "region",
+        "disableTargetNearbyMinionUntilNextTurn"
       ],
-      "actionHints": [],
+      "actionHints": [
+        "cast-magic"
+      ],
       "eventHints": [
-        "disable"
+        "minion-disabled",
+        "minion-died"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "disable_magic_should_kill_its_underground_burrowing_target"
+        "file": "crates/sorcery-engine/tests/disable_subsurface_rules.rs",
+        "testName": "rule_catalog_0698_disable_kills_an_underground_burrowing_target"
       }
     },
     {
@@ -16264,6 +16265,57 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0696_chain_magic_stages_distinct_nearby_hops_and_resolves_simultaneously"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0697",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic targets stay in the caster region. After a surface caster's ally is burrowed, that ally is no longer offered while an exposed surface enemy stays reachable. Distinct from 0673 (Fatality region filter) and from 0023 (Stealth exclusion).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_0697_magic_targets_stay_in_the_caster_region_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0698",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Freeze Disable on an underground Burrowing minion immediately settles its region: the same receipt emits minion-disabled then minion-died, and the unit leaves play. Distinct from 0661–0662, which Freeze a surface minion until the next Start Phase or absorb into Ward, and from a surface Burrowing minion that stays in play after Disable.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_subsurface_rules.rs",
+        "testName": "rule_catalog_0698_disable_kills_an_underground_burrowing_target"
       }
     }
   ]
