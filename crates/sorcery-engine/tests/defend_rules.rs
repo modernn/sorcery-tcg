@@ -329,7 +329,7 @@ fn rule_catalog_0777_movement_bonus_one_issues_exact_two_step_defend_path() {
 }
 
 #[test]
-fn defend_should_move_then_resolve_simultaneous_split_damage() {
+fn rule_catalog_0788_defend_moves_then_resolves_simultaneous_split_damage() {
     let AttackSetup {
         attacker_id,
         defender_id,
