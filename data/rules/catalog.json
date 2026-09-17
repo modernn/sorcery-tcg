@@ -158,7 +158,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "avatar_draw_spell_should_pay_tap_and_keep_identity_private"
+        "testName": "rule_catalog_0792_avatar_draw_spell_pays_tap_keeps_identity_private"
       }
     },
     {
@@ -1747,7 +1747,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
-        "testName": "genesis_sleep_should_require_real_damage_and_not_strike_retroactively"
+        "testName": "rule_catalog_0790_genesis_sleep_requires_real_damage_not_retroactive_strike"
       }
     },
     {
@@ -2229,7 +2229,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
-        "testName": "ignited_should_die_before_turn_cleanup_unless_disabled"
+        "testName": "rule_catalog_0789_ignited_dies_before_turn_cleanup_unless_disabled"
       }
     },
     {
@@ -2592,7 +2592,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "bladderblimp_deathrite_should_count_each_players_nearby_controlled_sites"
+        "testName": "rule_catalog_0787_bladderblimp_deathrite_counts_nearby_controlled_sites"
       }
     },
     {
@@ -2722,7 +2722,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/defend_rules.rs",
-        "testName": "defend_should_move_then_resolve_simultaneous_split_damage"
+        "testName": "rule_catalog_0788_defend_moves_then_resolves_simultaneous_split_damage"
       }
     },
     {
@@ -2777,7 +2777,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
-        "testName": "surviving_minion_damage_should_persist_until_end_phase"
+        "testName": "rule_catalog_0786_surviving_minion_damage_persists_until_end_phase"
       }
     },
     {
@@ -3216,7 +3216,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
-        "testName": "end_turn_artifact_life_loss_should_respect_regions_rubble_stacking_and_deaths_door"
+        "testName": "rule_catalog_0783_end_turn_artifact_life_loss_respects_regions_rubble_deaths_door"
       }
     },
     {
@@ -18364,6 +18364,216 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
         "testName": "rule_catalog_0782_carried_artifact_life_loss_uses_cell_survives_bearer_disable"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0783",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Stacked end-turn Artifact life losses charge the site controller separately, can reduce life to zero and open Death's Door without ending the game, and further end-turn charges on Death's Door record triggers without reducing life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnSiteControllerLosesLife",
+        "artifact",
+        "deaths-door"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-site-life-loss-triggered",
+        "avatar-life-lost",
+        "avatar-reached-deaths-door"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0783_end_turn_artifact_life_loss_respects_regions_rubble_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0784",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic can destroy a realm Aura that sources an immobile area. The Aura moves to its owner's cemetery, the matching immobile area lifts, and the event is aura-destroyed rather than a duration dispel.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_0784_destroy_target_aura_lifts_matching_immobile_area"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0785",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "The Belfry untaps a nearby Avatar at end of turn even when no minion occupies the site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/belfry_rules.rs",
+        "testName": "rule_catalog_0785_belfry_untaps_nearby_avatar_without_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0786",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Surviving minion damage persists through the turn and clears in End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0786_surviving_minion_damage_persists_until_end_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0787",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Bladderblimp Deathrite makes each player lose life for their nearby sites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0787_bladderblimp_deathrite_counts_nearby_controlled_sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0788",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Defend moves a unit into a simultaneous fight and stages exact split damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "move",
+        "defend",
+        "fight"
+      ],
+      "eventHints": [
+        "damage",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0788_defend_moves_then_resolves_simultaneous_split_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0789",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ignited with diesAtEndOfControllerTurn dies at its controller End Phase before turn cleanup unless Disabled; Disabled Ignited minions survive cleanup while damage resets and disable effects expire.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disabled",
+        "diesAtEndOfControllerTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-died",
+        "turn-ended",
+        "turn-started",
+        "minion-disable-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "rule_catalog_0789_ignited_dies_before_turn_cleanup_unless_disabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0790",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis sleep ends on real damage without retroactive strikes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0790_genesis_sleep_requires_real_damage_not_retroactive_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0791",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Oversized ground movement checks every newly entered terrain cell for legality.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0791_oversized_ground_movement_checks_every_new_terrain_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0792",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A draw-spell Avatar pays its tap cost and keeps the drawn identity private.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "draw",
+        "tap",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0792_avatar_draw_spell_pays_tap_keeps_identity_private"
       }
     }
   ]
