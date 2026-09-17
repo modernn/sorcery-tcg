@@ -265,7 +265,7 @@ fn fire_south(session: &mut Session, shooter_id: &str, target_id: &str) -> Recei
 }
 
 #[test]
-fn ready_minion_should_tap_to_shoot_fixed_damage_at_first_visible_unit() {
+fn rule_catalog_0781_ready_minion_taps_to_shoot_fixed_damage_at_first_visible_unit() {
     let setup = prepare_projectile(
         82,
         &minion(json!({
