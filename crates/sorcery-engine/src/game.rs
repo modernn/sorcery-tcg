@@ -22541,8 +22541,16 @@ impl Game {
             region: striker_location.region,
             target_removed: false,
         };
-        self.resolve_fight_window(&pending, true, &[], None, outcomes)?;
-        Self::emit_leap_magic_resolved(continuation, outcomes);
+        let interrupted = self.resolve_fight_window(
+            &pending,
+            true,
+            &[],
+            Some(DeathriteContinuation::LeapAttack(continuation.clone())),
+            outcomes,
+        )?;
+        if !interrupted {
+            Self::emit_leap_magic_resolved(continuation, outcomes);
+        }
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 //! Direct proofs for Leap Attack resuming after ordered movement Deathrites
-//! (RULE-CATALOG-0022, 0695).
+//! (RULE-CATALOG-0022, 0695, 1009).
 //!
 //! 0599–0600 already cover stepping an ally to strike, and the immobile stay
 //! edge. This slice keeps the 0022 leftover: stepping away from a nearby
@@ -323,6 +323,171 @@ fn order_deathrite_actions(session: &Session) -> Vec<LegalAction> {
         .collect()
 }
 
+fn leap_kill_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "leap-attack-kill-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-leap-attack-kill-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-leap": leap(),
+            "north-site": site(),
+            "north-source": minion(json!({
+                "attack": 3,
+                "defense": 3,
+                "otherNearbyAlliesPowerBonus": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-enemy-a": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-enemy-b": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-source",
+                    "north-leap",
+                    "north-source",
+                    "north-leap",
+                    "north-source",
+                    "north-leap",
+                    "north-source",
+                    "north-leap",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-enemy-a",
+                    "south-enemy-b",
+                    "south-enemy-a",
+                    "south-enemy-b",
+                    "south-enemy-a",
+                    "south-enemy-b",
+                    "south-enemy-a",
+                    "south-enemy-b",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct LeapKillDeathriteSetup {
+    enemy_ids: [String; 2],
+    leap_id: String,
+    session: Session,
+    source_id: String,
+}
+
+fn try_setup_leap_kill_deathrite(encoded: &str) -> Option<LeapKillDeathriteSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let source = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let enemy_a = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy-a"
+            && descriptor["cell"] == "C2"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let enemy_b = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy-b"
+            && descriptor["cell"] == "C2"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let snapshot = state(&session);
+    let leap_id = snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()?
+        .iter()
+        .find(|card| card["cardId"] == "north-leap")?["instanceId"]
+        .as_str()?
+        .to_owned();
+    Some(LeapKillDeathriteSetup {
+        enemy_ids: [
+            enemy_a.0["cardInstanceId"].as_str()?.to_owned(),
+            enemy_b.0["cardInstanceId"].as_str()?.to_owned(),
+        ],
+        leap_id,
+        session,
+        source_id: source.0["cardInstanceId"].as_str()?.to_owned(),
+    })
+}
+
+fn pending_leap_kill(setup: &LeapKillDeathriteSetup) -> Value {
+    json!({
+        "ally": { "instanceId": setup.source_id, "kind": "minion", "seat": "north" },
+        "cardId": "north-leap",
+        "instanceId": setup.leap_id,
+        "kind": "leap-attack",
+        "owner": "north",
+        "strikeLocation": { "cell": "C2", "region": "surface" },
+    })
+}
+
+fn seed_leap_kill_deathrite(start: u32) -> String {
+    (start..start + 2048)
+        .map(leap_kill_deathrite_manifest)
+        .find(|candidate| try_setup_leap_kill_deathrite(candidate).is_some())
+        .expect("bounded seed with complete Leap Attack kill Deathrite setup")
+}
+
 #[test]
 fn rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_deathrites() {
     let encoded = seed_leap_deathrite(695);
@@ -413,4 +578,93 @@ fn rule_catalog_0799_leap_attack_deathrite_order_branches_match_after_checkpoint
         branch_hashes.push(branch.state_hash().expect("completed state hash"));
     }
     assert_eq!(branch_hashes[0], branch_hashes[1]);
+}
+
+#[test]
+fn rule_catalog_1009_leap_attack_kill_triggers_deathrite_draw_before_strike_resumes() {
+    let encoded = seed_leap_kill_deathrite(1009);
+    let mut setup =
+        try_setup_leap_kill_deathrite(&encoded).expect("complete Leap Attack kill Deathrite setup");
+    let interrupted = cast_leap(&mut setup.session, &setup.leap_id, &setup.source_id);
+    assert_eq!(
+        event_types(&interrupted),
+        [
+            "magic-cast",
+            "unit-stepped",
+            "strike-damage-allocated",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+        ]
+    );
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"],
+        pending_leap_kill(&setup)
+    );
+    assert!(
+        setup
+            .enemy_ids
+            .iter()
+            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
+    );
+
+    let order = order_deathrite_actions(&setup.session)
+        .into_iter()
+        .next()
+        .expect("engine-issued Deathrite order");
+    assert!(
+        setup
+            .enemy_ids
+            .iter()
+            .any(|instance_id| { order.descriptor["sourceInstanceId"] == *instance_id })
+    );
+    let (_, ordered) = accept_where(&mut setup.session, |descriptor| {
+        descriptor == &order.descriptor
+    });
+    let types = event_types(&ordered);
+    assert_eq!(
+        &types[..4],
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+        ]
+    );
+    assert_eq!(types.get(4), Some(&"minion-died"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    let draw_index = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    let resolved_index = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("resumed Leap resolution");
+    assert!(draw_index < resolved_index);
+    let drawn = ordered
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw payload");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert!(
+        setup
+            .enemy_ids
+            .iter()
+            .any(|instance_id| drawn.payload["sourceInstanceId"] == *instance_id)
+    );
+    let finished = state(&setup.session);
+    assert_eq!(finished["phase"], "main");
+    assert!(finished["pendingDeathrites"].is_null());
+    assert!(
+        setup
+            .enemy_ids
+            .iter()
+            .all(|instance_id| realm_unit(&finished, instance_id).is_none())
+    );
+    assert_exact_replay(&setup.session);
 }
