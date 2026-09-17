@@ -996,7 +996,7 @@ fn rule_catalog_1116_blink_empty_chosen_deck_is_deck_out() {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_stay_active_when_drawing_the_other_deck() {
+fn rule_catalog_1126_blink_stays_active_when_drawing_other_deck() {
     let mut checkpoint = blink_checkpoint(true);
     assert_eq!(
         state(&checkpoint.session)["players"]["north"]["spellbook"],
