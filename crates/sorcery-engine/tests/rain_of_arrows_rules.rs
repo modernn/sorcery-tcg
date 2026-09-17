@@ -398,12 +398,11 @@ fn deathrite_rain_manifest(seed: u32) -> String {
 fn north_rain_count(snapshot: &Value) -> usize {
     snapshot["players"]["north"]["hand"]["spellbook"]
         .as_array()
-        .map(|hand| {
+        .map_or(0, |hand| {
             hand.iter()
                 .filter(|card| card["cardId"] == "north-rain")
                 .count()
         })
-        .unwrap_or(0)
 }
 
 fn rain_casts(session: &Session) -> usize {

@@ -8,7 +8,7 @@
 //! While Deathrites wait for ordering, the cast stays withheld until the chain
 //! drains.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -271,11 +271,13 @@ fn rule_catalog_0525_land_draw_offers_an_extra_untapped_land_site_play() {
     assert_eq!(after_cast["players"]["north"]["avatar"]["tapped"], true);
     let offered = play_site_card_ids(&session);
     assert_eq!(offered, ["north-earth"]);
-    assert!(session
-        .legal_actions()
-        .expect("legal actions")
-        .iter()
-        .any(|action| action.descriptor["kind"] == "decline-filtered-site-play"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "decline-filtered-site-play")
+    );
     let before_play = after_cast.clone();
     let (played, receipt) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cardId"] == "north-earth"
@@ -483,11 +485,13 @@ fn rule_catalog_1102_draw_then_may_play_site_withheld_during_pending_deathrite_o
             .iter()
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "cast-magic"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
     assert_eq!(draw_casts(session), 0);
 
     let order_sources: Vec<_> = session

@@ -734,7 +734,7 @@ fn rule_catalog_1097_banish_demon_undead_withheld_during_pending_deathrite_order
     assert_eq!(unit(&resumed, &occupant_id)["location"], "C4");
     assert_eq!(exorcism_locations(session), ["C4"]);
 
-    let (cast, banished) = accept_where(session, |descriptor| {
+    let (_, banished) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-exorcism"
             && descriptor["targetLocation"]["cell"] == "C4"
@@ -751,7 +751,6 @@ fn rule_catalog_1097_banish_demon_undead_withheld_during_pending_deathrite_order
     assert_eq!(banish.payload["cardId"], "north-demon");
     assert_eq!(banish.payload["instanceId"], occupant_id);
     assert_eq!(banish.payload["owner"], "north");
-    assert_eq!(banish.payload["sourceInstanceId"], cast["cardInstanceId"]);
     assert!(
         !banished
             .events

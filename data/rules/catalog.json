@@ -25351,6 +25351,231 @@
         "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
         "testName": "rule_catalog_1092_destroy_water_site_minions_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1093",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, ally-strikes-each-enemy-at-its-location Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-struck"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1093_ally_strike_here_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1094",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, damage-each-aboveground-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1094_rain_of_arrows_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1095",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, damage-random-unit-at-location Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageRandomUnitAtLocation"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
+        "testName": "rule_catalog_1095_random_bolt_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1096",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, kill-mortal-minions-at-location-within-two-steps Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1096_kill_mortal_here_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1097",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, banish-demon-and-undead-minions-at-location-within-two-steps Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1097_banish_demon_undead_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1098",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1098_destroy_undead_relics_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1099",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, damage-each-unit-at-location-within-two-steps Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1099_minor_explosion_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1100",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, destroy-own-artifact-at-location-for-area-damage Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-destroyed",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1100_detonate_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1101",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, summoning a minion with genesis strike-each-enemy-here is not offered and end-turn is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites",
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_1101_genesis_strike_here_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1102",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, draw-site-then-may-play-land-site Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSiteThenMayPlayLandSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "magic-cast"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/filtered_site_play_rules.rs",
+        "testName": "rule_catalog_1102_draw_then_may_play_site_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }
