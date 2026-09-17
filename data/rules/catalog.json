@@ -15384,6 +15384,53 @@
         "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
         "testName": "rule_catalog_0662_freeze_is_absorbed_by_enemy_ward"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0665",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Magic can grant Airborne to a controlled ally for the current turn. The grant is recorded on minions as a temporary source, and public observations show the minion as Airborne.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0665_grant_airborne_makes_a_grounded_minion_airborne"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0666",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Airborne Magic still records a temporary source on a minion that is already Airborne. Shared End Phase cleanup expires that source, and printed Airborne remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_0666_already_airborne_grant_expires_at_end_phase"
+      }
     }
   ]
 }
