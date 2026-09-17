@@ -541,8 +541,8 @@ fn rule_catalog_0737_geomancer_deathrite_should_end_game_when_atlas_is_empty() {
 }
 
 #[test]
-fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis_when_atlas_is_empty(
-) {
+fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis_when_atlas_is_empty()
+ {
     let (mut session, deathrites, mana_before) = (244..1024)
         .map(terminal_manifest_with_seed)
         .find_map(|manifest| {

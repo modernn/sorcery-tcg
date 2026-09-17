@@ -20855,6 +20855,262 @@
         "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
         "testName": "rule_catalog_0902_flooded_earth_routes_secret_tunnel_hop_underwater"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0903",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Checkpoint save and resume mid-staged Chain Magic, after begin-chain-magic and before resolve-chain-magic, preserves staged targets, the chosen discardCardInstanceId, and legal resolve-chain-magic and extend-chain-magic actions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "magic-damage-allocated",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0903_chain_magic_checkpoint_resume_preserves_staged_targets_discard_and_actions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0904",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged zero-cost Chain Magic withholds extend-chain-magic when the caster lacks mana for the next hop even though resolve-chain-magic remains legal for the current staged count.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_pool_while_resolve_remains_legal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0905",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both end-of-controller-turn Avatar life loss and here-area damage, the End Phase resolves life loss first, then here-area damage through the existing end-turn continuation path.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "avatar-life-lost",
+        "end-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0905_end_turn_loss_then_here_damage_on_same_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0906",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When two minions each carry a start-of-controller-turn life gain, the Start Phase queues separate resolve-start-turn-trigger actions and only advances to Draw after both resolve.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_0906_two_start_turn_minion_triggers_resolve_separately_before_draw"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0907",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "In a simultaneous Defend fight, a printed or granted Lethal return strike destroys a 2-defense attacker from one positive damage in the same receipt as the attacker's strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal",
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "defend",
+        "close-defend"
+      ],
+      "eventHints": [
+        "defend-window-closed",
+        "fight-started",
+        "strike-damage-allocated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0907_defend_simultaneous_lethal_kills_tougher_attacker"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0908",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Heal-target-minion Magic removes only current wound damage when the printed heal amount exceeds accumulated minion damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "heal"
+      ],
+      "eventHints": [
+        "healing"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0908_heal_target_minion_caps_at_current_damage_not_printed_amount"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0909",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto Rubble at a cell with an underground Burrowing and Submerge minion relayers that minion underwater and state-based region settlement lets it survive in the same site-played receipt.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowing",
+        "submerge",
+        "elements",
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble-created",
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_0909_water_flood_relayers_dual_region_minion_underwater_without_settlement_death"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0910",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby minion-control Magic that respects Ward absorbs a Warded target: the minion loses Ward and keeps its controller without a minion-control-changed event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_0910_mesmerism_ward_absorbs_control_without_transferring_controller"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0911",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Fixed-damage projectiles are not capped at Ranged's two measured steps; a ready tap-to-shoot minion may traverse a longer surface ray to the first visible unit or Avatar.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "projectile-damage-allocated",
+        "damage-dealt",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0911_fixed_projectile_ray_extends_past_ranged_two_step_cap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0912",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A 2×2 Landbound minion disabled when Flood covers its entire footprint becomes enabled in place when a later-entered Drought Aura wins the timestamp on those same cells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "landbound",
+        "occupiesSquareArea",
+        "affectedSitesAreFlooded",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0912_later_drought_wins_over_flood_and_re_enables_square_landbound"
+      }
     }
   ]
 }

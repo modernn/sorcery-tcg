@@ -29,15 +29,20 @@ fn site() -> Value {
     })
 }
 
-fn deathrite() -> Value {
-    json!({
+fn deathrite(extra: Value) -> Value {
+    let mut value = json!({
         "attack": 1,
         "cardType": "minion",
         "deathriteDrawSite": true,
         "defense": 1,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-    })
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra minion facts must be an object");
+    };
+    value.as_object_mut().expect("minion facts").extend(extra);
+    value
 }
 
 fn mesmerism() -> Value {
@@ -78,9 +83,18 @@ fn mesmerism_manifest(seed: u32) -> String {
             "north-mesmerism": mesmerism(),
             "north-site": site(),
             "south-avatar": avatar(),
-            "south-far": deathrite(),
+            "south-far": deathrite(json!({})),
             "south-site": site(),
-            "south-target": deathrite(),
+            "south-target": deathrite(json!({})),
+            "south-warded": json!({
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "ward": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
         },
         "decks": {
             "north": {
@@ -103,10 +117,10 @@ fn mesmerism_manifest(seed: u32) -> String {
                 "spellbook": [
                     "south-far",
                     "south-target",
+                    "south-warded",
                     "south-far",
                     "south-target",
-                    "south-far",
-                    "south-target",
+                    "south-warded",
                     "south-far",
                     "south-target",
                 ],
@@ -425,5 +439,113 @@ fn rule_catalog_0684_mesmerism_does_not_offer_a_two_step_minion_while_an_adjacen
     let nearby = realm_unit(&finished, &near_id).expect("unstolen nearby minion");
     assert_eq!(nearby["controller"], "south");
     assert_eq!(nearby["owner"], "south");
+    assert_exact_replay(&session);
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let Ok(StepResult::Accepted(receipt)) = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    }) else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn try_warded_opening(encoded: &str) -> Option<(Session, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let (warded, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-warded"
+            && descriptor["cell"] == "C2"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()?
+        .to_owned();
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_id.as_str()
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    })?;
+    Some((session, warded["cardInstanceId"].as_str()?.to_owned()))
+}
+
+#[test]
+fn rule_catalog_0910_mesmerism_ward_absorbs_control_without_transferring_controller() {
+    let (mut session, warded_id) = (910..910 + 512)
+        .map(mesmerism_manifest)
+        .find_map(|candidate| try_warded_opening(&candidate))
+        .expect("bounded seed with completable Warded Mesmerism setup");
+    assert_eq!(mesmerism_targets(&session), [warded_id.as_str()]);
+    let snapshot = state(&session);
+    let before = realm_unit(&snapshot, &warded_id).expect("warded minion");
+    assert_eq!(before["controller"], "south");
+    assert_eq!(before["warded"], true);
+
+    let (_, absorbed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mesmerism"
+            && descriptor["target"]["instanceId"] == warded_id
+    });
+    assert_eq!(
+        event_types(&absorbed),
+        ["magic-cast", "ward-broken", "magic-resolved"]
+    );
+    assert!(
+        !absorbed
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-control-changed")
+    );
+    let finished = state(&session);
+    let after = realm_unit(&finished, &warded_id).expect("surviving minion");
+    assert_eq!(after["controller"], "south");
+    assert_eq!(after["owner"], "south");
+    assert_eq!(after["warded"], false);
     assert_exact_replay(&session);
 }

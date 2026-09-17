@@ -236,7 +236,9 @@ fn seed_with(start: u32, dual_region: bool) -> String {
                 .as_array()
                 .expect("South opening atlas");
             south_hand.iter().any(|card| card["cardId"] == minion_id)
-                && south_atlas.iter().any(|card| card["cardId"] == "south-water")
+                && south_atlas
+                    .iter()
+                    .any(|card| card["cardId"] == "south-water")
                 && snapshot["players"]["north"]["hand"]["spellbook"]
                     .as_array()
                     .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-destroy"))
@@ -331,8 +333,7 @@ fn rule_catalog_0901_water_flood_kills_buried_burrower_without_submerge_in_same_
 }
 
 #[test]
-fn rule_catalog_0909_water_flood_relayers_dual_region_minion_underwater_without_settlement_death(
-) {
+fn rule_catalog_0909_water_flood_relayers_dual_region_minion_underwater_without_settlement_death() {
     let encoded = seed_with(909, true);
     let mut session = opening_main(&encoded);
     south_draw_spellbook(&mut session);

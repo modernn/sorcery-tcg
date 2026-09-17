@@ -252,7 +252,9 @@ fn composition_opening() -> Session {
             let session = Session::new(&candidate).expect("terrain Aura composition candidate");
             let north_spells = opening_spell_ids(&session, "north");
             let south_spells = opening_spell_ids(&session, "south");
-            (north_spells.iter().any(|card| card == "north-square-landbound")
+            (north_spells
+                .iter()
+                .any(|card| card == "north-square-landbound")
                 && north_spells.iter().any(|card| card == "north-flood")
                 && south_spells.iter().any(|card| card == "south-drought"))
             .then_some(session)
