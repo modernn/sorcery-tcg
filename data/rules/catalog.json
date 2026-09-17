@@ -356,22 +356,26 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "Targeted Magic is a non-unit source and resolves damage, Deathrite, and cemetery entry.",
+      "plainLanguage": "Targeted Magic is a non-unit source and resolves damage, Deathrite, and cemetery entry. A minion that prevents high-power unit damage still dies to Magic, draws a site for its controller, and enters its owner's cemetery. Distinct from 0595 (no Deathrite) and 0660 (Deathrite after a failed nearby-control).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
+        "damageTargetUnit",
         "deathrite"
       ],
       "actionHints": [
-        "choose-target"
+        "cast-magic"
       ],
       "eventHints": [
-        "damage",
-        "cemetery-entry",
-        "resolution"
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0019_targeted_magic_is_a_non_unit_source_and_resolves_deathrites"
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_0685_targeted_magic_kills_a_deathrite_minion_as_a_non_unit_source"
       }
     },
     {
@@ -15926,6 +15930,62 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
         "testName": "rule_catalog_0684_mesmerism_does_not_offer_a_two_step_minion_while_an_adjacent_one_remains"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0685",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic is a non-unit source: it offers Avatars and a same-region minion, then kills a Deathrite minion that prevents damage from units of power 4 or more. The spell identity is the damage source, Deathrite draws a site for the controller, and both the corpse and the spell enter their owners' cemeteries. Distinct from 0595, which has no Deathrite, and from 0660, which proves Deathrite after Mesmerism fails.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_0685_targeted_magic_kills_a_deathrite_minion_as_a_non_unit_source"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0686",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic can damage an Avatar. A 1-life Avatar reaches Death's Door without ending the game; a later-turn Magic hit is a death blow and finishes the match with avatar_defeated. Distinct from 0650, which uses target-player life-loss rather than damageTargetUnit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-damage-allocated",
+        "avatar-reached-deaths-door",
+        "death-blow",
+        "game-ended",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_0686_targeted_magic_reaches_deaths_door_then_defeats_the_avatar"
       }
     }
   ]
