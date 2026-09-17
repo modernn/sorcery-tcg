@@ -1,8 +1,10 @@
 //! Direct proofs for banish-demon-and-undead-minions-at-location-within-two-steps
-//! Magic (RULE-CATALOG-0573–0574, 1029).
+//! Magic (RULE-CATALOG-0573–0574, 1029, 1097).
 //!
 //! 1029 covers exorcism banishing a Deathrite undead minion: the controller
 //! draws a site and magic-resolved only appears after deathrite settlement.
+//! 1097 covers Exorcism withheld while Deathrites wait for ordering, until
+//! the chain drains.
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal
 //! steps of the caster footprint and banishes every Demon or Undead minion
@@ -81,6 +83,27 @@ fn exorcism() -> Value {
         "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps": true,
         "cardType": "magic",
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -357,6 +380,137 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn deathrite_exorcism_manifest(seed: u32) -> String {
+    let fixture = "banish-demon-undead-here-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-demon": demon(),
+            "north-exorcism": exorcism(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": rain_deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-demon",
+                    "north-exorcism",
+                    "north-rain",
+                    "north-rain",
+                    "north-exorcism",
+                    "north-exorcism",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_exorcism_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-exorcism", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteExorcismSetup {
+    deathrite_ids: [String; 2],
+    occupant_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_occupant(
+    encoded: &str,
+) -> Option<PendingDeathriteExorcismSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let occupant = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-demon"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let occupant_id = occupant.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_exorcism_and_rain(&state(&session)) {
+        return None;
+    }
+    if exorcism_locations(&session) != ["C4"] {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteExorcismSetup {
+        deathrite_ids,
+        occupant_id,
+        session,
+    })
+}
+
+fn deathrite_exorcism_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_exorcism_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_occupant(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Exorcism Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0573_banishes_demon_at_location_and_spares_beast_and_far_undead() {
     let encoded = seed_with(&["north-demon", "north-beast", "north-exorcism"]);
@@ -524,4 +678,96 @@ fn rule_catalog_1029_banish_demon_undead_deathrite_draws_for_controller_on_kill(
     assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
     assert_eq!(atlas_len(&after, "south"), south_atlas);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1097_banish_demon_undead_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_exorcism_seed_with(1097);
+    let mut setup = try_pending_deathrite_with_ready_occupant(&encoded)
+        .expect("complete Exorcism Deathrite withheld setup");
+    let occupant_id = setup.occupant_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &occupant_id)["location"], "C4");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(exorcism_locations(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &occupant_id)["location"], "C4");
+    assert_eq!(exorcism_locations(session), ["C4"]);
+
+    let (cast, banished) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    });
+    assert_eq!(
+        event_types(&banished),
+        ["magic-cast", "minion-banished", "magic-resolved"]
+    );
+    let banish = banished
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-banished")
+        .expect("minion-banished");
+    assert_eq!(banish.payload["cardId"], "north-demon");
+    assert_eq!(banish.payload["instanceId"], occupant_id);
+    assert_eq!(banish.payload["owner"], "north");
+    assert_eq!(banish.payload["sourceInstanceId"], cast["cardInstanceId"]);
+    assert!(
+        !banished
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed"
+                || event.event_type == "minion-died"
+                || event.event_type == "damage-dealt")
+    );
+    let after = state(session);
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != occupant_id)
+    );
+    assert!(!cemetery_has(&after, "north", &occupant_id));
+    assert_exact_replay(session);
 }
