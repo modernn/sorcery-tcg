@@ -1,6 +1,7 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010, 1020, 1031, 1105).
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010, 1020, 1031, 1105,
+//! 1151).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -61,6 +62,10 @@
 //! hop after begin-chain-magic stages a nearby enemy minion.
 //! 1105 covers begin-chain-magic withheld while Deathrites wait for ordering,
 //! until the chain drains.
+//! 1151 covers extend-chain-magic withheld while Deathrites wait for ordering
+//! after rain kills Deathrite minions before a hop can extend. After order,
+//! begin stages one hop and extend is offered. Distinct from 1105, which only
+//! binds begin.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -4377,5 +4382,242 @@ fn rule_catalog_1105_chain_magic_withheld_during_pending_deathrite_order() {
         descriptor["kind"] == "begin-chain-magic" && descriptor["cardId"] == "north-chain"
     });
     assert_eq!(state(session)["phase"], "chain-magic");
+    assert_exact_replay(session);
+}
+
+fn extend_chain_deathrite_withheld_manifest(seed: u32) -> String {
+    let fixture = "chain-magic-extend-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally-a": minion(json!({})),
+            "north-ally-b": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-chain": chain(0),
+            "north-rain": rain(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_order(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally-a",
+                    "north-ally-b",
+                    "north-chain",
+                    "north-rain",
+                    "north-chain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn offers_extend_chain_magic(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == "extend-chain-magic")
+    })
+}
+
+struct PendingDeathriteExtendSetup {
+    deathrite_ids: [String; 2],
+    first_id: String,
+    second_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_extend_hops(encoded: &str) -> Option<PendingDeathriteExtendSetup> {
+    if !opening_has_all(encoded, &["north-ally-a", "north-ally-b"]) {
+        return None;
+    }
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-a"
+            && descriptor["cell"] == "C4"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-b"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let deathrite_a = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let deathrite_b = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    if !north_has_chain_and_rain(&state(&session)) {
+        return None;
+    }
+    if !offers_begin_chain_magic(&session) || offers_cast_magic_for_chain(&session) {
+        return None;
+    }
+    let first_id = first.0["cardInstanceId"].as_str()?.to_owned();
+    let second_id = second.0["cardInstanceId"].as_str()?.to_owned();
+    let hop_ids = chain_ids(&session, &hand_instance(&state(&session), "north-chain"));
+    if !hop_ids.contains(&first_id) || !hop_ids.contains(&second_id) {
+        return None;
+    }
+    if state(&session)["players"]["north"]["mana"]
+        .as_u64()
+        .is_none_or(|mana| mana < 2)
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        deathrite_a.0["cardInstanceId"].as_str()?.to_owned(),
+        deathrite_b.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteExtendSetup {
+        deathrite_ids,
+        first_id,
+        second_id,
+        session,
+    })
+}
+
+fn extend_chain_deathrite_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(extend_chain_deathrite_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_with_extend_hops(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Chain Magic hops on the board")
+}
+
+#[test]
+fn rule_catalog_1151_extend_chain_magic_withheld_during_pending_deathrite_order() {
+    let encoded = extend_chain_deathrite_withheld_seed_with(1151);
+    let mut setup = try_pending_deathrite_with_extend_hops(&encoded)
+        .expect("complete extend-chain-magic Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let first_id = setup.first_id.clone();
+    let second_id = setup.second_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        realm_unit(&paused, &first_id).is_some() && realm_unit(&paused, &second_id).is_some(),
+        "rain must leave the nearby hop allies in play so extend can resume"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "extend-chain-magic"
+                    && action.descriptor["kind"] != "begin-chain-magic"
+                    && !(action.descriptor["kind"] == "cast-magic"
+                        && action.descriptor["cardId"] == "north-chain")
+            })
+    );
+    assert!(!offers_extend_chain_magic(session));
+    assert!(!offers_begin_chain_magic(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(offers_begin_chain_magic(session));
+    assert!(!offers_extend_chain_magic(session));
+    assert!(!offers_cast_magic_for_chain(session));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardId"] == "north-chain"
+            && descriptor["target"]["instanceId"] == first_id
+    });
+    let staged = state(session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    assert!(offers_extend_chain_magic(session));
+    assert!(extend_ids(session).contains(&second_id));
+    assert!(!offers_begin_chain_magic(session));
     assert_exact_replay(session);
 }
