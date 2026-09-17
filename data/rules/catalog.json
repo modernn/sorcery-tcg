@@ -16681,6 +16681,62 @@
         "file": "crates/sorcery-engine/tests/duel_rules.rs",
         "testName": "rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_before_terminal"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0713",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When a Water site floods the underground layer at a cell, underground minions relayer to underwater before state-based settlement runs. A Burrowing minion with deathrite-damage-each-unit-here still allocates damage to co-located units using its underwater source region, and surviving targets remain underwater with the allocated damage. Distinct from Sinkhole subsurface preservation on water destruction (0704) and ordered Deathrite deferral during Bury (0710).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "elements",
+        "burrowing",
+        "deathriteDamageEachUnitHere",
+        "submerge"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "deathrite-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_0713_water_replacement_preserves_underwater_deathrite_source_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0714",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto Rubble that floods underground Burrowing Deathrite minions emits rubble-replaced and site-played, enters deathrite-order with a site-genesis continuation carrying genesis-gain-mana, and leaves one mana from the site play. After order-deathrites on the canonical first source, both Deathrites draw sites, both minions die, mana-gained completes Genesis, and play returns to main with two mana total. Distinct from immediate single-target Deathrite settlement (0691) and Cave-In area ordering (0692).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "elements",
+        "genesisGainMana",
+        "deathriteDrawSite",
+        "burrowing"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "deathrite-order-committed",
+        "site-drawn",
+        "minion-died",
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_0714_water_replacement_resumes_site_genesis_after_ordered_deathrites"
+      }
     }
   ]
 }
