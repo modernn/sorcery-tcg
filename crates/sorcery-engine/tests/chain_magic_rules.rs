@@ -1,6 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0943–0944, 0952, 0955, 0970, 0981).
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -43,6 +43,8 @@
 //! 0981 covers extend-chain-magic targeting a nearby enemy Avatar as the second
 //! hop after begin-chain-magic stages a nearby enemy minion, then resolving
 //! avatar life loss.
+//! 0984 covers resolve-chain-magic killing a Deathrite minion: the controller
+//! draws a site and magic-resolved only appears after deathrite settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -438,6 +440,53 @@ fn stealth_hops_manifest(seed: u32) -> String {
     }))
 }
 
+fn deathrite() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_chain_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-chain": chain(0),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-chain"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn hops_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
@@ -713,6 +762,21 @@ fn assert_staged_chain_magic_legal_actions_only(session: &Session) {
 fn sorted(mut ids: Vec<String>) -> Vec<String> {
     ids.sort_unstable();
     ids
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .expect("cemetery")
+        .iter()
+        .any(|card| card["instanceId"] == instance_id)
 }
 
 struct ChainHops {
@@ -3112,4 +3176,112 @@ fn setup_hops_short(encoded: &str, skip_last_site: bool) -> ChainHops {
             .to_owned(),
         session,
     }
+}
+
+fn try_setup_deathrite_chain(encoded: &str) -> Option<(Session, String, String)> {
+    if !opening_has_all(encoded, &["north-chain"]) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let before = state(&session);
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let deathrite_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Deathrite minion identity")
+        .to_owned();
+    if !chain_ids(&session, &chain_id).contains(&deathrite_id) {
+        return None;
+    }
+    Some((session, chain_id, deathrite_id))
+}
+
+#[test]
+fn rule_catalog_0984_resolve_chain_magic_magic_deathrite_draws_before_magic_resolved() {
+    let encoded = (984..984 + 256)
+        .map(deathrite_chain_manifest)
+        .find(|candidate| try_setup_deathrite_chain(candidate).is_some())
+        .expect("bounded seed with Chain Magic and nearby South Deathrite");
+    let (mut session, chain_id, deathrite_id) =
+        try_setup_deathrite_chain(&encoded).expect("deathrite chain setup");
+    let before = state(&session);
+    let south_atlas = atlas_len(&before, "south");
+    assert_eq!(
+        realm_unit(&before, &deathrite_id).expect("Deathrite on board")["controller"],
+        "south"
+    );
+
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == deathrite_id
+    });
+    assert!(begin.events.is_empty());
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        resolved.events[1].payload,
+        json!({
+            "amount": 2,
+            "sourceInstanceId": chain_id,
+            "targetInstanceId": deathrite_id,
+        })
+    );
+    let drawn = resolved
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], deathrite_id);
+    let site_drawn = event_types(&resolved)
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = event_types(&resolved)
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(event_types(&resolved).last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert_eq!(finished["phase"], "main");
+    assert!(finished["pendingChainMagic"].is_null());
+    assert!(realm_unit(&finished, &deathrite_id).is_none());
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert!(cemetery_has(&finished, "south", &deathrite_id));
+    assert!(!cemetery_has(&finished, "north", &deathrite_id));
+    assert_exact_replay(&session);
 }
