@@ -28809,6 +28809,357 @@ pub mod catalog_proofs {
             .expect("composed nearby-must-attack and double-strike Artifacts are self-play safe");
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one admission matrix keeps every grant-combat-modifier slice and minion modifier visible"
+    )]
+    pub fn rule_catalog_0734_grant_combat_modifier_magic_admits_common_minion_slices() {
+        let grant_manifest = |grant: Value, extra: &[(&str, Value)]| {
+            let extra = extra.to_vec();
+            selfplay_manifest_with(31, move |manifest| {
+                for ordinal in 1..=50 {
+                    let mut spell = json!({
+                        "cardType": "magic",
+                        "manaCost": 0,
+                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                    });
+                    if let Some(spell_object) = spell.as_object_mut() {
+                        spell_object.extend(grant.as_object().expect("grant Magic facts").clone());
+                    }
+                    manifest["cards"][format!("north-spell-{ordinal}")] = spell;
+                }
+                for (field, value) in &extra {
+                    manifest["cards"]["south-spell-1"][*field] = value.clone();
+                }
+            })
+        };
+        let grant_effects: &[(&str, Value)] = &[
+            ("grant-charge", json!({ "grantChargeToAllyThisTurn": true })),
+            (
+                "grant-first-strike",
+                json!({ "grantFirstStrikeToAllyThisTurn": true }),
+            ),
+            ("grant-ranged", json!({ "grantRangedToAllyThisTurn": true })),
+            (
+                "grant-airborne",
+                json!({ "grantAirborneToAllyThisTurn": true }),
+            ),
+            ("grant-power-two", json!({ "grantPowerToAllyThisTurn": 2 })),
+            ("grant-lethal", json!({ "grantLethalToAllyThisTurn": true })),
+            (
+                "grant-double-damage-next-strike",
+                json!({ "grantDoubleDamageToAllyNextStrikeThisTurn": true }),
+            ),
+        ];
+        let minion_slices: &[(&str, &[(&str, Value)])] = &[
+            ("ordinary minion", &[]),
+            ("Burrowing minion", &[("burrowing", json!(true))]),
+            ("Submerge minion", &[("submerge", json!(true))]),
+            ("Waterbound minion", &[("waterbound", json!(true))]),
+            ("Landbound minion", &[("landbound", json!(true))]),
+            ("Voidwalk minion", &[("voidwalk", json!(true))]),
+            (
+                "start-turn random teleport",
+                &[
+                    (
+                        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                        json!(true),
+                    ),
+                    ("voidwalk", json!(true)),
+                ],
+            ),
+            (
+                "start-turn draw spells",
+                &[("atStartOfControllerTurnDrawSpells", json!(1))],
+            ),
+            (
+                "start-turn draw sites",
+                &[("atStartOfControllerTurnDrawSites", json!(1))],
+            ),
+            (
+                "start-turn lure",
+                &[("atStartOfControllerTurnLureNearbyEnemyMinion", json!(true))],
+            ),
+            (
+                "start-turn mill spells",
+                &[("atStartOfControllerTurnMillSpells", json!(1))],
+            ),
+            (
+                "start-turn mill sites",
+                &[("atStartOfControllerTurnMillSites", json!(1))],
+            ),
+            (
+                "Deathrite spell draw",
+                &[("deathriteDrawSpells", json!(true))],
+            ),
+            (
+                "Deathrite spell mill",
+                &[("deathriteMillSpells", json!(true))],
+            ),
+            (
+                "Deathrite site mill",
+                &[("deathriteMillSites", json!(true))],
+            ),
+            (
+                "end-turn controller life gain",
+                &[("atEndOfControllerTurnControllerGainsLife", json!(2))],
+            ),
+            (
+                "end-turn controller life loss",
+                &[("atEndOfControllerTurnControllerLosesLife", json!(2))],
+            ),
+            (
+                "does not untap during Start Phase",
+                &[("doesNotUntapDuringControllersStartPhase", json!(true))],
+            ),
+            (
+                "must attack a unit if able",
+                &[("mustAttackAUnitIfAble", json!(true))],
+            ),
+            (
+                "enemies must attack this if able",
+                &[("enemiesMustAttackThisIfAble", json!(true))],
+            ),
+        ];
+        for (grant_label, grant) in grant_effects {
+            for (slice_label, extra) in minion_slices {
+                Game::from_manifest_json(&grant_manifest(grant.clone(), extra))
+                    .unwrap_or_else(|error| {
+                        panic!("valid {grant_label} manifest with {slice_label}: {error:?}")
+                    })
+                    .ensure_selfplay_supported()
+                    .unwrap_or_else(|error| {
+                        panic!("{grant_label} with {slice_label} is self-play safe: {error:?}")
+                    });
+            }
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one admission matrix keeps every control slice and deck-card modifier visible"
+    )]
+    pub fn rule_catalog_0735_control_magic_admits_common_minion_slices() {
+        let control_manifest = |control: Value, extra: &[(&str, Value)]| {
+            let extra = extra.to_vec();
+            selfplay_manifest_with(31, move |manifest| {
+                for ordinal in 1..=50 {
+                    let mut spell = json!({
+                        "cardType": "magic",
+                        "manaCost": 0,
+                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                    });
+                    if let Some(spell_object) = spell.as_object_mut() {
+                        spell_object
+                            .extend(control.as_object().expect("control Magic facts").clone());
+                    }
+                    manifest["cards"][format!("north-spell-{ordinal}")] = spell;
+                }
+                for (field, value) in &extra {
+                    manifest["cards"]["south-spell-1"][*field] = value.clone();
+                }
+            })
+        };
+        let this_turn = json!({ "gainControlOfTargetEnemyMinionThisTurn": true });
+        let until_stealth_lost = json!({ "gainControlOfTargetEnemyMinionUntilStealthLost": true });
+        let nearby = json!({ "gainControlOfTargetNearbyMinion": true });
+        let minion_slices: &[(&str, &[(&str, Value)])] = &[
+            ("ordinary minion", &[]),
+            ("Burrowing minion", &[("burrowing", json!(true))]),
+            ("Submerge minion", &[("submerge", json!(true))]),
+            ("Waterbound minion", &[("waterbound", json!(true))]),
+            ("Landbound minion", &[("landbound", json!(true))]),
+            ("Voidwalk minion", &[("voidwalk", json!(true))]),
+            (
+                "start-turn random teleport",
+                &[
+                    (
+                        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                        json!(true),
+                    ),
+                    ("voidwalk", json!(true)),
+                ],
+            ),
+            (
+                "start-turn draw spells",
+                &[("atStartOfControllerTurnDrawSpells", json!(1))],
+            ),
+            (
+                "start-turn draw sites",
+                &[("atStartOfControllerTurnDrawSites", json!(1))],
+            ),
+            (
+                "start-turn lure",
+                &[("atStartOfControllerTurnLureNearbyEnemyMinion", json!(true))],
+            ),
+            (
+                "start-turn mill spells",
+                &[("atStartOfControllerTurnMillSpells", json!(1))],
+            ),
+            (
+                "start-turn mill sites",
+                &[("atStartOfControllerTurnMillSites", json!(1))],
+            ),
+            (
+                "Deathrite spell draw",
+                &[("deathriteDrawSpells", json!(true))],
+            ),
+            (
+                "Deathrite spell mill",
+                &[("deathriteMillSpells", json!(true))],
+            ),
+            (
+                "Deathrite site mill",
+                &[("deathriteMillSites", json!(true))],
+            ),
+            (
+                "end-turn controller life gain",
+                &[("atEndOfControllerTurnControllerGainsLife", json!(2))],
+            ),
+            (
+                "end-turn controller life loss",
+                &[("atEndOfControllerTurnControllerLosesLife", json!(2))],
+            ),
+            (
+                "does not untap during Start Phase",
+                &[("doesNotUntapDuringControllersStartPhase", json!(true))],
+            ),
+            (
+                "must attack a unit if able",
+                &[("mustAttackAUnitIfAble", json!(true))],
+            ),
+            (
+                "enemies must attack this if able",
+                &[("enemiesMustAttackThisIfAble", json!(true))],
+            ),
+        ];
+        for (control_label, control) in [
+            ("this-turn enemy control", &this_turn),
+            ("stealth-bound enemy control", &until_stealth_lost),
+            ("nearby minion control", &nearby),
+        ] {
+            for (slice_label, extra) in minion_slices {
+                Game::from_manifest_json(&control_manifest(control.clone(), extra))
+                    .unwrap_or_else(|error| {
+                        panic!("valid {control_label} manifest with {slice_label}: {error:?}")
+                    })
+                    .ensure_selfplay_supported()
+                    .unwrap_or_else(|error| {
+                        panic!("{control_label} with {slice_label} is self-play safe: {error:?}")
+                    });
+            }
+        }
+
+        let power_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
+        let artifact_manifest = |artifact: &Value, control: &Value| {
+            selfplay_manifest_with(31, |manifest| {
+                manifest["cards"]["south-spell-1"] = artifact.clone();
+                for ordinal in 1..=50 {
+                    let mut spell = json!({
+                        "cardType": "magic",
+                        "manaCost": 0,
+                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                    });
+                    if let Some(spell_object) = spell.as_object_mut() {
+                        spell_object
+                            .extend(control.as_object().expect("control Magic facts").clone());
+                    }
+                    manifest["cards"][format!("north-spell-{ordinal}")] = spell;
+                }
+            })
+        };
+        for (control_label, control) in [
+            ("this-turn enemy control", &this_turn),
+            ("stealth-bound enemy control", &until_stealth_lost),
+            ("nearby minion control", &nearby),
+        ] {
+            Game::from_manifest_json(&artifact_manifest(&power_artifact, control))
+                .unwrap_or_else(|error| {
+                    panic!("valid power Artifact manifest for {control_label}: {error:?}")
+                })
+                .ensure_selfplay_supported()
+                .unwrap_or_else(|error| {
+                    panic!("power Artifacts with {control_label} are self-play safe: {error:?}")
+                });
+
+            let lethal_artifact = json!({
+                "cardType": "artifact",
+                "grantsBearerLethal": true,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            Game::from_manifest_json(&artifact_manifest(&lethal_artifact, control))
+                .unwrap_or_else(|error| {
+                    panic!("valid Lethal Artifact manifest for {control_label}: {error:?}")
+                })
+                .ensure_selfplay_supported()
+                .unwrap_or_else(|error| {
+                    panic!("Lethal Artifacts with {control_label} are self-play safe: {error:?}")
+                });
+
+            let nearby_must_attack_artifact = json!({
+                "cardType": "artifact",
+                "manaCost": 0,
+                "nearbyMinionsMustAttackIfAble": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            Game::from_manifest_json(&artifact_manifest(&nearby_must_attack_artifact, control))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "valid nearby-must-attack Artifact manifest for {control_label}: {error:?}"
+                    )
+                })
+                .ensure_selfplay_supported()
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "nearby-must-attack Artifacts with {control_label} are self-play safe: {error:?}"
+                    )
+                });
+
+            let nearby_double_artifact = json!({
+                "cardType": "artifact",
+                "manaCost": 0,
+                "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            Game::from_manifest_json(&artifact_manifest(&nearby_double_artifact, control))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "valid nearby-double-strike Artifact manifest for {control_label}: {error:?}"
+                    )
+                })
+                .ensure_selfplay_supported()
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "nearby double-strike Artifacts with {control_label} are self-play safe: {error:?}"
+                    )
+                });
+
+            let mask_artifact = json!({
+                "cardType": "artifact",
+                "manaCost": 0,
+                "nearbyMinionsMustAttackIfAble": true,
+                "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            Game::from_manifest_json(&artifact_manifest(&mask_artifact, control))
+                .unwrap_or_else(|error| {
+                    panic!("valid composed Mask Artifact manifest for {control_label}: {error:?}")
+                })
+                .ensure_selfplay_supported()
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "composed nearby-must-attack and double-strike Artifacts with {control_label} are self-play safe: {error:?}"
+                    )
+                });
+        }
+    }
+
     pub fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
         let manifest = selfplay_manifest_with(31, |_| {});
         let mut game = Game::from_manifest_json(&manifest).expect("valid game");
@@ -29191,16 +29542,11 @@ pub mod catalog_proofs {
                 ))
         );
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::synthetic::selfplay_manifest_with;
-
-    #[test]
     #[expect(clippy::too_many_lines)]
-    fn supported_magic_effects_should_be_selfplay_supported() {
+    pub fn rule_catalog_0736_supported_magic_effects_should_cover_every_admitted_variant() {
+        use crate::synthetic::selfplay_manifest_with;
+
         for (effect, facts) in [
             (
                 MagicEffect::DamageChainNearbyUnits,
@@ -29430,6 +29776,120 @@ mod tests {
                 MagicEffect::HealTargetMinion(1),
                 json!({ "healTargetMinion": 1 }),
             ),
+            (
+                MagicEffect::HealController(1),
+                json!({ "healController": 1 }),
+            ),
+            (
+                MagicEffect::DisableTargetNearbyMinionUntilNextTurn,
+                json!({ "disableTargetNearbyMinionUntilNextTurn": true }),
+            ),
+            (
+                MagicEffect::GrantChargeToAllyThisTurn,
+                json!({ "grantChargeToAllyThisTurn": true }),
+            ),
+            (
+                MagicEffect::GrantFirstStrikeToAllyThisTurn,
+                json!({ "grantFirstStrikeToAllyThisTurn": true }),
+            ),
+            (
+                MagicEffect::GrantRangedToAllyThisTurn,
+                json!({ "grantRangedToAllyThisTurn": true }),
+            ),
+            (
+                MagicEffect::GrantAirborneToAllyThisTurn,
+                json!({ "grantAirborneToAllyThisTurn": true }),
+            ),
+            (
+                MagicEffect::GrantPowerTwoToAllyThisTurn,
+                json!({ "grantPowerToAllyThisTurn": 2 }),
+            ),
+            (
+                MagicEffect::GrantLethalToAllyThisTurn,
+                json!({ "grantLethalToAllyThisTurn": true }),
+            ),
+            (
+                MagicEffect::GainControlOfTargetEnemyMinionThisTurn,
+                json!({ "gainControlOfTargetEnemyMinionThisTurn": true }),
+            ),
+            (
+                MagicEffect::GainControlOfTargetNearbyMinion,
+                json!({ "gainControlOfTargetNearbyMinion": true }),
+            ),
+            (
+                MagicEffect::GainControlOfTargetEnemyMinionUntilStealthLost,
+                json!({ "gainControlOfTargetEnemyMinionUntilStealthLost": true }),
+            ),
+            (
+                MagicEffect::KillTargetWoundedMinion,
+                json!({ "killTargetWoundedMinion": true }),
+            ),
+            (
+                MagicEffect::SummonRandomMinionFromAnyCemetery,
+                json!({ "summonRandomMinionFromAnyCemetery": true }),
+            ),
+            (
+                MagicEffect::SummonTokenToEachControlledSiteBorderingEnemySite(
+                    "selfplay-soldier-token".into(),
+                ),
+                json!({ "summonTokenToEachControlledSiteBorderingEnemySite": "selfplay-soldier-token" }),
+            ),
+            (
+                MagicEffect::TeleportAllyToTargetSite,
+                json!({ "teleportAllyToTargetSite": true }),
+            ),
+            (
+                MagicEffect::TeleportNearbyAllyThenDrawCard,
+                json!({ "teleportNearbyAllyThenDrawCard": true }),
+            ),
+            (
+                MagicEffect::BurrowTargetMinionOrArtifact,
+                json!({ "burrowTargetMinionOrArtifact": true }),
+            ),
+            (
+                MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite,
+                json!({ "burrowAllMinionsAndArtifactsAtTargetLandSite": true }),
+            ),
+            (
+                MagicEffect::SubmergeTargetMinion,
+                json!({ "submergeTargetMinion": true }),
+            ),
+            (
+                MagicEffect::DamageRandomUnitAtLocation(1),
+                json!({ "damageRandomUnitAtLocation": 1 }),
+            ),
+            (
+                MagicEffect::ReturnMinionFromOwnCemetery,
+                json!({ "returnMinionFromOwnCemetery": true }),
+            ),
+            (
+                MagicEffect::DamageTargetUnit {
+                    amount: 1,
+                    target_nearby: false,
+                    untap_target_minion_after_damage: false,
+                },
+                json!({ "damageTargetUnit": 1 }),
+            ),
+            (
+                MagicEffect::DamageTargetUnit {
+                    amount: 1,
+                    target_nearby: true,
+                    untap_target_minion_after_damage: false,
+                },
+                json!({ "damageTargetUnit": 1, "targetNearby": true }),
+            ),
+            (
+                MagicEffect::DamageTargetUnit {
+                    amount: 1,
+                    target_nearby: true,
+                    untap_target_minion_after_damage: true,
+                },
+                json!({
+                    "damageTargetUnit": 1,
+                    "targetNearby": true,
+                    "untapTargetMinionAfterDamage": true,
+                }),
+            ),
         ] {
             assert_eq!(unsupported_magic_effect(&effect), None);
             let manifest = selfplay_manifest_with(31, |manifest| {
@@ -29444,7 +29904,10 @@ mod tests {
                         card[field.as_str()] = value.clone();
                     }
                 }
-                if let Some(token_id) = facts.get("summonTokenToAlliedMinionThenDrawSpell") {
+                let token_id = facts
+                    .get("summonTokenToAlliedMinionThenDrawSpell")
+                    .or_else(|| facts.get("summonTokenToEachControlledSiteBorderingEnemySite"));
+                if let Some(token_id) = token_id {
                     manifest["cards"][token_id.as_str().expect("token card identity")] = json!({
                         "attack": 0,
                         "cardType": "minion",
@@ -29460,5 +29923,15 @@ mod tests {
                 .ensure_selfplay_supported()
                 .expect("supported Magic effect is self-play safe");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_magic_effects_should_be_selfplay_supported() {
+        catalog_proofs::rule_catalog_0736_supported_magic_effects_should_cover_every_admitted_variant();
     }
 }

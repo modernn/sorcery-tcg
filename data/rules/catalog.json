@@ -17200,6 +17200,107 @@
         "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
         "testName": "rule_catalog_0733_blink_magic_admits_minion_slices_and_common_modifiers"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0734",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Grant-charge, grant-first-strike, grant-ranged, grant-airborne, grant-power-two, grant-lethal, and grant-double-damage-next-strike Magic pass self-play admission when paired with ordinary minions, Burrowing, Submerge, Waterbound, Landbound, Voidwalk, start-turn and end-turn triggers, Deathrite library effects, and forced-attack facts on south-spell-1.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantChargeToAllyThisTurn",
+        "grantFirstStrikeToAllyThisTurn",
+        "grantRangedToAllyThisTurn",
+        "grantAirborneToAllyThisTurn",
+        "grantPowerToAllyThisTurn",
+        "grantLethalToAllyThisTurn",
+        "grantDoubleDamageToAllyNextStrikeThisTurn",
+        "burrowing",
+        "submerge",
+        "waterbound",
+        "landbound",
+        "voidwalk",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnMillSites",
+        "deathriteDrawSpells",
+        "deathriteMillSpells",
+        "deathriteMillSites",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "doesNotUntapDuringControllersStartPhase",
+        "mustAttackAUnitIfAble",
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0734_grant_combat_modifier_magic_admits_common_minion_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0735",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Gain-control-of-target-enemy-minion-this-turn, gain-control-of-target-enemy-minion-until-stealth-lost, and gain-control-of-target-nearby-minion Magic pass self-play admission when paired with ordinary minions, Burrowing, Submerge, Waterbound, Landbound, Voidwalk, start-turn and end-turn triggers, Deathrite library effects, forced-attack facts, and common Artifact bearer modifiers including composed Mask effects.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "gainControlOfTargetEnemyMinionUntilStealthLost",
+        "gainControlOfTargetNearbyMinion",
+        "burrowing",
+        "submerge",
+        "waterbound",
+        "landbound",
+        "voidwalk",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnMillSites",
+        "deathriteDrawSpells",
+        "deathriteMillSpells",
+        "deathriteMillSites",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "doesNotUntapDuringControllersStartPhase",
+        "mustAttackAUnitIfAble",
+        "enemiesMustAttackThisIfAble",
+        "grantsBearerPower",
+        "grantsBearerLethal",
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_0735_control_magic_admits_common_minion_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0736",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Every admitted Magic effect shape passes self-play manifest admission without unsupported-manifest rejection, including blink, burrow, submerge, control, grant, cemetery, and targeted-damage variants omitted from the earlier partial meta loop.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/selfplay_admission_rules.rs",
+        "testName": "rule_catalog_0736_supported_magic_effects_should_cover_every_admitted_variant"
+      }
     }
   ]
 }
