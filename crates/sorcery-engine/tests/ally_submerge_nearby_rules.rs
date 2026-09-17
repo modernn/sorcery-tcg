@@ -1,5 +1,5 @@
 //! Direct proofs for ally-submerges-target-nearby-minion Magic
-//! (RULE-CATALOG-0555–0556).
+//! (RULE-CATALOG-0555–0556, RULE-CATALOG-1056).
 //!
 //! Ordinary Magic chooses a controlled ally, then submerges one other
 //! minion nearby that ally. Nearby is measured from the ally, not the
@@ -61,6 +61,27 @@ fn trial() -> Value {
         "allySubmergesTargetNearbyMinion": true,
         "cardType": "magic",
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -296,6 +317,153 @@ fn assert_offered_pairs(session: &Session, ally_id: &str, nearby_id: &str, far_i
     assert!(!pairs.contains(&(avatar_id, far_id.to_owned())));
 }
 
+fn deathrite_submerge_manifest(seed: u32) -> String {
+    let fixture = "ally-submerge-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": water_site(),
+            "north-trial": trial(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-raider": raider(),
+            "south-site": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-trial",
+                    "north-rain",
+                    "north-rain",
+                    "north-trial",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-raider", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_trial_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-trial", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteSubmergeSetup {
+    ally_id: String,
+    deathrite_ids: [String; 2],
+    nearby_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_nearby_target(
+    encoded: &str,
+) -> Option<PendingDeathriteSubmergeSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let nearby = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let nearby_id = nearby.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_trial_and_rain(&state(&session)) {
+        return None;
+    }
+    if !trial_pairs(&session)
+        .iter()
+        .any(|(ally, target)| ally == &ally_id && target == &nearby_id)
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSubmergeSetup {
+        ally_id,
+        deathrite_ids,
+        nearby_id,
+        session,
+    })
+}
+
+fn deathrite_submerge_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_submerge_manifest)
+        .find(|candidate| try_pending_deathrite_with_nearby_target(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with ally-submerge Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0555_ally_submerges_a_nearby_minion_on_water() {
     let encoded = seed_with(true, 555, &["north-ally", "north-trial"]);
@@ -369,4 +537,77 @@ fn rule_catalog_0556_ally_submerge_is_a_paid_noop_on_earth() {
     assert_eq!(unit(&state(&session), &ally_id)["region"], "surface");
     assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1056_ally_submerge_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_submerge_seed_with(1056);
+    let mut setup = try_pending_deathrite_with_nearby_target(&encoded)
+        .expect("complete ally-submerge Deathrite withheld setup");
+    let ally_id = setup.ally_id.clone();
+    let nearby_id = setup.nearby_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &nearby_id)["region"], "surface");
+    assert_eq!(unit(&paused, &ally_id)["region"], "surface");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(trial_pairs(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &nearby_id)["region"], "surface");
+    assert!(trial_pairs(session)
+        .iter()
+        .any(|(ally, target)| ally == &ally_id && target == &nearby_id));
+
+    let (_, submerged) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-trial"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["target"]["instanceId"] == nearby_id
+    });
+    assert_eq!(
+        event_types(&submerged),
+        ["magic-cast", "minion-submerged", "magic-resolved"]
+    );
+    assert_eq!(unit(&state(session), &nearby_id)["region"], "underwater");
+    assert_eq!(unit(&state(session), &ally_id)["region"], "surface");
+    assert_exact_replay(session);
 }
