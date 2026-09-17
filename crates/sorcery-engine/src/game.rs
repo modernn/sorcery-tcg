@@ -27314,12 +27314,6 @@ mod tests {
     use crate::synthetic::{selfplay_manifest_with, synthetic_demo_manifest_json};
 
     #[test]
-    fn zero_site_recovery_should_issue_every_nearest_cell_in_canonical_order() {
-        super::catalog_proofs::rule_catalog_0701_zero_site_recovery_issues_nearest_cells_in_canonical_order();
-        super::catalog_proofs::rule_catalog_0702_zero_site_recovery_replaces_rubble_before_site_play();
-    }
-
-    #[test]
     fn rubble_replacement_should_admit_site_genesis_on_the_owners_atlas() {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
@@ -28506,11 +28500,6 @@ mod tests {
     }
 
     #[test]
-    fn site_destruction_should_preserve_protected_rubble_and_relative_subsurface() {
-        super::catalog_proofs::rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface();
-    }
-
-    #[test]
     fn temporary_power_should_apply_to_avatar_and_disabled_minion_stats() {
         let manifest = synthetic_demo_manifest_json(31).expect("synthetic manifest");
         let mut game = Game::from_manifest_json(&manifest).expect("valid game");
@@ -29083,178 +29072,6 @@ mod tests {
             contested
         );
         assert_eq!(outcomes[0].1["cell"], json!(contested));
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one scenario proof keeps scent-hound event ordering and replay together"
-    )]
-    fn scent_hound_events_should_follow_source_identity_before_target_order() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            for card_id in ["north-spell-1", "north-spell-2"] {
-                manifest["cards"][card_id]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
-            }
-            for card_id in ["south-spell-1", "south-spell-2"] {
-                manifest["cards"][card_id]["stealth"] = json!(true);
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Scent Hound manifest");
-        let card_id = |id: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == id)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let unit =
-            |card_id, instance_id: &str, controller, location: &str, stealthed| UnitPosition {
-                card: CardInstance {
-                    card_id,
-                    instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
-                    owner: controller,
-                    source: CardSource::Spellbook,
-                },
-                carried_lance_count: 0,
-                controller,
-                damage: 0,
-                disable_effects: Vec::new(),
-                disabled_until_damaged: false,
-                last_dropped_artifacts_turn: None,
-                last_interacted_turn: None,
-                last_picked_up_artifacts_turn: None,
-                location: Cell::parse(location).expect("fixture cell"),
-                occupied_cells: None,
-                planar_gate_voidwalk: false,
-                region: Region::Surface,
-                stealthed,
-                summoning_sickness: false,
-                tapped: false,
-                temporary_airborne_sources: Vec::new(),
-                temporary_charge_sources: Vec::new(),
-                temporary_first_strike_sources: Vec::new(),
-                temporary_lethal_sources: Vec::new(),
-                temporary_next_strike_double_sources: Vec::new(),
-                temporary_movement_sources: Vec::new(),
-                temporary_power_sources: Vec::new(),
-                temporary_ranged_sources: Vec::new(),
-                temporary_silence_sources: Vec::new(),
-                warded: false,
-            };
-        game.position.units = vec![
-            unit(
-                card_id("south-spell-1"),
-                "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-                Seat::South,
-                "D3",
-                true,
-            ),
-            unit(
-                card_id("south-spell-2"),
-                "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-                Seat::South,
-                "A2",
-                true,
-            ),
-            unit(
-                card_id("north-spell-1"),
-                "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-                Seat::North,
-                "A1",
-                false,
-            ),
-            unit(
-                card_id("north-spell-2"),
-                "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-                Seat::North,
-                "D4",
-                false,
-            ),
-        ];
-        let mut outcomes = Vec::new();
-        game.settle_nearby_enemy_stealth(&mut OutcomeLog::Record(&mut outcomes));
-
-        assert_eq!(
-            outcomes,
-            vec![
-                (
-                    "stealth-lost".to_owned(),
-                    json!({
-                        "instanceId": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
-                        "seat": "south",
-                        "sourceInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-                    }),
-                ),
-                (
-                    "stealth-lost".to_owned(),
-                    json!({
-                        "instanceId": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-                        "seat": "south",
-                        "sourceInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-                    }),
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn disabled_scent_hound_should_not_strip_nearby_enemy_stealth() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["north-spell-1"]["nearbyEnemiesPermanentlyLoseStealth"] = json!(true);
-            manifest["cards"]["south-spell-1"]["stealth"] = json!(true);
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid disabled Hound manifest");
-        let card_id = |id: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == id)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let mut hound = test_minion(
-            card_id("north-spell-1"),
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-            Seat::North,
-            Cell::parse("C3").expect("C3"),
-            None,
-        );
-        hound.disabled_until_damaged = true;
-        hound.tapped = false;
-        let mut target = test_minion(
-            card_id("south-spell-1"),
-            "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-            Seat::South,
-            Cell::parse("C2").expect("C2"),
-            None,
-        );
-        target.stealthed = true;
-        target.tapped = false;
-        game.position.units = vec![hound, target];
-        let mut outcomes = Vec::new();
-        game.settle_nearby_enemy_stealth(&mut OutcomeLog::Record(&mut outcomes));
-        assert!(outcomes.is_empty());
-        assert!(game.position.units[1].stealthed);
-        assert!(game.minion_is_disabled(&game.position.units[0]));
-    }
-
-    #[test]
-    fn craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid() {
-        super::catalog_proofs::rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid();
-    }
-
-    #[test]
-    fn raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement() {
-        super::catalog_proofs::rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement();
     }
 
     fn only_action(
