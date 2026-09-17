@@ -13818,6 +13818,58 @@
         "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
         "testName": "rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_in_play"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0603",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Fight-ally-with-adjacent-enemy Magic makes a chosen ally fight a targeted adjacent enemy through the shared fight pipeline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "fight"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "fight-started",
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0603_duel_magic_fights_an_adjacent_enemy_through_the_shared_pipeline"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0604",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Fight-ally-with-adjacent-enemy Magic breaks Ward on the target without entering combat.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0604_duel_magic_breaks_ward_without_entering_combat"
+      }
     }
   ]
 }
