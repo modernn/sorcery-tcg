@@ -1188,7 +1188,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "optional_targeted_genesis_damage_should_issue_decline_and_nearby_unit_branches"
+        "testName": "rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_branches"
       }
     },
     {
@@ -1399,7 +1399,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "optional_site_genesis_should_issue_decline_and_paid_token_branches"
+        "testName": "rule_catalog_0857_optional_site_genesis_issues_decline_and_paid_token_branches"
       }
     },
     {
@@ -1417,7 +1417,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site"
+        "testName": "rule_catalog_0859_geomancer_creates_rubble_and_privately_replaces_with_top_atlas_site"
       }
     },
     {
@@ -1436,7 +1436,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
-        "testName": "site_genesis_should_resume_after_ordered_terrain_replacement_deathrites"
+        "testName": "rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deathrites"
       }
     },
     {
@@ -1500,7 +1500,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
-        "testName": "observatory_genesis_should_privately_reorder_next_three_spells_without_drawing"
+        "testName": "rule_catalog_0858_observatory_genesis_privately_reorders_next_three_spells"
       }
     },
     {
@@ -1584,7 +1584,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
-        "testName": "mana_activation_should_require_readiness_tap_add_printed_mana_reveal_and_expire"
+        "testName": "rule_catalog_0864_mana_activation_requires_readiness_tap_and_expires"
       }
     },
     {
@@ -1643,7 +1643,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/damage_prevention_rules.rs",
-        "testName": "active_minion_should_prevent_damage_from_unit_at_current_power_threshold"
+        "testName": "rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold"
       }
     },
     {
@@ -1967,7 +1967,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
-        "testName": "lethal_requires_positive_minion_damage"
+        "testName": "rule_catalog_0862_lethal_requires_positive_minion_damage"
       }
     },
     {
@@ -2800,7 +2800,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
-        "testName": "deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw"
+        "testName": "rule_catalog_0861_deaths_door_prevents_same_turn_damage_and_later_draw"
       }
     },
     {
@@ -3056,7 +3056,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
-        "testName": "air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_and_reset"
+        "testName": "rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset"
       }
     },
     {
@@ -3071,7 +3071,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
-        "testName": "air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_and_reset"
+        "testName": "rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset"
       }
     },
     {
@@ -19862,6 +19862,208 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
         "testName": "rule_catalog_0855_rubble_replacement_strips_enemy_stealth_like_play_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0856",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Vile Imp may deal 2 damage to one adjacent unit or decline.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "decline"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_branches"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0857",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Humble Village Genesis may spend its mana to summon one Foot Soldier.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis"
+      ],
+      "actionHints": [
+        "summon"
+      ],
+      "eventHints": [
+        "mana-change",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0857_optional_site_genesis_issues_decline_and_paid_token_branches"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0858",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Observatory privately reorders the next three spells without drawing.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "private-reorder"
+      ],
+      "actionHints": [
+        "resolve-genesis-spell-order"
+      ],
+      "eventHints": [
+        "spells-reordered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0858_observatory_genesis_privately_reorders_next_three_spells"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0859",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Geomancer creates Rubble and privately replaces it with the top Atlas site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "rubble"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0859_geomancer_creates_rubble_and_privately_replaces_with_top_atlas_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0860",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Site Genesis resumes after ordered terrain-replacement Deathrites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deathrites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0861",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Death's Door prevents same-turn direct damage and later simultaneous death blows draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deaths-door"
+      ],
+      "actionHints": [
+        "draw"
+      ],
+      "eventHints": [
+        "damage",
+        "death",
+        "card-draw"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0861_deaths_door_prevents_same_turn_damage_and_later_draw"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0862",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Lethal kills a tougher minion with positive damage but not zero damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0862_lethal_requires_positive_minion_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0863",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An active minion prevents damage from a unit at its current-power threshold.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "elemental-threshold",
+        "derived-power"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_prevention_rules.rs",
+        "testName": "rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0864",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A minion mana ability requires readiness, taps, and expires at End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "tap"
+      ],
+      "eventHints": [
+        "effect-expiry",
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_0864_mana_activation_requires_readiness_tap_and_expires"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0865",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sparkmage counts every player-cast spell source, resets, and damages one other unit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "cast"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset"
       }
     }
   ]

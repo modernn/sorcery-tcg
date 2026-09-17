@@ -202,7 +202,7 @@ fn rule_catalog_0802_zero_air_threshold_taps_without_rng_or_damage() {
     clippy::too_many_lines,
     reason = "one replayed scenario proves counter accumulation, random damage, reset, and zero damage"
 )]
-fn air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_and_reset() {
+fn rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset() {
     let mut session = first_main(7);
     for expected_threshold in [1, 2] {
         accept_where(&mut session, |descriptor| {

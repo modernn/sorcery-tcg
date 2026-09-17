@@ -758,7 +758,7 @@ fn rule_catalog_0772_zero_power_avatars_emit_no_zero_damage_or_life_loss() {
     clippy::too_many_lines,
     reason = "one direct rule proof keeps each exact combat transcript together"
 )]
-fn lethal_requires_positive_minion_damage() {
+fn rule_catalog_0862_lethal_requires_positive_minion_damage() {
     let resolve = |attack, seed| {
         let manifest = scenario_manifest(seed, attack, 5, true, 1, 20);
         let mut setup = north_attacks_with_manifest(&manifest);
@@ -921,7 +921,7 @@ fn lethal_requires_positive_minion_damage() {
     clippy::too_many_lines,
     reason = "one direct rule proof keeps the exact three-fight transcript together"
 )]
-fn deaths_door_prevents_same_turn_damage_and_later_simultaneous_death_blows_draw() {
+fn rule_catalog_0861_deaths_door_prevents_same_turn_damage_and_later_draw() {
     let AvatarAttackSetup {
         north_avatar_instance_id,
         north_minion_instance_id,

@@ -229,7 +229,7 @@ fn setup(session: &mut Session, deathrite_count: usize) -> (Value, Vec<Value>) {
     clippy::too_many_lines,
     reason = "one direct continuation proof keeps terrain replacement, ordered Deathrites, and Genesis together"
 )]
-fn site_genesis_should_resume_after_ordered_terrain_replacement_deathrites() {
+fn rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deathrites() {
     let manifest = manifest();
     let mut session = Session::new(&manifest).expect("valid terrain Genesis scenario");
     let (top, deathrites) = setup(&mut session, 2);

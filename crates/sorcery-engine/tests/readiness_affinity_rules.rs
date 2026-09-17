@@ -744,7 +744,7 @@ fn rule_catalog_0094_granary_rats_suppress_site_threshold_while_enabled() {
     clippy::too_many_lines,
     reason = "direct scenario proof keeps the readiness and expiration sequence visible"
 )]
-fn mana_activation_should_require_readiness_tap_add_printed_mana_reveal_and_expire() {
+fn rule_catalog_0864_mana_activation_requires_readiness_tap_and_expires() {
     let mut mana_source = minion(1, 2);
     mana_source["charge"] = json!(true);
     mana_source["stealth"] = json!(true);

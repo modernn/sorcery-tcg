@@ -229,7 +229,7 @@ fn resolve_fight(seed: u32, source_power: u8, disabled_target: bool) -> FightRes
     clippy::too_many_lines,
     reason = "one direct rule proof compares all threshold and disabled cases"
 )]
-fn active_minion_should_prevent_damage_from_unit_at_current_power_threshold() {
+fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() {
     let prevented = resolve_fight(170, 4, false);
     assert_eq!(
         event_values(&prevented.fight),

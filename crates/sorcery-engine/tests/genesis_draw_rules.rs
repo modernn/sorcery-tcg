@@ -572,7 +572,7 @@ fn rule_catalog_0843_undamaged_zero_defense_genesis_survives_until_positive_dama
     clippy::too_many_lines,
     reason = "one direct proof covers issued branches, Ward, checkpoint, and replay parity"
 )]
-fn optional_targeted_genesis_damage_should_issue_decline_and_nearby_unit_branches() {
+fn rule_catalog_0856_optional_targeted_genesis_damage_issues_decline_and_nearby_branches() {
     let mut vile_imp = minion(2, 2);
     vile_imp["genesisMayDamageTargetAdjacentUnit"] = json!(2);
     let mut warded_enemy = minion(1, 2);
@@ -1702,7 +1702,7 @@ fn rule_catalog_0849_site_genesis_publicly_discards_top_spells_without_deck_out(
     clippy::too_many_lines,
     reason = "one direct scenario compares both engine-issued optional Genesis branches"
 )]
-fn optional_site_genesis_should_issue_decline_and_paid_token_branches() {
+fn rule_catalog_0857_optional_site_genesis_issues_decline_and_paid_token_branches() {
     let mut value = manifest_value(
         103,
         &avatar(false, 20),
@@ -6206,7 +6206,7 @@ fn rule_catalog_0850_seasonal_river_genesis_privately_keeps_or_bottoms_next_spel
     clippy::too_many_lines,
     reason = "one direct proof covers prefix permutations, privacy, and short Spellbooks"
 )]
-fn observatory_genesis_should_privately_reorder_next_three_spells_without_drawing() {
+fn rule_catalog_0858_observatory_genesis_privately_reorders_next_three_spells() {
     let manifest = private_site_genesis_manifest(161, &json!({ "genesisReorderNextSpells": 3 }), 6);
     let before = state(&opening_checkpoint(&manifest));
     let before_spellbook = before["players"]["north"]["spellbook"].clone();
@@ -6516,7 +6516,7 @@ fn rule_catalog_0852_hidden_spell_genesis_resumes_after_private_rubble_replaceme
     clippy::too_many_lines,
     reason = "one direct proof covers Geomancer creation, private replacement, and deferred Genesis"
 )]
-fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site() {
+fn rule_catalog_0859_geomancer_creates_rubble_and_privately_replaces_with_top_atlas_site() {
     let ready = |manifest: &str| {
         let mut session = Session::new(manifest).expect("valid Geomancer scenario");
         keep(&mut session);
