@@ -4805,6 +4805,10 @@ fn resolve_chain_deathrite_withheld_seed_with(start: u32) -> String {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "resolve-chain-magic Deathrite withhold scenario proof keeps assertions inline"
+)]
 fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order() {
     let encoded = resolve_chain_deathrite_withheld_seed_with(1152);
     let setup = try_staged_resolve_before_deathrite_order(&encoded)
@@ -4837,7 +4841,7 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
         .expect("staged extend after aura removal")
         .into_iter()
         .find(|action| {
-            let descriptor = issued_descriptor(&action);
+            let descriptor = issued_descriptor(action);
             descriptor["kind"] == "extend-chain-magic"
                 && descriptor["target"]["instanceId"] == avatar_id
         })
@@ -4889,7 +4893,7 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| issued_descriptor(&action)["kind"] == "order-deathrites")
+        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
         .map(|action| {
             issued_descriptor(&action)["sourceInstanceId"]
                 .as_str()
@@ -4903,7 +4907,7 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
         .expect("Deathrite order actions")
         .into_iter()
         .find(|action| {
-            let descriptor = issued_descriptor(&action);
+            let descriptor = issued_descriptor(action);
             descriptor["kind"] == "order-deathrites"
                 && descriptor["sourceInstanceId"] == deathrite_ids[0]
         })

@@ -1791,12 +1791,6 @@ fn deathrite_trebuchet_manifest(seed: u32) -> String {
     )
 }
 
-fn north_has_rain(snapshot: &Value) -> bool {
-    snapshot["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
-}
-
 struct PendingDeathriteTrebuchetSetup {
     artifact_id: String,
     deathrite_ids: [String; 2],

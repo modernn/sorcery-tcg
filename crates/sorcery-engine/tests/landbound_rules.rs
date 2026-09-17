@@ -866,11 +866,13 @@ fn rule_catalog_1150_activate_mana_withheld_during_pending_deathrite_order() {
     assert_eq!(paused["phase"], "deathrite-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(observed_unit(session, &mana_id)["tapped"], false);
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "activate-mana"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-mana")
+    );
     assert!(!offers(session, activates_mana(&mana_id)));
 
     let order_sources: Vec<_> = session

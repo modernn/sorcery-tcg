@@ -26490,6 +26490,232 @@
         "file": "crates/sorcery-engine/tests/rolling_boulder_rules.rs",
         "testName": "rule_catalog_1142_rolling_boulder_carried_artifact_relocates_with_pusher"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1143",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-artifact-roll-damage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "activate-artifact-roll-damage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-rolled",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rolling_boulder_rules.rs",
+        "testName": "rule_catalog_1143_activate_artifact_roll_damage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1144",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-artifact-damage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereToDamageUnitWithinTwoSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-damage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-damage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1145",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-artifact-discard-area-damage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps"
+      ],
+      "actionHints": [
+        "activate-artifact-discard-area-damage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "artifact-discard-area-damage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_rules.rs",
+        "testName": "rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1146",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-area-damage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToDamageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "activate-area-damage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "area-damage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/area_damage_rules.rs",
+        "testName": "rule_catalog_1146_activate_area_damage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1147",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-discard-random-damage is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToDiscardRandomCardAndDamageRandomOtherUnitAtNearbyLocation"
+      ],
+      "actionHints": [
+        "activate-discard-random-damage",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lucky_charm_footprint_rules.rs",
+        "testName": "rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1148",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, cast-aura is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "floodTargetLandSite"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1148_cast_aura_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1149",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, fly-site is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "flyOncePerTurn"
+      ],
+      "actionHints": [
+        "fly-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-flown"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/site_flight_void_rules.rs",
+        "testName": "rule_catalog_1149_fly_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1150",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, activate-mana is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapForMana"
+      ],
+      "actionHints": [
+        "activate-mana",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "mana-gained"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/landbound_rules.rs",
+        "testName": "rule_catalog_1150_activate_mana_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1151",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts Chain Magic before extend, extend-chain-magic is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "chainMagic"
+      ],
+      "actionHints": [
+        "extend-chain-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_1151_extend_chain_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1152",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order interrupts staged Chain Magic after extend, resolve-chain-magic is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "chainMagic"
+      ],
+      "actionHints": [
+        "resolve-chain-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

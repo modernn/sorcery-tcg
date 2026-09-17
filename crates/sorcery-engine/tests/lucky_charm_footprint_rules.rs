@@ -526,6 +526,10 @@ struct PendingDeathriteActivateDiscardSetup {
     session: Session,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "Lucky Charm activate-discard Deathrite withhold setup keeps branch steps inline"
+)]
 fn try_pending_deathrite_with_activate_discard(
     encoded: &str,
 ) -> Option<PendingDeathriteActivateDiscardSetup> {

@@ -1,8 +1,8 @@
 //! Direct proof that a tapped area-damage minion blankets one adjacent location with its own
 //! power and its carried Lethal, without becoming a strike (RULE-CATALOG-0076).
 
-use serde_json::{json, Value};
-use sorcery_engine::canonical::{canonical_json, identity_hash, IdentityHash};
+use serde_json::{Value, json};
+use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -646,11 +646,13 @@ fn rule_catalog_1146_activate_area_damage_withheld_during_pending_deathrite_orde
         "vikings"
     );
     assert!(area_damage_descriptors(session, &source_id).is_empty());
-    assert!(session
-        .legal_actions()
-        .expect("paused legal actions")
-        .iter()
-        .all(|action| action.descriptor["kind"] != "activate-area-damage"));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-area-damage")
+    );
 
     let order_sources: Vec<_> = session
         .legal_actions()
