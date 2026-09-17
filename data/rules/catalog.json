@@ -286,7 +286,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "aramos_should_discard_one_deterministic_random_hand_card_instead_of_mana"
+        "testName": "rule_catalog_0872_aramos_discards_deterministic_random_hand_card_instead_of_mana"
       }
     },
     {
@@ -307,7 +307,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/summon_rules.rs",
-        "testName": "gnarled_wendigo_should_sacrifice_only_local_surface_allies_before_paying_mana"
+        "testName": "rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana"
       }
     },
     {
@@ -1791,7 +1791,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "ranged_strikes_should_apply_ward_lethal_deathrites_and_terminal_results"
+        "testName": "rule_catalog_0867_ranged_strikes_apply_ward_lethal_deathrites_and_terminal_results"
       }
     },
     {
@@ -2554,7 +2554,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "ap_should_commit_deathrite_order_before_nap_resolves_first"
+        "testName": "rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first"
       }
     },
     {
@@ -2611,7 +2611,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "deathrite_area_damage_should_chain_in_ordered_simultaneous_batches"
+        "testName": "rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batches"
       }
     },
     {
@@ -2634,7 +2634,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "deathrite_area_damage_should_use_last_location_ward_reduction_and_lethal"
+        "testName": "rule_catalog_0878_deathrite_area_damage_uses_last_location_ward_reduction_and_lethal"
       }
     },
     {
@@ -3172,7 +3172,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
-        "testName": "end_turn_artifacts_should_cost_their_current_site_controller_life"
+        "testName": "rule_catalog_0879_end_turn_artifacts_cost_current_site_controller_life"
       }
     },
     {
@@ -20064,6 +20064,341 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
         "testName": "rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0866",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged rays respect site range, skip Stealth, and stop at the first visible stack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0866_ranged_rays_use_site_range_skip_stealth_stop_at_first_stack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0867",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ranged strikes without return damage and Ward prevents the first positive damage event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ward",
+        "ranged"
+      ],
+      "actionHints": [
+        "strike"
+      ],
+      "eventHints": [
+        "damage",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0867_ranged_strikes_apply_ward_lethal_deathrites_and_terminal_results"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0868",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged minion pauses Defend movement for one strike before continuing.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "defend",
+        "strike"
+      ],
+      "eventHints": [
+        "movement",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0868_ranged_minion_pauses_defend_movement_for_one_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0869",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Terminal Deathrites clear incremental Ranged movement state when the game ends.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0870",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Incremental movement power loss resolves ordered Deathrites then resumes the remaining path.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "deathrite"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement",
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0870_incremental_movement_power_loss_resolves_deathrite_and_resumes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0871",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged post-strike step does not queue after its shooter loses derived defense.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defense"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0872",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Aramos Mercenaries may discard a deterministic random hand card instead of paying mana.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "discard",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "card-discard",
+        "mana-change"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0872_aramos_discards_deterministic_random_hand_card_instead_of_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0873",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Gnarled Wendigo sacrifices local minions before paying its discounted summon.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon",
+        "sacrifice",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0874",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Gnarled Wendigo payment Deathrites resume one deferred summon and converge on both branches.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon",
+        "sacrifice"
+      ],
+      "eventHints": [
+        "death",
+        "summon"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_converge"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0875",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "A terminal Gnarled Wendigo payment Deathrite ends the game before its deferred summon resumes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "summon",
+        "sacrifice"
+      ],
+      "eventHints": [
+        "death",
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_rules.rs",
+        "testName": "rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_summon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0876",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "AP commits before NAP, then NAP Deathrites resolve before AP Deathrites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [
+        "resolution"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0877",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite damages each other remaining unit here in simultaneous chained batches.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathrite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "damage"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batches"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0878",
+      "requirementIds": [
+        "RULE-05"
+      ],
+      "plainLanguage": "Deathrite uses its moved last location with Ward, reduction, and Lethal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathrite",
+        "ward",
+        "lethal"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0878_deathrite_area_damage_uses_last_location_ward_reduction_and_lethal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0879",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Artifacts make their current site controller lose life at each turn end.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0879_end_turn_artifacts_cost_current_site_controller_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0880",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A fixed 2x2 footprint drives movement, combat, Auras, and terrain interactions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fixed-footprint"
+      ],
+      "actionHints": [
+        "move"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/footprint_rules.rs",
+        "testName": "rule_catalog_0880_fixed_two_by_two_footprint_drives_supported_interaction_core"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0881",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A finished game with verified private-local authority and passing TEST-04 gates classifies as ranked.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0881_private_local_allowlisted_manifest_classifies_ranked"
       }
     }
   ]

@@ -45,7 +45,7 @@ fn rule_catalog_0506_finished_synthetic_game_classifies_unranked_unverified_auth
 }
 
 #[test]
-fn rule_catalog_0866_private_local_allowlisted_manifest_classifies_ranked() {
+fn rule_catalog_0881_private_local_allowlisted_manifest_classifies_ranked() {
     let manifest_json = verified_private_local_manifest(31).expect("verified manifest");
     let game = sorcery_engine::game::Game::from_manifest_json(&manifest_json).expect("game");
     let policy =

@@ -339,7 +339,7 @@ fn setup_to_north_fourth_turn(blocks_ground_entry: bool) -> (Session, String, St
     clippy::too_many_lines,
     reason = "one direct footprint proof keeps movement, combat, response, checkpoint, and replay together"
 )]
-fn fixed_two_by_two_footprint_should_drive_the_supported_interaction_core() {
+fn rule_catalog_0880_fixed_two_by_two_footprint_drives_supported_interaction_core() {
     let (mut session, shooter, combat_target, interceptor) = setup_to_north_fourth_turn(false);
     let giant_actions = session
         .legal_actions()

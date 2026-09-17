@@ -425,7 +425,7 @@ fn rule_catalog_0787_bladderblimp_deathrite_counts_nearby_controlled_sites() {
     clippy::too_many_lines,
     reason = "one direct scenario proves last-location Ward, reduction, and Lethal branches"
 )]
-fn deathrite_area_damage_should_use_last_location_ward_reduction_and_lethal() {
+fn rule_catalog_0878_deathrite_area_damage_uses_last_location_ward_reduction_and_lethal() {
     let ward_manifest = combat_manifest(
         266,
         &json!({ "attack": 0, "deathriteDamageEachUnitHere": 2 }),
@@ -834,7 +834,7 @@ fn rule_catalog_0803_deathrite_healing_caps_skips_deaths_door_precedes_cemetery(
     clippy::too_many_lines,
     reason = "one direct scenario proves the complete AP-then-NAP ordering transaction"
 )]
-fn ap_should_commit_deathrite_order_before_nap_resolves_first() {
+fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
     let seed = 281;
     let mut manifest = base_manifest(seed);
     let preview_manifest = finish_manifest(manifest.clone(), "synthetic-ap-nap-preview-v1");
@@ -1035,7 +1035,7 @@ fn ap_should_commit_deathrite_order_before_nap_resolves_first() {
     clippy::too_many_lines,
     reason = "one direct scenario proves ordered nested Deathrite damage batches"
 )]
-fn deathrite_area_damage_should_chain_in_ordered_simultaneous_batches() {
+fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batches() {
     let seed = 263;
     let mut manifest = base_manifest(seed);
     let preview_manifest = finish_manifest(manifest.clone(), "synthetic-area-preview-v1");

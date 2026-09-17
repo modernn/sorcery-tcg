@@ -295,7 +295,7 @@ fn devils_egg_cards() -> Value {
     clippy::too_many_lines,
     reason = "one direct rule proof keeps both seats' charges and their exact ordering together"
 )]
-fn end_turn_artifacts_should_cost_their_current_site_controller_life() {
+fn rule_catalog_0879_end_turn_artifacts_cost_current_site_controller_life() {
     let mut unbounded = devils_egg_cards();
     unbounded["north-egg"]["atEndOfEachTurnSiteControllerLosesLife"] = json!(0);
     let rejected = Session::new(&manifest(
