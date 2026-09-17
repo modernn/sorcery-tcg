@@ -1,4 +1,4 @@
-//! Direct proofs for protected-site Craterize Magic (RULE-CATALOG-0657–0658).
+//! Direct proofs for protected-site Craterize Magic (RULE-CATALOG-0657–0658, 1082).
 //!
 //! Plain destroy-site and return-site Magic already have dedicated protected
 //! edges at RULE-CATALOG-0624 and RULE-CATALOG-0626 (from `magic_rules.rs` 0208
@@ -6,6 +6,10 @@
 //! its Atlas discard and applies its damage grid when the target cannot be
 //! moved, destroyed, or modified: the site stays, the occupant is still hit,
 //! and the spell still resolves.
+//!
+//! 1082 covers Craterize killing a Deathrite minion on the target site: the
+//! controller draws a site and magic-resolved only appears after deathrite
+//! settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -43,6 +47,18 @@ fn minion() -> Value {
     })
 }
 
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn crater_spell() -> Value {
     json!({
         "cardType": "magic",
@@ -75,6 +91,41 @@ fn crater_manifest(seed: u32, protected: bool) -> String {
             "south-avatar": avatar(),
             "south-minion": minion(),
             "south-site": site(protected),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-crater"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn crater_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "protected-site-crater-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-protected-site-crater-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-crater": crater_spell(),
+            "north-site": site(false),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(false),
         },
         "decks": {
             "north": {
@@ -172,6 +223,31 @@ fn seed_with(protected: bool, start: u32) -> String {
         .expect("bounded seed with Craterize Magic in the opening hand")
 }
 
+fn seed_with_deathrite(start: u32) -> String {
+    (start..start + 256)
+        .map(crater_deathrite_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-crater")
+        })
+        .expect("bounded seed with Craterize Deathrite setup")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
 fn stage_south_site_at_c1(session: &mut Session) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -189,6 +265,37 @@ fn stage_south_site_at_c1(session: &mut Session) -> String {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
     south_site_id
+}
+
+fn one_south_deathrite_at_c1(session: &mut Session) -> (String, String) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let south_site_id = state(session)["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South site identity")
+        .to_owned();
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (
+        south_site_id,
+        summoned["cardInstanceId"]
+            .as_str()
+            .expect("summoned minion identity")
+            .to_owned(),
+    )
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -381,5 +488,86 @@ fn rule_catalog_0658_craterize_is_prevented_on_a_protected_site_but_still_deals_
             .iter()
             .any(|card| card["instanceId"] == south_site_id)
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1082_craterize_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_deathrite(1082);
+    let mut session = opening_main(&encoded);
+    let (south_site_id, target_id) = one_south_deathrite_at_c1(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, receipt) = cast_crater_at_c1(&mut session, &south_site_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-destroyed",
+            "magic-damage-allocated",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "avatar-life-lost",
+            "rubble-created",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    let allocated = receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "magic-damage-allocated"
+                && event.payload["targetInstanceId"] == target_id
+        })
+        .expect("grid allocation to Deathrite minion");
+    assert_eq!(allocated.payload["amount"], 1);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    let types = event_types(&receipt);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &target_id).is_none());
+    assert_eq!(finished["realm"]["sites"]["C1"]["rubble"], true);
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
