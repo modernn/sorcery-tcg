@@ -1113,6 +1113,7 @@ type GameActionDescriptor =
     cardId: string;
     cardInstanceId: StateHash;
     casterInstanceId: StateHash;
+    discardCardInstanceId?: StateHash;
     kind: 'begin-chain-magic';
     target: GameUnitRef;
   }>

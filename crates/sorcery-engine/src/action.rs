@@ -543,6 +543,9 @@ pub enum ActionDescriptor {
         card_instance_id: IdentityHash,
         /// Authoritative Spellcaster instance identity.
         caster_instance_id: IdentityHash,
+        /// Exact hand card discarded as an additional player-chosen cost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        discard_card_instance_id: Option<IdentityHash>,
         /// First engine-issued unit target.
         target: UnitTarget,
     },
@@ -1301,17 +1304,25 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                     card_id: left_card,
                     card_instance_id: left_instance,
                     caster_instance_id: left_caster,
+                    discard_card_instance_id: left_discard_card,
                     target: left_target,
                 },
                 ActionDescriptor::BeginChainMagic {
                     card_id: right_card,
                     card_instance_id: right_instance,
                     caster_instance_id: right_caster,
+                    discard_card_instance_id: right_discard_card,
                     target: right_target,
                 },
             ) => compare_json_strings(left_card, right_card)
                 .then_with(|| left_instance.cmp(right_instance))
                 .then_with(|| left_caster.cmp(right_caster))
+                .then_with(|| {
+                    compare_optional_identities(
+                        left_discard_card.as_ref(),
+                        right_discard_card.as_ref(),
+                    )
+                })
                 .then_with(|| compare_unit_targets(left_target, right_target)),
             (
                 ActionDescriptor::CastMagic {

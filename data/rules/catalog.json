@@ -20493,6 +20493,51 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0886_deaths_door_cannot_begin_pay_life_chain_magic"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0887",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a chosen-discard additional cost discards the named hand card before magic-cast and resolves the staged chain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0887_chain_magic_discard_is_paid_before_the_cast_resolves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0888",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a chosen-discard additional cost is not offered when the caster has no other hand card to discard.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0888_chain_magic_discard_is_unoffered_without_another_hand_card"
+      }
     }
   ]
 }

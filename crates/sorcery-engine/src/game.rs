@@ -715,6 +715,7 @@ struct PendingChainMagic {
     card_id: CardId,
     card_instance_id: IdentityHash,
     caster_instance_id: IdentityHash,
+    discard_card_instance_id: Option<IdentityHash>,
     seat: Seat,
     targets: Vec<UnitTarget>,
 }
@@ -2401,9 +2402,20 @@ impl Game {
         let mana_paid = facts.mana_cost
             + CHAIN_MAGIC_EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
         let can_resolve = u64::from(player.mana) >= mana_paid
-            && facts.pay_life_as_additional_cost.is_none_or(|amount| {
-                player.avatar.life >= u16::from(amount)
-            });
+            && facts
+                .pay_life_as_additional_cost
+                .is_none_or(|amount| player.avatar.life >= u16::from(amount))
+            && (!facts.discard_card_as_additional_cost
+                || pending
+                    .discard_card_instance_id
+                    .as_ref()
+                    .is_some_and(|discard_id| {
+                        self.chain_magic_discard_still_legal(
+                            pending.seat,
+                            &pending.card_instance_id,
+                            discard_id,
+                        )
+                    }));
         if can_resolve {
             let finish = ActionDescriptor::ResolveChainMagic;
             self.push_action(
@@ -3568,6 +3580,15 @@ impl Game {
             }
             for (caster_kind, caster_instance_id) in &spellcasters {
                 if facts.effect == MagicEffect::DamageChainNearbyUnits {
+                    let discard_ids = if facts.discard_card_as_additional_cost {
+                        let options = self.chain_magic_discard_options(seat, &card.instance_id);
+                        if options.is_empty() {
+                            continue;
+                        }
+                        options
+                    } else {
+                        Vec::new()
+                    };
                     let caster = match caster_kind {
                         UnitKind::Avatar => UnitTarget::Avatar {
                             instance_id: caster_instance_id.clone(),
@@ -3579,16 +3600,27 @@ impl Game {
                         },
                     };
                     for target in self.chain_magic_targets(seat, &caster, &caster, &[])? {
-                        let descriptor = ActionDescriptor::BeginChainMagic {
-                            card_id: definition.id.clone(),
-                            card_instance_id: card.instance_id.clone(),
-                            caster_instance_id: caster_instance_id.clone(),
-                            target,
+                        let discard_variants = if facts.discard_card_as_additional_cost {
+                            discard_ids
+                                .iter()
+                                .map(|discard_id| Some(discard_id.clone()))
+                                .collect::<Vec<_>>()
+                        } else {
+                            vec![None]
                         };
-                        let label = descriptor
-                            .state_independent_label()
-                            .ok_or_else(|| invalid("begin-chain-magic action requires a label"))?;
-                        self.push_action(actions, descriptor, label);
+                        for discard_card_instance_id in discard_variants {
+                            let descriptor = ActionDescriptor::BeginChainMagic {
+                                card_id: definition.id.clone(),
+                                card_instance_id: card.instance_id.clone(),
+                                caster_instance_id: caster_instance_id.clone(),
+                                discard_card_instance_id,
+                                target: target.clone(),
+                            };
+                            let label = descriptor.state_independent_label().ok_or_else(|| {
+                                invalid("begin-chain-magic action requires a label")
+                            })?;
+                            self.push_action(actions, descriptor, label);
+                        }
                     }
                     continue;
                 }
@@ -6660,6 +6692,34 @@ impl Game {
                 ..MagicChoice::default()
             })
             .collect())
+    }
+
+    fn chain_magic_discard_options(
+        &self,
+        seat: Seat,
+        spell_instance_id: &IdentityHash,
+    ) -> Vec<IdentityHash> {
+        let player = &self.position.players[seat_index(seat)];
+        let mut discard_ids: Vec<_> = player
+            .hand_atlas
+            .iter()
+            .chain(&player.hand_spellbook)
+            .filter(|card| card.instance_id != *spell_instance_id)
+            .map(|card| card.instance_id.clone())
+            .collect();
+        discard_ids.sort_unstable();
+        discard_ids
+    }
+
+    fn chain_magic_discard_still_legal(
+        &self,
+        seat: Seat,
+        spell_instance_id: &IdentityHash,
+        discard_id: &IdentityHash,
+    ) -> bool {
+        self.chain_magic_discard_options(seat, spell_instance_id)
+            .iter()
+            .any(|candidate| candidate == discard_id)
     }
 
     fn with_chosen_hand_discard(
@@ -16863,6 +16923,7 @@ impl Game {
             card_id,
             card_instance_id,
             caster_instance_id,
+            discard_card_instance_id,
             target,
         } = &action.descriptor
         else {
@@ -16884,10 +16945,24 @@ impl Game {
                     && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
             })
             .ok_or(GameError::IllegalAction)?;
+        let CardFacts::Magic(facts) = &self.rules.cards[usize::from(card.card_id.0)].facts else {
+            return Err(GameError::IllegalAction);
+        };
+        if facts.discard_card_as_additional_cost {
+            let Some(discard_id) = discard_card_instance_id else {
+                return Err(GameError::IllegalAction);
+            };
+            if !self.chain_magic_discard_still_legal(action.seat, card_instance_id, discard_id) {
+                return Err(GameError::IllegalAction);
+            }
+        } else if discard_card_instance_id.is_some() {
+            return Err(GameError::IllegalAction);
+        }
         self.position.pending_chain_magic = PendingField::Pending(PendingChainMagic {
             card_id: card.card_id,
             card_instance_id: card_instance_id.clone(),
             caster_instance_id: caster_instance_id.clone(),
+            discard_card_instance_id: discard_card_instance_id.clone(),
             seat: action.seat,
             targets: vec![target.clone()],
         });
@@ -16970,6 +17045,26 @@ impl Game {
         }) {
             return Err(GameError::IllegalAction);
         }
+        if facts.discard_card_as_additional_cost {
+            let Some(discard_id) = pending.discard_card_instance_id.as_ref() else {
+                return Err(GameError::IllegalAction);
+            };
+            if !self.chain_magic_discard_still_legal(
+                action.seat,
+                &pending.card_instance_id,
+                discard_id,
+            ) {
+                return Err(GameError::IllegalAction);
+            }
+            self.pay_chosen_hand_discard(
+                action.seat,
+                discard_id,
+                &pending.card_instance_id,
+                outcomes,
+            )?;
+        } else if pending.discard_card_instance_id.is_some() {
+            return Err(GameError::IllegalAction);
+        }
         if let Some(amount) = life_paid {
             self.pay_avatar_life(action.seat, amount, &pending.card_instance_id, outcomes)?;
         }
@@ -17008,6 +17103,9 @@ impl Game {
                 "seat": action.seat,
                 "targetInstanceIds": pending.targets.iter().map(UnitTarget::instance_id).collect::<Vec<_>>(),
             });
+            if let Some(discard_card_instance_id) = pending.discard_card_instance_id.as_ref() {
+                payload["discardCardInstanceId"] = json!(discard_card_instance_id);
+            }
             if let Some(amount) = life_paid {
                 payload["lifePaid"] = json!(amount);
             }
@@ -24979,6 +25077,7 @@ impl Game {
                         "cardId": card_id,
                         "cardInstanceId": pending.card_instance_id,
                         "casterInstanceId": pending.caster_instance_id,
+                        "discardCardInstanceId": pending.discard_card_instance_id,
                         "seat": pending.seat,
                         "targets": pending.targets,
                     }),

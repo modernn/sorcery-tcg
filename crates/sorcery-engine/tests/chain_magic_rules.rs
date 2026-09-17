@@ -1,11 +1,12 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0886).
+//! 0885–0888).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
 //! every chosen unit in one resolve. 0709 is the edge slice: paid Chain Magic
 //! is suppressed without enough mana, and hops cannot leave the caster region.
 //! 0885–0886 cover pay-life additional costs on Chain Magic resolution.
+//! 0887–0888 cover chosen-discard additional costs on Chain Magic.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -71,6 +72,61 @@ fn pay_life_chain(life_cost: u8) -> Value {
         "payLifeAsAdditionalCost": life_cost,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
+}
+
+fn discard_chain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageChainNearbyUnits": true,
+        "discardCardAsAdditionalCost": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn fodder() -> Value {
+    json!({
+        "cardType": "magic",
+        "healController": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn discard_chain_manifest(seed: u32, north_spellbook: &[&str]) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-discard" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-discard-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-chain": discard_chain(),
+            "north-fodder": fodder(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": north_spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn pay_life_chain_manifest(seed: u32, life: u8) -> String {
@@ -698,5 +754,210 @@ fn rule_catalog_0886_deaths_door_cannot_begin_pay_life_chain_magic() {
     assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 0);
     assert!(!state(&session)["players"]["north"]["avatar"]["deathDoorTurn"].is_null());
     assert!(!offers_begin_pay_life_chain(&session));
+    assert_exact_replay(&session);
+}
+
+fn try_setup_discard_chain(encoded: &str) -> Option<(Session, String, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (target, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let before = state(&session);
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let fodder_id = try_hand_instance(&before, "north-fodder")?;
+    let target_id = target["cardInstanceId"].as_str()?.to_owned();
+    Some((session, chain_id, fodder_id, target_id))
+}
+
+fn offers_discard_chain(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardId"] == "north-chain"
+        })
+}
+
+#[test]
+fn rule_catalog_0887_chain_magic_discard_is_paid_before_the_cast_resolves() {
+    let spellbook = [
+        "north-chain",
+        "north-fodder",
+        "north-fodder",
+        "north-chain",
+        "north-fodder",
+        "north-fodder",
+    ];
+    let encoded = (887..887 + 512)
+        .map(|seed| discard_chain_manifest(seed, &spellbook))
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-fodder"])
+                && try_setup_discard_chain(candidate).is_some()
+        })
+        .expect("bounded seed with Chain Magic, fodder, and completable setup");
+    let (mut session, chain_id, fodder_id, target_id) =
+        try_setup_discard_chain(&encoded).expect("discard Chain Magic setup");
+    assert!(offers_discard_chain(&session));
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    assert_eq!(begin.events.len(), 0);
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "card-discarded",
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(resolved.events[0].payload["instanceId"], fodder_id);
+    assert_eq!(resolved.events[0].payload["sourceInstanceId"], chain_id);
+    assert_eq!(
+        resolved.events[1].payload["discardCardInstanceId"],
+        fodder_id
+    );
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == fodder_id)
+    );
+    assert!(realm_unit(&after, &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
+fn north_spell_card_ids(snapshot: &Value) -> Vec<String> {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .map(|card| card["cardId"].as_str().expect("card id").to_owned())
+        .collect()
+}
+
+fn north_hand_ids(snapshot: &Value, zone: &str) -> Vec<String> {
+    snapshot["players"]["north"]["hand"][zone]
+        .as_array()
+        .expect("north hand zone")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("hand identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn cast_all_fodder(session: &mut Session) {
+    while session
+        .legal_actions()
+        .expect("fodder actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-fodder"
+        })
+    {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-fodder"
+        });
+    }
+}
+
+fn seed_with_discard_chain(north_spellbook: &[&str], required: &[&str], start: u32) -> String {
+    (start..start + 256)
+        .map(|seed| discard_chain_manifest(seed, north_spellbook))
+        .find(|candidate| opening_has_all(candidate, required))
+        .expect("bounded seed with required opening cards")
+}
+
+#[test]
+fn rule_catalog_0888_chain_magic_discard_is_unoffered_without_another_hand_card() {
+    let encoded = seed_with_discard_chain(
+        &[
+            "north-chain",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+            "north-fodder",
+        ],
+        &["north-chain"],
+        888,
+    );
+    let mut session = opening_main(&encoded);
+    assert!(
+        offers_discard_chain(&session),
+        "Atlas leftovers still pay the discard cost"
+    );
+    cast_all_fodder(&mut session);
+    assert!(offers_discard_chain(&session));
+    for _ in 0..2 {
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        if state(&session)["players"]["south"]["domainEstablished"].as_bool() != Some(true) {
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+            });
+        }
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+        accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+        cast_all_fodder(&mut session);
+    }
+    let after = state(&session);
+    assert_eq!(north_hand_ids(&after, "atlas").len(), 0);
+    assert_eq!(north_spell_card_ids(&after), ["north-chain".to_owned()]);
+    assert!(
+        !offers_discard_chain(&session),
+        "an empty other-hand must issue no discard Chain Magic"
+    );
     assert_exact_replay(&session);
 }
