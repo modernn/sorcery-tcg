@@ -284,7 +284,7 @@ fn seed_with_fade_and_raider(start: u32, fixture: &str, revision: &str) -> Strin
         .expect("bounded seed with fade and raider filling the opening hand")
 }
 
-fn south_plays_c1(session: &mut Session) {
+fn south_plays_c1_then_north_draws_atlas(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -300,7 +300,7 @@ fn south_plays_c1(session: &mut Session) {
     });
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
 }
 
@@ -676,7 +676,7 @@ fn rule_catalog_0987_stealth_enemy_site_grant_then_empty_spellbook_is_a_deck_out
             .len(),
         0
     );
-    south_plays_c1(&mut session);
+    south_plays_c1_then_north_draws_atlas(&mut session);
     let (raid, _) = accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-raider"
