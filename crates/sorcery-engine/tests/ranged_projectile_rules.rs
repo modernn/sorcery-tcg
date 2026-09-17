@@ -327,7 +327,7 @@ fn fire_south(session: &mut Session, shooter_id: &str, target_id: &str) -> Recei
     clippy::too_many_lines,
     reason = "one direct ray proof compares default, bonus, stacked, and mixed action ordering"
 )]
-fn ranged_rays_should_use_site_range_skip_stealth_and_stop_at_first_visible_stack() {
+fn rule_catalog_0866_ranged_rays_use_site_range_skip_stealth_stop_at_first_stack() {
     let ranged_and_fixed = minion(json!({
         "ranged": true,
         "tapToShootProjectileDamage": 1,
