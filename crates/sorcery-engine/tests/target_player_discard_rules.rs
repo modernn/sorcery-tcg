@@ -1,9 +1,11 @@
-//! Direct proofs for target-player discard Magic (RULE-CATALOG-0643–0644).
+//! Direct proofs for target-player discard Magic (RULE-CATALOG-0643–0644,
+//! RULE-CATALOG-0919).
 //!
 //! Target-player discard offers only both Avatars. After the cast is
 //! announced, the targeted player chooses one of their own Atlas or
 //! Spellbook hand cards. An empty hand is a paid no-op, never a random
-//! discard and never a deck-out.
+//! discard and never a deck-out. A count above one keeps the pending
+//! Storyline open until each sequential choice is taken.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -439,5 +441,82 @@ fn rule_catalog_0644_target_player_discard_is_a_paid_noop_without_cards() {
     assert_eq!(state(&session)["phase"], "main");
     assert_eq!(state(&session)["decisionSeat"], "north");
     assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0919_multi_discard_storyline_defers_magic_resolved_until_each_choice() {
+    let encoded = seed_with(2, 6, 919);
+    let mut session = opening_main(&encoded);
+    let before = state(&session);
+    let south_avatar = before["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    let south_spells = hand_ids(&before, "south", "spellbook");
+    let first = south_spells[0].clone();
+    let second = south_spells[1].clone();
+    let (_, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    let spell_id = cast.events[0].payload["instanceId"].clone();
+    assert_eq!(event_types(&cast), ["magic-cast"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "discard-card");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["remaining"], 2);
+    assert_eq!(pending["pendingDiscardCards"]["seat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["sourceInstanceId"], spell_id);
+    assert!(
+        session
+            .legal_actions()
+            .expect("pending discard actions")
+            .iter()
+            .all(|action| action.seat == Seat::South)
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("no caster actions during the Storyline")
+            .iter()
+            .all(|action| action.seat == Seat::South)
+    );
+    let (_, first_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == first
+            && descriptor["zone"] == "spellbook"
+    });
+    assert_eq!(event_types(&first_receipt), ["card-discarded"]);
+    assert_eq!(
+        first_receipt.events[0].payload["sourceInstanceId"],
+        spell_id
+    );
+    let mid = state(&session);
+    assert_eq!(mid["phase"], "discard-card");
+    assert_eq!(mid["decisionSeat"], "south");
+    assert_eq!(mid["pendingDiscardCards"]["remaining"], 1);
+    assert_eq!(mid["pendingDiscardCards"]["sourceInstanceId"], spell_id);
+    let (_, second_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == second
+            && descriptor["zone"] == "spellbook"
+    });
+    assert_eq!(
+        event_types(&second_receipt),
+        ["card-discarded", "magic-resolved"]
+    );
+    assert_eq!(second_receipt.events[1].payload["instanceId"], spell_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["decisionSeat"], "north");
+    assert!(after.get("pendingDiscardCards").is_none());
+    assert_eq!(
+        after["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .expect("south hand")
+            .len(),
+        1
+    );
     assert_exact_replay(&session);
 }
