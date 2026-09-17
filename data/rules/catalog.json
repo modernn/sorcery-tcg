@@ -2958,16 +2958,22 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "Mesmerism transfers a minion and its Deathrite to the new controller.",
+      "plainLanguage": "Mesmerism transfers an adjacent nearby minion and its Deathrite to the new controller after the caster moves. A two-step-away minion on the same board is not offered. Distinct from 0659–0660, which prove same-cell nearby and a far-only board.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "deathrite"
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
       ],
-      "actionHints": [],
-      "eventHints": [],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn"
+      ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0146_mesmerism_should_transfer_a_minion_and_its_deathrite_to_the_new_controller"
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_0683_mesmerism_steals_the_adjacent_minion_and_its_deathrite_after_the_caster_moves"
       }
     },
     {
@@ -15760,6 +15766,63 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
         "testName": "rule_catalog_0678_cave_in_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0683",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic, after the caster Avatar steps from C4 to C3, offers the adjacent C2 minion and transfers it and its Deathrite to the caster. The two-step C1 minion stays unoffered on that same board. Distinct from 0659, which steals a same-cell minion with no far candidate present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite",
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "magic-damage-allocated",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_0683_mesmerism_steals_the_adjacent_minion_and_its_deathrite_after_the_caster_moves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0684",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic, after the caster Avatar steps from C4 to C3, does not offer the two-step C1 minion even while the adjacent C2 minion is a legal target. Killing that far minion resolves Deathrite for the original controller. Distinct from 0660, which places only a far minion three steps from an unmoved caster.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite",
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_0684_mesmerism_does_not_offer_a_two_step_minion_while_an_adjacent_one_remains"
       }
     }
   ]
