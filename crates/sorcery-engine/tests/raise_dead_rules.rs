@@ -1,9 +1,10 @@
 //! Direct proofs for summon-random-minion-from-any-cemetery Magic
-//! (RULE-CATALOG-0159, 0583–0584, 0707–0708).
+//! (RULE-CATALOG-0159, 0583–0584, 0707–0708, RULE-CATALOG-1054).
 //!
 //! Ordinary Raise Dead draws one random minion from either cemetery and
 //! opens free placement. An empty cemetery pool still resolves the spell as a
-//! paid no-op.
+//! paid no-op. While Deathrites wait for ordering, raise Magic stays withheld
+//! until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -56,6 +57,38 @@ fn raise_dead() -> Value {
     })
 }
 
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -103,6 +136,29 @@ fn raise_manifest(seed: u32) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -227,6 +283,148 @@ fn south_establishes_domain_if_required(session: &mut Session) {
     }
 }
 
+fn raise_ready(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("raise actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-raise"
+        })
+}
+
+fn deathrite_raise_manifest(seed: u32) -> String {
+    let fixture = "raise-dead-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-raise": raise_dead(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-raise",
+                    "north-rain",
+                    "north-rain",
+                    "north-raise",
+                    "north-rain",
+                    "north-raise",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_raise_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-raise", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteRaiseSetup {
+    cemetery_ids: Vec<String>,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_raise_ready(encoded: &str) -> Option<PendingDeathriteRaiseSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_raise_and_rain(&state(&session)) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    let mut cemetery_ids = deathrite_ids.to_vec();
+    cemetery_ids.push(visitor_id);
+    cemetery_ids.sort_unstable();
+    Some(PendingDeathriteRaiseSetup {
+        cemetery_ids,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_raise_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_raise_manifest)
+        .find(|candidate| try_pending_deathrite_with_raise_ready(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with raise Magic in hand")
+}
+
 fn setup_south_victim_in_cemetery(session: &mut Session) -> String {
     end_and_draw_spellbook(session);
     south_establishes_domain_if_required(session);
@@ -338,4 +536,98 @@ fn rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_place
 #[test]
 fn rule_catalog_0708_raise_dead_blocked_footprint_summon() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0708_raise_dead_blocked_footprint_summon();
+}
+
+#[test]
+fn rule_catalog_1054_raise_dead_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_raise_seed_with(1054);
+    let mut setup = try_pending_deathrite_with_raise_ready(&encoded)
+        .expect("complete raise-dead Deathrite withheld setup");
+    let cemetery_ids = setup.cemetery_ids.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(cemetery_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!raise_ready(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(raise_ready(session));
+
+    let (cast, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-raise"
+    });
+    assert_eq!(
+        event_types(&cast_receipt),
+        ["magic-cast", "dead-minion-selected"]
+    );
+    let raised_id = cast_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("raised minion identity")
+        .to_owned();
+    assert!(
+        cemetery_ids.contains(&raised_id),
+        "Raise Dead must draw from the rain-killed cemetery pool"
+    );
+
+    let (_, summon_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == raised_id
+            && descriptor["manaCost"] == 0
+            && descriptor["region"].is_null()
+    });
+    assert!(event_types(&summon_receipt).contains(&"minion-summoned"));
+    assert!(
+        state(session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == raised_id)
+    );
+    assert_eq!(
+        summon_receipt
+            .events
+            .iter()
+            .find(|event| event.event_type == "minion-summoned")
+            .expect("minion-summoned")
+            .payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    assert_exact_replay(session);
 }
