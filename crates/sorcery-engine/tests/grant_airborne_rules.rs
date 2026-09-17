@@ -1,5 +1,5 @@
 //! Direct proofs for grant-Airborne-this-turn Magic (RULE-CATALOG-0274–0275,
-//! RULE-CATALOG-0665–0666).
+//! RULE-CATALOG-0665–0666, RULE-CATALOG-1026).
 //!
 //! Official Magic can grant Airborne for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, is lost while the
@@ -7,7 +7,8 @@
 //! temporary-effect cleanup. Grounded attackers cannot strike Airborne minions
 //! until they themselves become Airborne. A printed-Airborne ally still takes
 //! the temporary source; End Phase expiry removes that source and leaves the
-//! printed keyword.
+//! printed keyword. Grant-Airborne-to-target-minion Magic stays withheld while
+//! Deathrites wait for ordering.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -74,6 +75,47 @@ fn grant() -> Value {
     })
 }
 
+fn airborne_target_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "grantAirborneToTargetMinion": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -119,6 +161,29 @@ fn manifest(north_ally: &Value, south_spell: &str) -> String {
         "schemaVersion": 1,
         "seed": 1,
     }))
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -242,6 +307,164 @@ fn summon_north_ally(session: &mut Session) -> String {
         .as_str()
         .expect("ally identity")
         .to_owned()
+}
+
+fn grant_airborne_targets(session: &Session) -> Vec<(String, String)> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("grant-Airborne actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-airborne"
+        })
+        .filter_map(|action| {
+            let target = action.descriptor.get("target")?;
+            Some((
+                target["kind"].as_str()?.to_owned(),
+                target["instanceId"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn deathrite_airborne_manifest(seed: u32) -> String {
+    let fixture = "grant-airborne-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-airborne": airborne_target_spell(),
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-airborne",
+                    "north-rain",
+                    "north-rain",
+                    "north-airborne",
+                    "north-rain",
+                    "north-airborne",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_airborne_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-airborne", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteAirborneSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    visitor_id: String,
+}
+
+fn try_pending_deathrite_with_grounded_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteAirborneSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_airborne_and_rain(&state(&session)) {
+        return None;
+    }
+    if grant_airborne_targets(&session).is_empty() {
+        return None;
+    }
+    if public_airborne(&session, &visitor_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteAirborneSetup {
+        deathrite_ids,
+        session,
+        visitor_id,
+    })
+}
+
+fn deathrite_airborne_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_airborne_manifest)
+        .find(|candidate| try_pending_deathrite_with_grounded_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with grant-Airborne Magic in hand")
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -444,4 +667,81 @@ fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
         "printed Airborne remains after the temporary grant expires"
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1026_grant_airborne_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_airborne_seed_with(1026);
+    let mut setup = try_pending_deathrite_with_grounded_visitor(&encoded)
+        .expect("complete grant-Airborne Deathrite withheld setup");
+    let visitor_id = setup.visitor_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(!public_airborne(session, &visitor_id));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(grant_airborne_targets(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(!public_airborne(session, &visitor_id));
+    assert_eq!(
+        grant_airborne_targets(session),
+        [("minion".to_owned(), visitor_id.clone())]
+    );
+
+    let (descriptor, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-airborne"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == visitor_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "airborne-granted", "magic-resolved"]
+    );
+    assert_eq!(receipt.events[1].payload["instanceId"], visitor_id);
+    assert_eq!(receipt.events[1].payload["seat"], "south");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+    assert!(public_airborne(session, &visitor_id));
+    assert_exact_replay(session);
 }

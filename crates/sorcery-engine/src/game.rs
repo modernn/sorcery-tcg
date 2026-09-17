@@ -1484,6 +1484,7 @@ fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
         | MagicEffect::GrantRangedToAllyThisTurn
         | MagicEffect::GrantStealthToAlliedMinionsThenDrawSpell
         | MagicEffect::GrantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell
+        | MagicEffect::GrantAirborneToTargetMinion
         | MagicEffect::GrantStealthToTargetMinion
         | MagicEffect::GrantWardToTargetMinion
         | MagicEffect::WardEachAlliedMinionAtTargetWaterSite
@@ -7456,6 +7457,7 @@ impl Game {
             | MagicEffect::KillTargetMinion
             | MagicEffect::ReturnTargetMinionToOwnerHand
             | MagicEffect::TapTargetMinion
+            | MagicEffect::GrantAirborneToTargetMinion
             | MagicEffect::GrantStealthToTargetMinion
             | MagicEffect::GrantWardToTargetMinion
             | MagicEffect::HealTargetMinion(_)
@@ -13618,6 +13620,67 @@ impl Game {
             });
         }
         self.revert_source_bound_controls(outcomes)
+    }
+
+    fn collect_banish_deathrite_sources(
+        &self,
+        instance_ids: &[IdentityHash],
+    ) -> Result<Vec<PendingDeathriteSource>, GameError> {
+        let mut sources = Vec::new();
+        for instance_id in instance_ids {
+            let unit = self
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?;
+            let CardFacts::Minion(facts) =
+                &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+            else {
+                return Err(GameError::IllegalAction);
+            };
+            let has_deathrite = facts.deathrite_damage_each_unit_here.is_some()
+                || facts.deathrite_draw_site
+                || facts.deathrite_draw_spells
+                || facts.deathrite_heal.is_some()
+                || facts.deathrite_lose_life_per_nearby_site_controlled
+                || facts.deathrite_mill_sites
+                || facts.deathrite_mill_spells;
+            if has_deathrite && !self.minion_abilities_lost(unit) {
+                let (current_power, _, lethal) = self.minion_current_stats(unit)?;
+                sources.push(PendingDeathriteSource {
+                    controller: unit.controller,
+                    current_power,
+                    instance_id: unit.card.instance_id.clone(),
+                    lethal,
+                    unit: unit.clone(),
+                });
+            }
+        }
+        Ok(sources)
+    }
+
+    fn begin_banish_deathrites(
+        &mut self,
+        sources: Vec<PendingDeathriteSource>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        if sources.is_empty() {
+            return Ok(());
+        }
+        self.revert_source_bound_controls(outcomes)?;
+        let batch = self.make_deathrite_batch(sources);
+        let pending = PendingDeathrites {
+            batches: batch.into_iter().collect(),
+            continuation: None,
+            corpses: Vec::new(),
+            deck_losers: Vec::new(),
+            deferred_magic_resolved: None,
+            defeated_avatars: Vec::new(),
+            return_decision_seat: self.position.decision_seat,
+            return_phase: self.position.phase,
+        };
+        self.drive_deathrites(pending, outcomes)
     }
 
     fn begin_minion_deaths(
@@ -20219,6 +20282,31 @@ impl Game {
                     outcomes,
                 )?;
             }
+            MagicEffect::GrantAirborneToTargetMinion => {
+                let Some(UnitTarget::Minion {
+                    instance_id,
+                    seat: target_seat,
+                }) = target
+                else {
+                    return Err(GameError::IllegalAction);
+                };
+                self.position
+                    .units
+                    .iter_mut()
+                    .find(|unit| {
+                        unit.card.instance_id == *instance_id && unit.controller == *target_seat
+                    })
+                    .ok_or(GameError::IllegalAction)?
+                    .temporary_airborne_sources
+                    .push(card_instance_id.clone());
+                outcomes.push("airborne-granted", || {
+                    json!({
+                        "instanceId": instance_id,
+                        "seat": target_seat,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
             MagicEffect::GrantStealthToTargetMinion => {
                 let Some(UnitTarget::Minion {
                     instance_id,
@@ -21506,7 +21594,9 @@ impl Game {
                 }
                 victims.sort_unstable();
                 if !victims.is_empty() {
+                    let sources = self.collect_banish_deathrite_sources(&victims)?;
                     self.banish_units(&victims, outcomes)?;
+                    self.begin_banish_deathrites(sources, outcomes)?;
                 }
             }
             MagicEffect::KillMortalMinionsAtLocationWithinTwoSteps => {
@@ -29879,6 +29969,10 @@ pub mod catalog_proofs {
             (
                 MagicEffect::TargetPlayerLosesLife(2),
                 json!({ "targetPlayerLosesLife": 2 }),
+            ),
+            (
+                MagicEffect::GrantAirborneToTargetMinion,
+                json!({ "grantAirborneToTargetMinion": true }),
             ),
             (
                 MagicEffect::GrantStealthToTargetMinion,
