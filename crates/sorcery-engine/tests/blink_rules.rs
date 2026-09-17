@@ -764,6 +764,66 @@ fn rule_catalog_0040_blink_should_owe_its_draw_until_ordered_deathrites_are_chos
 }
 
 #[test]
+fn rule_catalog_0994_blink_teleport_then_draw_empty_spellbook_is_a_deck_out() {
+    let mut checkpoint = blink_checkpoint(true);
+    assert_eq!(
+        state(&checkpoint.session)["players"]["north"]["spellbook"],
+        json!([])
+    );
+
+    let spell = checkpoint.spell.clone();
+    let sparkmage = checkpoint.sparkmage.clone();
+    let receipt = cast_blink(
+        &mut checkpoint.session,
+        &spell,
+        &sparkmage,
+        "E4",
+        "spellbook",
+    );
+
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "minion-died",
+            "magic-resolved",
+            "game-ended",
+        ]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn"),
+        "an empty Spellbook must deck out instead of drawing"
+    );
+    let ended = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    assert_eq!(
+        state(&checkpoint.session)["terminal"],
+        json!({
+            "loser": "north",
+            "reason": "deck_empty",
+            "status": "finished",
+            "winner": "south",
+        })
+    );
+    assert!(
+        checkpoint
+            .session
+            .verify_replay()
+            .expect("verified exact replay")
+    );
+}
+
+#[test]
 fn rule_catalog_0040_blink_should_lose_the_game_when_its_chosen_deck_is_empty() {
     let mut checkpoint = blink_checkpoint(true);
     assert_eq!(
