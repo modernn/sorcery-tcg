@@ -400,7 +400,7 @@ fn rule_catalog_0076_area_damage_should_use_bearer_lethal_without_becoming_a_str
 }
 
 #[test]
-fn a_loose_lethal_artifact_should_not_lend_its_lethal_to_area_damage() {
+fn rule_catalog_0769_loose_lethal_artifact_does_not_lend_lethal_to_area_damage() {
     let mut session = Session::new(&manifest()).expect("valid area damage scenario");
     let blanket = blanket_position(&mut session, false);
 

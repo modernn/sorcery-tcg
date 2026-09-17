@@ -766,7 +766,7 @@ fn ranged_deathrites_should_clear_a_dead_shooters_pending_step() {
 }
 
 #[test]
-fn immobile_ranged_minion_should_not_offer_a_post_strike_step() {
+fn rule_catalog_0770_immobile_ranged_minion_offers_no_post_strike_step() {
     let setup = prepare_ranged(
         197,
         &minion(json!({

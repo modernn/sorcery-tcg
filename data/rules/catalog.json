@@ -18046,6 +18046,92 @@
         "file": "crates/sorcery-engine/tests/intercept_rules.rs",
         "testName": "rule_catalog_0768_cannot_defend_airborne_cannot_use_updraft_departure"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0769",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A loose Lethal Artifact does not lend Lethal to adjacent-location area damage from a minion ability.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantsBearerLethal",
+        "tapToDamageEachUnitAtAdjacentLocation"
+      ],
+      "actionHints": [
+        "activate-area-damage"
+      ],
+      "eventHints": [
+        "area-damage-allocated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/area_damage_rules.rs",
+        "testName": "rule_catalog_0769_loose_lethal_artifact_does_not_lend_lethal_to_area_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0770",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "An Immobile Ranged minion with a post-strike step fact offers no optional step after firing.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "immobile",
+        "ranged",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0770_immobile_ranged_minion_offers_no_post_strike_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0771",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Sideways-only movement restriction excludes every vertical Defend path while leaving other response actions unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movesOnlySideways"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0771_sideways_restriction_excludes_vertical_defend_paths"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0772",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Zero-power Avatars in combat allocate no strike damage and emit no zero-damage or zero life-loss events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "declare-attack",
+        "allocate-strike"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0772_zero_power_avatars_emit_no_zero_damage_or_life_loss"
+      }
     }
   ]
 }

@@ -723,7 +723,7 @@ fn replay_game(session: &Session) -> Game {
 }
 
 #[test]
-fn zero_power_avatars_should_not_emit_zero_damage_or_life_loss() {
+fn rule_catalog_0772_zero_power_avatars_emit_no_zero_damage_or_life_loss() {
     let AvatarAttackSetup {
         mut session,
         south_avatar_instance_id,

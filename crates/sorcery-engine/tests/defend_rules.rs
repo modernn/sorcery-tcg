@@ -253,7 +253,7 @@ fn declared_attack(
 }
 
 #[test]
-fn sideways_movement_should_exclude_vertical_defend_paths() {
+fn rule_catalog_0771_sideways_restriction_excludes_vertical_defend_paths() {
     let AttackSetup {
         defender_id,
         session,
