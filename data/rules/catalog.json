@@ -14608,6 +14608,48 @@
         "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
         "testName": "rule_catalog_0630_mill_sites_is_a_paid_noop_on_an_empty_atlas"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0631",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-artifact Magic detaches a carried Artifact and returns it to its owner's Spellbook hand. The opponent sees only the resulting hand count, and the Artifact does not enter a cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_artifact_rules.rs",
+        "testName": "rule_catalog_0631_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0632",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-artifact Magic offers no target when no Artifact occupies the caster region, including when only a minion is in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetArtifactToOwnerHand"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_artifact_rules.rs",
+        "testName": "rule_catalog_0632_return_target_artifact_offers_no_target_without_an_artifact"
+      }
     }
   ]
 }
