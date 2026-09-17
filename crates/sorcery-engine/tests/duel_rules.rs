@@ -1,4 +1,4 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946, 0965).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946, 0965, 1007).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
@@ -79,6 +79,54 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
+fn duel_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "duel-deathrite-draw" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-duel-deathrite-draw-v1",
+        },
+        "cards": {
+            "north-ally": minion(json!({ "attack": 3, "defense": 4 })),
+            "north-avatar": avatar(),
+            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-duel": duel(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": minion(json!({
+                "attack": 2,
+                "deathriteDrawSite": true,
+                "defense": 3,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-duel", "north-ally", "north-caster", "north-duel", "north-ally", "north-caster"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 4],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn duel_manifest(seed: u32, ward: bool) -> String {
@@ -551,6 +599,13 @@ fn seed_duel_with_mask(start: u32, mask_on_enemy_bearer: bool) -> String {
         .expect("bounded seed with complete Mask Duel setup")
 }
 
+fn seed_duel_deathrite(start: u32) -> String {
+    (start..start + 512)
+        .map(duel_deathrite_manifest)
+        .find(|candidate| try_setup_duel(candidate).is_some())
+        .expect("bounded seed with complete Deathrite Duel setup")
+}
+
 fn setup_duel_with_mask(
     encoded: &str,
     mask_on_enemy_bearer: bool,
@@ -768,3 +823,65 @@ fn rule_catalog_0965_duel_magic_fight_strike_is_not_doubled_when_struck_unit_is_
     );
     assert_exact_replay(&session);
 }
+#[test]
+fn rule_catalog_1007_duel_kill_triggers_deathrite_draw_before_magic_resolved() {
+    let encoded = seed_duel_deathrite(1007);
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel(&encoded);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    assert_eq!(south_atlas, 1, "thin South atlas leaves one site before the Duel kill");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    let types = event_types(&receipt);
+    assert!(types.contains(&"fight-started"));
+    assert!(types.contains(&"damage-dealt"));
+    assert!(types.contains(&"minion-died"));
+    assert!(types.contains(&"site-drawn"));
+    assert!(types.contains(&"magic-resolved"));
+
+    let fight_damage = types
+        .iter()
+        .rposition(|event_type| *event_type == "damage-dealt")
+        .expect("fight damage-dealt");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        fight_damage < site_drawn
+            && site_drawn < minion_died
+            && minion_died < magic_resolved,
+        "expected fight damage, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert!(realm_unit(&finished, &ally_id).is_some());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
+}
+
