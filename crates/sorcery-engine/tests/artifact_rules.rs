@@ -2,7 +2,8 @@
 //! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), the
 //! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), the
 //! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
-//! (RULE-CATALOG-0143), and the measured location a Payload Trebuchet blankets for those same two
+//! (RULE-CATALOG-0143), Siege Ballista activation withheld during deathrite-order
+//! (RULE-CATALOG-1144), and the measured location a Payload Trebuchet blankets for those same two
 //! taps plus a discarded card (RULE-CATALOG-0144).
 
 use serde_json::{Value, json};
@@ -91,6 +92,29 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -1034,6 +1058,206 @@ fn rule_catalog_0752_siege_ballista_cannot_fire_while_bearer_is_disabled() {
         "a disabled bearer cannot pay the Ballista's first tap"
     );
     assert_exact_replay(&session);
+}
+
+fn deathrite_ballista_manifest(seed: u32) -> String {
+    let scenario: Value =
+        serde_json::from_str(&ballista_scenario()).expect("Siege Ballista scenario JSON");
+    let cards = json!({
+        "ballista-avatar": scenario["cards"]["ballista-avatar"].clone(),
+        "ballista-bearer": scenario["cards"]["ballista-bearer"].clone(),
+        "ballista-north-site": scenario["cards"]["ballista-north-site"].clone(),
+        "ballista-south-site": { "cardType": "site", "elements": ["earth"] },
+        "north-rain": {
+            "cardType": "magic",
+            "damageEachAbovegroundMinion": 1,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "siege-ballista": scenario["cards"]["siege-ballista"].clone(),
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["ballista-north-site"; 6],
+            "avatar": "ballista-avatar",
+            "spellbook": [
+                "siege-ballista",
+                "ballista-bearer",
+                "north-rain",
+                "north-rain",
+                "siege-ballista",
+                "ballista-bearer",
+            ],
+        },
+        "south": {
+            "atlas": vec!["ballista-south-site"; 6],
+            "avatar": "ballista-avatar",
+            "spellbook": vec!["south-minion"; 6],
+        },
+    });
+    manifest(
+        "synthetic-siege-ballista-deathrite-withheld-v1",
+        &cards,
+        &decks,
+        seed,
+    )
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+struct PendingDeathriteBallistaSetup {
+    artifact_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_ready_ballista(
+    encoded: &str,
+) -> Option<PendingDeathriteBallistaSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let bearer = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "ballista-bearer"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let bearer_id = bearer.0["cardInstanceId"].as_str()?.to_owned();
+    let (cast, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "siege-ballista"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    })?;
+    let artifact_id = cast["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if artifact_damage_pairs(&session, &artifact_id).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteBallistaSetup {
+        artifact_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_ballista_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_ballista_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_ballista(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a ready Siege Ballista on the board",
+        )
+}
+
+#[test]
+fn rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_ballista_seed_with(1144);
+    let mut setup = try_pending_deathrite_with_ready_ballista(&encoded)
+        .expect("complete activate-artifact-damage Deathrite withheld setup");
+    let artifact_id = setup.artifact_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(
+        realm_artifacts(&paused)
+            .iter()
+            .find(|artifact| artifact["instanceId"] == artifact_id)
+            .expect("ready Ballista")["cardId"],
+        "siege-ballista"
+    );
+    assert!(artifact_damage_pairs(session, &artifact_id).is_empty());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-artifact-damage")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(!artifact_damage_pairs(session, &artifact_id).is_empty());
+    assert!(!descriptors_of_kind(session, "activate-artifact-damage").is_empty());
+    assert_exact_replay(session);
 }
 
 /// North's Spellbook is four cards, so the one card its opening hand leaves behind is the payload
