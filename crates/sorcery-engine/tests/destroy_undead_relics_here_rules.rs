@@ -1,11 +1,14 @@
 //! Direct proofs for destroy-undead-minions-and-artifacts-at-location-within-two-steps
-//! Magic (RULE-CATALOG-0575–0576).
+//! Magic (RULE-CATALOG-0575–0576, 1052).
 //!
 //! Ordinary Unravel chooses a location within two measured steps of the caster
 //! and destroys every Undead minion and Artifact whose cell and region match.
 //! A non-Undead minion at another offered location is left unwounded. An empty
 //! offered location is a paid no-op. This is one composed fact, exclusive of
 //! destroy-artifacts-and-auras-at-location and kill-mortal-minions-at-location.
+//!
+//! 1052 covers Unravel killing a Deathrite undead minion: the controller draws
+//! a site and magic-resolved only appears after deathrite settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -42,6 +45,18 @@ fn undead() -> Value {
     json!({
         "attack": 1,
         "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "undead": true,
+    })
+}
+
+fn deathrite_undead() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
         "defense": 3,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -88,6 +103,51 @@ fn unravel_manifest(seed: u32) -> String {
             "north-relic": relic(),
             "north-site": earth_site(),
             "north-undead": undead(),
+            "north-unravel": unravel(),
+            "south-avatar": avatar(),
+            "south-dummy": beast(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-undead",
+                    "north-relic",
+                    "north-unravel",
+                    "north-beast",
+                    "north-beast",
+                    "north-beast",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn unravel_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "destroy-undead-relics-here-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-destroy-undead-relics-here-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-beast": beast(),
+            "north-relic": relic(),
+            "north-site": earth_site(),
+            "north-undead": deathrite_undead(),
             "north-unravel": unravel(),
             "south-avatar": avatar(),
             "south-dummy": beast(),
@@ -192,13 +252,28 @@ fn opening_spell_ids(encoded: &str) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
+    seed_with_manifest(required, unravel_manifest)
+}
+
+fn seed_with_deathrite(required: &[&str]) -> String {
+    seed_with_manifest(required, unravel_deathrite_manifest)
+}
+
+fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
     (575..575 + 256)
-        .map(unravel_manifest)
+        .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn south_plays_c1_and_ends(session: &mut Session) {
@@ -423,5 +498,111 @@ fn rule_catalog_0576_destroy_undead_relics_here_empty_location_is_a_paid_noop() 
             .and_then(Value::as_array)
             .is_none_or(Vec::is_empty)
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1052_destroy_undead_relics_deathrite_draws_for_controller_on_kill() {
+    let encoded = (1052..1052 + 256)
+        .map(unravel_deathrite_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|card| card == "north-undead")
+                && hand.iter().any(|card| card == "north-relic")
+                && hand.iter().any(|card| card == "north-unravel")
+        })
+        .unwrap_or_else(|| {
+            seed_with_deathrite(&["north-undead", "north-relic", "north-unravel"])
+        });
+    let mut session = opening_main(&encoded);
+    south_plays_c1_and_ends(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let undead_id = summon_at(&mut session, "north-undead", "C3");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == "C3"
+    });
+    let relic_id = artifact_at(&session, "north-relic", "C3");
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (cast, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-unravel"
+            && descriptor["targetLocation"]["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-killed",
+            "site-drawn",
+            "minion-died",
+            "artifact-destroyed",
+            "magic-resolved",
+        ]
+    );
+    let kill = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-killed")
+        .expect("minion-killed");
+    assert_eq!(kill.payload["cardId"], "north-undead");
+    assert_eq!(kill.payload["instanceId"], undead_id);
+    assert_eq!(kill.payload["owner"], "north");
+    assert_eq!(kill.payload["seat"], "north");
+    assert_eq!(kill.payload["sourceInstanceId"], cast["cardInstanceId"]);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], undead_id);
+    let types = event_types(&receipt);
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        site_drawn < magic_resolved,
+        "magic-resolved must follow deathrite site-drawn"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    let destroyed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "artifact-destroyed")
+        .expect("artifact destruction");
+    assert_eq!(destroyed.payload["cardId"], "north-relic");
+    assert_eq!(destroyed.payload["instanceId"], relic_id);
+    assert_eq!(destroyed.payload["owner"], "north");
+    assert_eq!(
+        destroyed.payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+
+    let after = state(&session);
+    assert!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != undead_id)
+    );
+    assert!(realm_artifact(&after, &relic_id).is_none());
+    assert!(cemetery_has(&after, "north", &undead_id));
+    assert!(cemetery_has(&after, "north", &relic_id));
+    assert_eq!(atlas_len(&after, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&after, "south"), south_atlas);
     assert_exact_replay(&session);
 }
