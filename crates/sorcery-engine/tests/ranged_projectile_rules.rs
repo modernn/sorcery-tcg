@@ -791,7 +791,7 @@ fn rule_catalog_0770_immobile_ranged_minion_offers_no_post_strike_step() {
 }
 
 #[test]
-fn ranged_minion_should_pause_basic_movement_for_one_strike() {
+fn rule_catalog_0774_ranged_minion_pauses_basic_movement_for_one_strike() {
     let setup = prepare_ranged(
         193,
         &minion(json!({
