@@ -393,8 +393,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0020_duel_uses_an_allys_region_and_the_shared_fight_pipeline"
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0603_duel_magic_fights_an_adjacent_enemy_through_the_shared_pipeline"
       }
     },
     {
@@ -414,8 +414,8 @@
         "strike"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0021_leap_attack_optionally_steps_an_ally_before_it_strikes_every_enemy_there"
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_0599_leap_attack_steps_an_ally_and_strikes_enemies_at_the_destination"
       }
     },
     {
@@ -500,8 +500,8 @@
         "disable"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "freeze_should_disable_nearby_minion_until_caster_next_start_phase"
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_0581_freeze_disables_nearby_minion_until_caster_next_start_phase"
       }
     },
     {
@@ -540,8 +540,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0027_lightning_bolt_should_damage_one_random_unit_at_the_chosen_location"
+        "file": "crates/sorcery-engine/tests/random_bolt_rules.rs",
+        "testName": "rule_catalog_0607_random_bolt_damages_one_random_unit_at_the_chosen_location"
       }
     },
     {
@@ -573,8 +573,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0029_minor_explosion_damages_every_unit_at_one_nearby_location"
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_0589_explosion_damages_each_unit_at_location_and_ward_absorbs"
       }
     },
     {
@@ -609,8 +609,8 @@
         "damage"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0031_rain_of_arrows_simultaneously_damages_every_surface_minion"
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_0605_rain_of_arrows_damages_every_aboveground_minion"
       }
     },
     {
@@ -628,8 +628,8 @@
         "charge"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0032_charge_magic_grants_an_ally_charge_only_for_the_current_turn"
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_0597_charge_magic_lets_a_summoning_sick_ally_move_and_attack"
       }
     },
     {
