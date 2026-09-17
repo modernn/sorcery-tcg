@@ -559,7 +559,7 @@ fn end_turn_deathrite_cards(terminal: bool) -> Value {
 }
 
 #[test]
-fn end_turn_deathrite_order_should_resume_the_interrupted_turn_transition() {
+fn rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order() {
     let manifest = manifest(
         111,
         &end_turn_deathrite_cards(false),

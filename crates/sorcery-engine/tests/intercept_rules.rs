@@ -256,7 +256,7 @@ fn cannot_defend_airborne_minion_cannot_use_free_updraft_departure() {
 }
 
 #[test]
-fn adjacent_updraft_sites_keep_airborne_defend_paths_bounded() {
+fn rule_catalog_0756_adjacent_updraft_sites_keep_airborne_defend_paths_bounded() {
     let mut responder = minion();
     responder["airborne"] = json!(true);
     let setup = attack_checkpoint_with_site(

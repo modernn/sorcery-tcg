@@ -17682,6 +17682,101 @@
         "file": "crates/sorcery-engine/tests/artifact_rules.rs",
         "testName": "rule_catalog_0752_siege_ballista_cannot_fire_while_bearer_is_disabled"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0753",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "End-turn Artifact life loss charges the current site controller but skips Rubble, which has no controller.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "endTurnSiteLifeLoss",
+        "earthSitePlayCreatesAdjacentRubble"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-site-life-loss-triggered",
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0753_end_turn_artifact_life_loss_skips_rubble"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0754",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "End-turn Artifact life loss resolves before end-phase deaths drop the Artifact where its bearer fell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "endTurnSiteLifeLoss",
+        "diesAtEndOfControllerTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "end-turn-site-life-loss-triggered",
+        "avatar-life-lost",
+        "artifact-dropped",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0754_carried_artifact_life_loss_charges_before_bearer_dies"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0755",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "End-turn ordered Deathrites pause the turn transition until every source order resolves, then resume turn-ended and turn-started.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "diesAtEndOfControllerTurn",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "turn-ended",
+        "turn-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0756",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Adjacent Updraft Ridge sites keep Airborne Defend path enumeration bounded to the free-departure routes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "airborneMinionsAtopMoveFreelyAway"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0756_adjacent_updraft_sites_keep_airborne_defend_paths_bounded"
+      }
     }
   ]
 }
