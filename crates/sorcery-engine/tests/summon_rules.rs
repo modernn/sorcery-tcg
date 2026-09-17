@@ -379,7 +379,7 @@ fn rule_catalog_0822_spellcaster_pays_mana_and_summons_at_controlled_site() {
     clippy::too_many_lines,
     reason = "one catalog proof keeps payment privacy, checkpoint, PRNG, state, stale rejection, and replay together"
 )]
-fn aramos_should_discard_one_deterministic_random_hand_card_instead_of_mana() {
+fn rule_catalog_0872_aramos_discards_deterministic_random_hand_card_instead_of_mana() {
     let mut aramos = minion(3, &thresholds(Some("earth"), 1));
     aramos["discardRandomCardInsteadOfMana"] = json!(true);
     let manifest = scenario_manifest(417, &site("earth", false), &aramos, &site("earth", false));
@@ -538,7 +538,7 @@ fn aramos_should_discard_one_deterministic_random_hand_card_instead_of_mana() {
     clippy::too_many_lines,
     reason = "one catalog proof keeps sacrifice eligibility, checkpoint, state, stale rejection, and replay together"
 )]
-fn gnarled_wendigo_should_sacrifice_only_local_surface_allies_before_paying_mana() {
+fn rule_catalog_0873_gnarled_wendigo_sacrifices_local_allies_before_paying_mana() {
     let manifest = wendigo_manifest(6, 1, false);
     let mut session = wendigo_main(&manifest, true);
     let before = state(&session);
@@ -804,7 +804,7 @@ fn rule_catalog_0828_gnarled_wendigo_offers_useful_sacrifice_payments() {
     clippy::too_many_lines,
     reason = "the ordered payment proof keeps the pending checkpoint and both converging Deathrite branches together"
 )]
-fn gnarled_wendigo_payment_deathrites_should_resume_one_summon_and_converge() {
+fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_converge() {
     let manifest = wendigo_manifest(6, 1, true);
     let mut session = wendigo_main(&manifest, true);
     let before = state(&session);
@@ -997,7 +997,7 @@ fn gnarled_wendigo_payment_deathrites_should_resume_one_summon_and_converge() {
     clippy::too_many_lines,
     reason = "the terminal payment proof keeps deck exhaustion, deferred summon cancellation, cemetery state, and replay together"
 )]
-fn gnarled_wendigo_terminal_deathrite_should_end_before_deferred_summon() {
+fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_summon() {
     let manifest = wendigo_manifest(6, 1, true);
     let mut session = wendigo_main(&manifest, true);
     for _ in 0..2 {

@@ -1168,7 +1168,7 @@ fn ordered_deathrites_ending_a_game_should_clear_incremental_ranged_movement() {
     clippy::too_many_lines,
     reason = "one direct scenario proves derived-power death and Deathrite resume on a movement edge"
 )]
-fn incremental_movement_power_loss_should_resolve_deathrite_and_resume() {
+fn rule_catalog_0870_incremental_movement_power_loss_resolves_deathrite_and_resumes() {
     let cards = json!({
         "north-ally": minion(json!({
             "deathriteDrawSite": true,
@@ -1295,7 +1295,7 @@ fn incremental_movement_power_loss_should_resolve_deathrite_and_resume() {
     clippy::too_many_lines,
     reason = "one direct scenario proves post-strike queue timing through ordered derived deaths"
 )]
-fn ranged_step_should_not_queue_after_its_shooter_loses_derived_defense() {
+fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defense() {
     let cards = json!({
         "north-aura": minion(json!({
             "deathriteDrawSite": true,
