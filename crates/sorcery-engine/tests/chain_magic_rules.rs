@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -19,6 +19,8 @@
 //! 0914 covers Chain Magic phase routing: staged chains offer only
 //! extend-chain-magic and resolve-chain-magic from `append_chain_magic_actions`,
 //! not main-phase cast-magic, end-turn, or move-and-attack.
+//! 0924 covers resolve-chain-magic emitting magic-damage-allocated for every
+//! staged target before any minion-died in the same receipt.
 //! 0923 covers pending.targets dedup: extend-chain-magic never re-lists an
 //! already-staged hop. Distinct from 0696 resolve flow, 0903 checkpoint resume,
 //! 0913 post-extend mana gating, and 0914 phase routing.
@@ -654,6 +656,69 @@ fn rule_catalog_0696_chain_magic_stages_distinct_nearby_hops_and_resolves_simult
     assert_eq!(after["players"]["north"]["mana"], hops.mana - 2);
     assert!(realm_unit(&after, &hops.first_id).is_none());
     assert!(realm_unit(&after, &hops.second_id).is_none());
+    assert_exact_replay(&hops.session);
+}
+
+#[test]
+fn rule_catalog_0924_resolve_chain_magic_allocates_all_targets_before_any_minion_died() {
+    let encoded = (924..924 + 256)
+        .map(hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+        })
+        .expect("bounded seed with Chain Magic and both nearby allies in the opening hand");
+    let mut hops = setup_hops(&encoded);
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["instanceId"] == hops.second_id
+    });
+    let (_, resolved) = accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    let first_death = event_types(&resolved)
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("at least one staged target must die");
+    let allocations: Vec<_> = resolved
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.event_type == "magic-damage-allocated")
+        .collect();
+    assert_eq!(
+        allocations.len(),
+        2,
+        "each staged hop gets one magic-damage-allocated"
+    );
+    assert!(
+        allocations
+            .iter()
+            .all(|(index, _)| *index < first_death),
+        "every magic-damage-allocated must precede the first minion-died"
+    );
+    assert_eq!(
+        sorted(
+            allocations
+                .iter()
+                .map(|(_, event)| {
+                    event.payload["targetInstanceId"]
+                        .as_str()
+                        .expect("allocation target")
+                        .to_owned()
+                })
+                .collect()
+        ),
+        sorted(vec![hops.first_id.clone(), hops.second_id.clone()])
+    );
+    for (_, event) in &allocations {
+        assert_eq!(event.payload["amount"], 2);
+        assert_eq!(event.payload["sourceInstanceId"], hops.chain_id);
+    }
     assert_exact_replay(&hops.session);
 }
 
