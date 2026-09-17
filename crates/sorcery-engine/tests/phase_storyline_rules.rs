@@ -1,11 +1,203 @@
 //! Direct proofs for Phase and Storyline cleanup (RULE-CATALOG-0728,
-//! RULE-CATALOG-0731, RULE-CATALOG-0732).
+//! RULE-CATALOG-0731, RULE-CATALOG-0732, RULE-CATALOG-0906).
 //!
 //! End-turn cleanup resets both players' air-threshold cast counters, not just
 //! the ending player. Extends the Sparkmage per-turn counter slice in 0149.
 //! Post-action settlement tails slot before `magic-resolved`, so terminal
 //! `game-ended` follows magic completion rather than `magic-cast`.
 //! Ordered terminal cleanup omits resolved Chain Magic from authoritative state.
+//! Multiple start-of-controller-turn minion triggers resolve as separate Start
+//! Phase actions in summon order before the Draw step.
+
+use serde_json::{Value, json};
+use sorcery_engine::canonical::identity_hash;
+use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::session::{Session, StepResult};
+
+fn avatar(life: u8) -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": life,
+    })
+}
+
+fn site() -> Value {
+    json!({ "cardType": "site", "elements": ["earth"] })
+}
+
+fn life_giver(amount: u8) -> Value {
+    json!({
+        "atStartOfControllerTurnControllerGainsLife": amount,
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drain() -> Value {
+    json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "targetPlayerLosesLife": 2,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn dual_start_turn_queue_manifest() -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "phase-storyline-start-turn-queue" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-phase-storyline-start-turn-queue-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-first": life_giver(2),
+            "north-second": life_giver(1),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-drain": drain(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-first",
+                    "north-second",
+                    "north-first",
+                    "north-second",
+                    "north-first",
+                    "north-second",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-drain"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": 906,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
+    let action = session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected engine-issued action in phase {} among {:?}",
+                state(session)["phase"],
+                session
+                    .legal_actions()
+                    .expect("legal actions")
+                    .iter()
+                    .map(|action| action.descriptor.clone())
+                    .collect::<Vec<_>>()
+            );
+        });
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .expect("authoritative step")
+    else {
+        panic!("engine-issued action must be accepted");
+    };
+    (descriptor, receipt)
+}
+
+fn keep(session: &mut Session) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    });
+}
+
+fn state(session: &Session) -> Value {
+    session.replay_value().expect("authoritative replay value")["state"].clone()
+}
+
+fn unit_id(session: &Session, card_id: &str) -> Value {
+    state(session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == card_id)
+        .expect("expected unit")["instanceId"]
+        .clone()
+}
+
+fn assert_exact_replay(session: &Session) {
+    let action_ids: Vec<_> = session
+        .transcript()
+        .iter()
+        .map(|receipt| receipt.action_id.clone())
+        .collect();
+    let replayed = Session::replay(session.manifest_json(), &action_ids).expect("exact replay");
+    assert_eq!(
+        replayed.replay_value().expect("replayed value"),
+        session.replay_value().expect("session value")
+    );
+    assert_eq!(replayed.transcript(), session.transcript());
+    assert!(session.verify_replay().expect("verified replay"));
+}
+
+fn after_north_ready_to_start_turn_with_two_givers() -> Session {
+    let mut session =
+        Session::new(&dual_start_turn_queue_manifest()).expect("valid dual-trigger session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-first"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-drain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "north"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
 
 #[test]
 fn rule_catalog_0728_end_turn_cleanup_resets_both_players_air_threshold_counts() {
@@ -20,4 +212,71 @@ fn rule_catalog_0731_post_action_terminal_event_should_follow_magic_completion()
 #[test]
 fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic();
+}
+
+#[test]
+fn rule_catalog_0906_two_start_turn_minion_triggers_resolve_separately_before_draw() {
+    let mut session = after_north_ready_to_start_turn_with_two_givers();
+    let first_id = unit_id(&session, "north-first");
+    let second_id = unit_id(&session, "north-second");
+    let before = state(&session);
+    assert_eq!(before["phase"], "start-turn");
+    assert_eq!(before["activeSeat"], "north");
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    let queued_triggers: Vec<_> = session
+        .legal_actions()
+        .expect("start-turn triggers")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .collect();
+    assert_eq!(queued_triggers.len(), 2);
+    assert!(
+        queued_triggers
+            .iter()
+            .any(|action| action.descriptor["sourceInstanceId"] == first_id)
+    );
+    assert!(
+        queued_triggers
+            .iter()
+            .any(|action| action.descriptor["sourceInstanceId"] == second_id)
+    );
+    let (_, first_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == first_id
+    });
+    assert_eq!(
+        first_receipt.events.len(),
+        1,
+        "first trigger resolves only its own life gain"
+    );
+    assert_eq!(first_receipt.events[0].event_type, "avatar-healed");
+    assert_eq!(first_receipt.events[0].payload["amount"], 2);
+    assert_eq!(
+        first_receipt.events[0].payload["sourceInstanceId"],
+        first_id
+    );
+    let mid = state(&session);
+    assert_eq!(mid["phase"], "start-turn");
+    assert_eq!(mid["players"]["north"]["avatar"]["life"], 20);
+    let remaining: Vec<_> = session
+        .legal_actions()
+        .expect("remaining start-turn triggers")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "resolve-start-turn-trigger")
+        .collect();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].descriptor["sourceInstanceId"], second_id);
+    let (_, second_receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == second_id
+    });
+    assert!(
+        second_receipt.events.is_empty(),
+        "a capped start-turn heal emits no avatar-healed event once the Avatar is full"
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
 }
