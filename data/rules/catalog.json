@@ -15384,6 +15384,49 @@
         "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
         "testName": "rule_catalog_0662_freeze_is_absorbed_by_enemy_ward"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0669",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-target-aura Magic returns a realm Flood to its owner's Spellbook hand. The Aura leaves the realm, Flood water leaves the covered sites, the opponent sees only the updated hand count, and the targeting key is the realm Aura rather than a cemetery card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "aura-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_0669_return_target_aura_returns_flood_to_its_owners_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0670",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Return-target-aura Magic offers no target when no Aura occupies the realm, including when only a minion is in play. A minion is not a realm Aura, so the bounce spell stays in hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_0670_return_target_aura_offers_no_target_without_a_realm_aura"
+      }
     }
   ]
 }
