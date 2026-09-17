@@ -493,12 +493,12 @@ fn no_kind(session: &Session, kind: &str) -> bool {
         .all(|action| action.descriptor["kind"] != kind)
 }
 
-fn avatar() -> Value {
+fn avatar(draw_spell: bool) -> Value {
     json!({
         "attack": 1,
         "cardType": "avatar",
         "defense": 1,
-        "drawSpell": false,
+        "drawSpell": draw_spell,
         "life": 20,
     })
 }
@@ -539,8 +539,12 @@ fn visitor() -> Value {
     })
 }
 
-fn deathrite_avatar_draw_manifest(seed: u32) -> String {
-    let fixture = "avatar-site-draw-deathrite-withheld";
+fn deathrite_avatar_draw_manifest(seed: u32, draw_spell: bool) -> String {
+    let fixture = if draw_spell {
+        "avatar-spell-draw-deathrite-withheld"
+    } else {
+        "avatar-site-draw-deathrite-withheld"
+    };
     let mut value = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": fixture }))
@@ -549,10 +553,10 @@ fn deathrite_avatar_draw_manifest(seed: u32) -> String {
             "revisionId": format!("synthetic-{fixture}-v1"),
         },
         "cards": {
-            "north-avatar": avatar(),
+            "north-avatar": avatar(draw_spell),
             "north-rain": rain(),
             "north-site": site(),
-            "south-avatar": avatar(),
+            "south-avatar": avatar(false),
             "south-minion": deathrite_minion(),
             "south-site": site(),
             "south-visitor": visitor(),
@@ -586,8 +590,9 @@ struct PendingDeathriteAvatarDrawSetup {
     session: Session,
 }
 
-fn try_pending_deathrite_with_avatar_site_draw(
+fn try_ready_deathrite_with_avatar_draw(
     encoded: &str,
+    required_kinds: &[&str],
 ) -> Option<PendingDeathriteAvatarDrawSetup> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
@@ -624,19 +629,11 @@ fn try_pending_deathrite_with_avatar_site_draw(
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
     let main_actions = session.legal_actions().ok()?;
-    if !main_actions
-        .iter()
-        .any(|action| action.descriptor["kind"] == "draw-site")
-        || !main_actions
+    if !required_kinds.iter().all(|kind| {
+        main_actions
             .iter()
-            .any(|action| action.descriptor["kind"] == "play-site")
-    {
-        return None;
-    }
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
-    })?;
-    if state(&session)["phase"] != "deathrite-order" {
+            .any(|action| action.descriptor["kind"] == *kind)
+    }) {
         return None;
     }
     let mut deathrite_ids = [
@@ -650,11 +647,40 @@ fn try_pending_deathrite_with_avatar_site_draw(
     })
 }
 
+fn try_cast_rain_to_deathrite_order(setup: &mut PendingDeathriteAvatarDrawSetup) -> bool {
+    try_accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })
+    .is_some()
+        && state(&setup.session)["phase"] == "deathrite-order"
+}
+
+fn try_pending_deathrite_with_avatar_site_draw(
+    encoded: &str,
+) -> Option<PendingDeathriteAvatarDrawSetup> {
+    let mut setup = try_ready_deathrite_with_avatar_draw(encoded, &["draw-site", "play-site"])?;
+    try_cast_rain_to_deathrite_order(&mut setup).then_some(setup)
+}
+
+fn try_pending_deathrite_with_avatar_spell_draw(
+    encoded: &str,
+) -> Option<PendingDeathriteAvatarDrawSetup> {
+    let mut setup = try_ready_deathrite_with_avatar_draw(encoded, &["draw-spell"])?;
+    try_cast_rain_to_deathrite_order(&mut setup).then_some(setup)
+}
+
 fn deathrite_avatar_draw_seed_with(start: u32) -> String {
     (start..start + 2048)
-        .map(deathrite_avatar_draw_manifest)
+        .map(|seed| deathrite_avatar_draw_manifest(seed, false))
         .find(|candidate| try_pending_deathrite_with_avatar_site_draw(candidate).is_some())
         .expect("bounded seed that reaches pending Deathrites with Avatar site draw legal")
+}
+
+fn deathrite_avatar_spell_draw_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(|seed| deathrite_avatar_draw_manifest(seed, true))
+        .find(|candidate| try_pending_deathrite_with_avatar_spell_draw(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Avatar spell draw legal")
 }
 
 #[test]
@@ -711,5 +737,61 @@ fn rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order() 
     assert_eq!(resumed["players"]["north"]["avatar"]["tapped"], false);
     assert!(has_kind(session, "draw-site"));
     assert!(has_kind(session, "play-site"));
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_avatar_spell_draw_seed_with(1133);
+    let mut setup = try_ready_deathrite_with_avatar_draw(&encoded, &["draw-spell"])
+        .expect("complete Avatar spell-draw Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let play_site_offered;
+    {
+        let session = &setup.session;
+        let ready = state(session);
+        assert_eq!(ready["phase"], "main");
+        assert_eq!(ready["decisionSeat"], "north");
+        assert_eq!(ready["players"]["north"]["avatar"]["tapped"], false);
+        assert!(has_kind(session, "draw-spell"));
+        play_site_offered = has_kind(session, "play-site");
+    }
+
+    assert!(try_cast_rain_to_deathrite_order(&mut setup));
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
+    assert!(no_kind(session, "draw-spell"));
+    if play_site_offered {
+        assert!(no_kind(session, "play-site"));
+    }
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["players"]["north"]["avatar"]["tapped"], false);
+    assert!(has_kind(session, "draw-spell"));
     assert_exact_replay(session);
 }
