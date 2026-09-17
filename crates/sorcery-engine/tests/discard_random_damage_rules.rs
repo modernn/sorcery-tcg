@@ -1,4 +1,4 @@
-//! Direct proofs for discard-funded random damage (RULE-CATALOG-0152 / 0153 / 0154).
+//! Direct proofs for discard-funded random damage (RULE-CATALOG-0152 / 0153 / 0154 / 0724).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -97,6 +97,13 @@ fn end_and_draw(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn end_and_draw_zone(session: &mut Session, zone: &str) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
     });
 }
 
@@ -491,4 +498,177 @@ fn rule_catalog_0154_discard_damage_should_snapshot_derived_power_and_use_ward_a
     assert_eq!(landed["accumulated"], 3);
     assert_eq!(realm_damage(&state(&prevented), &guard), 3);
     assert_exact_replay(&prevented);
+}
+
+fn magic(extra: Value) -> Value {
+    let mut value = json!({
+        "cardType": "magic",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra magic facts must be an object");
+    };
+    value.as_object_mut().expect("magic facts").extend(extra);
+    value
+}
+
+fn nimbus_cards() -> Value {
+    json!({
+        "north-ally": minion(json!({ "stealth": true })),
+        "north-avatar": avatar(),
+        "north-jinn": minion(json!({ "discardSpellToDamageRandomOtherUnitHere": 3 })),
+        "north-kill": magic(json!({ "killTargetMinion": true })),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-giant": minion(json!({
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        })),
+        "south-site": site(),
+    })
+}
+
+fn nimbus_manifest(wanted: &[&str]) -> String {
+    let cards = nimbus_cards();
+    let north = [
+        "north-jinn",
+        "north-ally",
+        "north-kill",
+        "north-jinn",
+        "north-ally",
+        "north-kill",
+        "north-jinn",
+        "north-ally",
+        "north-kill",
+        "north-jinn",
+        "north-ally",
+        "north-kill",
+    ];
+    let south = ["south-giant"; 12];
+    seeded(&cards, &north, &south, wanted)
+}
+
+fn disabled_jinn_manifest() -> String {
+    let cards = json!({
+        "north-avatar": avatar(),
+        "north-disabled-jinn": minion(json!({
+            "discardSpellToDamageRandomOtherUnitHere": 3,
+            "genesisDisableSelfUntilDamaged": true,
+        })),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-fodder": minion(json!({})),
+        "south-site": site(),
+    });
+    let north = ["north-disabled-jinn"; 12];
+    let south = ["south-fodder"; 12];
+    seeded(&cards, &north, &south, &["north:north-disabled-jinn"])
+}
+
+struct NimbusBoard {
+    ally: String,
+    jinn: String,
+}
+
+fn establish_nimbus_board(session: &mut Session) -> NimbusBoard {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    play_site(session, "B4");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C3");
+    end_and_draw(session);
+    end_and_draw_zone(session, "atlas");
+    play_site(session, "B3");
+    let jinn = summon(session, "north-jinn", "C4");
+    let ally = summon(session, "north-ally", "C4");
+    end_and_draw(session);
+    let _enemy = summon(session, "south-giant", "B3");
+    NimbusBoard { ally, jinn }
+}
+
+fn establish_disabled_jinn(session: &mut Session) -> String {
+    keep(session);
+    keep(session);
+    play_site(session, "C4");
+    summon(session, "north-disabled-jinn", "C4")
+}
+
+fn cast_magic_on(session: &mut Session, card_id: &str, target_instance_id: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == card_id
+            && descriptor["target"]["instanceId"] == target_instance_id
+    });
+}
+
+fn has_discard_damage_activation(session: &Session) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| action.descriptor["kind"] == "activate-discard-random-damage")
+}
+
+fn unit_stealthed(current: &Value, instance_id: &str) -> bool {
+    current["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .unwrap_or_else(|| panic!("unit {instance_id}"))["stealthed"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+#[test]
+fn rule_catalog_0724_discard_damage_should_ignore_disabled_or_removed_sources_and_count_oversized_once()
+ {
+    let manifest = nimbus_manifest(&[
+        "north:north-jinn",
+        "north:north-ally",
+        "south:south-giant",
+        "north:north-kill",
+    ]);
+    let mut enabled = Session::new(&manifest).expect("valid discard-damage scenario");
+    let board = establish_nimbus_board(&mut enabled);
+    end_and_draw(&mut enabled);
+    assert!(
+        !offered_activations(&enabled, &board.jinn).is_empty(),
+        "an enabled source must offer discard-here damage"
+    );
+    let (_, receipt) = activate(&mut enabled, &board.jinn);
+    assert_eq!(
+        candidate_count(&receipt),
+        3,
+        "avatar, ally, and one oversized enemy"
+    );
+    assert!(
+        unit_stealthed(&state(&enabled), &board.ally),
+        "stealth stays until the ally is chosen or revealed"
+    );
+    assert_exact_replay(&enabled);
+
+    let mut disabled =
+        Session::new(&disabled_jinn_manifest()).expect("valid disabled-source scenario");
+    let jinn = establish_disabled_jinn(&mut disabled);
+    end_and_draw(&mut disabled);
+    assert!(
+        offered_activations(&disabled, &jinn).is_empty(),
+        "a disabled source must not offer discard-here damage"
+    );
+
+    let mut removed = Session::new(&manifest).expect("valid removed-source scenario");
+    let board = establish_nimbus_board(&mut removed);
+    end_and_draw(&mut removed);
+    cast_magic_on(&mut removed, "north-kill", &board.jinn);
+    assert!(
+        !has_discard_damage_activation(&removed),
+        "a removed source must leave no discard-here activations"
+    );
 }

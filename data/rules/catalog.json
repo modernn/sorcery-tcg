@@ -16946,6 +16946,30 @@
         "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
         "testName": "rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0724",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Discard-here damage ignores disabled or removed sources and counts an oversized enemy footprint once in its hidden candidate pool. Extends 0154.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disabled",
+        "discardSpellToDamageRandomOtherUnitHere",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "discard"
+      ],
+      "eventHints": [
+        "damage",
+        "card-discard"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/discard_random_damage_rules.rs",
+        "testName": "rule_catalog_0724_discard_damage_should_ignore_disabled_or_removed_sources_and_count_oversized_once"
+      }
     }
   ]
 }
