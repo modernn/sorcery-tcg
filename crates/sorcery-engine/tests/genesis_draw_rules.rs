@@ -6718,6 +6718,11 @@ fn geomancer_should_create_rubble_and_privately_replace_it_with_top_atlas_site()
 }
 
 #[test]
+fn rule_catalog_0719_geomancer_admits_site_genesis_on_owners_atlas() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0719_geomancer_admits_site_genesis_on_owners_atlas();
+}
+
+#[test]
 fn rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws() {
     let atlas = ["leyline", "leyline", "leyline", "leyline"];
     let manifest = geomancer_manifest(

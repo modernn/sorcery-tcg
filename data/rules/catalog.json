@@ -16838,6 +16838,25 @@
         "file": "crates/sorcery-engine/tests/bury_oversized_rules.rs",
         "testName": "rule_catalog_0718_bury_on_all_water_oversized_footprint_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0719",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "A Geomancer Avatar with replace-adjacent-rubble-with-top-atlas-site and site genesis-heal-nearby-avatars on owner Atlas cards passes self-play admission whether the healing Genesis is on the same deck or an unrelated opponent Atlas card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "replaceAdjacentRubbleWithTopAtlasSite",
+        "genesisHealNearbyAvatars"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_draw_rules.rs",
+        "testName": "rule_catalog_0719_geomancer_admits_site_genesis_on_owners_atlas"
+      }
     }
   ]
 }

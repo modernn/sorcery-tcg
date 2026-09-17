@@ -27821,14 +27821,7 @@ pub mod catalog_proofs {
     }
 
 
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::synthetic::{selfplay_manifest_with, synthetic_demo_manifest_json};
-
-    #[test]
-    fn rubble_replacement_should_admit_site_genesis_on_the_owners_atlas() {
+    pub fn rule_catalog_0719_geomancer_admits_site_genesis_on_owners_atlas() {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
                 json!(true);
@@ -27849,6 +27842,12 @@ mod tests {
             .ensure_selfplay_supported()
             .expect("Geomancer Atlas Genesis is self-play safe");
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthetic::{selfplay_manifest_with, synthetic_demo_manifest_json};
 
     #[test]
     #[expect(clippy::too_many_lines)]
