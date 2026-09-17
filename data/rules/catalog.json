@@ -14412,6 +14412,53 @@
         "file": "crates/sorcery-engine/tests/bounce_rules.rs",
         "testName": "rule_catalog_0622_bounce_magic_ward_absorbs_the_return"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0627",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic offers only both Avatars, never a minion, and puts the printed number of the chosen player's top Spellbook cards into that owner's cemetery in deck order. Identities are public. The game stays active when cards remain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "spell-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_0627_mill_spells_puts_opponent_library_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0628",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-spell Magic that finds an empty Spellbook is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_0628_mill_spells_is_a_paid_noop_on_an_empty_library"
+      }
     }
   ]
 }
