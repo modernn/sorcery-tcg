@@ -149,7 +149,7 @@ fn north_second_main(seed: u32, short_decks: bool) -> Session {
 }
 
 #[test]
-fn mulligan_returns_chosen_card_to_deck_bottom() {
+fn rule_catalog_0801_mulligan_returns_chosen_cards_to_deck_bottom() {
     let mut session = Session::new(&scenario_manifest(11, 30, 50)).expect("valid session");
     let before = state(&session);
     let returned = before["players"]["north"]["hand"]["atlas"][0]["instanceId"]
