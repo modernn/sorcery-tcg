@@ -14,6 +14,8 @@ Do not fast-forward `master` from a checkout that cannot run `pnpm verify` with 
 
 Run **10 parallel subagents** per catalog-binding iteration (was 4). Each lane owns one orphan proof end to end: rename to `rule_catalog_XXXX_*`, add the matching `RULE-CATALOG-XXXX` row, run its targeted `cargo test`, and return. The merge coordinator alone edits `data/rules/catalog.json`, `OVERNIGHT-HANDOFF.md`, and any shared `game.rs` refs; dedicated `*_rules.rs` orphan backlog **0** after `0880`; next IDs start at `1163`. Subagent model: **Grok 4.6** (`cursor-grok-4.6-high`).
 
+After each iteration lands on `cursor/source-bound-control-0005`, **re-merge to `master`**: fast-forward `master` to the canonical feat hash (or latest docs hash), push `origin/master`, and record the master tip in this handoff. Run `cargo test -p sorcery-engine --all-features --locked`, catalog linker, fmt, and clippy before the FF; run full `pnpm verify` when `.local/authority/` and `pwsh` are available.
+
 ## Catalog count
 
 `data/rules/catalog.json`: **1162 rust-supported / 0 typescript-supported** out of 1162.
