@@ -272,6 +272,79 @@ fn begin_north_turn(session: &mut Session) {
     });
 }
 
+fn paths_to_cell(session: &Session, instance_id: &str, cell: &str) -> Vec<Value> {
+    session
+        .legal_actions()
+        .expect("movement actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == instance_id
+                && action.descriptor["path"].as_array().is_some_and(|path| {
+                    path.last()
+                        .and_then(|location| location["cell"].as_str())
+                        == Some(cell)
+                })
+        })
+        .map(|action| action.descriptor["path"].clone())
+        .collect()
+}
+
+fn connection_manifest() -> String {
+    let mut value: Value = serde_json::from_str(&manifest()).expect("base mountain pass manifest");
+    value["cards"]["north-connector"] = minion(json!({ "connectsTopBottom": true }));
+    value["decks"]["north"]["spellbook"] = json!([
+        "north-connector",
+        "north-ground",
+        "north-airborne",
+        "north-occupant",
+    ]);
+    value.as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).expect("connection manifest identity"));
+    canonical_json(&value).expect("canonical connection manifest")
+}
+
+fn prepare_occupied_pass_connection_entry() -> (Session, String) {
+    let mut session =
+        Session::new(&connection_manifest()).expect("valid Mountain Pass connection scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let connector_id = summon(&mut session, "north-connector", "C4");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    summon(&mut session, "south-ground", "C2");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    (session, connector_id)
+}
+
 fn entry_actor_ids(session: &Session) -> Vec<String> {
     session
         .legal_actions()
@@ -467,5 +540,33 @@ fn rule_catalog_0808_ground_minion_leaves_occupied_mountain_pass() {
             .expect("leaver")["location"],
         "C3"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0929_connected_ground_minion_cannot_wrap_enter_occupied_mountain_pass() {
+    let (mut session, connector_id) = prepare_occupied_pass_connection_entry();
+    assert!(paths_to_cell(&session, &connector_id, "C1")
+        .iter()
+        .any(|path| {
+            path.as_array().is_some_and(|locations| {
+                locations
+                    .iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C4", "C1"])
+            })
+        }));
+    assert!(paths_to_cell(&session, &connector_id, "C2").is_empty());
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == connector_id
+            && descriptor["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|location| location["cell"].as_str().expect("path cell"))
+                    .eq(["C4", "C1"])
+            })
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "decline-attack");
+    assert!(paths_to_cell(&session, &connector_id, "C2").is_empty());
     assert_exact_replay(&session);
 }
