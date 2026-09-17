@@ -275,7 +275,7 @@ fn rule_catalog_0771_sideways_restriction_excludes_vertical_defend_paths() {
 }
 
 #[test]
-fn movement_bonus_one_should_issue_and_apply_exact_two_step_defend_path() {
+fn rule_catalog_0777_movement_bonus_one_issues_exact_two_step_defend_path() {
     let AttackSetup {
         defender_id,
         mut session,
