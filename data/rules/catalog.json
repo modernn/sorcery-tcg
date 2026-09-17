@@ -15332,6 +15332,58 @@
         "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
         "testName": "rule_catalog_0660_mesmerism_does_not_steal_a_far_minion_and_deathrite_stays_with_controller"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0661",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Freeze Magic that disables a nearby minion until the caster's next Start Phase offers a same-region minion occupying the caster footprint. Casting disables that minion, blocking its actions until the flag expires on that turn boundary.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "minion-disable-expired",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
+        "testName": "rule_catalog_0661_freeze_disables_a_nearby_minion_until_caster_next_start_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0662",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Freeze Magic that targets an enemy warded minion is absorbed. Ward breaks and the minion is not Disabled.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
+        "testName": "rule_catalog_0662_freeze_is_absorbed_by_enemy_ward"
+      }
     }
   ]
 }
