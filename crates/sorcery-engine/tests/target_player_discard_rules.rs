@@ -1,5 +1,5 @@
 //! Direct proofs for target-player discard Magic (RULE-CATALOG-0643–0644,
-//! RULE-CATALOG-0919, RULE-CATALOG-1050).
+//! RULE-CATALOG-0919, RULE-CATALOG-1050, RULE-CATALOG-1166).
 //!
 //! Target-player discard offers only both Avatars. After the cast is
 //! announced, the targeted player chooses one of their own Atlas or
@@ -7,7 +7,9 @@
 //! discard and never a deck-out. A count above one keeps the pending
 //! Storyline open until each sequential choice is taken. While Deathrites
 //! wait for ordering, target-player discard Magic stays withheld until
-//! the chain drains.
+//! the chain drains. 1166 covers the Storyline itself: a discard cast that
+//! settles Deathrites before any discard-card choice is issued withholds
+//! discard-card until the order drains, then returns the pending choice.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -16,6 +18,7 @@ use sorcery_engine::checkpoint::{
     serialize_game_checkpoint,
 };
 use sorcery_engine::contract::{ActionRequest, Receipt, RejectionCode, Seat};
+use sorcery_engine::game::{Game, IssuedAction};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -70,6 +73,18 @@ fn deathrite_minion() -> Value {
         "deathriteDrawSite": true,
         "defense": 1,
         "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn power_bonus_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "otherNearbyAlliesPowerBonus": 1,
         "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -206,26 +221,82 @@ fn assert_exact_replay(session: &Session) {
 }
 
 fn discard_card_ids(session: &Session) -> Vec<(String, String)> {
-    session
-        .legal_actions()
-        .expect("legal actions")
+    discard_card_ids_from(
+        session
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .map(|action| action.descriptor),
+    )
+}
+
+fn issued_descriptor(action: &IssuedAction) -> Value {
+    serde_json::to_value(action.descriptor()).expect("typed descriptor JSON")
+}
+
+fn game_discard_card_ids(game: &Game) -> Vec<(String, String)> {
+    discard_card_ids_from(
+        game.legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .map(|action| issued_descriptor(&action)),
+    )
+}
+
+fn discard_card_ids_from(descriptors: impl IntoIterator<Item = Value>) -> Vec<(String, String)> {
+    descriptors
         .into_iter()
-        .filter_map(|action| {
-            if action.descriptor["kind"] != "discard-card" {
+        .filter_map(|descriptor| {
+            if descriptor["kind"] != "discard-card" {
                 return None;
             }
             Some((
-                action.descriptor["cardInstanceId"]
+                descriptor["cardInstanceId"]
                     .as_str()
                     .expect("discard identity")
                     .to_owned(),
-                action.descriptor["zone"]
+                descriptor["zone"]
                     .as_str()
                     .expect("discard zone")
                     .to_owned(),
             ))
         })
         .collect()
+}
+
+fn replay_game(session: &Session) -> Game {
+    let mut game = Game::from_manifest_json(session.manifest_json()).expect("valid replay game");
+    for receipt in session.transcript() {
+        let action = game
+            .legal_actions()
+            .expect("replay legal actions")
+            .into_iter()
+            .find(|action| {
+                action
+                    .to_legal_action()
+                    .is_ok_and(|action| action.action_id == receipt.action_id)
+            })
+            .expect("recorded engine-issued action");
+        game.apply_action(&action).expect("replay action");
+    }
+    game
+}
+
+fn apply_where(game: &mut Game, predicate: impl Fn(&Value) -> bool) {
+    let action = game
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .find(|action| predicate(&issued_descriptor(action)))
+        .expect("expected engine-issued action");
+    game.apply_action(&action).expect("authoritative Game step");
+}
+
+fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
 }
 
 fn discard_targets(session: &Session) -> Vec<String> {
@@ -766,4 +837,245 @@ fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_ord
     assert_eq!(state(session)["phase"], "main");
     assert!(state(session).get("pendingDiscardCards").is_none());
     assert_exact_replay(session);
+}
+
+fn deathrite_interrupt_discard_manifest(seed: u32) -> String {
+    let fixture = "target-player-discard-card-deathrite-interrupt";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-discard": discard_spell(2),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-aura": power_bonus_minion(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-discard",
+                    "north-rain",
+                    "north-rain",
+                    "north-discard",
+                    "north-rain",
+                    "north-discard",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-minion",
+                    "south-aura",
+                    "south-minion",
+                    "south-minion",
+                    "south-aura",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct PendingDiscardDeathriteInterruptSetup {
+    aura_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_wounded_deathrites_with_discard_ready(
+    encoded: &str,
+) -> Option<PendingDiscardDeathriteInterruptSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let aura = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-aura"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_discard_and_rain(&state(&session)) {
+        return None;
+    }
+    if !discard_targets(&session).iter().any(|seat| seat == "south") {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    let snapshot = state(&session);
+    if snapshot["phase"] != "main" {
+        return None;
+    }
+    let aura_id = aura.0["cardInstanceId"].as_str()?.to_owned();
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    if deathrite_ids.iter().any(|instance_id| {
+        realm_unit(&snapshot, instance_id).is_none_or(|unit| unit["damage"] != 1)
+    }) || realm_unit(&snapshot, &aura_id).is_none_or(|unit| unit["damage"] != 1)
+    {
+        return None;
+    }
+    Some(PendingDiscardDeathriteInterruptSetup {
+        aura_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_interrupt_discard_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_interrupt_discard_manifest)
+        .find(|candidate| try_wounded_deathrites_with_discard_ready(candidate).is_some())
+        .expect(
+            "bounded seed that wounds Deathrites under a power bonus with discard Magic in hand",
+        )
+}
+
+#[test]
+fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_interrupt_discard_seed_with(1166);
+    let setup = try_wounded_deathrites_with_discard_ready(&encoded)
+        .expect("complete target-player discard Deathrite interrupt setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let south_avatar =
+        state(&setup.session)["players"]["south"]["avatar"]["card"]["instanceId"].clone();
+    assert_exact_replay(&setup.session);
+
+    let mut control = setup.session.clone();
+    let (_, cast) = accept_where(&mut control, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+    assert_eq!(event_types(&cast), ["magic-cast"]);
+    let pending = state(&control);
+    assert_eq!(pending["phase"], "discard-card");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(pending["pendingDiscardCards"]["remaining"], 2);
+    assert_eq!(pending["pendingDiscardCards"]["seat"], "south");
+    assert!(!discard_card_ids(&control).is_empty());
+    assert_exact_replay(&control);
+
+    let mut branched = replay_game(&setup.session);
+    assert!(
+        branched.test_remove_realm_unit(&aura_id),
+        "checkpoint branch must drop the power-bonus ally so wounded Deathrites settle"
+    );
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == south_avatar
+    });
+
+    let paused = branched.authoritative_state();
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["pendingDeathrites"]["returnPhase"], "discard-card");
+    assert_eq!(paused["pendingDiscardCards"]["remaining"], 2);
+    assert_eq!(paused["pendingDiscardCards"]["seat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        game_discard_card_ids(&branched).is_empty(),
+        "deathrite-order must issue no discard-card while the Storyline stays pending"
+    );
+
+    let order_sources: Vec<_> = branched
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
+        .map(|action| {
+            issued_descriptor(&action)["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = branched.authoritative_state();
+    assert_eq!(resumed["phase"], "discard-card");
+    assert_eq!(resumed["decisionSeat"], "south");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["pendingDiscardCards"]["remaining"], 2);
+    let offered = game_discard_card_ids(&branched);
+    assert!(
+        !offered.is_empty(),
+        "discard-card must return once deathrite-order clears"
+    );
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "discard-card"
+            && descriptor["cardInstanceId"] == offered[0].0
+            && descriptor["zone"] == offered[0].1
+    });
+    let mid = branched.authoritative_state();
+    assert_eq!(mid["phase"], "discard-card");
+    assert_eq!(mid["pendingDiscardCards"]["remaining"], 1);
+    apply_where(&mut branched, |descriptor| {
+        descriptor["kind"] == "discard-card"
+    });
+    let after = branched.authoritative_state();
+    assert_eq!(after["phase"], "main");
+    assert_eq!(after["decisionSeat"], "north");
+    assert!(after.get("pendingDiscardCards").is_none());
 }
