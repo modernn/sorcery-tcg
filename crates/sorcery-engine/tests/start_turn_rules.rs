@@ -2,8 +2,9 @@
 //! controller Spellbook draws (RULE-CATALOG-0237–0238), controller Atlas
 //! draws (RULE-CATALOG-0241–0242), stacked library triggers
 //! (RULE-CATALOG-0387–0388, RULE-CATALOG-0391–0392, RULE-CATALOG-0393–0394,
-//! RULE-CATALOG-0397–0398), and library-plus-teleport stacks
-//! (RULE-CATALOG-0401–0402).
+//! RULE-CATALOG-0397–0398), library-plus-teleport stacks
+//! (RULE-CATALOG-0401–0402), and thin-library draw-then-mill edges
+//! (RULE-CATALOG-0916).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1453,6 +1454,85 @@ fn rule_catalog_0388_start_turn_mill_spells_is_a_no_op_after_draw_empties_the_li
             .expect("north hand")
             .len(),
         hand_before + library_before
+    );
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        cemetery_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0916_start_turn_draw_then_mill_spells_mills_no_op_when_library_has_one_card() {
+    let mut session = draw_mill_stack_start_turn(
+        916,
+        &[
+            "north-draw-card",
+            "north-mill-card",
+            "north-draw-card",
+            "north-source",
+        ],
+    );
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let drawn_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("only spell")["instanceId"]
+        .clone();
+    let library_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    assert_eq!(library_before, 1);
+    let hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let cemetery_before = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["spell-drawn"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
     );
     assert_eq!(
         after["players"]["north"]["cemetery"]
