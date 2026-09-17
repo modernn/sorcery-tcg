@@ -1,5 +1,5 @@
 //! Direct proofs for submerge-target-minion Magic (RULE-CATALOG-0591–0592,
-//! RULE-CATALOG-1034).
+//! RULE-CATALOG-1034, RULE-CATALOG-1089).
 //!
 //! Ordinary Drown Magic forcefully submerges a same-region minion at a Water
 //! site. A Submerge minion survives underwater. An earth-only site resolves as a
@@ -464,9 +464,8 @@ fn rule_catalog_0592_drown_on_earth_only_site_is_a_paid_noop() {
     assert_exact_replay(&session);
 }
 
-#[test]
-fn rule_catalog_1034_drown_magic_withheld_during_pending_deathrite_order() {
-    let encoded = deathrite_drown_seed_with(1034);
+fn prove_drown_magic_withheld_during_pending_deathrite_order(start: u32) {
+    let encoded = deathrite_drown_seed_with(start);
     let mut setup = try_pending_deathrite_with_ready_swimmer(&encoded)
         .expect("complete drown Deathrite withheld setup");
     let swimmer_id = setup.swimmer_id.clone();
@@ -539,4 +538,14 @@ fn rule_catalog_1034_drown_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(unit(&state(session), &swimmer_id)["region"], "underwater");
     assert!(realm_unit(&state(session), &deathrite_ids[0]).is_none());
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1034_drown_magic_withheld_during_pending_deathrite_order() {
+    prove_drown_magic_withheld_during_pending_deathrite_order(1034);
+}
+
+#[test]
+fn rule_catalog_1089_drown_magic_withheld_during_pending_deathrite_order() {
+    prove_drown_magic_withheld_during_pending_deathrite_order(1089);
 }
