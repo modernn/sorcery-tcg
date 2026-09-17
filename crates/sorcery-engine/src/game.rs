@@ -1843,6 +1843,11 @@ impl Game {
         self.position.players[0].avatar.life = life;
     }
 
+    #[doc(hidden)]
+    pub fn test_set_north_mana(&mut self, mana: u16) {
+        self.position.players[0].mana = mana;
+    }
+
     /// Scenario proof helper: drop one North hand card without cemetery routing.
     #[doc(hidden)]
     pub fn test_remove_north_hand_card(&mut self, zone: &str, instance_id: &str) -> bool {
