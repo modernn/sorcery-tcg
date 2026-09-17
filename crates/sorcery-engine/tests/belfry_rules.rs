@@ -1,4 +1,4 @@
-//! Direct proofs for official Belfry (RULE-CATALOG-0312–0313).
+//! Direct proofs for official Belfry (RULE-CATALOG-0312–0313, RULE-CATALOG-0785).
 //!
 //! Belfry is a Monument: "At the end of your turn, untap all nearby allies."
 //! Nearby is the Artifact's square plus the eight surrounding squares in the
@@ -307,7 +307,7 @@ fn avatar_only_manifest() -> String {
 }
 
 #[test]
-fn belfry_untaps_the_nearby_avatar_without_a_minion() {
+fn rule_catalog_0785_belfry_untaps_nearby_avatar_without_minion() {
     let mut session = Session::new(&avatar_only_manifest()).expect("valid avatar-only Belfry");
     keep(&mut session);
     keep(&mut session);
