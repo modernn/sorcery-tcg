@@ -448,14 +448,15 @@ fn rule_catalog_0100_airborne_moves_diagonally_and_restricts_attacks_and_interce
     ));
     assert_exact_replay(&disabled_response.session);
 
-    assert_airborne_defends_along_a_diagonal_path();
+    rule_catalog_1138_airborne_defends_along_a_diagonal_defend_path();
 }
 
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "the direct Defend scenario keeps its turn sequence and assertions together"
 )]
-fn assert_airborne_defends_along_a_diagonal_path() {
+fn rule_catalog_1138_airborne_defends_along_a_diagonal_defend_path() {
     let airborne = minion(true, false);
     let mut setup = attack_checkpoint(123, &airborne, &airborne);
     accept_where(&mut setup.session, |descriptor| {
