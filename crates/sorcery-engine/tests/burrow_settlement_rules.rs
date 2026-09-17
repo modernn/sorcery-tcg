@@ -1,5 +1,5 @@
 //! Direct proofs for Bury Deathrite settlement and Cave-In Deathrite order
-//! (RULE-CATALOG-0691–0692).
+//! (RULE-CATALOG-0691–0692, 0710).
 //!
 //! 0655–0656 prove an ordinary minion dies after a forceful burrow or stays
 //! put on Water. 0587–0588 prove Cave-In burrows Burrowing survivors at a land
@@ -10,6 +10,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{create_game_checkpoint, resume_game_checkpoint};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
@@ -37,6 +38,31 @@ fn deathrite_minion() -> Value {
         "deathriteDrawSite": true,
         "defense": 1,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn burrowing_deathrite_buff() -> Value {
+    json!({
+        "attack": 1,
+        "burrowing": true,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "otherNearbyAlliesPowerBonus": 1,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn genesis_pinger() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 10,
+        "genesisDamageEachOtherUnitHere": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -170,6 +196,64 @@ fn opening_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
                 .to_owned()
         })
         .collect()
+}
+
+fn bury_deferral_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "bury-deferral-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-bury-deferral-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bury": bury(),
+            "north-pinger": genesis_pinger(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-buff": burrowing_deathrite_buff(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-bury",
+                    "north-bury",
+                    "north-pinger",
+                    "north-bury",
+                    "north-bury",
+                    "north-pinger",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-buff"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_deferral(start: u32) -> String {
+    (start..start + 256)
+        .map(bury_deferral_manifest)
+        .find(|candidate| {
+            let preview = Session::new(candidate).expect("ordered Bury candidate");
+            let snapshot = state(&preview);
+            let hand = snapshot["players"]["north"]["hand"]["spellbook"]
+                .as_array()
+                .expect("North opening hand");
+            hand.iter().any(|card| card["cardId"] == "north-bury")
+                && hand.iter().any(|card| card["cardId"] == "north-pinger")
+        })
+        .expect("bounded seed with Bury and a pinger")
 }
 
 fn seed_with(cave_in_spell: bool, start: u32, required_south: usize) -> String {
@@ -407,5 +491,99 @@ fn rule_catalog_0692_cave_in_burrows_then_orders_deathrites() {
             .iter()
             .all(|instance_id| cemetery_has(&completed, "south", instance_id))
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0710_bury_defers_until_ordered_static_deathrites_finish() {
+    let encoded = seed_with_deferral(710);
+    let mut session = opening_main(&encoded);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut buff_ids = Vec::new();
+    for _ in 0..2 {
+        let (summoned, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
+                && descriptor["cardId"] == "south-buff"
+                && descriptor["cell"] == "C1"
+        });
+        buff_ids.push(
+            summoned["cardInstanceId"]
+                .as_str()
+                .expect("buff identity")
+                .to_owned(),
+        );
+    }
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "north-pinger"
+            && descriptor["cell"] == "C1"
+    });
+    assert!(buff_ids.iter().all(|instance_id| {
+        realm_unit(&state(&session), instance_id).is_some_and(|unit| unit["damage"] == 1)
+    }));
+    let spell_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-bury")
+        .expect("Bury in hand")["instanceId"]
+        .as_str()
+        .expect("Bury identity")
+        .to_owned();
+
+    let (_, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == spell_id
+            && descriptor["target"]["instanceId"] == buff_ids[0]
+    });
+    assert_eq!(event_types(&cast), ["magic-cast", "minion-burrowed"]);
+    let pending = state(&session);
+    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["decisionSeat"], "south");
+    assert_eq!(
+        pending["pendingDeathrites"]["deferredOutcomes"],
+        json!([{
+            "payload": {
+                "cardId": "north-bury",
+                "instanceId": spell_id,
+                "owner": "north",
+            },
+            "type": "magic-resolved",
+        }])
+    );
+
+    let checkpoint = create_game_checkpoint(&session).expect("ordered Bury checkpoint");
+    let restored = resume_game_checkpoint(&checkpoint).expect("restored ordered Bury checkpoint");
+    assert_eq!(
+        restored.replay_value().expect("restored pending state"),
+        session.replay_value().expect("source pending state")
+    );
+    let (_, ordered) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == buff_ids[0]
+    });
+    assert_eq!(
+        event_types(&ordered),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(state(&session)["phase"], "main");
     assert_exact_replay(&session);
 }

@@ -16588,6 +16588,37 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0709_chain_magic_requires_mana_and_same_region_hops"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0710",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic burrows a chosen Burrowing Deathrite minion while two wounded allies share the site. The receipt emits magic-cast and minion-burrowed only, enters deathrite-order with magic-resolved deferred, and checkpoint create/resume preserves the pending state. After order-deathrites, both Deathrites draw sites, both minions die, and magic-resolved completes in main. Distinct from immediate single-target Deathrite settlement (0691) and Cave-In area ordering (0692).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "burrowing",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-burrowed",
+        "deathrite-order-committed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_0710_bury_defers_until_ordered_static_deathrites_finish"
+      }
     }
   ]
 }
