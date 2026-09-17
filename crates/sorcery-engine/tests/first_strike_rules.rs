@@ -1,5 +1,6 @@
 //! Direct proofs for first-strike combat (RULE-CATALOG-0204–0206, RULE-CATALOG-0744,
-//! RULE-CATALOG-0749, RULE-CATALOG-0778, RULE-CATALOG-0790, RULE-CATALOG-0978).
+//! RULE-CATALOG-0749, RULE-CATALOG-0778, RULE-CATALOG-0790, RULE-CATALOG-0978,
+//! RULE-CATALOG-0991).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -699,6 +700,179 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
             "attack": 6,
             "deathriteDamageEachUnitHere": 1,
             "defense": 3,
+            "strikesFirstWhileDefending": true,
+        })),
+        &survivor,
+        true,
+        true,
+    );
+    let fs_defender_id = setup.defender_id.as_ref().expect("Deathrite defender");
+    let survivor_id = setup.survivor_id.as_ref().expect("surviving defender");
+    let mut deathrite_ids = [setup.target_id.clone(), fs_defender_id.clone()];
+    deathrite_ids.sort();
+
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == setup.target_id
+    });
+    for join_id in [fs_defender_id.as_str(), survivor_id.as_str()] {
+        accept_where(&mut setup.session, |descriptor| {
+            descriptor["kind"] == "defend" && descriptor["unitInstanceId"] == join_id
+        });
+    }
+    accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    assert_eq!(state(&setup.session)["phase"], "allocate");
+    while state(&setup.session)["phase"] == "allocate" {
+        accept_where(&mut setup.session, |descriptor| {
+            descriptor["kind"] == "allocate-strike"
+                && descriptor["amount"]
+                    == if deathrite_ids
+                        .iter()
+                        .any(|id| descriptor["targetInstanceId"] == id.as_str())
+                    {
+                        3
+                    } else {
+                        0
+                    }
+        });
+    }
+
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"]["kind"],
+        "first-strike"
+    );
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"]["attackerStrikesFirst"],
+        false
+    );
+    assert_eq!(
+        paused["pendingDeathrites"]["continuation"]["firstCombatantInstanceIds"],
+        json!([fs_defender_id])
+    );
+    assert!(unit(&paused, &setup.attacker_id).is_none());
+    assert!(deathrite_ids.iter().all(|id| unit(&paused, id).is_none()));
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|id| !in_cemetery(&paused, "south", id))
+    );
+    assert!(
+        setup
+            .session
+            .transcript()
+            .last()
+            .expect("paused allocation receipt")
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_checkpoint_round_trip(&setup.session);
+
+    let actions = setup
+        .session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .collect::<Vec<_>>();
+    assert_eq!(actions.len(), 2);
+    let first_source = actions[0].descriptor["sourceInstanceId"]
+        .as_str()
+        .expect("first ordered source")
+        .to_owned();
+    let before_version = paused["stateVersion"].as_u64().expect("paused version");
+    let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
+        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_source
+    });
+    assert_eq!(receipt.state_version, before_version);
+    assert_eq!(receipt.next_state_version, before_version + 1);
+
+    let sources = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "deathrite-damage-allocated")
+        .filter_map(|event| event.payload["sourceInstanceId"].as_str())
+        .fold(Vec::new(), |mut unique, source| {
+            if !unique.contains(&source) {
+                unique.push(source);
+            }
+            unique
+        });
+    assert_eq!(sources.first().copied(), Some(first_source.as_str()));
+    assert_eq!(sources.len(), 2);
+    let last_deathrite = receipt
+        .events
+        .iter()
+        .rposition(|event| event.event_type == "deathrite-damage-allocated")
+        .expect("last Deathrite allocation");
+    let first_death = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "minion-died")
+        .expect("first early death");
+    let return_damage = receipt
+        .events
+        .iter()
+        .rposition(|event| {
+            event.event_type == "damage-dealt" && event.payload["instanceId"] == *survivor_id
+        })
+        .expect("normal return damage");
+    assert!(last_deathrite < return_damage && return_damage < first_death);
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .filter(|event| event.event_type == "minion-died")
+            .count(),
+        3
+    );
+
+    let resolved = state(&setup.session);
+    assert_eq!(resolved["stateVersion"], before_version + 1);
+    assert!(in_cemetery(&resolved, "north", &setup.attacker_id));
+    assert_eq!(
+        unit(&resolved, survivor_id).expect("surviving defender")["damage"],
+        2
+    );
+    assert_eq!(resolved["players"]["south"]["avatar"]["life"], 20);
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|id| in_cemetery(&resolved, "south", id))
+    );
+    assert_eq!(resolved["phase"], "main");
+    assert!(resolved["pendingCombat"].is_null());
+    assert!(resolved["pendingDeathrites"].is_null());
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the direct continuation proof keeps allocation, ordering, resume, and event order together"
+)]
+fn rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_resumes_once() {
+    let deathrite = minion(json!({
+        "attack": 2,
+        "deathriteDamageEachUnitHere": 1,
+        "defense": 3,
+    }));
+    let survivor = minion(json!({ "attack": 2, "defense": 10 }));
+    let mut setup = prepare_attack(
+        283,
+        &minion(json!({ "attack": 6, "defense": 4 })),
+        &deathrite,
+        &minion(json!({
+            "attack": 6,
+            "deathriteDamageEachUnitHere": 1,
+            "defense": 3,
+            "strikesFirstWhileAttacking": true,
             "strikesFirstWhileDefending": true,
         })),
         &survivor,
