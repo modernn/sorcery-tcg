@@ -1,10 +1,13 @@
 //! Direct proofs for damage-each-unit-at-location-within-two-steps Magic
-//! (RULE-CATALOG-0589–0590, RULE-CATALOG-0716).
+//! (RULE-CATALOG-0589–0590, RULE-CATALOG-0716, 1039).
 //!
 //! Ordinary Magic offers existing locations within two measured cardinal steps
 //! of the caster footprint and deals 3 damage to every Unit there. Ward
 //! absorbs. Location offers are not unit targets, so Stealth does not filter
 //! them. An empty offered location is a paid no-op.
+//!
+//! 1039 covers minor explosion killing a Deathrite minion: the controller draws
+//! a site and magic-resolved only appears after deathrite settlement.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -51,6 +54,18 @@ fn warded() -> Value {
     })
 }
 
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn explosion() -> Value {
     json!({
         "cardType": "magic",
@@ -64,6 +79,41 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn explosion_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "minor-explosion-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-minor-explosion-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-explosion": explosion(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-explosion"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn explosion_manifest(seed: u32) -> String {
@@ -182,6 +232,20 @@ fn opening_spell_ids(encoded: &str) -> Vec<String> {
         .collect()
 }
 
+fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    snapshot["realm"]["units"]
+        .as_array()?
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
+}
+
 fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
     snapshot["realm"]["units"]
         .as_array()
@@ -219,6 +283,40 @@ fn seed_with(required: &[&str]) -> String {
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn seed_with_deathrite(start: u32) -> String {
+    (start..start + 256)
+        .map(explosion_deathrite_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-explosion")
+        })
+        .expect("bounded seed with minor explosion Deathrite setup")
+}
+
+fn one_south_deathrite_at_c3(session: &mut Session) -> String {
+    south_ends_after_c1(session);
+    play_c3(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned minion identity")
+        .to_owned()
 }
 
 fn summon_at(session: &mut Session, card_id: &str, cell: &str) -> String {
@@ -409,4 +507,74 @@ fn rule_catalog_0590_empty_offered_location_is_a_paid_noop() {
 #[test]
 fn rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0716_minor_explosion_measures_connected_locations_and_hits_only_target_region();
+}
+
+#[test]
+fn rule_catalog_1039_minor_explosion_deathrite_draws_for_controller_on_kill() {
+    let encoded = seed_with_deathrite(1039);
+    let mut session = opening_main(&encoded);
+    let target_id = one_south_deathrite_at_c3(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-explosion"
+            && descriptor["targetLocation"]["cell"] == "C3"
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["targetInstanceId"], target_id);
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], target_id);
+    let types = event_types(&receipt);
+    let damage_dealt = types
+        .iter()
+        .position(|event_type| *event_type == "damage-dealt")
+        .expect("damage-dealt index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        damage_dealt < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected damage-dealt, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &target_id).is_none());
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == target_id)
+    );
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
+    assert_exact_replay(&session);
 }
