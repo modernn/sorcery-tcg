@@ -1,4 +1,4 @@
-//! Direct proofs for Overpower this-turn power Magic (RULE-CATALOG-0033, 0700).
+//! Direct proofs for Overpower this-turn power Magic (RULE-CATALOG-0033, 0700, 0722).
 //!
 //! `grantPowerToAllyThisTurn` offers controlled allies, raises current derived
 //! power by +2 per source until the current End Phase, and feeds source-aware
@@ -7,7 +7,7 @@
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
-use sorcery_engine::contract::{ActionRequest, Receipt};
+use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
@@ -32,6 +32,28 @@ fn fighter() -> Value {
         "attack": 2,
         "cardType": "minion",
         "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn disabled_power_fighter() -> Value {
+    json!({
+        "attack": 2,
+        "burrowing": true,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "stealth": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "ward": true,
+    })
+}
+
+fn sleep() -> Value {
+    json!({
+        "cardType": "magic",
+        "disableTargetMinionWithinTwoStepsUntilDamaged": true,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -118,6 +140,48 @@ fn overpower_manifest(seed: u32) -> String {
     }))
 }
 
+fn power_observed_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "temporary-power-observed" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-temporary-power-observed-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-fighter": disabled_power_fighter(),
+            "north-overpower": overpower(),
+            "north-site": site(),
+            "north-sleep": sleep(),
+            "south-avatar": avatar(),
+            "south-filler": filler(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-overpower",
+                    "north-overpower",
+                    "north-fighter",
+                    "north-sleep",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-filler"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -161,6 +225,10 @@ fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay")["state"].clone()
 }
 
+fn observed(session: &Session) -> Value {
+    session.public_view(Seat::North).expect("North public view")
+}
+
 fn event_types(receipt: &Receipt) -> Vec<&str> {
     receipt
         .events
@@ -186,6 +254,21 @@ fn opening_has(encoded: &str, card_ids: &[&str]) -> bool {
     })
 }
 
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
 fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
     snapshot["realm"]["units"]
         .as_array()
@@ -193,6 +276,23 @@ fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
         .iter()
         .find(|unit| unit["instanceId"] == instance_id)
         .expect("expected realm unit")
+}
+
+fn observed_unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected observed unit")
+}
+
+fn avatar_stats(snapshot: &Value, seat: &str) -> (u64, u64) {
+    let avatar = &snapshot["players"][seat]["avatar"];
+    (
+        avatar["attack"].as_u64().expect("avatar attack"),
+        avatar["defense"].as_u64().expect("avatar defense"),
+    )
 }
 
 fn overpower_ally_ids(session: &Session) -> Vec<String> {
@@ -245,6 +345,18 @@ fn seed_with(start: u32) -> String {
         .map(overpower_manifest)
         .find(|candidate| opening_has(candidate, &["north-fighter"]))
         .expect("bounded seed with fighter and two Overpower Magics")
+}
+
+fn seed_for_power_observed(start: u32) -> String {
+    (start..start + 512)
+        .map(power_observed_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-fighter")
+                && hand.iter().any(|id| id == "north-sleep")
+                && hand.iter().any(|id| id == "north-overpower")
+        })
+        .expect("bounded seed with fighter, Sleep, and Overpower in the opening hand")
 }
 
 fn play_to_powered_board(session: &mut Session) -> (String, String, String) {
@@ -464,5 +576,110 @@ fn rule_catalog_0700_overpower_offers_allies_and_stacks_until_end_phase() {
             .collect::<Vec<_>>()
     );
     assert!(realm_unit(&state(&session), &fighter_id)["temporaryPowerSources"].is_null());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_stats() {
+    let encoded = seed_for_power_observed(722);
+    let mut session = opening_main(&encoded);
+    let (fighter_summon, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-fighter"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let fighter_id = fighter_summon["cardInstanceId"]
+        .as_str()
+        .expect("fighter identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+
+    let before = observed(&session);
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    assert_eq!(avatar_stats(&before, "north"), (1, 1));
+    let fighter_before = observed_unit(&before, &fighter_id);
+    assert_eq!(fighter_before["attack"], 2);
+    assert_eq!(fighter_before["defense"], 2);
+    assert_eq!(fighter_before["stealthed"], true);
+    assert_eq!(fighter_before["warded"], true);
+
+    let (_, slept) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-sleep"
+            && descriptor["target"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&slept),
+        [
+            "magic-cast",
+            "minion-disabled",
+            "stealth-lost",
+            "magic-resolved"
+        ]
+    );
+    let after_sleep = observed(&session);
+    let disabled_fighter = observed_unit(&after_sleep, &fighter_id);
+    assert_eq!(disabled_fighter["disabled"], true);
+    assert_eq!(disabled_fighter["attack"], 2);
+    assert_eq!(disabled_fighter["defense"], 2);
+
+    let mut ally_ids = overpower_ally_ids(&session);
+    ally_ids.sort();
+    let mut expected_allies = vec![avatar_id.clone(), fighter_id.clone()];
+    expected_allies.sort();
+    assert_eq!(ally_ids, expected_allies);
+
+    let (_, avatar_grant) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-overpower"
+            && descriptor["ally"]["kind"] == "avatar"
+    });
+    assert_eq!(
+        event_types(&avatar_grant),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    let after_avatar = observed(&session);
+    assert_eq!(avatar_stats(&after_avatar, "north"), (3, 3));
+    assert_eq!(
+        after_avatar["players"]["north"]["avatar"]["temporaryPowerSources"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+
+    let (_, fighter_grant) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-overpower"
+            && descriptor["ally"]["instanceId"] == fighter_id
+    });
+    assert_eq!(
+        event_types(&fighter_grant),
+        ["magic-cast", "power-granted", "magic-resolved"]
+    );
+    let after_fighter = observed(&session);
+    let powered = observed_unit(&after_fighter, &fighter_id);
+    assert_eq!(powered["disabled"], true);
+    assert_eq!(powered["attack"], 4);
+    assert_eq!(powered["defense"], 4);
+    assert_eq!(powered["stealthed"], false);
+    assert_eq!(powered["warded"], true);
+    assert_eq!(
+        powered["temporaryPowerSources"].as_array().map(Vec::len),
+        Some(1)
+    );
     assert_exact_replay(&session);
 }

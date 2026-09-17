@@ -16903,6 +16903,28 @@
         "file": "crates/sorcery-engine/tests/fatality_rules.rs",
         "testName": "rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0722",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "This-turn +2 power raises observed attack and defense for Avatars and disabled minions. Disabled, stealthed, and warded allies remain valid grantPowerToAllyThisTurn targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerToAllyThisTurn",
+        "derived-power"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overpower_rules.rs",
+        "testName": "rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_stats"
+      }
     }
   ]
 }
