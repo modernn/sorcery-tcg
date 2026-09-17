@@ -249,22 +249,23 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Token Magic summons deterministically and tokens banish instead of entering a cemetery.",
+      "plainLanguage": "Token Magic summons source-linked tokens in stable cell order with identities hashed from cell, ordinal, owner, source, and pre-cast state version, and with no random draws. Distinct from 0579, which proves bordering-site occupancy of the same spell without the identity recipe or empty random-draw assertion.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
-        "token"
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
       ],
       "actionHints": [
-        "summon"
+        "cast-magic"
       ],
       "eventHints": [
-        "cemetery-entry",
-        "banishment",
-        "summon"
+        "magic-cast",
+        "minion-summoned",
+        "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "token_magic_should_summon_in_cell_order_and_banish_a_dead_token"
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_0687_token_magic_summons_in_cell_order_with_deterministic_identities"
       }
     },
     {
@@ -15986,6 +15987,55 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
         "testName": "rule_catalog_0686_targeted_magic_reaches_deaths_door_then_defeats_the_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0687",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Token Magic summons source-linked tokens in stable cell order. After North controls C4, C3, and B3 and South occupies B2, casting places foot-soldier tokens on B3 then C3. Each identity is hashed from card, cell, ordinal, owner, token source, spell instance, and pre-cast state version, and the receipt has no random draws. Distinct from 0579, which proves bordering-site occupancy without the identity recipe or empty random-draw proof.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-summoned",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_0687_token_magic_summons_in_cell_order_with_deterministic_identities"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0688",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Magic-summoned 1x1 token that dies in combat is banished instead of entering a cemetery: the fight emits minion-died then minion-banished, and the token instance is absent from its owner's cemetery. Distinct from 0372, which proves the same exit for a 2x2 Genesis token.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token"
+      ],
+      "actionHints": [
+        "declare-attack",
+        "close-defend"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_0688_dead_token_banishes_instead_of_entering_a_cemetery"
       }
     }
   ]
