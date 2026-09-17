@@ -1683,7 +1683,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
-        "testName": "ready_minion_should_tap_to_shoot_fixed_damage_at_first_visible_unit"
+        "testName": "rule_catalog_0781_ready_minion_taps_to_shoot_fixed_damage_at_first_visible_unit"
       }
     },
     {
@@ -1724,7 +1724,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
-        "testName": "attacking_only_first_strike_should_kill_before_return_and_be_inactive_defending"
+        "testName": "rule_catalog_0778_attacking_first_strike_kills_before_return_inactive_defending"
       }
     },
     {
@@ -1877,7 +1877,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
-        "testName": "ranged_minion_should_pause_basic_movement_for_one_strike"
+        "testName": "rule_catalog_0774_ranged_minion_pauses_basic_movement_for_one_strike"
       }
     },
     {
@@ -1988,7 +1988,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/intercept_rules.rs",
-        "testName": "cannot_defend_should_block_movement_but_allow_stationary_defend_and_intercept"
+        "testName": "rule_catalog_0779_cannot_defend_blocks_movement_allows_stationary_response"
       }
     },
     {
@@ -2209,7 +2209,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
-        "testName": "malakhim_should_untap_only_when_tapped_and_enabled"
+        "testName": "rule_catalog_0780_malakhim_untap_only_when_tapped_and_enabled"
       }
     },
     {
@@ -2515,7 +2515,7 @@
       "eventHints": [],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/defend_rules.rs",
-        "testName": "movement_bonus_one_should_issue_and_apply_exact_two_step_defend_path"
+        "testName": "rule_catalog_0777_movement_bonus_one_issues_exact_two_step_defend_path"
       }
     },
     {
@@ -2573,7 +2573,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
-        "testName": "simultaneous_deathrites_should_resolve_nap_then_ap_before_cemetery_entry"
+        "testName": "rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery"
       }
     },
     {
@@ -3193,7 +3193,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
-        "testName": "end_turn_artifact_life_loss_should_use_its_carried_cell_and_survive_bearer_disable"
+        "testName": "rule_catalog_0757_carried_artifact_life_loss_outlasts_disabled_bearer"
       }
     },
     {
@@ -18131,6 +18131,239 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/combat_rules.rs",
         "testName": "rule_catalog_0772_zero_power_avatars_emit_no_zero_damage_or_life_loss"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0773",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A finished avatar_defeated game replay exposes the winning and losing seats through Game::outcome().",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "declare-attack",
+        "close-defend"
+      ],
+      "eventHints": [
+        "death-blow",
+        "avatar-life-lost",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_0773_terminal_outcome_exposes_winner_and_loser"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0774",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged minion with mayRangedStrikeOnceDuringBasicMovement pauses incremental Move and Attack movement for one projectile shot mid-path, exhausts that strike, and resumes along the remaining path to activate move-and-attack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "mayRangedStrikeOnceDuringBasicMovement",
+        "movementBonus"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "continue-basic-movement",
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "basic-movement-started",
+        "basic-movement-continued",
+        "projectile-shot",
+        "move-and-attack-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0774_ranged_minion_pauses_basic_movement_for_one_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0775",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A later-entered persistent 2×2 Flood Aura covering the same site wins the timestamp: the site becomes a Water site and provides Water threshold, while its other affinities remain. Drought entered first stays in the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/terrain_aura_rules.rs",
+        "testName": "rule_catalog_0775_later_flood_wins_when_it_enters_after_drought"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0776",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Simultaneous draw-site Deathrites resolve NAP then AP before minions enter their cemeteries; an empty Atlas skips those draws and finishes in a draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "death",
+        "cemetery-entry",
+        "resolution",
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_rules.rs",
+        "testName": "rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0777",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Movement +1 issues and applies an exact two-step Defend path, joining the attack and removing the original target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movement-bonus"
+      ],
+      "actionHints": [
+        "defend"
+      ],
+      "eventHints": [
+        "defender-joined",
+        "original-target-removed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/defend_rules.rs",
+        "testName": "rule_catalog_0777_movement_bonus_one_issues_exact_two_step_defend_path"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0778",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Attacking-only first strike kills the defender before return damage while attacking, and is inactive while defending so equal minions trade simultaneously.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking"
+      ],
+      "actionHints": [
+        "attack",
+        "strike"
+      ],
+      "eventHints": [
+        "death",
+        "resolution",
+        "strike"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0778_attacking_first_strike_kills_before_return_inactive_defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0779",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A minion with cannotDefend is excluded from movement Defend paths but may still Defend in place and Intercept when co-located.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "cannotDefend"
+      ],
+      "actionHints": [
+        "defend",
+        "intercept"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "testName": "rule_catalog_0779_cannot_defend_blocks_movement_allows_stationary_response"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0780",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Malakhim with untapsAtEndOfControllerTurn untaps at its controller End Phase only when tapped and not Disabled; ready minions skip untap and Disabled minions stay tapped while damage resets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disabled",
+        "untapsAtEndOfControllerTurn"
+      ],
+      "actionHints": [
+        "end-turn"
+      ],
+      "eventHints": [
+        "minion-untapped",
+        "turn-ended",
+        "turn-started"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "rule_catalog_0780_malakhim_untap_only_when_tapped_and_enabled"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0781",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ready minion with tap-to-shoot fixed projectile damage may fire in each direction, skip Stealth along the ray to the first visible unit, tap and lose Stealth while keeping Ward, and deal its fixed amount on hit.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage",
+        "stealth",
+        "ward"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "stealth-lost",
+        "projectile-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0781_ready_minion_taps_to_shoot_fixed_damage_at_first_visible_unit"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0782",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "End-turn Artifact life loss on a carried Artifact charges the site controller of the cell its bearer currently occupies, following the bearer when it walks to a new site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfEachTurnSiteControllerLosesLife",
+        "artifact"
+      ],
+      "actionHints": [
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "end-turn-site-life-loss-triggered",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0782_carried_artifact_life_loss_uses_cell_survives_bearer_disable"
       }
     }
   ]
