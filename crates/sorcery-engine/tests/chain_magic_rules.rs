@@ -1,5 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
+//! 0944, 0952).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -29,6 +30,10 @@
 //! 0934 covers extend-chain-magic preserving the staged discardCardInstanceId
 //! from begin through resolve when a second hop is added. Distinct from 0889
 //! single-hop atlas discard resolve and 0903 checkpoint resume.
+//! 0944 covers extend-chain-magic omitting nearby enemy minions with active
+//! Stealth while visible nearby enemies remain eligible.
+//! 0952 covers begin-chain-magic withheld for a printed Spellcaster with zero
+//! legal first hops on an otherwise empty nearby board area.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -243,6 +248,49 @@ fn discard_hops_manifest(seed: u32) -> String {
     }))
 }
 
+fn isolated_spellcaster_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-isolated-spellcaster" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-isolated-spellcaster-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-chain": chain(0),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-caster",
+                    "north-chain",
+                    "north-caster",
+                    "north-chain",
+                    "north-caster",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn spellcaster_hops_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
@@ -278,6 +326,57 @@ fn spellcaster_hops_manifest(seed: u32) -> String {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn stealth_hops_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-stealth-hops" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-stealth-hops-v1",
+        },
+        "cards": {
+            "north-ally-a": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-chain": chain(0),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-stealth": minion(json!({ "stealth": true, "summonToAnySite": true })),
+            "south-visible": minion(json!({ "summonToAnySite": true })),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-ally-a",
+                    "north-chain",
+                    "north-ally-a",
+                    "north-chain",
+                    "north-ally-a",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec![
+                    "south-visible",
+                    "south-stealth",
+                    "south-visible",
+                    "south-visible",
+                    "south-stealth",
+                    "south-stealth",
+                ],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -2125,6 +2224,56 @@ struct SpellcasterChainHops {
     hops: ChainHops,
 }
 
+fn try_north_play_site(session: &mut Session, cell: &str) -> Option<()> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "play-site")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    })?;
+    Some(())
+}
+
+fn try_setup_isolated_spellcaster(encoded: &str) -> Option<(Session, String, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-caster"]) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    for cell in ["C3", "C2", "C1"] {
+        try_north_play_site(&mut session, cell)?;
+    }
+    let (caster, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C1"
+    })?;
+    let before = state(&session);
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let caster_id = caster["cardInstanceId"]
+        .as_str()
+        .expect("printed caster identity")
+        .to_owned();
+    Some((session, chain_id, caster_id))
+}
+
+fn offers_begin_spellcaster_chain(session: &Session, chain_id: &str, caster_id: &str) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                && action.descriptor["cardInstanceId"] == chain_id
+                && action.descriptor["casterInstanceId"] == caster_id
+        })
+}
+
 fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
     if !opening_has_all(encoded, &["north-chain", "north-caster", "north-ally-a"]) {
         return None;
@@ -2182,6 +2331,42 @@ fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
 }
 
 #[test]
+fn rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops(
+) {
+    let encoded = (952..952 + 512)
+        .map(isolated_spellcaster_manifest)
+        .find(|candidate| try_setup_isolated_spellcaster(candidate).is_some())
+        .expect("bounded seed with Chain Magic, printed Spellcaster, and isolated C1 setup");
+    let (session, chain_id, caster_id) =
+        try_setup_isolated_spellcaster(&encoded).expect("isolated Spellcaster setup");
+    let snapshot = state(&session);
+    assert_eq!(
+        realm_unit(&snapshot, &caster_id)
+            .and_then(|unit| unit["location"]["cell"].as_str()),
+        Some("C1"),
+        "the printed Spellcaster must sit alone at the remote site"
+    );
+    assert!(
+        snapshot["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .filter(|unit| unit["instanceId"] != caster_id)
+            .all(|unit| unit["location"]["cell"] != "C1"),
+        "no other unit may share the caster region near C1"
+    );
+    assert!(
+        chain_ids(&session, &chain_id).is_empty(),
+        "zero nearby hops must issue no begin-chain-magic targets for the Chain card"
+    );
+    assert!(
+        !offers_begin_spellcaster_chain(&session, &chain_id, &caster_id),
+        "append_main must issue no begin-chain-magic for the printed Spellcaster caster"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0933_chain_magic_withheld_when_staged_caster_is_not_a_legal_spellcaster() {
     let encoded = (933..933 + 256)
         .map(spellcaster_hops_manifest)
@@ -2236,6 +2421,124 @@ fn rule_catalog_0933_chain_magic_withheld_when_staged_caster_is_not_a_legal_spel
     assert!(
         branched.legal_actions().is_err(),
         "append_chain_magic_actions must fail when pending.caster_instance_id is not a legal Spellcaster"
+    );
+    assert_exact_replay(&hops.session);
+}
+
+fn try_setup_stealth_hops(encoded: &str) -> Option<(ChainHops, String, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-ally-a"]) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let (first, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally-a"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (visible, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visible"
+            && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (stealth, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-stealth"
+            && descriptor["cell"] == "D4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let before = state(&session);
+    let visible_id = visible["cardInstanceId"].as_str()?.to_owned();
+    let stealth_id = stealth["cardInstanceId"].as_str()?.to_owned();
+    let visible_unit = realm_unit(&before, &visible_id)?;
+    let stealth_unit = realm_unit(&before, &stealth_id)?;
+    if visible_unit["stealthed"] == true || stealth_unit["stealthed"] != true {
+        return None;
+    }
+    Some((
+        ChainHops {
+            avatar_id: before["players"]["north"]["avatar"]["card"]["instanceId"]
+                .as_str()
+                .expect("North Avatar identity")
+                .to_owned(),
+            chain_id: hand_instance(&before, "north-chain"),
+            first_id: first["cardInstanceId"]
+                .as_str()
+                .expect("first hop identity")
+                .to_owned(),
+            mana: before["players"]["north"]["mana"]
+                .as_u64()
+                .expect("North mana"),
+            second_id: visible_id.clone(),
+            session,
+        },
+        visible_id,
+        stealth_id,
+    ))
+}
+
+#[test]
+fn rule_catalog_0944_extend_chain_magic_omits_nearby_stealthed_enemy_minions() {
+    let encoded = (944..944 + 512)
+        .map(stealth_hops_manifest)
+        .find(|candidate| try_setup_stealth_hops(candidate).is_some())
+        .expect("bounded seed with Chain Magic, ally hop, and nearby visible and stealthed enemies");
+    let (mut hops, visible_id, stealth_id) =
+        try_setup_stealth_hops(&encoded).expect("stealth Chain Magic hops setup");
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    let extensions = extend_ids(&hops.session);
+    assert!(
+        extensions.contains(&visible_id),
+        "extend-chain-magic must still offer the nearby visible enemy"
+    );
+    assert!(
+        !extensions.contains(&stealth_id),
+        "extend-chain-magic must omit the nearby stealthed enemy"
     );
     assert_exact_replay(&hops.session);
 }
