@@ -27820,7 +27820,6 @@ pub mod catalog_proofs {
         );
     }
 
-
     pub fn rule_catalog_0719_geomancer_admits_site_genesis_on_owners_atlas() {
         let cross_deck = selfplay_manifest_with(31, |manifest| {
             manifest["cards"]["north-avatar"]["replaceAdjacentRubbleWithTopAtlasSite"] =
@@ -27931,7 +27930,6 @@ pub mod catalog_proofs {
             });
         assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
     }
-
 }
 
 #[cfg(test)]
@@ -29207,7 +29205,6 @@ mod tests {
                 .stealthed
         );
     }
-
 
     #[test]
     fn tower_should_grant_derived_stats_regardless_of_site_controller() {
