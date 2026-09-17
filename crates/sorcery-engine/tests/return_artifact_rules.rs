@@ -1,9 +1,10 @@
 //! Direct proofs for return-target-artifact-to-owner-hand Magic
-//! (RULE-CATALOG-0631–0632).
+//! (RULE-CATALOG-0631–0632, RULE-CATALOG-1072).
 //!
 //! Return-artifact Magic detaches a carried Artifact and returns it to its
 //! owner's Spellbook hand. The opponent sees only the resulting hand count.
-//! It offers no target when the caster region has no Artifact.
+//! It offers no target when the caster region has no Artifact. While Deathrites
+//! wait for ordering, return-artifact Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -51,6 +52,27 @@ fn return_spell() -> Value {
         "cardType": "magic",
         "manaCost": 0,
         "returnTargetArtifactToOwnerHand": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -124,6 +146,29 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
 }
 
 fn keep(session: &mut Session) {
@@ -228,6 +273,141 @@ fn stage_south_minion(session: &mut Session) -> String {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
     minion_id
+}
+
+fn deathrite_return_artifact_manifest(seed: u32) -> String {
+    let fixture = "return-artifact-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-return": return_spell(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-artifact": artifact(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-return",
+                    "north-rain",
+                    "north-rain",
+                    "north-return",
+                    "north-rain",
+                    "north-return",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-artifact"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-minion", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_return_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-return", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteReturnArtifactSetup {
+    artifact_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_return_artifact_target(
+    encoded: &str,
+) -> Option<PendingDeathriteReturnArtifactSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-artifact"
+            && descriptor["bearer"]["kind"] == "avatar"
+    })?;
+    let artifact_id = state(&session)["realm"]["artifacts"][0]["instanceId"]
+        .as_str()?
+        .to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_return_and_rain(&state(&session)) {
+        return None;
+    }
+    if return_artifact_targets(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteReturnArtifactSetup {
+        artifact_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_return_artifact_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_return_artifact_manifest)
+        .find(|candidate| try_pending_deathrite_with_return_artifact_target(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with return-artifact Magic in hand")
 }
 
 fn return_artifact_targets(session: &Session) -> Vec<String> {
@@ -392,4 +572,74 @@ fn rule_catalog_0632_return_target_artifact_offers_no_target_without_an_artifact
             .any(|card| card["cardId"] == "north-return")
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1072_return_artifact_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_return_artifact_seed_with(1072);
+    let mut setup = try_pending_deathrite_with_return_artifact_target(&encoded)
+        .expect("complete return-artifact Deathrite withheld setup");
+    let artifact_id = setup.artifact_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(realm_has_artifact(&paused, &artifact_id));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(return_artifact_targets(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(realm_has_artifact(&resumed, &artifact_id));
+    assert_eq!(
+        return_artifact_targets(session).as_slice(),
+        std::slice::from_ref(&artifact_id)
+    );
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    assert!(!realm_has_artifact(&state(session), &artifact_id));
+    assert_exact_replay(session);
 }
