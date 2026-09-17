@@ -982,3 +982,68 @@ fn rule_catalog_1141_intercept_withheld_during_pending_deathrite_order() {
     );
     exact_replay(session);
 }
+
+#[test]
+fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
+    let encoded = intercept_deathrite_seed_with(1159);
+    let mut setup = try_pending_intercept_during_deathrite_order(&encoded)
+        .expect("complete close-intercept Deathrite withheld setup");
+    let attacker_id = setup.attacker_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let interceptor_id = setup.interceptor_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "close-intercept")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+                && descriptor["unitInstanceId"] == attacker_id
+        });
+    }
+    assert_eq!(state(session)["phase"], "attack");
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    let legal: Vec<Value> = session
+        .legal_actions()
+        .expect("Intercept actions")
+        .into_iter()
+        .map(|action| action.descriptor)
+        .collect();
+    assert_eq!(state(session)["phase"], json!("intercept"));
+    assert_eq!(state(session)["decisionSeat"], json!("south"));
+    assert!(
+        legal
+            .iter()
+            .any(|descriptor| descriptor["kind"] == "close-intercept")
+    );
+    assert!(legal.iter().any(|descriptor| {
+        descriptor == &json!({ "kind": "intercept", "unitInstanceId": interceptor_id })
+    }));
+    exact_replay(session);
+}
