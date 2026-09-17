@@ -337,9 +337,7 @@ struct PendingDeathriteDisableSetup {
     visitor_id: String,
 }
 
-fn try_pending_deathrite_with_ready_visitor(
-    encoded: &str,
-) -> Option<PendingDeathriteDisableSetup> {
+fn try_pending_deathrite_with_ready_visitor(encoded: &str) -> Option<PendingDeathriteDisableSetup> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
     keep(&mut session);

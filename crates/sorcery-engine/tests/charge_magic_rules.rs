@@ -484,8 +484,8 @@ fn rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_
 #[test]
 fn rule_catalog_1033_charge_magic_withheld_during_pending_deathrite_order() {
     let encoded = deathrite_charge_seed_with(1033);
-    let mut setup = try_pending_deathrite(&encoded)
-        .expect("complete Charge Deathrite withheld setup");
+    let mut setup =
+        try_pending_deathrite(&encoded).expect("complete Charge Deathrite withheld setup");
     let ally_id = setup.ally_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;

@@ -202,8 +202,7 @@ fn mill_casts(session: &Session) -> usize {
         .expect("legal actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-mill"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-mill"
         })
         .count()
 }

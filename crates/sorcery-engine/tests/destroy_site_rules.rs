@@ -557,10 +557,7 @@ fn rule_catalog_1035_destroy_site_magic_withheld_during_pending_deathrite_order(
             .iter()
             .all(|unit| unit["instanceId"] != *instance_id)
     }));
-    assert_eq!(
-        paused["realm"]["sites"]["C1"]["instanceId"],
-        south_site_id
-    );
+    assert_eq!(paused["realm"]["sites"]["C1"]["instanceId"], south_site_id);
     assert!(
         session
             .legal_actions()
@@ -593,10 +590,7 @@ fn rule_catalog_1035_destroy_site_magic_withheld_during_pending_deathrite_order(
     assert_eq!(resumed["phase"], "main");
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
-    assert_eq!(
-        resumed["realm"]["sites"]["C1"]["instanceId"],
-        south_site_id
-    );
+    assert_eq!(resumed["realm"]["sites"]["C1"]["instanceId"], south_site_id);
     assert!(
         destroy_site_targets(session)
             .iter()

@@ -327,8 +327,7 @@ fn draw_casts(session: &Session) -> usize {
         .expect("draw-spell actions")
         .iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-draw"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-draw"
         })
         .count()
 }

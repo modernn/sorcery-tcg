@@ -294,8 +294,7 @@ fn bury_targets(session: &Session) -> Vec<String> {
         .expect("bury actions")
         .into_iter()
         .filter(|action| {
-            action.descriptor["kind"] == "cast-magic"
-                && action.descriptor["cardId"] == "north-bury"
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-bury"
         })
         .filter_map(|action| {
             action.descriptor["target"]["instanceId"]
