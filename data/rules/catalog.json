@@ -16566,6 +16566,28 @@
         "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
         "testName": "rule_catalog_0708_raise_dead_blocked_footprint_summon"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0709",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A two-mana Chain Magic is not offered while the caster has only one mana. With a surface minion at C4 and a burrowing ally underground at C3, begin-chain-magic on the surface target is legal once mana is sufficient, but extend-chain-magic to the underground unit is illegal because hops cannot leave the caster region. Distinct from 0696 happy-path hops and simultaneous resolve.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0709_chain_magic_requires_mana_and_same_region_hops"
+      }
     }
   ]
 }

@@ -1,9 +1,9 @@
-//! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696).
+//! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709).
 //!
-//! 0385–0386 already cover oversized Spellcaster footprint hops. This slice
-//! keeps the 0030 leftover: a 1×1 caster stages distinct nearby hops, then
-//! damages every chosen unit in one resolve. Extra hops cost 2 mana, and hops
-//! cannot leave the caster's region.
+//! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
+//! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
+//! every chosen unit in one resolve. 0709 is the edge slice: paid Chain Magic
+//! is suppressed without enough mana, and hops cannot leave the caster region.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -494,7 +494,7 @@ fn try_setup_filter(encoded: &str) -> Option<(Session, String, String)> {
 }
 
 #[test]
-fn chain_magic_requires_mana_and_same_region_hops() {
+fn rule_catalog_0709_chain_magic_requires_mana_and_same_region_hops() {
     let encoded = (1696..1696 + 512)
         .map(filter_manifest)
         .find(|candidate| try_setup_filter(candidate).is_some())
