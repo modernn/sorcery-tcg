@@ -543,7 +543,7 @@ fn rule_catalog_0814_ranged_damage_keeps_unit_source_without_return_strike() {
     clippy::too_many_lines,
     reason = "one direct strike proof keeps Ward, death, Lethal, Deathrite, and terminal ordering together"
 )]
-fn ranged_strikes_should_apply_ward_lethal_deathrites_and_terminal_results() {
+fn rule_catalog_0867_ranged_strikes_apply_ward_lethal_deathrites_and_terminal_results() {
     let warded = prepare_ranged(
         187,
         &minion(json!({ "attack": 4, "ranged": true })),
@@ -862,7 +862,7 @@ fn rule_catalog_0774_ranged_minion_pauses_basic_movement_for_one_strike() {
     clippy::too_many_lines,
     reason = "one direct scenario proves incremental Defend, one Ranged shot, and replay together"
 )]
-fn ranged_minion_should_pause_defend_movement_for_one_strike() {
+fn rule_catalog_0868_ranged_minion_pauses_defend_movement_for_one_strike() {
     let ranged = minion(json!({
         "mayRangedStrikeOnceDuringBasicMovement": true,
         "ranged": true,
@@ -986,7 +986,7 @@ fn ranged_minion_should_pause_defend_movement_for_one_strike() {
     clippy::too_many_lines,
     reason = "one direct scenario proves terminal cleanup after ordered Deathrites interrupt movement"
 )]
-fn ordered_deathrites_ending_a_game_should_clear_incremental_ranged_movement() {
+fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
     let cards = json!({
         "north-avatar": avatar(),
         "north-mover": minion(json!({
