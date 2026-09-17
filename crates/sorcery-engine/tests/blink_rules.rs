@@ -372,7 +372,7 @@ fn destinations(casts: &[Value], ally: &str) -> Vec<String> {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_offer_every_ally_a_nearby_location_and_either_deck() {
+fn rule_catalog_1123_blink_offers_nearby_location_and_either_deck() {
     let checkpoint = blink_checkpoint(false);
     assert_eq!(
         realm_unit(&checkpoint.session, &checkpoint.fragile).expect("wounded ally")["damage"],
