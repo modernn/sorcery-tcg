@@ -1,8 +1,10 @@
-//! Direct proofs for teleport-target-one-diagonal Magic (RULE-CATALOG-0563–0564).
+//! Direct proofs for teleport-target-one-diagonal Magic (RULE-CATALOG-0563–0564,
+//! RULE-CATALOG-1032).
 //!
 //! Ordinary Magic targets a minion, Artifact, or Aura and teleports it one
 //! diagonal step onto an existing location. Cardinal cells and stay are not
-//! offered. No diagonal site means the spell has no legal cast.
+//! offered. No diagonal site means the spell has no legal cast. While Deathrites
+//! wait for ordering, teleport Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -41,6 +43,38 @@ fn displace() -> Value {
         "cardType": "magic",
         "manaCost": 0,
         "teleportTargetMinionArtifactOrAuraOneDiagonal": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -285,6 +319,163 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
+fn deathrite_displace_manifest(seed: u32) -> String {
+    let fixture = "teleport-one-diagonal-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-displace": displace(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-displace",
+                    "north-rain",
+                    "north-rain",
+                    "north-displace",
+                    "north-rain",
+                    "north-displace",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_displace_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-displace", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+struct PendingDeathriteDisplaceSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    visitor_id: String,
+}
+
+fn try_lay_diagonal_site(session: &mut Session) -> bool {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D4"
+    })
+    .is_some()
+        && try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn").is_some()
+        && try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+        .is_some()
+        && try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn").is_some()
+        && try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+        .is_some()
+        && try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "D3"
+        })
+        .is_some()
+}
+
+fn try_pending_deathrite_with_ready_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteDisplaceSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !try_lay_diagonal_site(&mut session) {
+        return None;
+    }
+    if !north_has_displace_and_rain(&state(&session)) {
+        return None;
+    }
+    if displace_destinations(&session, &visitor_id).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDisplaceSetup {
+        deathrite_ids,
+        session,
+        visitor_id,
+    })
+}
+
+fn deathrite_displace_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_displace_manifest)
+        .find(|candidate| try_pending_deathrite_with_ready_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with teleport Magic in hand")
+}
+
 #[test]
 fn rule_catalog_0563_teleport_targets_a_minion_one_diagonal() {
     let encoded = seed_with(&["north-ally", "north-displace"]);
@@ -330,4 +521,74 @@ fn rule_catalog_0564_teleport_one_diagonal_is_unoffered_without_a_diagonal_site(
     assert!(displace_destinations(&session, &ally_id).is_empty());
     assert_eq!(displace_casts(&session), 0);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1032_teleport_one_diagonal_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_displace_seed_with(1032);
+    let mut setup = try_pending_deathrite_with_ready_visitor(&encoded)
+        .expect("complete teleport Deathrite withheld setup");
+    let visitor_id = setup.visitor_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &visitor_id)["location"], "C4");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(displace_destinations(session, &visitor_id).is_empty());
+    assert_eq!(displace_casts(session), 0);
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &visitor_id)["location"], "C4");
+    assert_eq!(displace_destinations(session, &visitor_id), ["D3"]);
+
+    let (_, teleported) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-displace"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == visitor_id
+            && descriptor["targetLocation"]["cell"] == "D3"
+    });
+    let types = event_types(&teleported);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(types.contains(&"unit-teleported"));
+    assert_eq!(unit(&state(session), &visitor_id)["location"], "D3");
+    assert_exact_replay(session);
 }
