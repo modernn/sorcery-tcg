@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0934).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -24,6 +24,9 @@
 //! 0923 covers pending.targets dedup: extend-chain-magic never re-lists an
 //! already-staged hop. Distinct from 0696 resolve flow, 0903 checkpoint resume,
 //! 0913 post-extend mana gating, and 0914 phase routing.
+//! 0934 covers extend-chain-magic preserving the staged discardCardInstanceId
+//! from begin through resolve when a second hop is added. Distinct from 0889
+//! single-hop atlas discard resolve and 0903 checkpoint resume.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -1292,6 +1295,51 @@ fn atlas_discard_chain_manifest(seed: u32) -> String {
     }))
 }
 
+fn atlas_discard_hops_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-atlas-discard-hops" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-atlas-discard-hops-v1",
+        },
+        "cards": {
+            "north-ally-a": minion(json!({})),
+            "north-ally-b": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-chain": discard_chain(),
+            "north-fodder": fodder(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-ally-a",
+                    "north-ally-b",
+                    "north-fodder",
+                    "north-chain",
+                    "north-fodder",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn chain_discard_begin_ids(session: &Session, chain_id: &str) -> Vec<String> {
     session
         .legal_actions()
@@ -1733,6 +1781,16 @@ fn try_setup_discard_hops(encoded: &str) -> Option<(ChainHops, String)> {
     Some((hops, fodder_id))
 }
 
+fn try_setup_atlas_discard_hops(encoded: &str) -> Option<(ChainHops, String, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-ally-a", "north-ally-b"]) {
+        return None;
+    }
+    let hops = setup_hops(encoded);
+    let snapshot = state(&hops.session);
+    let atlas_id = north_hand_ids(&snapshot, "atlas").into_iter().next()?;
+    Some((hops, atlas_id, "north-site".to_owned()))
+}
+
 #[test]
 fn rule_catalog_0903_chain_magic_checkpoint_resume_preserves_staged_targets_discard_and_actions() {
     let encoded = (903..903 + 512)
@@ -1865,6 +1923,115 @@ fn rule_catalog_0914_chain_magic_phase_issues_only_chain_actions_while_staged() 
     assert_staged_chain_magic_legal_actions_only(&hops.session);
     assert!(offers_resolve_chain_magic(&hops.session));
     assert!(!extend_ids(&hops.session).is_empty());
+    assert_exact_replay(&hops.session);
+}
+
+#[test]
+fn rule_catalog_0934_extend_chain_magic_preserves_staged_discard_through_resolve() {
+    let encoded = (934..934 + 512)
+        .map(atlas_discard_hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+                && try_setup_atlas_discard_hops(candidate).is_some()
+        })
+        .expect("bounded seed with Chain Magic, both nearby allies, and Atlas discard");
+    let (mut hops, atlas_id, site_card_id) =
+        try_setup_atlas_discard_hops(&encoded).expect("Atlas discard Chain Magic hops setup");
+    let atlas_before = state(&hops.session)["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+            && descriptor["discardCardInstanceId"] == atlas_id
+    });
+    let after_begin = state(&hops.session);
+    assert_eq!(after_begin["phase"], "chain-magic");
+    assert_eq!(
+        after_begin["pendingChainMagic"]["discardCardInstanceId"],
+        atlas_id
+    );
+    assert_eq!(
+        after_begin["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["instanceId"] == hops.second_id
+    });
+    let after_extend = state(&hops.session);
+    assert_eq!(after_extend["phase"], "chain-magic");
+    assert_eq!(
+        after_extend["pendingChainMagic"]["discardCardInstanceId"],
+        atlas_id
+    );
+    assert_eq!(
+        after_extend["pendingChainMagic"]["targets"],
+        json!([
+            {
+                "instanceId": hops.first_id,
+                "kind": "minion",
+                "seat": "north",
+            },
+            {
+                "instanceId": hops.second_id,
+                "kind": "minion",
+                "seat": "north",
+            },
+        ])
+    );
+
+    let (_, resolved) = accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "card-discarded",
+            "magic-cast",
+            "magic-damage-allocated",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "minion-died",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(resolved.events[0].payload["cardId"], site_card_id);
+    assert_eq!(resolved.events[0].payload["instanceId"], atlas_id);
+    assert_eq!(resolved.events[0].payload["zone"], "atlas");
+    assert_eq!(resolved.events[0].payload["sourceInstanceId"], hops.chain_id);
+    assert_eq!(
+        resolved.events[1].payload["discardCardInstanceId"],
+        atlas_id
+    );
+    let after = state(&hops.session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingChainMagic"].is_null());
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == atlas_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        atlas_before - 1
+    );
+    assert!(realm_unit(&after, &hops.first_id).is_none());
+    assert!(realm_unit(&after, &hops.second_id).is_none());
     assert_exact_replay(&hops.session);
 }
 
