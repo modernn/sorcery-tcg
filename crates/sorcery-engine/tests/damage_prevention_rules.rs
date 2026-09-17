@@ -6,6 +6,7 @@ use sorcery_engine::session::{Session, StepResult};
 struct FightResult {
     attacker_instance_id: String,
     fight: Receipt,
+    grant_source_instance_id: Option<String>,
     session: Session,
     target_instance_id: String,
 }
@@ -31,6 +32,15 @@ fn minion(attack: u8, defense: u8) -> Value {
         "defense": defense,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 1, "fire": 0, "water": 0 },
+    })
+}
+
+fn grant_double() -> Value {
+    json!({
+        "cardType": "magic",
+        "grantDoubleDamageToAllyNextStrikeThisTurn": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
 
@@ -219,6 +229,7 @@ fn resolve_fight(seed: u32, source_power: u8, disabled_target: bool) -> FightRes
     FightResult {
         attacker_instance_id,
         fight,
+        grant_source_instance_id: None,
         session,
         target_instance_id,
     }
@@ -365,4 +376,193 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
     );
     assert!(disabled.fight.random_draws.is_empty());
     assert_exact_replay(&disabled.session);
+}
+
+fn double_strike_manifest(seed: u32) -> String {
+    let mut attacker = minion(2, 2);
+    attacker["charge"] = json!(true);
+    attacker["summonToAnySite"] = json!(true);
+    let mut target = minion(0, 4);
+    target["summonToAnySite"] = json!(true);
+    target["takesLessDamage"] = json!(1);
+    let mut manifest = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "damage-prevention-rules" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-damage-prevention-rules-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-grant": grant_double(),
+            "north-minion": attacker,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": target,
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 5],
+                "avatar": "north-avatar",
+                "spellbook": ["north-minion", "north-grant", "north-minion"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 5],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 5],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    manifest["manifestId"] =
+        json!(identity_hash(&manifest).expect("canonical synthetic manifest identity"));
+    canonical_json(&manifest).expect("canonical synthetic manifest")
+}
+
+fn resolve_double_strike_with_takes_less(seed: u32) -> FightResult {
+    let manifest = double_strike_manifest(seed);
+    let mut session = Session::new(&manifest).expect("valid double-strike prevention scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned_target, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "south-minion"
+    });
+    let target_instance_id = summoned_target["cardInstanceId"]
+        .as_str()
+        .expect("target identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (summoned_attacker, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-minion"
+            && descriptor["cell"] == "C1"
+    });
+    let attacker_instance_id = summoned_attacker["cardInstanceId"]
+        .as_str()
+        .expect("attacker identity")
+        .to_owned();
+    let (grant_cast, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-grant"
+            && descriptor["ally"]["instanceId"] == attacker_instance_id
+    });
+    let grant_source_instance_id = grant_cast["cardInstanceId"]
+        .as_str()
+        .expect("grant identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_instance_id
+            && descriptor["to"]["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_instance_id
+    });
+    let (_, fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    FightResult {
+        attacker_instance_id,
+        fight,
+        grant_source_instance_id: Some(grant_source_instance_id),
+        session,
+        target_instance_id,
+    }
+}
+
+#[test]
+fn rule_catalog_0900_takes_less_damage_reduces_each_modified_strike_after_doubling() {
+    let doubled = resolve_double_strike_with_takes_less(190);
+    let grant_source_instance_id = doubled
+        .grant_source_instance_id
+        .expect("grant source identity");
+    assert_eq!(
+        event_values(&doubled.fight),
+        vec![
+            json!({
+                "payload": { "defenderCount": 0, "originalTargetParticipates": true },
+                "type": "defend-window-closed",
+            }),
+            json!({
+                "payload": {
+                    "attackerInstanceId": doubled.attacker_instance_id,
+                    "combatantInstanceIds": [doubled.target_instance_id],
+                },
+                "type": "fight-started",
+            }),
+            json!({
+                "payload": {
+                    "amount": 4,
+                    "strikerInstanceId": doubled.attacker_instance_id,
+                    "targetInstanceId": doubled.target_instance_id,
+                },
+                "type": "strike-damage-allocated",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 0,
+                    "amount": 0,
+                    "direct": true,
+                    "instanceId": doubled.attacker_instance_id,
+                    "seat": "north",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "accumulated": 3,
+                    "amount": 3,
+                    "attemptedAmount": 4,
+                    "direct": true,
+                    "instanceId": doubled.target_instance_id,
+                    "prevented": true,
+                    "seat": "south",
+                },
+                "type": "damage-dealt",
+            }),
+            json!({
+                "payload": {
+                    "instanceId": doubled.attacker_instance_id,
+                    "seat": "north",
+                    "sourceInstanceId": grant_source_instance_id,
+                },
+                "type": "next-strike-double-consumed",
+            }),
+        ]
+    );
+    assert_eq!(
+        unit_state(&doubled.session, &doubled.target_instance_id)["damage"],
+        3
+    );
+    assert!(
+        !doubled
+            .session
+            .replay_value()
+            .expect("authoritative replay")["state"]["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("south cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == doubled.target_instance_id)
+    );
+    assert!(doubled.fight.random_draws.is_empty());
+    assert_exact_replay(&doubled.session);
 }
