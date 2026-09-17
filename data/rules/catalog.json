@@ -16989,6 +16989,27 @@
         "file": "crates/sorcery-engine/tests/tower_rules.rs",
         "testName": "rule_catalog_0725_tower_should_grant_derived_stats_regardless_of_site_controller"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0726",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "End-turn Artifact life loss on a carried Artifact uses the oversized bearer's chosen cell for site controller attribution. Extends 0156.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact",
+        "atEndOfEachTurnSiteControllerLosesLife",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "loss"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_life_loss_rules.rs",
+        "testName": "rule_catalog_0726_carried_artifact_life_loss_should_follow_oversized_bearer_cell"
+      }
     }
   ]
 }

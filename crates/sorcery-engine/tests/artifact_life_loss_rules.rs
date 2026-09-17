@@ -1,7 +1,7 @@
 //! Direct proofs for the life an Artifact costs its current site controller as each turn ends
 //! (RULE-CATALOG-0155), the carried cell that loss follows and the bearer Disable it survives
 //! (RULE-CATALOG-0156), and the regions, Rubble, stacking, and Death's Door it respects
-//! (RULE-CATALOG-0157).
+//! (RULE-CATALOG-0157), and the oversized bearer cell that attribution follows (0726).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -244,10 +244,21 @@ fn cast_loose_artifact(session: &mut Session, card_id: &str, cell: &str) -> Stri
 
 /// Conjures one Artifact onto a local bearer and returns its realm identity.
 fn cast_carried_artifact(session: &mut Session, card_id: &str, bearer_instance_id: &str) -> String {
+    cast_carried_artifact_at(session, card_id, bearer_instance_id, None)
+}
+
+/// Conjures one Artifact onto a bearer cell and returns its realm identity.
+fn cast_carried_artifact_at(
+    session: &mut Session,
+    card_id: &str,
+    bearer_instance_id: &str,
+    bearer_cell: Option<&str>,
+) -> String {
     let (cast, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-artifact"
             && descriptor["cardId"] == card_id
             && descriptor["bearer"]["instanceId"] == bearer_instance_id
+            && bearer_cell.is_none_or(|cell| descriptor["bearerCell"] == cell)
     });
     cast["cardInstanceId"]
         .as_str()
@@ -809,5 +820,155 @@ fn end_turn_artifact_life_loss_should_charge_a_submerged_bearers_site() {
     let after = state(&session);
     assert_eq!(life(&after, "north"), json!(18));
     assert_eq!(life(&after, "south"), json!(20));
+    assert_exact_replay(&session);
+}
+
+fn oversized_carried_egg_cards() -> Value {
+    json!({
+        "north-avatar": avatar(20, json!({})),
+        "north-bearer": minion(json!({
+            "genesisDisableSelfUntilDamaged": true,
+            "occupiesSquareArea": 2,
+            "summonToAnySite": true,
+        })),
+        "north-egg": devils_egg(1),
+        "north-site": site(&["earth"]),
+        "south-avatar": avatar(20, json!({})),
+        "south-filler": minion(json!({})),
+        "south-site": site(&["earth"]),
+    })
+}
+
+fn oversized_carried_egg_manifest(seed: u32) -> String {
+    let cards = oversized_carried_egg_cards();
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "artifact-life-loss" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-artifact-life-loss-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-bearer",
+                    "north-egg",
+                    "north-egg",
+                    "north-egg",
+                    "north-egg",
+                    "north-egg",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-filler"; 50],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn end_and_draw(session: &mut Session) {
+    end_turn(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "draw");
+}
+
+/// South lays the whole B1 square before North's oversized bearer carries an Egg at C1.
+fn establish_oversized_carried_egg_board(session: &mut Session) -> (String, String, String) {
+    play_site(session, "C4");
+    end_and_draw(session);
+    play_site(session, "C1");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "B1");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "B2");
+    end_and_draw(session);
+    end_and_draw(session);
+    play_site(session, "C2");
+    end_and_draw(session);
+
+    let bearer = summon(session, "north-bearer", "B1");
+    let current = state(session);
+    assert_eq!(
+        realm_unit(&current, &bearer).expect("oversized bearer")["occupiedCells"],
+        json!(["B1", "B2", "C1", "C2"])
+    );
+    assert_eq!(
+        realm_unit(&current, &bearer).expect("oversized bearer")["disabledUntilDamaged"],
+        true
+    );
+    let egg = cast_carried_artifact_at(session, "north-egg", &bearer, Some("C1"));
+    let charged_site = site_instance_id(&state(session), "C1");
+    (
+        bearer,
+        egg,
+        charged_site.as_str().expect("C1 site identity").to_owned(),
+    )
+}
+
+#[test]
+fn rule_catalog_0726_carried_artifact_life_loss_should_follow_oversized_bearer_cell() {
+    let encoded = (1..=4096)
+        .map(oversized_carried_egg_manifest)
+        .find(|candidate| {
+            let opening = state(&Session::new(candidate).expect("oversized egg candidate"));
+            ["north-bearer", "north-egg"].into_iter().all(|card_id| {
+                opening["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("opening spellbook hand")
+                    .iter()
+                    .any(|card| card["cardId"] == card_id)
+            })
+        })
+        .expect("bounded seed opening with the oversized bearer and its Egg in hand");
+    let mut session = Session::new(&encoded).expect("valid oversized carried Egg scenario");
+    keep(&mut session);
+    keep(&mut session);
+    let (bearer, egg, charged_site) = establish_oversized_carried_egg_board(&mut session);
+
+    let ended = end_turn(&mut session);
+    assert_eq!(
+        ended.events[..2]
+            .iter()
+            .map(|event| (event.event_type.as_str(), event.payload.clone()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "end-turn-site-life-loss-triggered",
+                json!({
+                    "amount": 1,
+                    "seat": "south",
+                    "siteInstanceId": charged_site,
+                    "sourceInstanceId": egg,
+                }),
+            ),
+            (
+                "avatar-life-lost",
+                json!({
+                    "amount": 1,
+                    "life": 19,
+                    "seat": "south",
+                    "sourceInstanceId": egg,
+                }),
+            ),
+        ]
+    );
+    let after = state(&session);
+    assert!(realm_unit(&after, &bearer).is_some());
+    assert_eq!(
+        (life(&after, "north"), life(&after, "south")),
+        (json!(20), json!(19))
+    );
     assert_exact_replay(&session);
 }
