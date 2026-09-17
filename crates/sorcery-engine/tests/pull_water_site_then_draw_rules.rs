@@ -222,6 +222,51 @@ fn seed_with(required: &[&str]) -> String {
         .expect("bounded seed with required Riptide opening cards")
 }
 
+fn empty_library_riptide_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "riptide-then-draw-empty" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-riptide-then-draw-empty-v1",
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-riptide": riptide(),
+            "north-site": water_site(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-ally", "north-riptide", "north-riptide"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["north-ally"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_ally_and_riptide_empty(start: u32) -> String {
+    (start..start + 256)
+        .map(empty_library_riptide_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-riptide")
+        })
+        .expect("bounded seed with ally and Riptide filling the opening hand")
+}
+
 fn south_plays_c1(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -233,6 +278,20 @@ fn south_plays_c1(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_plays_c1_then_north_draws_atlas(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
 }
 
@@ -376,5 +435,74 @@ fn rule_catalog_0548_riptide_still_draws_without_an_adjacent_unit() {
             .iter()
             .any(|card| card["instanceId"] == library_top)
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0993_riptide_pull_then_empty_spellbook_is_a_deck_out() {
+    let encoded = seed_with_ally_and_riptide_empty(993);
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    south_plays_c1_then_north_draws_atlas(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C3");
+    let (cast, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-riptide"
+            && descriptor["targetLocation"]["cell"] == "C4"
+            && descriptor["target"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    assert_eq!(granted.events[1].payload["targetInstanceId"], ally_id);
+    assert_eq!(granted.events[1].payload["from"]["cell"], "C3");
+    assert_eq!(granted.events[1].payload["to"]["cell"], "C4");
+    assert_eq!(
+        granted.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["location"], "C4");
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_exact_replay(&session);
 }
