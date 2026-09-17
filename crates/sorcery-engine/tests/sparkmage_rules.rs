@@ -1,4 +1,5 @@
-//! Direct proofs for Sparkmage activation (RULE-CATALOG-0148–0150, RULE-CATALOG-0723).
+//! Direct proofs for Sparkmage activation (RULE-CATALOG-0149–0150, RULE-CATALOG-0723,
+//! RULE-CATALOG-0802).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -155,7 +156,7 @@ fn assert_exact_replay(session: &Session) {
 }
 
 #[test]
-fn zero_air_threshold_activation_without_another_unit_should_tap_without_rng_or_damage() {
+fn rule_catalog_0802_zero_air_threshold_taps_without_rng_or_damage() {
     let mut session = first_main(417);
     let actions = session.legal_actions().expect("Sparkmage actions");
     let activation = actions
