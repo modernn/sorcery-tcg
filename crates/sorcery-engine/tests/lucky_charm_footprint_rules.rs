@@ -1,10 +1,13 @@
 //! Direct proofs that Lucky Charm extra-random for discard-here uses a 2×2
-//! source's whole footprint (RULE-CATALOG-0369–0370).
+//! source's whole footprint (RULE-CATALOG-0369–0370), and that
+//! activate-discard-random-damage stays withheld during deathrite-order
+//! (RULE-CATALOG-1147).
 //!
 //! Discard-funded random-here already hits every unit sharing any occupied
 //! cell. Lucky Charm must offer those same candidates and then honor the
 //! chosen outcome. A B3 occupant of an A3-anchored square is therefore a
-//! committed extra-random choice, and a minion on C1 is not.
+//! committed extra-random choice, and a minion on C1 is not. Deathrite-order
+//! still blocks the activation until the pending chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -393,4 +396,341 @@ fn rule_catalog_0370_lucky_charm_excludes_unit_outside_discard_source_footprint(
         0
     );
     assert_exact_replay(&session);
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_giant() -> Value {
+    let mut value = giant();
+    value["defense"] = json!(9);
+    value
+}
+
+fn try_accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> Option<Value> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(_) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some(descriptor)
+}
+
+fn offers_activate_discard(session: &Session, source_instance_id: &str) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "activate-discard-random-damage"
+                && action.descriptor["sourceInstanceId"] == source_instance_id
+        })
+    })
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+fn north_spell_count(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map_or(0, Vec::len)
+}
+
+fn deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "lucky-charm-footprint-deathrite" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-lucky-charm-footprint-deathrite-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-charm": charm(),
+            "north-earth": earth(),
+            "north-giant": deathrite_giant(),
+            "north-rain": rain(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 12],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-charm",
+                    "north-giant",
+                    "north-rain",
+                    "north-charm",
+                    "north-giant",
+                    "north-rain",
+                    "north-charm",
+                    "north-giant",
+                    "north-rain",
+                    "north-charm",
+                    "north-giant",
+                    "north-rain",
+                    "north-charm",
+                    "north-giant",
+                    "north-rain",
+                    "north-giant",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 16],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct PendingDeathriteActivateDiscardSetup {
+    deathrite_ids: [String; 2],
+    giant_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_activate_discard(
+    encoded: &str,
+) -> Option<PendingDeathriteActivateDiscardSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    let atlas = opening_ids(&session, "atlas");
+    let spells = opening_ids(&session, "spellbook");
+    if atlas.iter().filter(|card| *card == "north-earth").count() < 3
+        || !spells.contains(&"north-charm".to_owned())
+        || !spells.contains(&"north-giant".to_owned())
+    {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-charm"
+            && descriptor["bearer"]["kind"] == "avatar"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "B4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "B3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "A4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "A3"
+    })?;
+    let summoned = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-giant"
+            && descriptor["cell"] == "A3"
+            && descriptor["region"].is_null()
+    })?;
+    let giant_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    let current = state(&session);
+    let occupant = realm_unit(&current, &giant_id)?;
+    if occupant["location"] != "A3" || occupant["occupiedCells"] != json!(["A3", "A4", "B3", "B4"])
+    {
+        return None;
+    }
+    if !north_has_rain(&current) || north_spell_count(&current) < 2 {
+        return None;
+    }
+    if !offers_activate_discard(&session, &giant_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first["cardInstanceId"].as_str()?.to_owned(),
+        second["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteActivateDiscardSetup {
+        deathrite_ids,
+        giant_id,
+        session,
+    })
+}
+
+fn deathrite_activate_discard_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_manifest)
+        .find(|candidate| try_pending_deathrite_with_activate_discard(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Lucky Charm discard-here ready")
+}
+
+#[test]
+fn rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_activate_discard_seed_with(1147);
+    let mut setup = try_pending_deathrite_with_activate_discard(&encoded)
+        .expect("complete Lucky Charm activate-discard-random-damage Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let giant_id = setup.giant_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    let giant = realm_unit(&paused, &giant_id).expect("2x2 remains in play");
+    assert_eq!(giant["location"], "A3");
+    assert_eq!(giant["occupiedCells"], json!(["A3", "A4", "B3", "B4"]));
+    assert_eq!(giant["damage"], 1);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-discard-random-damage")
+    );
+    assert!(!offers_activate_discard(session, &giant_id));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    let giant = realm_unit(&resumed, &giant_id).expect("2x2 still occupies the square");
+    assert_eq!(giant["occupiedCells"], json!(["A3", "A4", "B3", "B4"]));
+    assert_eq!(giant["damage"], 1);
+    assert!(
+        offers_activate_discard(session, &giant_id),
+        "activate-discard-random-damage returns after Deathrites drain"
+    );
+    assert_exact_replay(session);
 }
