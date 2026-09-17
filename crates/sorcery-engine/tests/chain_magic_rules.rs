@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -19,6 +19,9 @@
 //! 0914 covers Chain Magic phase routing: staged chains offer only
 //! extend-chain-magic and resolve-chain-magic from `append_chain_magic_actions`,
 //! not main-phase cast-magic, end-turn, or move-and-attack.
+//! 0923 covers pending.targets dedup: extend-chain-magic never re-lists an
+//! already-staged hop. Distinct from 0696 resolve flow, 0903 checkpoint resume,
+//! 0913 post-extend mana gating, and 0914 phase routing.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -1799,6 +1802,38 @@ fn rule_catalog_0914_chain_magic_phase_issues_only_chain_actions_while_staged() 
     assert_staged_chain_magic_legal_actions_only(&hops.session);
     assert!(offers_resolve_chain_magic(&hops.session));
     assert!(!extend_ids(&hops.session).is_empty());
+    assert_exact_replay(&hops.session);
+}
+
+#[test]
+fn rule_catalog_0923_extend_chain_magic_cannot_retarget_already_staged_hop() {
+    let encoded = (923..923 + 256)
+        .map(hops_manifest)
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-ally-a", "north-ally-b"])
+        })
+        .expect("bounded seed with Chain Magic and both nearby allies in the opening hand");
+    let mut hops = setup_hops(&encoded);
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    assert!(!extend_ids(&hops.session).contains(&hops.first_id));
+    assert_eq!(
+        sorted(extend_ids(&hops.session)),
+        sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()])
+    );
     assert_exact_replay(&hops.session);
 }
 
