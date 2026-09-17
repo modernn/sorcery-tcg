@@ -1,4 +1,6 @@
-//! Direct proofs for end-of-each-turn wandering Auras (RULE-CATALOG-0262–0263).
+//! Direct proofs for end-of-each-turn wandering Auras (RULE-CATALOG-0262–0263)
+//! and resolve-end-turn-aura-move withheld during deathrite-order
+//! (RULE-CATALOG-1156).
 //!
 //! Official cards such as Wildfire conjure atop a single nearby site. At the
 //! end of each turn, each unit there takes damage, then the Aura must move to
@@ -43,20 +45,32 @@ fn minion() -> Value {
     })
 }
 
-fn manifest() -> String {
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn encoded_manifest(fixture: &str, south_minion: Value) -> String {
     let mut value = json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "end-turn-wandering-aura" }))
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-end-turn-wandering-aura-v1",
+            "revisionId": format!("synthetic-{fixture}-v1"),
         },
         "cards": {
             "north-aura": aura(),
             "north-avatar": avatar(),
             "north-site": site(),
             "south-avatar": avatar(),
-            "south-minion": minion(),
+            "south-minion": south_minion,
             "south-site": site(),
         },
         "decks": {
@@ -78,6 +92,14 @@ fn manifest() -> String {
     });
     value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
     sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn manifest() -> String {
+    encoded_manifest("end-turn-wandering-aura", minion())
+}
+
+fn deathrite_manifest() -> String {
+    encoded_manifest("end-turn-wandering-aura-deathrite", deathrite_minion())
 }
 
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
@@ -151,6 +173,19 @@ fn move_wildfire(session: &mut Session, cell: &str) -> Receipt {
 fn draw_then_end(session: &mut Session) -> Receipt {
     accept_where(session, |descriptor| descriptor["kind"] == "draw");
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn").1
+}
+
+fn summon_deathrite_at_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })
+    .0["cardInstanceId"]
+        .as_str()
+        .expect("Deathrite identity")
+        .to_owned()
 }
 
 #[test]
@@ -269,5 +304,93 @@ fn rule_catalog_0263_far_sites_are_illegal_and_each_turn_can_box_the_aura_out() 
     let after = state(&session);
     assert!(after["realm"].get("auras").is_none());
     assert_eq!(after["phase"], "draw");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1156_resolve_end_turn_aura_move_withheld_during_pending_deathrite_order() {
+    let mut session = Session::new(&deathrite_manifest()).expect("valid Deathrite wandering Aura");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let mut deathrite_ids = [
+        summon_deathrite_at_c4(&mut session),
+        summon_deathrite_at_c4(&mut session),
+    ];
+    deathrite_ids.sort_unstable();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "draw");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-aura"
+            && descriptor["cells"] == json!(["C4"])
+    });
+    let ended = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn").1;
+    assert!(
+        ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-end-turn-triggered")
+    );
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "resolve-end-turn-aura-move"),
+        "deathrite-order must issue no resolve-end-turn-aura-move"
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(&session);
+    assert_eq!(resumed["phase"], "end-turn-aura");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    let source_id = aura_id(&session);
+    let moved = move_wildfire(&mut session, "C3");
+    assert!(moved.events.iter().any(|event| {
+        event.event_type == "aura-moved"
+            && event.payload["cells"] == json!(["C3"])
+            && event.payload["instanceId"] == source_id
+    }));
+    assert_eq!(state(&session)["phase"], "draw");
     assert_exact_replay(&session);
 }
