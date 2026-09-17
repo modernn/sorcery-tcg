@@ -13818,6 +13818,53 @@
         "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
         "testName": "rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_in_play"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0601",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Lure-enemy-minion-one-step-closer Magic tempts a nearby enemy minion to take its own closer step toward the caster's ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-lured",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_0601_lure_magic_tempts_a_nearby_enemy_one_step_closer"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0602",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Lure-enemy-minion-one-step-closer Magic still resolves as a paid no-op when no nearby enemy minion qualifies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_0602_lure_magic_no_ops_without_a_nearby_enemy_minion"
+      }
     }
   ]
 }
