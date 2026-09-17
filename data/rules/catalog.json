@@ -26734,7 +26734,7 @@
         "site-drawn"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/intercept_rules.rs",
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
         "testName": "rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order"
       }
     },
