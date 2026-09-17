@@ -1,7 +1,8 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
-//! fight pipeline. Ward on the target breaks without entering combat.
+//! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
+//! route strike damage through avatar-life-lost instead of minion damage.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -291,5 +292,40 @@ fn rule_catalog_0604_duel_magic_breaks_ward_without_entering_combat() {
         realm_unit(&after, &ally_id).expect("unharmed ally")["damage"],
         0
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0711_duel_magic_fights_through_avatar_ally_adjacent_to_enemy_minion() {
+    let encoded = seed_with(false, 711);
+    let (mut session, _ally_id, caster_id, enemy_id) = setup_duel(&encoded);
+    let north_avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+
+    let (descriptor, fight) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == north_avatar_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    assert_eq!(descriptor["ally"]["kind"], "avatar");
+    assert_eq!(descriptor["target"]["kind"], "minion");
+    assert_eq!(
+        event_types(&fight),
+        [
+            "magic-cast",
+            "fight-started",
+            "strike-damage-allocated",
+            "damage-dealt",
+            "avatar-life-lost",
+            "damage-dealt",
+            "magic-resolved",
+        ]
+    );
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 18);
+    assert!(realm_unit(&state(&session), &enemy_id).is_some());
     assert_exact_replay(&session);
 }

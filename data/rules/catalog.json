@@ -16619,6 +16619,33 @@
         "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
         "testName": "rule_catalog_0710_bury_defers_until_ordered_static_deathrites_finish"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0711",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Fight-ally-with-adjacent-enemy Magic may choose the casting player's Avatar as the ally; strike damage against the Avatar emits avatar-life-lost instead of minion damage. Distinct from 0603 minion ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "fight"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "fight-started",
+        "damage-dealt",
+        "avatar-life-lost",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0711_duel_magic_fights_through_avatar_ally_adjacent_to_enemy_minion"
+      }
     }
   ]
 }
