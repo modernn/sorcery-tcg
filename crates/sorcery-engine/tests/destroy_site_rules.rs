@@ -124,7 +124,7 @@ fn opening_main(encoded: &str) -> Session {
     let mut session = Session::new(encoded).expect("valid destroy-site session");
     keep(&mut session);
     keep(&mut session);
-    accept_where(session, |descriptor| {
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
     session
