@@ -1,5 +1,6 @@
 //! Direct proofs that site flight surfaces void occupants
-//! (RULE-CATALOG-0351–0352).
+//! (RULE-CATALOG-0351–0352) and that deathrite-order withholds fly-site
+//! until the chain completes (RULE-CATALOG-1149).
 //!
 //! Playing a site and creating rubble already fill a void and surface what it
 //! held. Flight onto a nearby void is the same surface fill: a Voidwalk minion
@@ -66,6 +67,33 @@ fn dummy() -> Value {
         "cardType": "minion",
         "defense": 1,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn hardy_breeze() -> Value {
+    let mut value = breeze();
+    value["defense"] = json!(2);
+    value
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -197,6 +225,37 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn offers_fly_site(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == "fly-site")
+    })
 }
 
 fn keep(session: &mut Session) {
@@ -348,12 +407,10 @@ fn rule_catalog_0351_flight_onto_void_surfaces_voidwalk_minion() {
         "void"
     );
     let receipt = fly_cloud_to_d4(&mut session);
-    assert!(
-        !receipt
-            .events
-            .iter()
-            .any(|event| event.event_type == "minion-banished" || event.event_type == "minion-died")
-    );
+    assert!(!receipt
+        .events
+        .iter()
+        .any(|event| event.event_type == "minion-banished" || event.event_type == "minion-died"));
     assert!(event_types(&receipt).contains(&"site-flown"));
     let current = state(&session);
     let occupant = realm_unit(&current, &walker_id).expect("surfaced Voidwalk minion");
@@ -401,4 +458,201 @@ fn rule_catalog_0352_flight_onto_void_surfaces_void_artifact() {
     assert_eq!(surfaced["location"], "D4");
     assert_eq!(surfaced["region"], "surface");
     assert_exact_replay(&session);
+}
+
+fn deathrite_fly_site_manifest(seed: u32) -> String {
+    let fixture = "site-flight-fly-site-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-breeze": hardy_breeze(),
+            "north-cloud": cloud(),
+            "north-rain": rain(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite_minion(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-cloud"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-breeze",
+                    "north-breeze",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-rain"))
+}
+
+struct PendingDeathriteFlySiteSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    source_id: String,
+}
+
+fn try_pending_deathrite_with_fly_site_legal(
+    encoded: &str,
+) -> Option<PendingDeathriteFlySiteSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    let played = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-cloud"
+            && descriptor["cell"] == "C4"
+    })?;
+    let source_id = played.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-breeze"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-breeze"
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if !offers_fly_site(&session) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteFlySiteSetup {
+        deathrite_ids,
+        session,
+        source_id,
+    })
+}
+
+fn deathrite_fly_site_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_fly_site_manifest)
+        .find(|candidate| try_pending_deathrite_with_fly_site_legal(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with legal Cloud City fly-site")
+}
+
+#[test]
+fn rule_catalog_1149_fly_site_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_fly_site_seed_with(1149);
+    let mut setup = try_pending_deathrite_with_fly_site_legal(&encoded)
+        .expect("complete fly-site Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let source_id = setup.source_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["realm"]["sites"]["C4"]["instanceId"], source_id);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "end-turn" && action.descriptor["kind"] != "fly-site"
+            })
+    );
+    assert!(!offers_fly_site(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["realm"]["sites"]["C4"]["instanceId"], source_id);
+    assert!(offers_fly_site(session));
+
+    let receipt = fly_cloud_to_d4(session);
+    assert!(event_types(&receipt).contains(&"site-flown"));
+    assert_eq!(
+        state(session)["realm"]["sites"]["D4"]["instanceId"],
+        source_id
+    );
+    assert_exact_replay(session);
 }
