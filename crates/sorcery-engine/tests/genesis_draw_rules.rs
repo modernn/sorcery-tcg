@@ -232,7 +232,7 @@ fn replay_game(session: &Session) -> Game {
 }
 
 #[test]
-fn avatar_draw_spell_should_pay_tap_and_keep_identity_private() {
+fn rule_catalog_0792_avatar_draw_spell_pays_tap_keeps_identity_private() {
     let manifest = scenario_manifest(30, &avatar(true, 20), &minion(1, 1), &minion(1, 1), 6, 5, 5);
     let mut session = north_second_main(first_main(&manifest));
     let before = state(&session);
