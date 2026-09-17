@@ -55,6 +55,24 @@ fn lethal_gift() -> Value {
     })
 }
 
+fn movement_gift() -> Value {
+    json!({
+        "cardType": "magic",
+        "grantMovementOneToAllyThisTurnThenDrawSpell": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn power_gift() -> Value {
+    json!({
+        "cardType": "magic",
+        "grantPowerTwoToAllyThisTurnThenDrawSpell": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -320,6 +338,138 @@ fn rule_catalog_0949_lethal_grant_then_empty_spellbook_is_a_deck_out() {
     let after = state(&session);
     assert_eq!(
         unit(&after, &ally_id)["temporaryLethalSources"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0956_movement_grant_then_empty_spellbook_is_a_deck_out() {
+    let encoded = seed_with_ally_and_gift(
+        956,
+        &movement_gift(),
+        "grant-movement-then-draw-empty",
+        "synthetic-grant-movement-then-draw-empty-v1",
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let (_, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "movement-granted",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    let after = state(&session);
+    assert_eq!(
+        unit(&after, &ally_id)["temporaryMovementSources"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out() {
+    let encoded = seed_with_ally_and_gift(
+        962,
+        &power_gift(),
+        "grant-power-then-draw-empty",
+        "synthetic-grant-power-then-draw-empty-v1",
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let (_, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "power-granted",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    let after = state(&session);
+    assert_eq!(
+        unit(&after, &ally_id)["temporaryPowerSources"]
             .as_array()
             .map(Vec::len),
         Some(1)
