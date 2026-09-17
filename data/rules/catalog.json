@@ -21842,6 +21842,234 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0942_mixed_verified_and_synthetic_batch_downgrades_verified_game"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0943",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged Chain Magic withholds extend-chain-magic and resolve-chain-magic when a staged target minion is no longer in the Realm, including after checkpoint resume.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0943_chain_magic_withheld_when_staged_target_minion_leaves_realm"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0944",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After begin-chain-magic stages a hop, extend-chain-magic omits nearby enemy minions with active Stealth while still offering visible nearby enemies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "stealth"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0944_extend_chain_magic_omits_nearby_stealthed_enemy_minions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0945",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A Leap Attack Magic strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0945_leap_attack_strike_deals_double_damage_when_the_struck_unit_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0946",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Duel Magic fight strike deals double damage when the struck unit is nearby a nearby-double-strike source at the same cell as the Mask bearer.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "fightAllyWithAdjacentEnemy",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "fight-started",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/duel_rules.rs",
+        "testName": "rule_catalog_0946_duel_magic_fight_strike_deals_double_damage_when_struck_unit_is_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0947",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic strike deals double damage when the struck enemy is nearby a nearby-double-strike source.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0947_ally_strike_magic_deals_double_damage_when_the_struck_enemy_is_nearby"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0948",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and mill, draw resolves before mill on the same Start Phase trigger.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnMillSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0948_start_turn_draw_sites_then_mill_sites_resolves_in_order_on_same_trigger"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0949",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion Lethal this turn and then draws a spell ends the game in deck-out when the Spellbook is empty after the grant resolves, without drawing a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0949_lethal_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0950",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A finished verified-authority game stays ranked when evaluated under batch policy that includes only verified manifests.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0950_verified_only_batch_keeps_verified_game_ranked"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0951",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Source-bound Genesis control steals a distant tapped enemy Deathrite minion, and when the thief kills it before the source leaves play the Deathrite draws a site for the thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0951_source_bound_control_transfers_distant_deathrite_to_thief_before_source_leaves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0952",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "begin-chain-magic is not offered when the printed Spellcaster caster has zero legal first hops in its region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster",
+        "burrowing"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops"
+      }
     }
   ]
 }

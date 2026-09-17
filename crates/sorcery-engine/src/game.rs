@@ -6154,6 +6154,7 @@ impl Game {
                 || selected
                     .iter()
                     .any(|chosen| chosen.instance_id() == &unit.card.instance_id)
+                || (selected.is_empty() && unit.card.instance_id == *caster.instance_id())
                 || (unit.controller != seat && self.minion_has_active_stealth(unit))
                 || !Self::footprints_nearby(previous_cells, Self::unit_occupied_cells(unit))
             {
@@ -22486,11 +22487,21 @@ impl Game {
             .collect();
         let attacker_id = continuation.ally.instance_id().clone();
         for enemy in &enemies {
+            let enemy_kind = match enemy {
+                UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                UnitTarget::Minion { .. } => UnitKind::Minion,
+            };
+            let allocated = self.nearby_unit_strike_amount(
+                amount,
+                enemy_kind,
+                enemy.seat(),
+                enemy.instance_id(),
+            )?;
             let striker_id = attacker_id.clone();
             let target_id = enemy.instance_id().clone();
             outcomes.push("strike-damage-allocated", || {
                 json!({
-                    "amount": amount,
+                    "amount": allocated,
                     "strikerInstanceId": striker_id,
                     "targetInstanceId": target_id,
                 })

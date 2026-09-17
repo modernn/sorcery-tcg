@@ -5,7 +5,8 @@
 //! RULE-CATALOG-0397–0398), library-plus-teleport stacks
 //! (RULE-CATALOG-0401–0402), thin-library draw-then-mill edges
 //! (RULE-CATALOG-0916), and direct draw-sites-then-teleport ordering
-//! (RULE-CATALOG-0936).
+//! (RULE-CATALOG-0936), and direct draw-sites-then-mill ordering
+//! (RULE-CATALOG-0948).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2777,5 +2778,47 @@ fn rule_catalog_0936_start_turn_draw_sites_then_teleport_resolves_in_order_witho
             .expect("source after teleport")["location"],
         location_before
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0948_start_turn_draw_sites_then_mill_sites_resolves_in_order_on_same_trigger() {
+    let mut session = draw_sites_mill_sites_stack_start_turn(948, &["north-site"; 6]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "site-drawn")
+        .expect("site-drawn event");
+    let mill_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "site-discarded")
+        .expect("site-discarded event");
+    assert!(
+        draw_index < mill_index,
+        "Atlas draw must resolve before Atlas mill on the same minion Start Phase trigger"
+    );
+    assert_eq!(
+        receipt.events[draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(
+        receipt.events[mill_index].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(state(&session)["phase"], "draw");
     assert_exact_replay(&session);
 }

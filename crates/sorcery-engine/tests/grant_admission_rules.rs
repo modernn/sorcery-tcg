@@ -46,24 +46,33 @@ fn gift() -> Value {
     })
 }
 
+fn lethal_gift() -> Value {
+    json!({
+        "cardType": "magic",
+        "grantLethalToAllyThisTurnThenDrawSpell": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn empty_library_manifest(seed: u32) -> String {
+fn empty_library_manifest(seed: u32, gift_card: &Value, fixture: &str, revision: &str) -> String {
     finish_manifest(json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "grant-airborne-then-draw-empty" }))
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-grant-airborne-then-draw-empty-v1",
+            "revisionId": revision,
         },
         "cards": {
             "north-ally": ally(),
             "north-avatar": avatar(),
-            "north-gift": gift(),
+            "north-gift": gift_card.clone(),
             "north-site": site(),
             "south-ally": ally(),
             "south-avatar": avatar(),
@@ -163,9 +172,9 @@ fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
         .expect("expected realm unit")
 }
 
-fn seed_with_ally_and_gift(start: u32) -> String {
+fn seed_with_ally_and_gift(start: u32, gift_card: &Value, fixture: &str, revision: &str) -> String {
     (start..start + 256)
-        .map(empty_library_manifest)
+        .map(|seed| empty_library_manifest(seed, gift_card, fixture, revision))
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-gift")
@@ -190,7 +199,12 @@ fn assert_exact_replay(session: &Session) {
 
 #[test]
 fn rule_catalog_0941_airborne_grant_then_empty_spellbook_is_a_deck_out() {
-    let encoded = seed_with_ally_and_gift(941);
+    let encoded = seed_with_ally_and_gift(
+        941,
+        &gift(),
+        "grant-airborne-then-draw-empty",
+        "synthetic-grant-airborne-then-draw-empty-v1",
+    );
     let mut session = opening_main(&encoded);
     assert_eq!(
         state(&session)["players"]["north"]["spellbook"]
@@ -240,6 +254,72 @@ fn rule_catalog_0941_airborne_grant_then_empty_spellbook_is_a_deck_out() {
     let after = state(&session);
     assert_eq!(
         unit(&after, &ally_id)["temporaryAirborneSources"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0949_lethal_grant_then_empty_spellbook_is_a_deck_out() {
+    let encoded = seed_with_ally_and_gift(
+        949,
+        &lethal_gift(),
+        "grant-lethal-then-draw-empty",
+        "synthetic-grant-lethal-then-draw-empty-v1",
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let (_, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "lethal-granted",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    let after = state(&session);
+    assert_eq!(
+        unit(&after, &ally_id)["temporaryLethalSources"]
             .as_array()
             .map(Vec::len),
         Some(1)

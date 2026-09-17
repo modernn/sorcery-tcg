@@ -1,5 +1,6 @@
-//! Direct proofs that nearby doubled unit strikes apply to Ranged projectiles
-//! and Genesis strikes (RULE-CATALOG-0252–0255).
+//! Direct proofs that nearby doubled unit strikes apply to Ranged projectiles,
+//! Genesis strikes (RULE-CATALOG-0252–0255), Leap Attack strikes
+//! (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947).
 //!
 //! Official Mask of Mayhem FAQ doubles a strike when the struck unit is nearby
 //! the source, including distant Ranged strikers. Ordinary combat already uses
@@ -227,6 +228,258 @@ fn genesis_opening_manifest() -> &'static str {
     })
 }
 
+fn leap() -> Value {
+    json!({
+        "cardType": "magic",
+        "leapAttackAlly": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn leap_opening_manifest() -> &'static str {
+    static MANIFEST: OnceLock<String> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        (1..=4096)
+            .map(|seed| {
+                let cards = json!({
+                    "north-ally": minion(json!({ "summonToAnySite": true })),
+                    "north-avatar": avatar(),
+                    "north-leap": leap(),
+                    "north-site": site(),
+                    "south-avatar": avatar(),
+                    "south-mask": double_mask(),
+                    "south-minion": minion(json!({ "summonToAnySite": true })),
+                    "south-site": site(),
+                });
+                let mut value = json!({
+                    "authority": {
+                        "contentHash": identity_hash(&json!({
+                            "fixture": "synthetic-nearby-leap-double-strike-v1"
+                        }))
+                        .expect("synthetic authority identity"),
+                        "mode": "synthetic",
+                        "revisionId": "synthetic-nearby-leap-double-strike-v1",
+                    },
+                    "cards": cards,
+                    "decks": {
+                        "north": {
+                            "atlas": vec!["north-site"; 6],
+                            "avatar": "north-avatar",
+                            "spellbook": [
+                                "north-leap",
+                                "north-ally",
+                                "north-leap",
+                                "north-ally",
+                                "north-leap",
+                                "north-ally",
+                            ],
+                        },
+                        "south": {
+                            "atlas": vec!["south-site"; 6],
+                            "avatar": "south-avatar",
+                            "spellbook": [
+                                "south-mask",
+                                "south-minion",
+                                "south-minion",
+                                "south-mask",
+                                "south-minion",
+                                "south-minion",
+                            ],
+                        },
+                    },
+                    "engineVersion": "sorcery-core-v1",
+                    "firstSeat": "north",
+                    "schemaVersion": 1,
+                    "seed": seed,
+                });
+                value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+                sorcery_engine::canonical::canonical_json(&value)
+                    .expect("canonical synthetic manifest")
+            })
+            .find(|candidate| {
+                let opening = state(&Session::new(candidate).expect("opening candidate"));
+                let hand = opening["players"]["south"]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("south opening spellbook");
+                hand.iter().any(|card| card["cardId"] == "south-mask")
+                    && hand.iter().any(|card| card["cardId"] == "south-minion")
+            })
+            .expect("bounded seed opening with a Mask and a south minion")
+    })
+}
+
+fn ally_strike_magic() -> Value {
+    json!({
+        "allyStrikesEachEnemyAtItsLocation": true,
+        "cardType": "magic",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn ally_strike_opening_manifest() -> &'static str {
+    static MANIFEST: OnceLock<String> = OnceLock::new();
+    MANIFEST.get_or_init(|| {
+        (1..=4096)
+            .map(|seed| {
+                let cards = json!({
+                    "north-ally": minion(json!({})),
+                    "north-avatar": avatar(),
+                    "north-site": site(),
+                    "north-spin": ally_strike_magic(),
+                    "south-avatar": avatar(),
+                    "south-mask": double_mask(),
+                    "south-minion": minion(json!({ "summonToAnySite": true })),
+                    "south-site": site(),
+                });
+                let mut value = json!({
+                    "authority": {
+                        "contentHash": identity_hash(&json!({
+                            "fixture": "synthetic-nearby-ally-strike-double-strike-v1"
+                        }))
+                        .expect("synthetic authority identity"),
+                        "mode": "synthetic",
+                        "revisionId": "synthetic-nearby-ally-strike-double-strike-v1",
+                    },
+                    "cards": cards,
+                    "decks": {
+                        "north": {
+                            "atlas": vec!["north-site"; 6],
+                            "avatar": "north-avatar",
+                            "spellbook": [
+                                "north-ally",
+                                "north-spin",
+                                "north-spin",
+                                "north-ally",
+                                "north-spin",
+                                "north-spin",
+                            ],
+                        },
+                        "south": {
+                            "atlas": vec!["south-site"; 6],
+                            "avatar": "south-avatar",
+                            "spellbook": [
+                                "south-mask",
+                                "south-minion",
+                                "south-minion",
+                                "south-mask",
+                                "south-minion",
+                                "south-minion",
+                            ],
+                        },
+                    },
+                    "engineVersion": "sorcery-core-v1",
+                    "firstSeat": "north",
+                    "schemaVersion": 1,
+                    "seed": seed,
+                });
+                value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+                sorcery_engine::canonical::canonical_json(&value)
+                    .expect("canonical synthetic manifest")
+            })
+            .find(|candidate| {
+                let opening = state(&Session::new(candidate).expect("opening candidate"));
+                let hand = opening["players"]["north"]["hand"]["spellbook"]
+                    .as_array()
+                    .expect("north opening spellbook");
+                hand.iter().any(|card| card["cardId"] == "north-spin")
+                    && hand.iter().any(|card| card["cardId"] == "north-ally")
+            })
+            .expect("bounded seed opening with ally-strike Magic and a north ally")
+    })
+}
+
+fn after_ally_strike_ready(carry_mask: bool) -> Session {
+    let mut session =
+        Session::new(ally_strike_opening_manifest()).expect("valid ally-strike session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    cast_south_mask(&mut session, carry_mask);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    session
+}
+
+fn after_leap_ready(carry_mask: bool) -> Session {
+    let mut session = Session::new(leap_opening_manifest()).expect("valid leap session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+    });
+    cast_south_mask(&mut session, carry_mask);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    session
+}
+
 fn after_ranged_ready(carry_mask: bool) -> Session {
     let mut session = Session::new(ranged_opening_manifest()).expect("valid ranged session");
     keep(&mut session);
@@ -373,6 +626,29 @@ fn rule_catalog_0254_genesis_strike_deals_double_damage_when_the_struck_unit_is_
 }
 
 #[test]
+fn rule_catalog_0945_leap_attack_strike_deals_double_damage_when_the_struck_unit_is_nearby() {
+    let mut session = after_leap_ready(true);
+    let ally_id = unit_id(&session, "north-ally");
+    let target_id = unit_id(&session, "south-minion");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-leap"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == "C4"
+    });
+    assert_eq!(strike_amount(&receipt, &target_id), 2);
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .all(|unit| unit["instanceId"] != target_id),
+        "a 1-power nearby Leap Attack strike must deal 2 and kill a 2-defense minion"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_nearby() {
     let mut session = after_south_holds_c4(false);
     let target_id = unit_id(&session, "south-minion");
@@ -390,5 +666,28 @@ fn rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_n
         .find(|unit| unit["instanceId"] == target_id)
         .expect("south minion survives an undoubled 1-power Genesis strike");
     assert_eq!(target["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0947_ally_strike_magic_deals_double_damage_when_the_struck_enemy_is_nearby() {
+    let mut session = after_ally_strike_ready(true);
+    let ally_id = unit_id(&session, "north-ally");
+    let target_id = unit_id(&session, "south-minion");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(strike_amount(&receipt, &target_id), 2);
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .all(|unit| unit["instanceId"] != target_id),
+        "a 1-power nearby ally-strike Magic hit must deal 2 and kill a 2-defense minion"
+    );
     assert_exact_replay(&session);
 }

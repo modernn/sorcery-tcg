@@ -153,3 +153,43 @@ fn rule_catalog_0942_mixed_verified_and_synthetic_batch_downgrades_verified_game
         [EligibilityReason::UnverifiedAuthority]
     );
 }
+
+#[test]
+fn rule_catalog_0950_verified_only_batch_keeps_verified_game_ranked() {
+    let verified_manifest = verified_private_local_manifest(31).expect("verified manifest");
+    let other_verified = verified_private_local_manifest(32).expect("other verified manifest");
+    let game = sorcery_engine::game::Game::from_manifest_json(&verified_manifest).expect("game");
+    let policy =
+        baseline_policy_snapshot(game.rules().authority_hash(), game.rules().engine_version())
+            .expect("baseline policy");
+    let deck_id = IdentityHash::parse(BASELINE_POLICY_DECK_ID).expect("baseline deck id");
+    let record = record_policy_game(
+        &verified_manifest,
+        &deck_id,
+        &policy,
+        &deck_id,
+        &policy,
+        MAX_GAME_ACTIONS,
+    )
+    .expect("seed-31 finished verified record");
+
+    assert!(record.replay_verified);
+    assert!(record.eligibility.gates.all_passed());
+    assert!(record.eligibility.ranked);
+    assert_eq!(record.classification, BatchClassification::Ranked);
+
+    let batch_policy = eligibility_policy_for_manifest_jsons([
+        verified_manifest.as_str(),
+        other_verified.as_str(),
+    ]);
+    assert!(batch_policy.authority_verified);
+
+    let batch_eligibility =
+        evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+    assert!(batch_eligibility.ranked);
+    assert_eq!(
+        batch_eligibility.classification,
+        BatchClassification::Ranked
+    );
+    assert!(batch_eligibility.reasons.is_empty());
+}

@@ -1,6 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0944, 0952).
+//! 0943–0944, 0952).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -25,6 +25,8 @@
 //! 0923 covers pending.targets dedup: extend-chain-magic never re-lists an
 //! already-staged hop. Distinct from 0696 resolve flow, 0903 checkpoint resume,
 //! 0913 post-extend mana gating, and 0914 phase routing.
+//! 0943 covers extend/resolve withheld when a staged target minion leaves the
+//! Realm, including after checkpoint resume.
 //! 0933 covers extend/resolve withheld when the staged caster is no longer a
 //! legal Spellcaster (checkpoint branch after the printed Spellcaster leaves).
 //! 0934 covers extend-chain-magic preserving the staged discardCardInstanceId
@@ -2312,10 +2314,8 @@ fn try_setup_spellcaster_hops(encoded: &str) -> Option<SpellcasterChainHops> {
     })
 }
 
-
 #[test]
-fn rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops(
-) {
+fn rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops() {
     let encoded = (952..952 + 256)
         .map(isolated_spellcaster_manifest)
         .find(|candidate| try_setup_isolated_spellcaster(candidate).is_some())
@@ -2340,6 +2340,74 @@ fn rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_
         "append_main must issue no begin-chain-magic for the printed Spellcaster caster"
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0943_chain_magic_withheld_when_staged_target_minion_leaves_realm() {
+    let encoded = (943..943 + 256)
+        .map(spellcaster_hops_manifest)
+        .find(|candidate| try_setup_spellcaster_hops(candidate).is_some())
+        .expect("bounded seed with printed Spellcaster, allies, and Chain Magic draw");
+    let mut setup = try_setup_spellcaster_hops(&encoded).expect("spellcaster hops setup");
+    let hops = &mut setup.hops;
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["casterInstanceId"] == setup.caster_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    assert!(offers_resolve_chain_magic(&hops.session));
+    assert!(!extend_ids(&hops.session).is_empty());
+
+    let checkpoint = create_game_checkpoint(&hops.session).expect("staged target checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized target checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed target checkpoint");
+    let resumed = resume_game_checkpoint(&parsed).expect("resumed staged target session");
+    assert_eq!(state(&resumed), staged);
+    assert!(offers_resolve_chain_magic(&resumed));
+
+    let mut branched = replay_game(&resumed);
+    assert!(
+        branched.test_remove_realm_unit(&hops.first_id),
+        "checkpoint branch must remove the first staged hop from the Realm"
+    );
+    assert!(
+        realm_unit(&branched.authoritative_state(), &hops.first_id).is_none(),
+        "staged target must leave the Realm before legal_actions is reissued"
+    );
+    match branched.legal_actions() {
+        Err(_) => {}
+        Ok(legal) => {
+            assert!(
+                !legal.iter().any(|action| matches!(
+                    action.descriptor(),
+                    ActionDescriptor::ResolveChainMagic
+                )),
+                "a staged target that left the Realm must issue no resolve-chain-magic"
+            );
+            assert!(
+                !legal.iter().any(|action| {
+                    matches!(
+                        action.descriptor(),
+                        ActionDescriptor::ExtendChainMagic { .. }
+                    )
+                }),
+                "a staged target that left the Realm must issue no extend-chain-magic"
+            );
+        }
+    }
+    assert_exact_replay(&hops.session);
 }
 
 #[test]
@@ -2489,7 +2557,9 @@ fn rule_catalog_0944_extend_chain_magic_omits_nearby_stealthed_enemy_minions() {
     let encoded = (944..944 + 512)
         .map(stealth_hops_manifest)
         .find(|candidate| try_setup_stealth_hops(candidate).is_some())
-        .expect("bounded seed with Chain Magic, ally hop, and nearby visible and stealthed enemies");
+        .expect(
+            "bounded seed with Chain Magic, ally hop, and nearby visible and stealthed enemies",
+        );
     let (mut hops, visible_id, stealth_id) =
         try_setup_stealth_hops(&encoded).expect("stealth Chain Magic hops setup");
     accept_where(&mut hops.session, |descriptor| {

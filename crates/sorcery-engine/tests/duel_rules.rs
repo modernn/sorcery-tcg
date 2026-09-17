@@ -1,4 +1,4 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
@@ -66,6 +66,15 @@ fn burrow_all() -> Value {
     })
 }
 
+fn double_mask() -> Value {
+    json!({
+        "cardType": "artifact",
+        "manaCost": 0,
+        "nearbyStrikesAgainstUnitsDealDoubleDamage": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
@@ -115,6 +124,51 @@ fn duel_manifest(seed: u32, ward: bool) -> String {
     }))
 }
 
+fn duel_nearby_mask_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "duel-nearby-mask-double-strike" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-duel-nearby-mask-double-strike-v1",
+        },
+        "cards": {
+            "north-ally": minion(json!({ "attack": 1, "defense": 4 })),
+            "north-avatar": avatar(),
+            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-duel": duel(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": minion(json!({ "attack": 1, "defense": 2 })),
+            "south-mask": double_mask(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-duel", "north-ally", "north-caster", "north-duel", "north-ally", "north-caster"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-mask",
+                    "south-enemy",
+                    "south-enemy",
+                    "south-mask",
+                    "south-enemy",
+                    "south-enemy",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -154,6 +208,19 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .iter()
         .map(|event| event.event_type.as_str())
         .collect()
+}
+
+fn damage_dealt_amount(receipt: &Receipt, target_id: &str) -> i64 {
+    receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "damage-dealt" && event.payload["instanceId"] == target_id
+        })
+        .expect("damage dealt to target")
+        .payload["amount"]
+        .as_i64()
+        .expect("damage amount")
 }
 
 fn realm_unit<'a>(snapshot: &'a Value, instance_id: &str) -> Option<&'a Value> {
@@ -221,6 +288,61 @@ fn try_setup_duel(encoded: &str) -> Option<(Session, String, String, String)> {
             && descriptor["cell"] == "C3"
     })?;
     let enemy_id = enemy_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some((session, ally_id, caster_id, enemy_id))
+}
+
+fn try_setup_duel_with_nearby_mask(encoded: &str) -> Option<(Session, String, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let (ally_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally_summon["cardInstanceId"].as_str()?.to_owned();
+    let (caster_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = caster_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (enemy_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C3"
+    })?;
+    let enemy_id = enemy_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-mask"
+            && descriptor["bearer"]["instanceId"] == enemy_id
+    })?;
     try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -410,6 +532,17 @@ fn seed_with(ward: bool, start: u32) -> String {
         .expect("bounded seed with complete Duel setup")
 }
 
+fn seed_duel_with_nearby_mask(start: u32) -> String {
+    (start..start + 512)
+        .map(duel_nearby_mask_manifest)
+        .find(|candidate| try_setup_duel_with_nearby_mask(candidate).is_some())
+        .expect("bounded seed with complete nearby-Mask Duel setup")
+}
+
+fn setup_duel_with_nearby_mask(encoded: &str) -> (Session, String, String, String) {
+    try_setup_duel_with_nearby_mask(encoded).expect("complete nearby-Mask Duel setup")
+}
+
 #[test]
 fn rule_catalog_0603_duel_magic_fights_an_adjacent_enemy_through_the_shared_pipeline() {
     let encoded = seed_with(false, 603);
@@ -569,5 +702,28 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
         ["magic-resolved", "game-ended"]
     );
     assert_eq!(state(&session)["phase"], "terminal");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0946_duel_magic_fight_strike_deals_double_damage_when_struck_unit_is_nearby_mask() {
+    let encoded = seed_duel_with_nearby_mask(946);
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel_with_nearby_mask(&encoded);
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    assert!(event_types(&receipt).contains(&"fight-started"));
+    assert_eq!(damage_dealt_amount(&receipt, &enemy_id), 2);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &enemy_id).is_none());
+    assert_eq!(
+        realm_unit(&state(&session), &ally_id).expect("ally survives the doubled return strike")["damage"],
+        2
+    );
     assert_exact_replay(&session);
 }
