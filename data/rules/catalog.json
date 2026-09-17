@@ -17054,6 +17054,24 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
         "testName": "rule_catalog_0727_pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units"
+      },
+    {
+      "ruleId": "RULE-CATALOG-0732",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ordered terminal cleanup omits resolved Chain Magic from authoritative state instead of serializing pendingChainMagic as null.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic"
       }
     }
   ]

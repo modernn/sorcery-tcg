@@ -28211,6 +28211,22 @@ pub mod catalog_proofs {
         );
     }
 
+    pub fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
+        let manifest = selfplay_manifest_with(31, |_| {});
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.position.phase = Phase::DeathriteOrder;
+        game.clear_ordered_terminal_continuations();
+
+        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
+        assert!(
+            game.authoritative_state()
+                .get("pendingChainMagic")
+                .is_none()
+        );
+        assert_eq!(game.position.phase, Phase::Terminal);
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
@@ -29233,23 +29249,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["magic-cast", "minion-died", "magic-resolved", "game-ended",]
         );
-    }
-
-    #[test]
-    fn ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
-        let manifest = selfplay_manifest_with(31, |_| {});
-        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
-        game.position.pending_chain_magic = PendingField::Resolved;
-        game.position.phase = Phase::DeathriteOrder;
-        game.clear_ordered_terminal_continuations();
-
-        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
-        assert!(
-            game.authoritative_state()
-                .get("pendingChainMagic")
-                .is_none()
-        );
-        assert_eq!(game.position.phase, Phase::Terminal);
     }
 
     fn test_minion(
