@@ -1,5 +1,5 @@
 //! Direct proofs for summon-random-minion-from-any-cemetery Magic
-//! (RULE-CATALOG-0583–0584).
+//! (RULE-CATALOG-0159, 0583–0584, 0707–0708).
 //!
 //! Ordinary Raise Dead draws one random minion from either cemetery and
 //! opens free placement. An empty cemetery pool still resolves the spell as a
@@ -328,4 +328,14 @@ fn rule_catalog_0584_raise_dead_with_empty_cemetery_is_a_paid_noop() {
             .is_none_or(Vec::is_empty)
     );
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement();
+}
+
+#[test]
+fn rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon();
 }

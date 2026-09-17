@@ -7,6 +7,24 @@ use crate::canonical::{CanonicalError, canonical_json, identity_hash};
 const SYNTHETIC_AUTHORITY_HASH: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
+/// Mutates the public synthetic demo manifest and returns a fresh canonical copy.
+///
+/// # Panics
+///
+/// Panics when the base manifest cannot be decoded or re-canonicalized.
+pub fn selfplay_manifest_with(seed: u32, mutate: impl FnOnce(&mut Value)) -> String {
+    let mut manifest: Value =
+        serde_json::from_str(&synthetic_demo_manifest_json(seed).expect("synthetic manifest"))
+            .expect("manifest JSON");
+    manifest
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("manifestId");
+    mutate(&mut manifest);
+    manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
+    canonical_json(&manifest).expect("canonical manifest")
+}
+
 /// Builds the canonical, entirely synthetic two-player demo manifest.
 ///
 /// # Errors

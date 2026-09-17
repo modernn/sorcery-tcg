@@ -117,8 +117,8 @@
       "actionHints": [],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/src/game.rs",
-        "testName": "zero_site_recovery_should_issue_every_nearest_cell_in_canonical_order"
+        "file": "crates/sorcery-engine/tests/zero_domain_recovery_rules.rs",
+        "testName": "rule_catalog_0701_zero_site_recovery_issues_nearest_cells_in_canonical_order"
       }
     },
     {
@@ -215,8 +215,8 @@
         "rubble"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/src/game.rs",
-        "testName": "site_destruction_should_preserve_protected_rubble_and_relative_subsurface"
+        "file": "crates/sorcery-engine/tests/sinkhole_subsurface_rules.rs",
+        "testName": "rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface"
       }
     },
     {
@@ -449,7 +449,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Magic targeting excludes enemy Stealth. Own Stealth stays targetable. Distinct from 0617–0618 (Grant-Stealth) and from 0697 (caster-region confinement).",
+      "plainLanguage": "Magic targeting excludes enemy Stealth. Own Stealth stays targetable. Distinct from 0617\u20130618 (Grant-Stealth) and from 0697 (caster-region confinement).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "stealth"
@@ -515,7 +515,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Disabling a subsurface minion immediately settles its region. Freeze on an underground Burrowing minion emits minion-disabled then minion-died. Distinct from 0661–0662 (surface Freeze / Ward absorb).",
+      "plainLanguage": "Disabling a subsurface minion immediately settles its region. Freeze on an underground Burrowing minion emits minion-disabled then minion-died. Distinct from 0661\u20130662 (surface Freeze / Ward absorb).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disabled",
@@ -803,7 +803,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand and does not offer an opposing cemetery minion. Distinct from 0593–0594, which never place an opposing cemetery minion.",
+      "plainLanguage": "Rescue returns a chosen own cemetery minion to hidden hand and does not offer an opposing cemetery minion. Distinct from 0593\u20130594, which never place an opposing cemetery minion.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "returnMinionFromOwnCemetery"
@@ -913,7 +913,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Targetless healController Magic restores the caster Avatar through the printed-life cap and cannot leave Death's Door. Distinct from 0651–0652, which offer a chosen Avatar.",
+      "plainLanguage": "Targetless healController Magic restores the caster Avatar through the printed-life cap and cannot leave Death's Door. Distinct from 0651\u20130652, which offer a chosen Avatar.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "healController"
@@ -2979,7 +2979,7 @@
         "RULE-03",
         "RULE-05"
       ],
-      "plainLanguage": "Mesmerism transfers an adjacent nearby minion and its Deathrite to the new controller after the caster moves. A two-step-away minion on the same board is not offered. Distinct from 0659–0660, which prove same-cell nearby and a far-only board.",
+      "plainLanguage": "Mesmerism transfers an adjacent nearby minion and its Deathrite to the new controller after the caster moves. A two-step-away minion on the same board is not offered. Distinct from 0659\u20130660, which prove same-cell nearby and a far-only board.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "gainControlOfTargetNearbyMinion",
@@ -3002,7 +3002,7 @@
       "requirementIds": [
         "RULE-03"
       ],
-      "plainLanguage": "Fatality kills only a wounded minion in the caster region. A wounded underground minion is not offered when the caster is on the surface. Distinct from 0609–0610, which prove wounded-versus-healthy on the surface only.",
+      "plainLanguage": "Fatality kills only a wounded minion in the caster region. A wounded underground minion is not offered when the caster is on the surface. Distinct from 0609\u20130610, which prove wounded-versus-healthy on the surface only.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "killTargetWoundedMinion"
@@ -3256,8 +3256,8 @@
         "random-selection"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/src/game.rs",
-        "testName": "raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement"
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement"
       }
     },
     {
@@ -3280,8 +3280,8 @@
         "card-discard"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/src/game.rs",
-        "testName": "craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid"
+        "file": "crates/sorcery-engine/tests/craterize_rules.rs",
+        "testName": "rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid"
       }
     },
     {
@@ -16195,7 +16195,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Targetless healController Magic pays its cost with no target, restores the caster Avatar through the printed-life cap, and cannot leave Death's Door. Life stays at zero, the game stays active, and no healing event is emitted from Death's Door. Distinct from 0651–0652, which offer a chosen Avatar.",
+      "plainLanguage": "Targetless healController Magic pays its cost with no target, restores the caster Avatar through the printed-life cap, and cannot leave Death's Door. Life stays at zero, the game stays active, and no healing event is emitted from Death's Door. Distinct from 0651\u20130652, which offer a chosen Avatar.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "healController"
@@ -16219,7 +16219,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Leap-attack-ally Magic steps a controlled ally, then pauses in deathrite-order when that step settles two wounded Deathrite allies who lost a nearby power bonus. After either Deathrite order, the pending leap strike resumes at the destination and kills the enemy there. Distinct from ordinary Leap Attack (0599–0600), which never defers the strike.",
+      "plainLanguage": "Leap-attack-ally Magic steps a controlled ally, then pauses in deathrite-order when that step settles two wounded Deathrite allies who lost a nearby power bonus. After either Deathrite order, the pending leap strike resumes at the destination and kills the enemy there. Distinct from ordinary Leap Attack (0599\u20130600), which never defers the strike.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "leapAttackAlly",
@@ -16250,7 +16250,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 1x1 caster stages Chain Magic through distinct nearby hops and damages every chosen unit simultaneously on resolve. Extra hops cost two mana, already-chosen units cannot be hopped again, and hops cannot leave the caster region. Distinct from oversized Spellcaster footprint hops (0385–0386).",
+      "plainLanguage": "A 1x1 caster stages Chain Magic through distinct nearby hops and damages every chosen unit simultaneously on resolve. Extra hops cost two mana, already-chosen units cannot be hopped again, and hops cannot leave the caster region. Distinct from oversized Spellcaster footprint hops (0385\u20130386).",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "damageChainNearbyUnits"
@@ -16302,7 +16302,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "Freeze Disable on an underground Burrowing minion immediately settles its region: the same receipt emits minion-disabled then minion-died, and the unit leaves play. Distinct from 0661–0662, which Freeze a surface minion until the next Start Phase or absorb into Ward, and from a surface Burrowing minion that stays in play after Disable.",
+      "plainLanguage": "Freeze Disable on an underground Burrowing minion immediately settles its region: the same receipt emits minion-disabled then minion-died, and the unit leaves play. Distinct from 0661\u20130662, which Freeze a surface minion until the next Start Phase or absorb into Ward, and from a surface Burrowing minion that stays in play after Disable.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "disableTargetNearbyMinionUntilNextTurn",
@@ -16357,7 +16357,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "grantPowerToAllyThisTurn Magic offers controlled allies, raises current derived power by +2 per source until the current End Phase, and feeds source-aware prevention. Stacked grants expire together before turn-ended. Distinct from 0529–0530, which grant to a minion then draw and do not offer Avatars.",
+      "plainLanguage": "grantPowerToAllyThisTurn Magic offers controlled allies, raises current derived power by +2 per source until the current End Phase, and feeds source-aware prevention. Stacked grants expire together before turn-ended. Distinct from 0529\u20130530, which grant to a minion then draw and do not offer Avatars.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "grantPowerToAllyThisTurn",
@@ -16374,6 +16374,199 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/overpower_rules.rs",
         "testName": "rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0701",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Zero-domain site recovery offers every nearest empty cell in canonical order and rejects forged destinations. Distinct from ordinary expansion when the player still controls sites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/zero_domain_recovery_rules.rs",
+        "testName": "rule_catalog_0701_zero_site_recovery_issues_nearest_cells_in_canonical_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0702",
+      "requirementIds": [
+        "RULE-02"
+      ],
+      "plainLanguage": "Zero-domain site recovery onto Rubble replaces the Rubble before the site is played. Distinct from 0701, which only enumerates nearest cells and rejects forgery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "rubble"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/zero_domain_recovery_rules.rs",
+        "testName": "rule_catalog_0702_zero_site_recovery_replaces_rubble_before_site_play"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0703",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sinkhole sacrifices a source site, prevents destruction on protected targets, preserves existing Rubble, and still creates neutral Rubble on ordinary targets. Distinct from site_destruction_rules.rs 0012 replay, which omits subsurface occupants.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "rubble",
+        "sacrificeToDestroyNearbySite"
+      ],
+      "actionHints": [
+        "sacrifice"
+      ],
+      "eventHints": [
+        "site-sacrificed",
+        "site-destruction-prevented",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sinkhole_subsurface_rules.rs",
+        "testName": "rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0704",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sinkhole destruction on a Water site preserves relative subsurface: drowned minions die, Burrowing survivors and loose Artifacts settle underground, and terminal Atlas loss ends the game after Rubble. Distinct from 0703 protected and existing-Rubble branches.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "rubble",
+        "submerge",
+        "burrowing"
+      ],
+      "actionHints": [
+        "sacrifice"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble-created",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sinkhole_subsurface_rules.rs",
+        "testName": "rule_catalog_0704_sinkhole_preserves_subsurface_on_water_destruction"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0705",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Craterize pays a mandatory Atlas discard, destroys an unprotected target site into Rubble, applies its full Manhattan damage grid across regions and statuses, and resolves deterministically. Distinct from 0657, which uses a flat 1-damage grid in Session replay.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "damageUnitsAboveAndBelowTargetSiteByManhattanDistance"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "discard",
+        "destroy"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "site-destroyed",
+        "magic-damage-allocated",
+        "rubble-created",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/craterize_rules.rs",
+        "testName": "rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0706",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Craterize refuses casts without an Atlas discard, rejects paying with the target site, and still damages occupants when the target site cannot be destroyed. Distinct from 0658 protected-site Session slice.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetSite",
+        "discardSiteAsAdditionalCost",
+        "cannotBeMovedDestroyedOrModified"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "discard"
+      ],
+      "eventHints": [
+        "site-destruction-prevented",
+        "magic-damage-allocated",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/craterize_rules.rs",
+        "testName": "rule_catalog_0706_craterize_enforces_discard_cost_and_still_damages_protected_sites"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0707",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Raise Dead resolves an empty cemetery as a paid no-op, otherwise draws one public random minion from the combined cemetery pool before opening free placement. Distinct from 0583-0584 Session replay after a kill setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery",
+        "cemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "dead-minion-selected",
+        "random-selection"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0708",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Raise Dead free placement accepts only engine-issued cells, fails oversized footprints with no legal location, and raises enemy-owned corpses at zero mana with Genesis billing on the controller. Distinct from 0583 single-site summon replay.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery",
+        "occupiesSquareArea"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summon-failed",
+        "minion-summoned",
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon"
       }
     }
   ]

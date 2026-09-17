@@ -25951,24 +25951,12 @@ fn resolve_mulligan_zone(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+#[allow(clippy::wildcard_imports)]
+pub mod catalog_proofs {
     use super::*;
-    use crate::canonical::canonical_json;
     use crate::synthetic::synthetic_demo_manifest_json;
-
-    fn selfplay_manifest_with(seed: u32, mutate: impl FnOnce(&mut Value)) -> String {
-        let mut manifest: Value =
-            serde_json::from_str(&synthetic_demo_manifest_json(seed).expect("synthetic manifest"))
-                .expect("manifest JSON");
-        manifest
-            .as_object_mut()
-            .expect("manifest object")
-            .remove("manifestId");
-        mutate(&mut manifest);
-        manifest["manifestId"] = json!(identity_hash(&manifest).expect("manifest identity"));
-        canonical_json(&manifest).expect("canonical manifest")
-    }
 
     fn play_site_actions(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
         game.legal_actions()
@@ -25984,8 +25972,7 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn zero_site_recovery_should_issue_every_nearest_cell_in_canonical_order() {
+    pub fn rule_catalog_0701_zero_site_recovery_issues_nearest_cells_in_canonical_order() {
         let manifest = synthetic_demo_manifest_json(267).expect("synthetic manifest");
         let mut game = Game::from_manifest_json(&manifest).expect("valid game");
         let c3 = Cell::parse("C3").expect("C3");
@@ -26011,7 +25998,6 @@ mod tests {
         game.position.active_seat = Seat::North;
         game.position.decision_seat = Seat::North;
         game.position.phase = Phase::Main;
-
         let recovery_actions = play_site_actions(&game, &recovery_card);
         assert_eq!(
             recovery_actions
@@ -26023,10 +26009,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["B3", "C2", "C4", "D3"].map(|cell| Cell::parse(cell).expect("valid cell"))
         );
-
         let mut forged = recovery_actions[0].clone();
         let ActionDescriptor::PlaySite { cell, .. } = &mut forged.descriptor else {
-            unreachable!("filtered PlaySite action");
+            unreachable!()
         };
         *cell = Cell::parse("A1").expect("A1");
         let before_forgery = game.authoritative_state();
@@ -26035,10 +26020,34 @@ mod tests {
             Err(GameError::IllegalAction)
         ));
         assert_eq!(game.authoritative_state(), before_forgery);
+    }
 
-        game.position.players[seat_index(Seat::North)]
-            .avatar
-            .location = c4;
+    pub fn rule_catalog_0702_zero_site_recovery_replaces_rubble_before_site_play() {
+        let manifest = synthetic_demo_manifest_json(267).expect("synthetic manifest");
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        let south_site = game.position.players[seat_index(Seat::South)]
+            .hand_atlas
+            .remove(0);
+        game.position.sites[c3.index()] = Some(SitePosition {
+            card: south_site,
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        });
+        game.position.rubble[c4.index()] = Some(
+            identity_hash(&json!({ "fixture": "zero-site-recovery-rubble" }))
+                .expect("Rubble identity"),
+        );
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = c4;
+        north.avatar.tapped = false;
+        north.domain_established = true;
+        let recovery_card = north.hand_atlas[0].instance_id.clone();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
         let replacement_actions = play_site_actions(&game, &recovery_card);
         assert_eq!(replacement_actions.len(), 1);
         let (outcomes, random_draws) = game
@@ -26054,6 +26063,1128 @@ mod tests {
         );
         assert!(game.position.rubble[c4.index()].is_none());
         assert!(game.position.sites[c4.index()].is_some());
+    }
+
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::synthetic::selfplay_manifest_with;
+
+    fn test_minion(
+        card_id: CardId,
+        instance_id: &str,
+        controller: Seat,
+        location: Cell,
+        occupied_cells: Option<SquareArea>,
+    ) -> UnitPosition {
+        UnitPosition {
+            card: CardInstance {
+                card_id,
+                instance_id: IdentityHash::parse(instance_id).expect("fixture identity"),
+                owner: controller,
+                source: CardSource::Spellbook,
+            },
+            carried_lance_count: 0,
+            controller,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
+            last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
+            location,
+            occupied_cells,
+            planar_gate_voidwalk: false,
+            region: Region::Surface,
+            stealthed: false,
+            summoning_sickness: false,
+            tapped: true,
+            temporary_airborne_sources: Vec::new(),
+            temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
+            warded: false,
+        }
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one shared crater board keeps every distance, terrain, and status case visible together"
+    )]
+    fn craterize_fixture(protected: bool) -> (Game, BTreeMap<&'static str, IdentityHash>) {
+        let manifest = selfplay_manifest_with(197, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "cardType": "magic",
+                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [10, 7, 4, 2, 1],
+                    "destroyTargetSite": true,
+                    "discardSiteAsAdditionalCost": true,
+                    "manaCost": 8,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            if protected {
+                manifest["cards"]["south-site-1"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+            }
+            for (ordinal, facts) in [
+                (1, json!({ "burrowing": true, "submerge": true })),
+                (2, json!({ "burrowing": true })),
+                (3, json!({})),
+                (4, json!({ "stealth": true })),
+                (5, json!({ "ward": true })),
+                (6, json!({ "occupiesSquareArea": 2 })),
+                (7, json!({ "voidwalk": true })),
+            ] {
+                let card = &mut manifest["cards"][format!("south-spell-{ordinal}")];
+                card["defense"] = json!(40);
+                card["manaCost"] = json!(0);
+                for (field, value) in facts.as_object().expect("fixture minion facts") {
+                    card[field.as_str()] = value.clone();
+                }
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Craterize manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let north_land = card_id("north-site-1");
+        let south_land = card_id("south-site-2");
+        let water = card_id("south-site-1");
+        let minions: [CardId; 7] =
+            std::array::from_fn(|index| card_id(&format!("south-spell-{}", index + 1)));
+
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (cell, card, owner) in [
+            ("B1", south_land, Seat::South),
+            ("B2", south_land, Seat::South),
+            ("C1", south_land, Seat::South),
+            ("C2", water, Seat::South),
+            ("C3", south_land, Seat::South),
+            ("C4", north_land, Seat::North),
+            ("D3", south_land, Seat::South),
+            ("D4", north_land, Seat::North),
+            ("E3", south_land, Seat::South),
+            ("E4", south_land, Seat::South),
+        ] {
+            let cell = Cell::parse(cell).expect("fixture cell");
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card: CardInstance {
+                    card_id: card,
+                    instance_id: identity_hash(
+                        &json!({ "cell": cell, "fixture": "craterize-site" }),
+                    )
+                    .expect("fixture site identity"),
+                    owner,
+                    source: CardSource::Atlas,
+                },
+                controller: owner,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+
+        let mut identities = BTreeMap::new();
+        game.position.units = Vec::new();
+        for (name, index, cell, region) in [
+            ("center", 0, "C2", Region::Underwater),
+            ("seven", 1, "C3", Region::Underground),
+            ("four", 2, "D3", Region::Surface),
+            ("two", 3, "E3", Region::Surface),
+            ("one", 4, "E4", Region::Surface),
+            ("oversized", 5, "B1", Region::Surface),
+            ("void", 6, "A4", Region::Void),
+        ] {
+            let instance_id =
+                identity_hash(&json!({ "fixture": name, "kind": "craterize-minion" }))
+                    .expect("fixture minion identity");
+            let mut unit = test_minion(
+                minions[index],
+                instance_id.as_str(),
+                Seat::South,
+                Cell::parse(cell).expect("fixture cell"),
+                (name == "oversized").then_some(Cell::SQUARE_AREAS[3]),
+            );
+            unit.region = region;
+            unit.stealthed = name == "two";
+            unit.warded = name == "one";
+            game.position.units.push(unit);
+            identities.insert(name, instance_id);
+        }
+
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = Cell::parse("C3").expect("C3");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = Cell::parse("C4").expect("C4");
+        north.domain_established = true;
+        north.mana = 8;
+        (game, identities)
+    }
+
+    fn craterize_casts(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
+        game.legal_actions()
+            .expect("Craterize actions")
+            .into_iter()
+            .filter(|action| match &action.descriptor {
+                ActionDescriptor::CastMagic {
+                    card_instance_id: candidate,
+                    ..
+                } => *candidate == *card_instance_id,
+                _ => false,
+            })
+            .collect()
+    }
+
+    struct RaiseDeadFixture {
+        game: Game,
+        north_corpse: IdentityHash,
+        raise_dead: IdentityHash,
+        south_corpse: IdentityHash,
+    }
+
+    fn raise_dead_fixture(oversized: bool) -> RaiseDeadFixture {
+        let manifest = selfplay_manifest_with(198, |manifest| {
+            manifest["cards"]["north-spell-1"] = json!({
+                "cardType": "magic",
+                "manaCost": 0,
+                "summonRandomMinionFromAnyCemetery": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+            // The corpse is unaffordable and off-threshold, so only a free placement can raise it.
+            let corpse = &mut manifest["cards"]["south-spell-1"];
+            corpse["defense"] = json!(3);
+            corpse["manaCost"] = json!(9);
+            corpse["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 0, "water": 4 });
+            // An oversized footprint cannot also carry a Genesis, so the branches split here.
+            if oversized {
+                corpse["occupiesSquareArea"] = json!(2);
+            } else {
+                corpse["genesisLoseControllerLife"] = json!(2);
+            }
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid Raise Dead manifest");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    game.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
+            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
+        };
+        let raise_dead = instance(
+            card_id("north-spell-1"),
+            Seat::North,
+            CardSource::Spellbook,
+            500,
+        );
+        let south_corpse = instance(
+            card_id("south-spell-1"),
+            Seat::South,
+            CardSource::Spellbook,
+            501,
+        );
+        let north_corpse = instance(
+            card_id("north-spell-2"),
+            Seat::North,
+            CardSource::Spellbook,
+            502,
+        );
+        let sites = [
+            (
+                Cell::parse("C4").expect("C4"),
+                Seat::North,
+                instance(card_id("north-site-1"), Seat::North, CardSource::Atlas, 503),
+            ),
+            (
+                Cell::parse("C1").expect("C1"),
+                Seat::South,
+                instance(card_id("south-site-1"), Seat::South, CardSource::Atlas, 504),
+            ),
+        ];
+
+        game.position.sites = std::array::from_fn(|_| None);
+        game.position.rubble = std::array::from_fn(|_| None);
+        for (cell, controller, card) in sites {
+            game.position.sites[cell.index()] = Some(SitePosition {
+                card,
+                controller,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        game.position.units = Vec::new();
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let south = &mut game.position.players[seat_index(Seat::South)];
+        south.avatar.location = Cell::parse("C1").expect("C1");
+        south.cemetery = vec![south_corpse.clone()];
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.location = Cell::parse("C4").expect("C4");
+        north.cemetery = vec![north_corpse.clone()];
+        north.domain_established = true;
+        north.hand_spellbook = vec![raise_dead.clone()];
+        north.mana = 3;
+        RaiseDeadFixture {
+            game,
+            north_corpse: north_corpse.instance_id,
+            raise_dead: raise_dead.instance_id,
+            south_corpse: south_corpse.instance_id,
+        }
+    }
+
+    fn only_action(
+        actions: &[IssuedAction],
+        matches: impl Fn(&ActionDescriptor) -> bool,
+    ) -> &IssuedAction {
+        let mut found = actions.iter().filter(|action| matches(&action.descriptor));
+        let action = found.next().expect("expected one issued action");
+        assert!(found.next().is_none(), "expected exactly one issued action");
+        action
+    }
+
+    fn raise_dead_cast(game: &Game) -> IssuedAction {
+        only_action(
+            &game.legal_actions().expect("Raise Dead actions"),
+            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { .. }),
+        )
+        .clone()
+    }
+
+    fn event_types(events: &[(String, Value)]) -> Vec<&str> {
+        events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect()
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct terrain proof keeps protected, Rubble, and subsurface Sinkhole branches together"
+    )]
+    pub fn rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface() {
+        let admitted = selfplay_manifest_with(244, |manifest| {
+            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
+            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+        });
+        Game::from_manifest_json(&admitted)
+            .expect("valid Sinkhole manifest")
+            .ensure_selfplay_supported()
+            .expect("Sinkhole source and protection facts are self-play safe");
+
+        let manifest = selfplay_manifest_with(244, |manifest| {
+            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
+            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
+            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
+            for ordinal in [1, 2] {
+                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
+                manifest["cards"][format!("south-spell-{ordinal}")]["submerge"] = json!(true);
+                manifest["cards"][format!("south-spell-{ordinal}")]["thresholds"] =
+                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
+            }
+            manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
+            manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
+            manifest["cards"]["south-spell-3"] = json!({
+                "cardType": "artifact",
+                "grantsBearerPower": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            });
+        });
+        let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
+        let card_id = |name: &str| {
+            CardId(
+                u16::try_from(
+                    base.rules
+                        .cards
+                        .iter()
+                        .position(|card| card.id == name)
+                        .expect("fixture card"),
+                )
+                .expect("fixture card index"),
+            )
+        };
+        let source_id =
+            identity_hash(&json!({ "fixture": "sinkhole-source" })).expect("source identity");
+        let protected_id =
+            identity_hash(&json!({ "fixture": "sinkhole-protected" })).expect("protected identity");
+        let water_id =
+            identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
+        let source = SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-1"),
+                instance_id: source_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        };
+        let protected = SitePosition {
+            card: CardInstance {
+                card_id: card_id("north-site-2"),
+                instance_id: protected_id.clone(),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        };
+        let water = SitePosition {
+            card: CardInstance {
+                card_id: card_id("south-site-1"),
+                instance_id: water_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        };
+        let c2 = Cell::parse("C2").expect("C2");
+        let c3 = Cell::parse("C3").expect("C3");
+        let c4 = Cell::parse("C4").expect("C4");
+        base.position.sites = std::array::from_fn(|_| None);
+        base.position.rubble = std::array::from_fn(|_| None);
+        base.position.sites[c2.index()] = Some(water);
+        base.position.sites[c3.index()] = Some(source);
+        base.position.sites[c4.index()] = Some(protected.clone());
+        let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let artifact_id = IdentityHash::parse(
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        )
+        .expect("artifact identity");
+        let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
+        drowned.region = Region::Underwater;
+        let mut survivor =
+            test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
+        survivor.region = Region::Underwater;
+        base.position.units = vec![drowned, survivor];
+        base.position.artifacts = vec![ArtifactPosition {
+            card: CardInstance {
+                card_id: card_id("south-spell-3"),
+                instance_id: artifact_id.clone(),
+                owner: Seat::South,
+                source: CardSource::Spellbook,
+            },
+            placement: ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underwater,
+            },
+        }];
+        base.position.active_seat = Seat::North;
+        base.position.decision_seat = Seat::North;
+        base.position.phase = Phase::Main;
+        base.position.players[seat_index(Seat::North)].domain_established = true;
+
+        let source_actions = base
+            .legal_actions()
+            .expect("site destruction actions")
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction {
+                        source_site_instance_id,
+                        ..
+                    } if *source_site_instance_id == source_id
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            source_actions
+                .iter()
+                .map(|action| match action.descriptor {
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } => target_cell,
+                    _ => unreachable!("filtered site destruction"),
+                })
+                .collect::<Vec<_>>(),
+            [c2, c3, c4]
+        );
+
+        let mut protected_branch = base.clone();
+        let protected_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c4
+                )
+            })
+            .expect("protected target action");
+        let (protected_events, protected_random) = protected_branch
+            .apply_action_recorded(protected_action)
+            .expect("protected target activation");
+        assert!(protected_random.is_empty());
+        assert_eq!(
+            protected_events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "site-sacrificed",
+                "site-destruction-prevented",
+                "rubble-created",
+            ]
+        );
+        assert_eq!(
+            protected_branch.position.sites[c4.index()],
+            Some(protected.clone())
+        );
+        assert!(protected_branch.position.sites[c3.index()].is_none());
+
+        let mut rubble_branch = base.clone();
+        rubble_branch.position.units.clear();
+        rubble_branch.position.sites[c2.index()] = None;
+        let existing_rubble =
+            identity_hash(&json!({ "fixture": "existing-rubble" })).expect("Rubble identity");
+        rubble_branch.position.rubble[c2.index()] = Some(existing_rubble.clone());
+        let rubble_action = rubble_branch
+            .legal_actions()
+            .expect("Rubble target actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction {
+                        source_site_instance_id,
+                        target_cell,
+                        ..
+                    } if *source_site_instance_id == source_id && *target_cell == c2
+                )
+            })
+            .expect("existing Rubble target");
+        let (rubble_events, _) = rubble_branch
+            .apply_action_recorded(&rubble_action)
+            .expect("Rubble target activation");
+        assert_eq!(
+            rubble_branch.position.rubble[c2.index()],
+            Some(existing_rubble)
+        );
+        assert_eq!(
+            rubble_events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["site-sacrificed", "site-destroyed", "rubble-created"]
+        );
+        assert!(rubble_events[1].1.get("owner").is_none());
+
+        let mut terminal_branch = base.clone();
+        terminal_branch.position.players[seat_index(Seat::South)]
+            .atlas
+            .clear();
+        let terminal_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
+                )
+            })
+            .expect("terminal Water target action");
+        let (terminal_events, _) = terminal_branch
+            .apply_action_recorded(terminal_action)
+            .expect("terminal Water target activation");
+        let terminal_types = terminal_events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            terminal_types
+                .iter()
+                .rposition(|event_type| *event_type == "rubble-created")
+                < terminal_types
+                    .iter()
+                    .position(|event_type| *event_type == "game-ended")
+        );
+
+        let mut destroyed = base;
+        let normal_action = source_actions
+            .iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
+                )
+            })
+            .expect("Water target action");
+        let (events, random_draws) = destroyed
+            .apply_action_recorded(normal_action)
+            .expect("Water target activation");
+        assert!(random_draws.is_empty());
+        let event_types = events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&event_types[..2], ["site-sacrificed", "site-destroyed"]);
+        assert_eq!(
+            &event_types[event_types.len() - 2..],
+            ["rubble-created", "rubble-created"]
+        );
+        assert!(
+            !destroyed
+                .position
+                .units
+                .iter()
+                .any(|unit| unit.card.instance_id.as_str() == drowned_id)
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id.as_str() == survivor_id)
+                .expect("Burrowing survivor")
+                .region,
+            Region::Underground
+        );
+        assert_eq!(
+            destroyed
+                .position
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.card.instance_id == artifact_id)
+                .expect("loose Artifact")
+                .placement,
+            ArtifactPlacement::Loose {
+                location: c2,
+                region: Region::Underground,
+            }
+        );
+        let south_cemetery = &destroyed.position.players[seat_index(Seat::South)].cemetery;
+        assert_eq!(south_cemetery[0].instance_id.as_str(), drowned_id);
+        assert_eq!(south_cemetery[1].instance_id, water_id);
+        assert!(destroyed.position.sites[c2.index()].is_none());
+        assert!(destroyed.position.sites[c3.index()].is_none());
+        assert_eq!(destroyed.position.sites[c4.index()], Some(protected));
+    }
+
+    pub fn rule_catalog_0704_sinkhole_preserves_subsurface_on_water_destruction() {
+        rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface();
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct crater proof keeps the discard cost, protection, grid, and terrain branches together"
+    )]
+    pub fn rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid() {
+        let (base, identities) = craterize_fixture(false);
+        let c2 = Cell::parse("C2").expect("C2");
+        let craterize = base.position.players[seat_index(Seat::North)].hand_spellbook[0]
+            .instance_id
+            .clone();
+        let target_site_instance_id = base.position.sites[c2.index()]
+            .as_ref()
+            .expect("Water target site")
+            .card
+            .instance_id
+            .clone();
+        let discard_count = base.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .len();
+        assert!(discard_count > 1);
+
+        // The additional cost is mandatory, so an empty Atlas hand offers no cast at all.
+        let mut costless = base.clone();
+        costless.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .clear();
+        assert!(craterize_casts(&costless, &craterize).is_empty());
+
+        let casts = craterize_casts(&base, &craterize);
+        let target_cells = casts
+            .iter()
+            .filter_map(|action| match &action.descriptor {
+                ActionDescriptor::CastMagic {
+                    target_location, ..
+                } => target_location.map(|location| location.cell),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(target_cells.len(), 10);
+        let target_casts: Vec<_> = casts
+            .iter()
+            .filter(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target_site_instance_id: Some(site),
+                        ..
+                    } if *site == target_site_instance_id
+                )
+            })
+            .collect();
+        assert_eq!(target_casts.len(), discard_count);
+        let cast = target_casts[0].clone();
+        let ActionDescriptor::CastMagic {
+            discard_site_instance_id: Some(discarded_site_instance_id),
+            ..
+        } = &cast.descriptor
+        else {
+            unreachable!("Craterize issues its discard cost");
+        };
+        let discarded_site_instance_id = discarded_site_instance_id.clone();
+
+        // Only an Atlas card in hand pays the cost; the target site itself is not a legal payment.
+        let mut forged = cast.clone();
+        let ActionDescriptor::CastMagic {
+            discard_site_instance_id,
+            ..
+        } = &mut forged.descriptor
+        else {
+            unreachable!("filtered Craterize cast");
+        };
+        *discard_site_instance_id = Some(target_site_instance_id.clone());
+        let mut forgery = base.clone();
+        let before_forgery = forgery.authoritative_state();
+        assert!(matches!(
+            forgery.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(forgery.authoritative_state(), before_forgery);
+
+        let (protected_base, protected_identities) = craterize_fixture(true);
+        let protected_site = protected_base.position.sites[c2.index()].clone();
+        let protected_spell = protected_base.position.players[seat_index(Seat::North)]
+            .hand_spellbook[0]
+            .instance_id
+            .clone();
+        let protected_cast = craterize_casts(&protected_base, &protected_spell)
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
+                        if location.cell == c2
+                )
+            })
+            .expect("protected Craterize cast");
+        let mut protected = protected_base;
+        let (protected_events, protected_random) = protected
+            .apply_action_recorded(&protected_cast)
+            .expect("protected Craterize cast");
+        assert!(protected_random.is_empty());
+        let protected_types: Vec<_> = protected_events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect();
+        assert!(protected_types.contains(&"site-destruction-prevented"));
+        assert!(!protected_types.contains(&"rubble-created"));
+        assert_eq!(protected.position.sites[c2.index()], protected_site);
+        let protected_center = protected
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == protected_identities["center"])
+            .expect("protected crater centre");
+        assert_eq!(
+            (protected_center.damage, protected_center.region),
+            (10, Region::Underwater)
+        );
+
+        let mut destroyed = base.clone();
+        let (events, random_draws) = destroyed
+            .apply_action_recorded(&cast)
+            .expect("Craterize cast");
+        assert!(random_draws.is_empty());
+        let event_types: Vec<_> = events
+            .iter()
+            .map(|(event_type, _)| event_type.as_str())
+            .collect();
+        assert_eq!(
+            &event_types[..3],
+            ["card-discarded", "magic-cast", "site-destroyed"]
+        );
+        assert!(event_types.contains(&"rubble-created"));
+        assert_eq!(event_types.last(), Some(&"magic-resolved"));
+        assert_eq!(events[0].1["zone"], json!("atlas"));
+        assert_eq!(
+            events[0].1["instanceId"],
+            json!(discarded_site_instance_id.as_str())
+        );
+        assert_eq!(
+            events[1].1["discardSiteInstanceId"],
+            json!(discarded_site_instance_id.as_str())
+        );
+
+        let allocated: BTreeMap<&str, u64> = events
+            .iter()
+            .filter(|(event_type, _)| event_type == "magic-damage-allocated")
+            .map(|(_, payload)| {
+                (
+                    payload["targetInstanceId"]
+                        .as_str()
+                        .expect("allocated target"),
+                    payload["amount"].as_u64().expect("allocated amount"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            ["center", "seven", "four", "two", "one", "oversized", "void",]
+                .map(|name| allocated.get(identities[name].as_str()).copied()),
+            [Some(10), Some(7), Some(4), Some(2), Some(1), Some(28), None,]
+        );
+
+        let settled = |name: &str| {
+            destroyed
+                .position
+                .units
+                .iter()
+                .find(|unit| unit.card.instance_id == identities[name])
+                .map(|unit| (unit.damage, unit.region, unit.stealthed, unit.warded))
+        };
+        assert_eq!(
+            ["center", "seven", "four", "two", "one", "oversized", "void"].map(settled),
+            [
+                // The drained Water layer drops the submerged minion into its Burrowing layer.
+                Some((10, Region::Underground, false, false)),
+                Some((7, Region::Underground, false, false)),
+                Some((4, Region::Surface, false, false)),
+                Some((2, Region::Surface, true, false)),
+                // A Ward absorbs the grid damage outright and breaks.
+                Some((0, Region::Surface, false, false)),
+                Some((28, Region::Surface, false, false)),
+                Some((0, Region::Void, false, false)),
+            ]
+        );
+        assert_eq!(
+            (
+                destroyed.position.players[seat_index(Seat::North)]
+                    .avatar
+                    .life,
+                destroyed.position.players[seat_index(Seat::South)]
+                    .avatar
+                    .life,
+                destroyed.position.players[seat_index(Seat::North)].mana,
+            ),
+            (16, 13, 0)
+        );
+
+        let north_cemetery = &destroyed.position.players[seat_index(Seat::North)].cemetery;
+        assert!(
+            north_cemetery
+                .iter()
+                .any(|card| card.instance_id == craterize)
+        );
+        assert!(
+            north_cemetery
+                .iter()
+                .any(|card| card.instance_id == discarded_site_instance_id)
+        );
+        assert!(
+            !destroyed.position.players[seat_index(Seat::North)]
+                .hand_atlas
+                .iter()
+                .any(|card| card.instance_id == discarded_site_instance_id)
+        );
+        assert!(
+            destroyed.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == target_site_instance_id)
+        );
+        assert!(destroyed.position.sites[c2.index()].is_none());
+        assert_eq!(
+            destroyed.position.rubble[c2.index()],
+            Some(
+                identity_hash(&json!({
+                    "cell": c2,
+                    "destroyedSiteInstanceId": target_site_instance_id,
+                    "kind": "rubble",
+                    "sourceInstanceId": craterize,
+                }))
+                .expect("deterministic Rubble identity")
+            )
+        );
+
+        let mut repeated = base;
+        let (repeated_events, repeated_random) = repeated
+            .apply_action_recorded(&cast)
+            .expect("repeated Craterize cast");
+        assert_eq!(repeated_events, events);
+        assert!(repeated_random.is_empty());
+        assert_eq!(repeated.position, destroyed.position);
+    }
+
+    pub fn rule_catalog_0706_craterize_enforces_discard_cost_and_still_damages_protected_sites() {
+        rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid();
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct Raise Dead proof keeps the empty pool, blocked placement, and free summon branches together"
+    )]
+    pub fn rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement() {
+        let base = raise_dead_fixture(false);
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+
+        // An empty cemetery pool resolves the Magic outright and never touches the PRNG.
+        let mut empty = base.game.clone();
+        empty.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        empty.position.players[seat_index(Seat::South)].cemetery = Vec::new();
+        let empty_cast = raise_dead_cast(&empty);
+        let (empty_events, empty_random) = empty
+            .apply_action_recorded(&empty_cast)
+            .expect("empty cemetery Raise Dead cast");
+        assert_eq!(event_types(&empty_events), ["magic-cast", "magic-resolved"]);
+        assert!(empty_random.is_empty());
+        assert_eq!(empty.position.phase, Phase::Main);
+        assert!(empty.position.pending_cemetery_summon.is_none());
+
+        // Both cemeteries feed one public draw over the shared candidate pool.
+        let mut both = base.game.clone();
+        let both_cast = raise_dead_cast(&both);
+        let (both_events, both_random) = both
+            .apply_action_recorded(&both_cast)
+            .expect("two candidate Raise Dead cast");
+        assert_eq!(
+            event_types(&both_events),
+            ["magic-cast", "dead-minion-selected"]
+        );
+        assert_eq!(both_random.len(), 1);
+        assert_eq!(both_random[0].purpose, "magic_random_dead_minion");
+        assert_eq!(both_random[0].domain.kind, "dead_minion_instance_candidate");
+        assert_eq!(both_random[0].domain.exclusive_maximum, 2);
+        assert_eq!(both.position.phase, Phase::CemeterySummon);
+        let selected = both_events[1].1["instanceId"]
+            .as_str()
+            .expect("selected corpse")
+            .to_owned();
+        assert!(
+            selected == base.north_corpse.as_str() || selected == base.south_corpse.as_str(),
+            "the draw stays inside the cemetery pool"
+        );
+        // Selection alone moves nothing: both corpses wait in their cemeteries.
+        assert_eq!(
+            both.position.players[seat_index(Seat::North)]
+                .cemetery
+                .len(),
+            2,
+        );
+        assert_eq!(
+            both.position.players[seat_index(Seat::South)]
+                .cemetery
+                .len(),
+            1,
+        );
+
+        // A footprint with nowhere to land fails its summon instead of silently vanishing.
+        let oversized = raise_dead_fixture(true);
+        let mut blocked = oversized.game;
+        blocked.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        let blocked_cast = raise_dead_cast(&blocked);
+        let (blocked_events, blocked_random) = blocked
+            .apply_action_recorded(&blocked_cast)
+            .expect("blocked Raise Dead cast");
+        assert_eq!(
+            event_types(&blocked_events),
+            [
+                "magic-cast",
+                "dead-minion-selected",
+                "minion-summon-failed",
+                "magic-resolved",
+            ]
+        );
+        assert_eq!(blocked_random.len(), 1);
+        assert_eq!(blocked_events[2].1["reason"], json!("no-legal-location"));
+        assert_eq!(
+            blocked_events[2].1["instanceId"],
+            json!(oversized.south_corpse.as_str())
+        );
+        assert_eq!(blocked.position.phase, Phase::Main);
+        assert!(blocked.position.pending_cemetery_summon.is_none());
+        assert_eq!(
+            blocked.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
+            oversized.south_corpse
+        );
+
+        // One candidate proves the placement itself: free, anywhere, and enemy owned.
+        let mut game = base.game.clone();
+        game.position.players[seat_index(Seat::North)].cemetery = Vec::new();
+        let cast = raise_dead_cast(&game);
+        let (cast_events, cast_random) = game
+            .apply_action_recorded(&cast)
+            .expect("single candidate Raise Dead cast");
+        assert_eq!(
+            event_types(&cast_events),
+            ["magic-cast", "dead-minion-selected"]
+        );
+        assert_eq!(cast_random.len(), 1);
+        assert_eq!(cast_random[0].domain.exclusive_maximum, 1);
+        assert_eq!(
+            cast_events[1].1,
+            json!({
+                "cardId": "south-spell-1",
+                "instanceId": base.south_corpse,
+                "owner": "south",
+                "seat": "north",
+                "sourceInstanceId": base.raise_dead,
+            })
+        );
+        assert_eq!(game.position.phase, Phase::CemeterySummon);
+        assert_eq!(
+            game.authoritative_state()["pendingCemeterySummon"],
+            json!({
+                "cardInstanceId": base.south_corpse,
+                "cardOwner": "south",
+                "casterInstanceId": game.position.players[seat_index(Seat::North)]
+                    .avatar
+                    .card
+                    .instance_id,
+                "seat": "north",
+                "sourceMagicInstanceId": base.raise_dead,
+            })
+        );
+
+        let placements = game.legal_actions().expect("free placement actions");
+        assert!(!placements.is_empty());
+        assert!(placements.iter().all(|action| matches!(
+            &action.descriptor,
+            ActionDescriptor::SummonMinion {
+                card_instance_id,
+                mana_cost: 0,
+                payment_mode: None,
+                sacrificed_minion_instance_ids: None,
+                ..
+            } if *card_instance_id == base.south_corpse
+        )));
+        let cells: BTreeSet<_> = placements
+            .iter()
+            .filter_map(|action| match &action.descriptor {
+                ActionDescriptor::SummonMinion { cell, .. } => Some(*cell),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells, BTreeSet::from([c1, c4]));
+
+        // Only engine-issued cells place the corpse; an empty cell is not a legal destination.
+        let placement = only_action(&placements, |descriptor| {
+            matches!(descriptor, ActionDescriptor::SummonMinion { cell, .. } if *cell == c1)
+        })
+        .clone();
+        let mut forged = placement.clone();
+        let ActionDescriptor::SummonMinion { cell, .. } = &mut forged.descriptor else {
+            unreachable!("filtered free placement");
+        };
+        *cell = Cell::parse("A1").expect("A1");
+        let mut forgery = game.clone();
+        let before_forgery = forgery.authoritative_state();
+        assert!(matches!(
+            forgery.apply_action(&forged),
+            Err(GameError::IllegalAction)
+        ));
+        assert_eq!(forgery.authoritative_state(), before_forgery);
+
+        let mut placed = game.clone();
+        let (placed_events, placed_random) = placed
+            .apply_action_recorded(&placement)
+            .expect("free cemetery placement");
+        assert!(placed_random.is_empty());
+        assert_eq!(
+            event_types(&placed_events),
+            ["minion-summoned", "avatar-life-lost", "magic-resolved"]
+        );
+        assert_eq!(placed_events[0].1["manaPaid"], json!(0));
+        assert_eq!(placed_events[0].1["owner"], json!("south"));
+        assert_eq!(
+            placed_events[0].1["sourceInstanceId"],
+            json!(base.raise_dead.as_str())
+        );
+        assert_eq!(
+            placed_events[2].1["instanceId"],
+            json!(base.raise_dead.as_str())
+        );
+        let raised = placed
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == base.south_corpse)
+            .expect("raised minion");
+        assert_eq!(
+            (
+                raised.card.owner,
+                raised.controller,
+                raised.location,
+                raised.region,
+                raised.summoning_sickness,
+            ),
+            (Seat::South, Seat::North, c1, Region::Surface, true)
+        );
+        assert_eq!(placed.position.phase, Phase::Main);
+        assert!(placed.position.pending_cemetery_summon.is_none());
+        assert!(
+            placed
+                .authoritative_state()
+                .get("pendingCemeterySummon")
+                .is_none()
+        );
+        // The Genesis bills the raising controller, and the nine-mana corpse still costs nothing.
+        assert_eq!(
+            (
+                placed.position.players[seat_index(Seat::North)].avatar.life,
+                placed.position.players[seat_index(Seat::North)].mana,
+            ),
+            (18, 3)
+        );
+        assert!(
+            placed.position.players[seat_index(Seat::South)]
+                .cemetery
+                .is_empty()
+        );
+
+        let mut repeated = game;
+        let (repeated_events, repeated_random) = repeated
+            .apply_action_recorded(&placement)
+            .expect("repeated free cemetery placement");
+        assert_eq!(repeated_events, placed_events);
+        assert!(repeated_random.is_empty());
+        assert_eq!(repeated.position, placed.position);
+    }
+
+    pub fn rule_catalog_0708_raise_dead_free_placement_and_blocked_footprint_summon() {
+        rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::synthetic::{selfplay_manifest_with, synthetic_demo_manifest_json};
+
+    #[test]
+    fn zero_site_recovery_should_issue_every_nearest_cell_in_canonical_order() {
+        super::catalog_proofs::rule_catalog_0701_zero_site_recovery_issues_nearest_cells_in_canonical_order();
+        super::catalog_proofs::rule_catalog_0702_zero_site_recovery_replaces_rubble_before_site_play();
     }
 
     #[test]
@@ -27243,309 +28374,8 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one direct terrain proof keeps protected, Rubble, and subsurface Sinkhole branches together"
-    )]
     fn site_destruction_should_preserve_protected_rubble_and_relative_subsurface() {
-        let admitted = selfplay_manifest_with(244, |manifest| {
-            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
-            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
-        });
-        Game::from_manifest_json(&admitted)
-            .expect("valid Sinkhole manifest")
-            .ensure_selfplay_supported()
-            .expect("Sinkhole source and protection facts are self-play safe");
-
-        let manifest = selfplay_manifest_with(244, |manifest| {
-            manifest["cards"]["north-site-1"]["sacrificeToDestroyNearbySite"] = json!(true);
-            manifest["cards"]["north-site-2"]["cannotBeMovedDestroyedOrModified"] = json!(true);
-            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
-            for ordinal in [1, 2] {
-                manifest["cards"][format!("south-spell-{ordinal}")]["manaCost"] = json!(0);
-                manifest["cards"][format!("south-spell-{ordinal}")]["submerge"] = json!(true);
-                manifest["cards"][format!("south-spell-{ordinal}")]["thresholds"] =
-                    json!({ "air": 0, "earth": 0, "fire": 0, "water": 0 });
-            }
-            manifest["cards"]["south-spell-2"]["burrowing"] = json!(true);
-            manifest["cards"]["south-spell-1"]["deathriteDrawSite"] = json!(true);
-            manifest["cards"]["south-spell-3"] = json!({
-                "cardType": "artifact",
-                "grantsBearerPower": 2,
-                "manaCost": 0,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-        });
-        let mut base = Game::from_manifest_json(&manifest).expect("valid terrain fixture");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    base.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let source_id =
-            identity_hash(&json!({ "fixture": "sinkhole-source" })).expect("source identity");
-        let protected_id =
-            identity_hash(&json!({ "fixture": "sinkhole-protected" })).expect("protected identity");
-        let water_id =
-            identity_hash(&json!({ "fixture": "sinkhole-water" })).expect("water identity");
-        let source = SitePosition {
-            card: CardInstance {
-                card_id: card_id("north-site-1"),
-                instance_id: source_id.clone(),
-                owner: Seat::North,
-                source: CardSource::Atlas,
-            },
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        };
-        let protected = SitePosition {
-            card: CardInstance {
-                card_id: card_id("north-site-2"),
-                instance_id: protected_id.clone(),
-                owner: Seat::North,
-                source: CardSource::Atlas,
-            },
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        };
-        let water = SitePosition {
-            card: CardInstance {
-                card_id: card_id("south-site-1"),
-                instance_id: water_id.clone(),
-                owner: Seat::South,
-                source: CardSource::Atlas,
-            },
-            controller: Seat::South,
-            last_flight_turn: None,
-            warded: false,
-        };
-        let c2 = Cell::parse("C2").expect("C2");
-        let c3 = Cell::parse("C3").expect("C3");
-        let c4 = Cell::parse("C4").expect("C4");
-        base.position.sites = std::array::from_fn(|_| None);
-        base.position.rubble = std::array::from_fn(|_| None);
-        base.position.sites[c2.index()] = Some(water);
-        base.position.sites[c3.index()] = Some(source);
-        base.position.sites[c4.index()] = Some(protected.clone());
-        let drowned_id = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let survivor_id = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let artifact_id = IdentityHash::parse(
-            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        )
-        .expect("artifact identity");
-        let mut drowned = test_minion(card_id("south-spell-1"), drowned_id, Seat::South, c2, None);
-        drowned.region = Region::Underwater;
-        let mut survivor =
-            test_minion(card_id("south-spell-2"), survivor_id, Seat::South, c2, None);
-        survivor.region = Region::Underwater;
-        base.position.units = vec![drowned, survivor];
-        base.position.artifacts = vec![ArtifactPosition {
-            card: CardInstance {
-                card_id: card_id("south-spell-3"),
-                instance_id: artifact_id.clone(),
-                owner: Seat::South,
-                source: CardSource::Spellbook,
-            },
-            placement: ArtifactPlacement::Loose {
-                location: c2,
-                region: Region::Underwater,
-            },
-        }];
-        base.position.active_seat = Seat::North;
-        base.position.decision_seat = Seat::North;
-        base.position.phase = Phase::Main;
-        base.position.players[seat_index(Seat::North)].domain_established = true;
-
-        let source_actions = base
-            .legal_actions()
-            .expect("site destruction actions")
-            .into_iter()
-            .filter(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction {
-                        source_site_instance_id,
-                        ..
-                    } if *source_site_instance_id == source_id
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            source_actions
-                .iter()
-                .map(|action| match action.descriptor {
-                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } => target_cell,
-                    _ => unreachable!("filtered site destruction"),
-                })
-                .collect::<Vec<_>>(),
-            [c2, c3, c4]
-        );
-
-        let mut protected_branch = base.clone();
-        let protected_action = source_actions
-            .iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c4
-                )
-            })
-            .expect("protected target action");
-        let (protected_events, protected_random) = protected_branch
-            .apply_action_recorded(protected_action)
-            .expect("protected target activation");
-        assert!(protected_random.is_empty());
-        assert_eq!(
-            protected_events
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "site-sacrificed",
-                "site-destruction-prevented",
-                "rubble-created",
-            ]
-        );
-        assert_eq!(
-            protected_branch.position.sites[c4.index()],
-            Some(protected.clone())
-        );
-        assert!(protected_branch.position.sites[c3.index()].is_none());
-
-        let mut rubble_branch = base.clone();
-        rubble_branch.position.units.clear();
-        rubble_branch.position.sites[c2.index()] = None;
-        let existing_rubble =
-            identity_hash(&json!({ "fixture": "existing-rubble" })).expect("Rubble identity");
-        rubble_branch.position.rubble[c2.index()] = Some(existing_rubble.clone());
-        let rubble_action = rubble_branch
-            .legal_actions()
-            .expect("Rubble target actions")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction {
-                        source_site_instance_id,
-                        target_cell,
-                        ..
-                    } if *source_site_instance_id == source_id && *target_cell == c2
-                )
-            })
-            .expect("existing Rubble target");
-        let (rubble_events, _) = rubble_branch
-            .apply_action_recorded(&rubble_action)
-            .expect("Rubble target activation");
-        assert_eq!(
-            rubble_branch.position.rubble[c2.index()],
-            Some(existing_rubble)
-        );
-        assert_eq!(
-            rubble_events
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            ["site-sacrificed", "site-destroyed", "rubble-created"]
-        );
-        assert!(rubble_events[1].1.get("owner").is_none());
-
-        let mut terminal_branch = base.clone();
-        terminal_branch.position.players[seat_index(Seat::South)]
-            .atlas
-            .clear();
-        let terminal_action = source_actions
-            .iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
-                )
-            })
-            .expect("terminal Water target action");
-        let (terminal_events, _) = terminal_branch
-            .apply_action_recorded(terminal_action)
-            .expect("terminal Water target activation");
-        let terminal_types = terminal_events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect::<Vec<_>>();
-        assert!(
-            terminal_types
-                .iter()
-                .rposition(|event_type| *event_type == "rubble-created")
-                < terminal_types
-                    .iter()
-                    .position(|event_type| *event_type == "game-ended")
-        );
-
-        let mut destroyed = base;
-        let normal_action = source_actions
-            .iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::ActivateSiteDestruction { target_cell, .. } if target_cell == c2
-                )
-            })
-            .expect("Water target action");
-        let (events, random_draws) = destroyed
-            .apply_action_recorded(normal_action)
-            .expect("Water target activation");
-        assert!(random_draws.is_empty());
-        let event_types = events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(&event_types[..2], ["site-sacrificed", "site-destroyed"]);
-        assert_eq!(
-            &event_types[event_types.len() - 2..],
-            ["rubble-created", "rubble-created"]
-        );
-        assert!(
-            !destroyed
-                .position
-                .units
-                .iter()
-                .any(|unit| unit.card.instance_id.as_str() == drowned_id)
-        );
-        assert_eq!(
-            destroyed
-                .position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id.as_str() == survivor_id)
-                .expect("Burrowing survivor")
-                .region,
-            Region::Underground
-        );
-        assert_eq!(
-            destroyed
-                .position
-                .artifacts
-                .iter()
-                .find(|artifact| artifact.card.instance_id == artifact_id)
-                .expect("loose Artifact")
-                .placement,
-            ArtifactPlacement::Loose {
-                location: c2,
-                region: Region::Underground,
-            }
-        );
-        let south_cemetery = &destroyed.position.players[seat_index(Seat::South)].cemetery;
-        assert_eq!(south_cemetery[0].instance_id.as_str(), drowned_id);
-        assert_eq!(south_cemetery[1].instance_id, water_id);
-        assert!(destroyed.position.sites[c2.index()].is_none());
-        assert!(destroyed.position.sites[c3.index()].is_none());
-        assert_eq!(destroyed.position.sites[c4.index()], Some(protected));
+        super::catalog_proofs::rule_catalog_0703_sinkhole_preserves_protected_rubble_and_relative_subsurface();
     }
 
     #[test]
@@ -28285,499 +29115,14 @@ mod tests {
         assert!(game.minion_is_disabled(&game.position.units[0]));
     }
 
-    /// One crater board: a Water target at C2, both Avatars inside the grid, and one South minion
-    /// per interesting distance, footprint, Ward, Stealth, and Void case.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one shared crater board keeps every distance, terrain, and status case visible together"
-    )]
-    fn craterize_fixture(protected: bool) -> (Game, BTreeMap<&'static str, IdentityHash>) {
-        let manifest = selfplay_manifest_with(197, |manifest| {
-            for ordinal in 1..=50 {
-                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                    "cardType": "magic",
-                    "damageUnitsAboveAndBelowTargetSiteByManhattanDistance": [10, 7, 4, 2, 1],
-                    "destroyTargetSite": true,
-                    "discardSiteAsAdditionalCost": true,
-                    "manaCost": 8,
-                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                });
-            }
-            manifest["cards"]["south-site-1"]["elements"] = json!(["water"]);
-            if protected {
-                manifest["cards"]["south-site-1"]["cannotBeMovedDestroyedOrModified"] = json!(true);
-            }
-            for (ordinal, facts) in [
-                (1, json!({ "burrowing": true, "submerge": true })),
-                (2, json!({ "burrowing": true })),
-                (3, json!({})),
-                (4, json!({ "stealth": true })),
-                (5, json!({ "ward": true })),
-                (6, json!({ "occupiesSquareArea": 2 })),
-                (7, json!({ "voidwalk": true })),
-            ] {
-                let card = &mut manifest["cards"][format!("south-spell-{ordinal}")];
-                card["defense"] = json!(40);
-                card["manaCost"] = json!(0);
-                for (field, value) in facts.as_object().expect("fixture minion facts") {
-                    card[field.as_str()] = value.clone();
-                }
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Craterize manifest");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let north_land = card_id("north-site-1");
-        let south_land = card_id("south-site-2");
-        let water = card_id("south-site-1");
-        let minions: [CardId; 7] =
-            std::array::from_fn(|index| card_id(&format!("south-spell-{}", index + 1)));
-
-        game.position.sites = std::array::from_fn(|_| None);
-        game.position.rubble = std::array::from_fn(|_| None);
-        for (cell, card, owner) in [
-            ("B1", south_land, Seat::South),
-            ("B2", south_land, Seat::South),
-            ("C1", south_land, Seat::South),
-            ("C2", water, Seat::South),
-            ("C3", south_land, Seat::South),
-            ("C4", north_land, Seat::North),
-            ("D3", south_land, Seat::South),
-            ("D4", north_land, Seat::North),
-            ("E3", south_land, Seat::South),
-            ("E4", south_land, Seat::South),
-        ] {
-            let cell = Cell::parse(cell).expect("fixture cell");
-            game.position.sites[cell.index()] = Some(SitePosition {
-                card: CardInstance {
-                    card_id: card,
-                    instance_id: identity_hash(
-                        &json!({ "cell": cell, "fixture": "craterize-site" }),
-                    )
-                    .expect("fixture site identity"),
-                    owner,
-                    source: CardSource::Atlas,
-                },
-                controller: owner,
-                last_flight_turn: None,
-                warded: false,
-            });
-        }
-
-        let mut identities = BTreeMap::new();
-        game.position.units = Vec::new();
-        for (name, index, cell, region) in [
-            ("center", 0, "C2", Region::Underwater),
-            ("seven", 1, "C3", Region::Underground),
-            ("four", 2, "D3", Region::Surface),
-            ("two", 3, "E3", Region::Surface),
-            ("one", 4, "E4", Region::Surface),
-            ("oversized", 5, "B1", Region::Surface),
-            ("void", 6, "A4", Region::Void),
-        ] {
-            let instance_id =
-                identity_hash(&json!({ "fixture": name, "kind": "craterize-minion" }))
-                    .expect("fixture minion identity");
-            let mut unit = test_minion(
-                minions[index],
-                instance_id.as_str(),
-                Seat::South,
-                Cell::parse(cell).expect("fixture cell"),
-                (name == "oversized").then_some(Cell::SQUARE_AREAS[3]),
-            );
-            unit.region = region;
-            unit.stealthed = name == "two";
-            unit.warded = name == "one";
-            game.position.units.push(unit);
-            identities.insert(name, instance_id);
-        }
-
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        game.position.players[seat_index(Seat::South)]
-            .avatar
-            .location = Cell::parse("C3").expect("C3");
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.location = Cell::parse("C4").expect("C4");
-        north.domain_established = true;
-        north.mana = 8;
-        (game, identities)
-    }
-
-    fn craterize_casts(game: &Game, card_instance_id: &IdentityHash) -> Vec<IssuedAction> {
-        game.legal_actions()
-            .expect("Craterize actions")
-            .into_iter()
-            .filter(|action| match &action.descriptor {
-                ActionDescriptor::CastMagic {
-                    card_instance_id: candidate,
-                    ..
-                } => *candidate == *card_instance_id,
-                _ => false,
-            })
-            .collect()
+    #[test]
+    fn craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid() {
+        super::catalog_proofs::rule_catalog_0705_craterize_discards_destroy_target_and_applies_damage_grid();
     }
 
     #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one direct crater proof keeps the discard cost, protection, grid, and terrain branches together"
-    )]
-    fn craterize_should_discard_a_site_destroy_its_target_and_apply_its_damage_grid() {
-        let (base, identities) = craterize_fixture(false);
-        let c2 = Cell::parse("C2").expect("C2");
-        let craterize = base.position.players[seat_index(Seat::North)].hand_spellbook[0]
-            .instance_id
-            .clone();
-        let target_site_instance_id = base.position.sites[c2.index()]
-            .as_ref()
-            .expect("Water target site")
-            .card
-            .instance_id
-            .clone();
-        let discard_count = base.position.players[seat_index(Seat::North)]
-            .hand_atlas
-            .len();
-        assert!(discard_count > 1);
-
-        // The additional cost is mandatory, so an empty Atlas hand offers no cast at all.
-        let mut costless = base.clone();
-        costless.position.players[seat_index(Seat::North)]
-            .hand_atlas
-            .clear();
-        assert!(craterize_casts(&costless, &craterize).is_empty());
-
-        let casts = craterize_casts(&base, &craterize);
-        let target_cells = casts
-            .iter()
-            .filter_map(|action| match &action.descriptor {
-                ActionDescriptor::CastMagic {
-                    target_location, ..
-                } => target_location.map(|location| location.cell),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        assert_eq!(target_cells.len(), 10);
-        let target_casts: Vec<_> = casts
-            .iter()
-            .filter(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::CastMagic {
-                        target_site_instance_id: Some(site),
-                        ..
-                    } if *site == target_site_instance_id
-                )
-            })
-            .collect();
-        assert_eq!(target_casts.len(), discard_count);
-        let cast = target_casts[0].clone();
-        let ActionDescriptor::CastMagic {
-            discard_site_instance_id: Some(discarded_site_instance_id),
-            ..
-        } = &cast.descriptor
-        else {
-            unreachable!("Craterize issues its discard cost");
-        };
-        let discarded_site_instance_id = discarded_site_instance_id.clone();
-
-        // Only an Atlas card in hand pays the cost; the target site itself is not a legal payment.
-        let mut forged = cast.clone();
-        let ActionDescriptor::CastMagic {
-            discard_site_instance_id,
-            ..
-        } = &mut forged.descriptor
-        else {
-            unreachable!("filtered Craterize cast");
-        };
-        *discard_site_instance_id = Some(target_site_instance_id.clone());
-        let mut forgery = base.clone();
-        let before_forgery = forgery.authoritative_state();
-        assert!(matches!(
-            forgery.apply_action(&forged),
-            Err(GameError::IllegalAction)
-        ));
-        assert_eq!(forgery.authoritative_state(), before_forgery);
-
-        let (protected_base, protected_identities) = craterize_fixture(true);
-        let protected_site = protected_base.position.sites[c2.index()].clone();
-        let protected_spell = protected_base.position.players[seat_index(Seat::North)]
-            .hand_spellbook[0]
-            .instance_id
-            .clone();
-        let protected_cast = craterize_casts(&protected_base, &protected_spell)
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::CastMagic { target_location: Some(location), .. }
-                        if location.cell == c2
-                )
-            })
-            .expect("protected Craterize cast");
-        let mut protected = protected_base;
-        let (protected_events, protected_random) = protected
-            .apply_action_recorded(&protected_cast)
-            .expect("protected Craterize cast");
-        assert!(protected_random.is_empty());
-        let protected_types: Vec<_> = protected_events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect();
-        assert!(protected_types.contains(&"site-destruction-prevented"));
-        assert!(!protected_types.contains(&"rubble-created"));
-        assert_eq!(protected.position.sites[c2.index()], protected_site);
-        let protected_center = protected
-            .position
-            .units
-            .iter()
-            .find(|unit| unit.card.instance_id == protected_identities["center"])
-            .expect("protected crater centre");
-        assert_eq!(
-            (protected_center.damage, protected_center.region),
-            (10, Region::Underwater)
-        );
-
-        let mut destroyed = base.clone();
-        let (events, random_draws) = destroyed
-            .apply_action_recorded(&cast)
-            .expect("Craterize cast");
-        assert!(random_draws.is_empty());
-        let event_types: Vec<_> = events
-            .iter()
-            .map(|(event_type, _)| event_type.as_str())
-            .collect();
-        assert_eq!(
-            &event_types[..3],
-            ["card-discarded", "magic-cast", "site-destroyed"]
-        );
-        assert!(event_types.contains(&"rubble-created"));
-        assert_eq!(event_types.last(), Some(&"magic-resolved"));
-        assert_eq!(events[0].1["zone"], json!("atlas"));
-        assert_eq!(
-            events[0].1["instanceId"],
-            json!(discarded_site_instance_id.as_str())
-        );
-        assert_eq!(
-            events[1].1["discardSiteInstanceId"],
-            json!(discarded_site_instance_id.as_str())
-        );
-
-        let allocated: BTreeMap<&str, u64> = events
-            .iter()
-            .filter(|(event_type, _)| event_type == "magic-damage-allocated")
-            .map(|(_, payload)| {
-                (
-                    payload["targetInstanceId"]
-                        .as_str()
-                        .expect("allocated target"),
-                    payload["amount"].as_u64().expect("allocated amount"),
-                )
-            })
-            .collect();
-        assert_eq!(
-            ["center", "seven", "four", "two", "one", "oversized", "void",]
-                .map(|name| allocated.get(identities[name].as_str()).copied()),
-            [Some(10), Some(7), Some(4), Some(2), Some(1), Some(28), None,]
-        );
-
-        let settled = |name: &str| {
-            destroyed
-                .position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id == identities[name])
-                .map(|unit| (unit.damage, unit.region, unit.stealthed, unit.warded))
-        };
-        assert_eq!(
-            ["center", "seven", "four", "two", "one", "oversized", "void"].map(settled),
-            [
-                // The drained Water layer drops the submerged minion into its Burrowing layer.
-                Some((10, Region::Underground, false, false)),
-                Some((7, Region::Underground, false, false)),
-                Some((4, Region::Surface, false, false)),
-                Some((2, Region::Surface, true, false)),
-                // A Ward absorbs the grid damage outright and breaks.
-                Some((0, Region::Surface, false, false)),
-                Some((28, Region::Surface, false, false)),
-                Some((0, Region::Void, false, false)),
-            ]
-        );
-        assert_eq!(
-            (
-                destroyed.position.players[seat_index(Seat::North)]
-                    .avatar
-                    .life,
-                destroyed.position.players[seat_index(Seat::South)]
-                    .avatar
-                    .life,
-                destroyed.position.players[seat_index(Seat::North)].mana,
-            ),
-            (16, 13, 0)
-        );
-
-        let north_cemetery = &destroyed.position.players[seat_index(Seat::North)].cemetery;
-        assert!(
-            north_cemetery
-                .iter()
-                .any(|card| card.instance_id == craterize)
-        );
-        assert!(
-            north_cemetery
-                .iter()
-                .any(|card| card.instance_id == discarded_site_instance_id)
-        );
-        assert!(
-            !destroyed.position.players[seat_index(Seat::North)]
-                .hand_atlas
-                .iter()
-                .any(|card| card.instance_id == discarded_site_instance_id)
-        );
-        assert!(
-            destroyed.position.players[seat_index(Seat::South)]
-                .cemetery
-                .iter()
-                .any(|card| card.instance_id == target_site_instance_id)
-        );
-        assert!(destroyed.position.sites[c2.index()].is_none());
-        assert_eq!(
-            destroyed.position.rubble[c2.index()],
-            Some(
-                identity_hash(&json!({
-                    "cell": c2,
-                    "destroyedSiteInstanceId": target_site_instance_id,
-                    "kind": "rubble",
-                    "sourceInstanceId": craterize,
-                }))
-                .expect("deterministic Rubble identity")
-            )
-        );
-
-        let mut repeated = base;
-        let (repeated_events, repeated_random) = repeated
-            .apply_action_recorded(&cast)
-            .expect("repeated Craterize cast");
-        assert_eq!(repeated_events, events);
-        assert!(repeated_random.is_empty());
-        assert_eq!(repeated.position, destroyed.position);
-    }
-
-    struct RaiseDeadFixture {
-        game: Game,
-        north_corpse: IdentityHash,
-        raise_dead: IdentityHash,
-        south_corpse: IdentityHash,
-    }
-
-    /// One Raise Dead board: sites only at C1 and C4, so free placement has to cross site
-    /// control and cannot host a two-by-two footprint, plus one corpse in each cemetery.
-    fn raise_dead_fixture(oversized: bool) -> RaiseDeadFixture {
-        let manifest = selfplay_manifest_with(198, |manifest| {
-            manifest["cards"]["north-spell-1"] = json!({
-                "cardType": "magic",
-                "manaCost": 0,
-                "summonRandomMinionFromAnyCemetery": true,
-                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-            });
-            // The corpse is unaffordable and off-threshold, so only a free placement can raise it.
-            let corpse = &mut manifest["cards"]["south-spell-1"];
-            corpse["defense"] = json!(3);
-            corpse["manaCost"] = json!(9);
-            corpse["thresholds"] = json!({ "air": 0, "earth": 0, "fire": 0, "water": 4 });
-            // An oversized footprint cannot also carry a Genesis, so the branches split here.
-            if oversized {
-                corpse["occupiesSquareArea"] = json!(2);
-            } else {
-                corpse["genesisLoseControllerLife"] = json!(2);
-            }
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid Raise Dead manifest");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
-        let instance = |card_id: CardId, owner: Seat, source: CardSource, ordinal: usize| {
-            card_instance(&game.rules, card_id, owner, source, ordinal).expect("fixture instance")
-        };
-        let raise_dead = instance(
-            card_id("north-spell-1"),
-            Seat::North,
-            CardSource::Spellbook,
-            500,
-        );
-        let south_corpse = instance(
-            card_id("south-spell-1"),
-            Seat::South,
-            CardSource::Spellbook,
-            501,
-        );
-        let north_corpse = instance(
-            card_id("north-spell-2"),
-            Seat::North,
-            CardSource::Spellbook,
-            502,
-        );
-        let sites = [
-            (
-                Cell::parse("C4").expect("C4"),
-                Seat::North,
-                instance(card_id("north-site-1"), Seat::North, CardSource::Atlas, 503),
-            ),
-            (
-                Cell::parse("C1").expect("C1"),
-                Seat::South,
-                instance(card_id("south-site-1"), Seat::South, CardSource::Atlas, 504),
-            ),
-        ];
-
-        game.position.sites = std::array::from_fn(|_| None);
-        game.position.rubble = std::array::from_fn(|_| None);
-        for (cell, controller, card) in sites {
-            game.position.sites[cell.index()] = Some(SitePosition {
-                card,
-                controller,
-                last_flight_turn: None,
-                warded: false,
-            });
-        }
-        game.position.units = Vec::new();
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-        let south = &mut game.position.players[seat_index(Seat::South)];
-        south.avatar.location = Cell::parse("C1").expect("C1");
-        south.cemetery = vec![south_corpse.clone()];
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.location = Cell::parse("C4").expect("C4");
-        north.cemetery = vec![north_corpse.clone()];
-        north.domain_established = true;
-        north.hand_spellbook = vec![raise_dead.clone()];
-        north.mana = 3;
-        RaiseDeadFixture {
-            game,
-            north_corpse: north_corpse.instance_id,
-            raise_dead: raise_dead.instance_id,
-            south_corpse: south_corpse.instance_id,
-        }
+    fn raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement() {
+        super::catalog_proofs::rule_catalog_0707_raise_dead_selects_random_cemetery_minion_before_free_placement();
     }
 
     fn only_action(
@@ -28790,252 +29135,11 @@ mod tests {
         action
     }
 
-    fn raise_dead_cast(game: &Game) -> IssuedAction {
-        only_action(
-            &game.legal_actions().expect("Raise Dead actions"),
-            |descriptor| matches!(descriptor, ActionDescriptor::CastMagic { .. }),
-        )
-        .clone()
-    }
-
     fn event_types(events: &[(String, Value)]) -> Vec<&str> {
         events
             .iter()
             .map(|(event_type, _)| event_type.as_str())
             .collect()
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one direct Raise Dead proof keeps the empty pool, blocked placement, and free summon branches together"
-    )]
-    fn raise_dead_should_select_a_public_random_cemetery_minion_before_free_placement() {
-        let base = raise_dead_fixture(false);
-        let c1 = Cell::parse("C1").expect("C1");
-        let c4 = Cell::parse("C4").expect("C4");
-
-        // An empty cemetery pool resolves the Magic outright and never touches the PRNG.
-        let mut empty = base.game.clone();
-        empty.position.players[seat_index(Seat::North)].cemetery = Vec::new();
-        empty.position.players[seat_index(Seat::South)].cemetery = Vec::new();
-        let empty_cast = raise_dead_cast(&empty);
-        let (empty_events, empty_random) = empty
-            .apply_action_recorded(&empty_cast)
-            .expect("empty cemetery Raise Dead cast");
-        assert_eq!(event_types(&empty_events), ["magic-cast", "magic-resolved"]);
-        assert!(empty_random.is_empty());
-        assert_eq!(empty.position.phase, Phase::Main);
-        assert!(empty.position.pending_cemetery_summon.is_none());
-
-        // Both cemeteries feed one public draw over the shared candidate pool.
-        let mut both = base.game.clone();
-        let both_cast = raise_dead_cast(&both);
-        let (both_events, both_random) = both
-            .apply_action_recorded(&both_cast)
-            .expect("two candidate Raise Dead cast");
-        assert_eq!(
-            event_types(&both_events),
-            ["magic-cast", "dead-minion-selected"]
-        );
-        assert_eq!(both_random.len(), 1);
-        assert_eq!(both_random[0].purpose, "magic_random_dead_minion");
-        assert_eq!(both_random[0].domain.kind, "dead_minion_instance_candidate");
-        assert_eq!(both_random[0].domain.exclusive_maximum, 2);
-        assert_eq!(both.position.phase, Phase::CemeterySummon);
-        let selected = both_events[1].1["instanceId"]
-            .as_str()
-            .expect("selected corpse")
-            .to_owned();
-        assert!(
-            selected == base.north_corpse.as_str() || selected == base.south_corpse.as_str(),
-            "the draw stays inside the cemetery pool"
-        );
-        // Selection alone moves nothing: both corpses wait in their cemeteries.
-        assert_eq!(
-            both.position.players[seat_index(Seat::North)]
-                .cemetery
-                .len(),
-            2,
-        );
-        assert_eq!(
-            both.position.players[seat_index(Seat::South)]
-                .cemetery
-                .len(),
-            1,
-        );
-
-        // A footprint with nowhere to land fails its summon instead of silently vanishing.
-        let oversized = raise_dead_fixture(true);
-        let mut blocked = oversized.game;
-        blocked.position.players[seat_index(Seat::North)].cemetery = Vec::new();
-        let blocked_cast = raise_dead_cast(&blocked);
-        let (blocked_events, blocked_random) = blocked
-            .apply_action_recorded(&blocked_cast)
-            .expect("blocked Raise Dead cast");
-        assert_eq!(
-            event_types(&blocked_events),
-            [
-                "magic-cast",
-                "dead-minion-selected",
-                "minion-summon-failed",
-                "magic-resolved",
-            ]
-        );
-        assert_eq!(blocked_random.len(), 1);
-        assert_eq!(blocked_events[2].1["reason"], json!("no-legal-location"));
-        assert_eq!(
-            blocked_events[2].1["instanceId"],
-            json!(oversized.south_corpse.as_str())
-        );
-        assert_eq!(blocked.position.phase, Phase::Main);
-        assert!(blocked.position.pending_cemetery_summon.is_none());
-        assert_eq!(
-            blocked.position.players[seat_index(Seat::South)].cemetery[0].instance_id,
-            oversized.south_corpse
-        );
-
-        // One candidate proves the placement itself: free, anywhere, and enemy owned.
-        let mut game = base.game.clone();
-        game.position.players[seat_index(Seat::North)].cemetery = Vec::new();
-        let cast = raise_dead_cast(&game);
-        let (cast_events, cast_random) = game
-            .apply_action_recorded(&cast)
-            .expect("single candidate Raise Dead cast");
-        assert_eq!(
-            event_types(&cast_events),
-            ["magic-cast", "dead-minion-selected"]
-        );
-        assert_eq!(cast_random.len(), 1);
-        assert_eq!(cast_random[0].domain.exclusive_maximum, 1);
-        assert_eq!(
-            cast_events[1].1,
-            json!({
-                "cardId": "south-spell-1",
-                "instanceId": base.south_corpse,
-                "owner": "south",
-                "seat": "north",
-                "sourceInstanceId": base.raise_dead,
-            })
-        );
-        assert_eq!(game.position.phase, Phase::CemeterySummon);
-        assert_eq!(
-            game.authoritative_state()["pendingCemeterySummon"],
-            json!({
-                "cardInstanceId": base.south_corpse,
-                "cardOwner": "south",
-                "casterInstanceId": game.position.players[seat_index(Seat::North)]
-                    .avatar
-                    .card
-                    .instance_id,
-                "seat": "north",
-                "sourceMagicInstanceId": base.raise_dead,
-            })
-        );
-
-        let placements = game.legal_actions().expect("free placement actions");
-        assert!(!placements.is_empty());
-        assert!(placements.iter().all(|action| matches!(
-            &action.descriptor,
-            ActionDescriptor::SummonMinion {
-                card_instance_id,
-                mana_cost: 0,
-                payment_mode: None,
-                sacrificed_minion_instance_ids: None,
-                ..
-            } if *card_instance_id == base.south_corpse
-        )));
-        let cells: BTreeSet<_> = placements
-            .iter()
-            .filter_map(|action| match &action.descriptor {
-                ActionDescriptor::SummonMinion { cell, .. } => Some(*cell),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(cells, BTreeSet::from([c1, c4]));
-
-        // Only engine-issued cells place the corpse; an empty cell is not a legal destination.
-        let placement = only_action(&placements, |descriptor| {
-            matches!(descriptor, ActionDescriptor::SummonMinion { cell, .. } if *cell == c1)
-        })
-        .clone();
-        let mut forged = placement.clone();
-        let ActionDescriptor::SummonMinion { cell, .. } = &mut forged.descriptor else {
-            unreachable!("filtered free placement");
-        };
-        *cell = Cell::parse("A1").expect("A1");
-        let mut forgery = game.clone();
-        let before_forgery = forgery.authoritative_state();
-        assert!(matches!(
-            forgery.apply_action(&forged),
-            Err(GameError::IllegalAction)
-        ));
-        assert_eq!(forgery.authoritative_state(), before_forgery);
-
-        let mut placed = game.clone();
-        let (placed_events, placed_random) = placed
-            .apply_action_recorded(&placement)
-            .expect("free cemetery placement");
-        assert!(placed_random.is_empty());
-        assert_eq!(
-            event_types(&placed_events),
-            ["minion-summoned", "avatar-life-lost", "magic-resolved"]
-        );
-        assert_eq!(placed_events[0].1["manaPaid"], json!(0));
-        assert_eq!(placed_events[0].1["owner"], json!("south"));
-        assert_eq!(
-            placed_events[0].1["sourceInstanceId"],
-            json!(base.raise_dead.as_str())
-        );
-        assert_eq!(
-            placed_events[2].1["instanceId"],
-            json!(base.raise_dead.as_str())
-        );
-        let raised = placed
-            .position
-            .units
-            .iter()
-            .find(|unit| unit.card.instance_id == base.south_corpse)
-            .expect("raised minion");
-        assert_eq!(
-            (
-                raised.card.owner,
-                raised.controller,
-                raised.location,
-                raised.region,
-                raised.summoning_sickness,
-            ),
-            (Seat::South, Seat::North, c1, Region::Surface, true)
-        );
-        assert_eq!(placed.position.phase, Phase::Main);
-        assert!(placed.position.pending_cemetery_summon.is_none());
-        assert!(
-            placed
-                .authoritative_state()
-                .get("pendingCemeterySummon")
-                .is_none()
-        );
-        // The Genesis bills the raising controller, and the nine-mana corpse still costs nothing.
-        assert_eq!(
-            (
-                placed.position.players[seat_index(Seat::North)].avatar.life,
-                placed.position.players[seat_index(Seat::North)].mana,
-            ),
-            (18, 3)
-        );
-        assert!(
-            placed.position.players[seat_index(Seat::South)]
-                .cemetery
-                .is_empty()
-        );
-
-        let mut repeated = game;
-        let (repeated_events, repeated_random) = repeated
-            .apply_action_recorded(&placement)
-            .expect("repeated free cemetery placement");
-        assert_eq!(repeated_events, placed_events);
-        assert!(repeated_random.is_empty());
-        assert_eq!(repeated.position, placed.position);
     }
 
     fn discard_damage_activations(game: &Game, source: &IdentityHash) -> Vec<IssuedAction> {
