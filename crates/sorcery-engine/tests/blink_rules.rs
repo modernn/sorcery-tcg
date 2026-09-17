@@ -519,7 +519,7 @@ fn rule_catalog_1115_blink_draws_site_when_caster_chooses_atlas() {
 }
 
 #[test]
-fn rule_catalog_0040_blink_should_keep_an_aura_that_never_leaves_its_neighbour() {
+fn rule_catalog_1124_blink_keeps_aura_when_ally_never_leaves_neighbor() {
     let mut checkpoint = blink_checkpoint(false);
     let spell = checkpoint.spell.clone();
     let sparkmage = checkpoint.sparkmage.clone();
