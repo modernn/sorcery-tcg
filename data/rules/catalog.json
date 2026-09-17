@@ -13623,6 +13623,201 @@
         "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
         "testName": "rule_catalog_0590_empty_offered_location_is_a_paid_noop"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0591",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic offers a same-region minion at a Water site and forcefully submerges a Submerge minion there. After south summons at C1 on a Water site, casting Drown moves the minion underwater and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_rules.rs",
+        "testName": "rule_catalog_0591_drown_submerges_a_submerge_minion_at_a_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0592",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic at an earth-only site resolves as a paid no-op because no underwater layer exists there.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_rules.rs",
+        "testName": "rule_catalog_0592_drown_on_earth_only_site_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0593",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic offers only the caster's own cemetery minions and returns the chosen instance to the hidden Spellbook hand with source-linked evidence.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_0593_rescue_returns_an_own_cemetery_minion_to_hidden_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0594",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic with an empty own cemetery still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_0594_rescue_with_empty_cemetery_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0595",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-target-unit Magic offers same-region minions and deals lethal damage through the shared death pipeline when defense is exceeded.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_target_rules.rs",
+        "testName": "rule_catalog_0595_zap_deals_lethal_damage_to_a_same_region_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0596",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-target-unit Magic lets enemy Ward absorb the complete damage event and break without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "ward"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_target_rules.rs",
+        "testName": "rule_catalog_0596_zap_ward_absorbs_the_damage"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0597",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-charge-to-ally-this-turn Magic offers controlled allies, grants temporary Charge, and lets a newly summoned sick minion Move and Attack immediately.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantChargeToAllyThisTurn",
+        "charge"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "charge-granted",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_0597_charge_magic_lets_a_summoning_sick_ally_move_and_attack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0598",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Grant-charge-to-ally-this-turn Magic still offers the caster's Avatar when no allied minion is in play and grants Charge through resolution.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantChargeToAllyThisTurn",
+        "charge"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "charge-granted",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_0598_charge_magic_grants_charge_to_the_avatar_when_no_minion_is_in_play"
+      }
     }
   ]
 }
