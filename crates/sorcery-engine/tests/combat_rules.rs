@@ -1,5 +1,9 @@
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
+use sorcery_engine::checkpoint::{
+    create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
+    serialize_game_checkpoint,
+};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
 use sorcery_engine::game::{Game, GameOutcome};
 use sorcery_engine::session::{Session, StepResult};
@@ -2076,5 +2080,377 @@ fn rule_catalog_0937_nearby_must_attack_if_able_still_offers_site_targets_when_a
     );
     assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
     assert_eq!(state(&session)["phase"], "main");
+    assert_exact_replay(&session);
+}
+
+fn avatar_card() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "life": 20,
+    })
+}
+
+fn site_card(extra: Value) -> Value {
+    let mut value = json!({ "cardType": "site", "elements": ["earth"] });
+    let Value::Object(extra) = extra else {
+        panic!("extra site facts must be an object");
+    };
+    value.as_object_mut().expect("site facts").extend(extra);
+    value
+}
+
+fn minion_card(extra: Value) -> Value {
+    let mut value = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 5,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra minion facts must be an object");
+    };
+    value.as_object_mut().expect("minion facts").extend(extra);
+    value
+}
+
+fn combat_deathrite_manifest(seed: u32) -> String {
+    let cards = json!({
+        "north-attacker": minion_card(json!({
+            "attack": 4,
+            "lethal": true,
+            "movementBonus": 1,
+        })),
+        "north-avatar": avatar_card(),
+        "north-shooter": minion_card(json!({ "ranged": true })),
+        "north-site": site_card(json!({ "rangedUnitsHereRangeBonus": 1 })),
+        "south-aura": minion_card(json!({
+            "defense": 1,
+            "otherNearbyAlliesPowerBonus": 1,
+            "summonToAnySite": true,
+        })),
+        "south-avatar": avatar_card(),
+        "south-deathrite-a": minion_card(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "south-deathrite-b": minion_card(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+        "south-site": site_card(json!({})),
+    });
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "combat-move-attack-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-combat-move-attack-deathrite-withheld-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 12],
+                "avatar": "north-avatar",
+                "spellbook": ["north-shooter", "north-shooter", "north-attacker"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": ["south-aura", "south-deathrite-a", "south-deathrite-b"],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn realm_unit<'a>(position: &'a Value, instance_id: &str) -> Option<&'a Value> {
+    position["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+}
+
+fn event_types(receipt: &Receipt) -> Vec<&str> {
+    receipt
+        .events
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect()
+}
+
+fn assert_checkpoint_round_trip(session: &Session) {
+    let checkpoint = create_game_checkpoint(session).expect("combat checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed checkpoint");
+    let restored = resume_game_checkpoint(&parsed).expect("restored checkpoint");
+    assert_eq!(state(&restored), state(session));
+    assert_eq!(
+        restored.legal_actions().expect("restored actions"),
+        session.legal_actions().expect("source actions")
+    );
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn combat_unit<'a>(position: &'a Value, instance_id: &str) -> &'a Value {
+    realm_unit(position, instance_id).expect("expected unit")
+}
+
+fn fire_south_projectile(session: &mut Session, shooter_id: &str, target_id: &str) -> Receipt {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["direction"] == "south"
+            && descriptor["shooterInstanceId"] == shooter_id
+            && descriptor["hit"]["instanceId"] == target_id
+    })
+    .1
+}
+
+fn move_and_attack_unit_ids(session: &Session) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "move-and-attack")
+        .map(|action| {
+            action.descriptor["unitInstanceId"]
+                .as_str()
+                .expect("move-and-attack unit")
+                .to_owned()
+        })
+        .collect()
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one direct scenario proves move-and-attack stays withheld until Deathrites are ordered"
+)]
+fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
+    let encoded = combat_deathrite_manifest(198);
+    let mut session = Session::new(&encoded).expect("valid combat Deathrite withheld scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let mut shooters = Vec::new();
+    for _ in 0..2 {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-shooter"
+                && descriptor["cell"] == "C4"
+        });
+        shooters.push(
+            summon["cardInstanceId"]
+                .as_str()
+                .expect("shooter identity")
+                .to_owned(),
+        );
+    }
+    let (attacker, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-attacker"
+            && descriptor["cell"] == "C4"
+    });
+    let attacker_id = attacker["cardInstanceId"]
+        .as_str()
+        .expect("attacker identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let mut south_ids = Vec::new();
+    for card_id in ["south-aura", "south-deathrite-a", "south-deathrite-b"] {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == card_id
+                && descriptor["cell"] == "C2"
+        });
+        south_ids.push(
+            summon["cardInstanceId"]
+                .as_str()
+                .expect("South minion identity")
+                .to_owned(),
+        );
+    }
+    let aura_id = south_ids[0].clone();
+    let mut deathrite_ids = [south_ids[1].clone(), south_ids[2].clone()];
+    deathrite_ids.sort_unstable();
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    fire_south_projectile(&mut session, &shooters[0], &south_ids[1]);
+    fire_south_projectile(&mut session, &shooters[1], &south_ids[2]);
+    assert_eq!(combat_unit(&state(&session), &south_ids[1])["damage"], 1);
+    assert_eq!(combat_unit(&state(&session), &south_ids[2])["damage"], 1);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["path"]
+                == json!([
+                    { "cell": "C4", "region": "surface" },
+                    { "cell": "C3", "region": "surface" },
+                    { "cell": "C2", "region": "surface" },
+                ])
+    });
+    while state(&session)["phase"] == "movement" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+    }
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == aura_id
+    });
+    while state(&session)["phase"] == "defend" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "close-defend"
+        });
+    }
+    while state(&session)["phase"] == "allocate" {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "allocate-strike"
+                && descriptor["amount"]
+                    .as_u64()
+                    .is_some_and(|amount| amount > 0)
+                && descriptor["targetInstanceId"] == aura_id
+        });
+    }
+
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(realm_unit(&paused, &aura_id).is_none());
+    assert!(
+        deathrite_ids
+            .iter()
+            .all(|instance_id| realm_unit(&paused, instance_id).is_none())
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "move-and-attack"),
+        "Move and Attack must stay withheld until the combat Deathrite chain completes"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("Deathrite order actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "order-deathrites")
+    );
+    assert_checkpoint_round_trip(&session);
+
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "deathrite-order-committed",
+            "site-drawn",
+            "site-drawn",
+            "minion-died",
+            "minion-died",
+            "minion-died",
+        ]
+    );
+
+    while matches!(
+        state(&session)["phase"].as_str(),
+        Some("attack") | Some("defend") | Some("allocate") | Some("intercept")
+    ) {
+        if try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "close-defend"
+        })
+        .is_some()
+        {
+            continue;
+        }
+        if try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "allocate-strike"
+                && descriptor["amount"]
+                    .as_u64()
+                    .is_some_and(|amount| amount > 0)
+        })
+        .is_some()
+        {
+            continue;
+        }
+        if try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "decline-attack"
+        })
+        .is_some()
+        {
+            continue;
+        }
+        break;
+    }
+
+    let resumed = state(&session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        !move_and_attack_unit_ids(&session).is_empty(),
+        "Move and Attack must be offered again once deathrite-order clears"
+    );
     assert_exact_replay(&session);
 }
