@@ -15384,6 +15384,55 @@
         "file": "crates/sorcery-engine/tests/disable_magic_rules.rs",
         "testName": "rule_catalog_0662_freeze_is_absorbed_by_enemy_ward"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0663",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Heal-target-minion Magic removes damage from a living minion in the same turn it was wounded. Avatars are not legal targets. The heal does not kill the minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-healed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0663_heal_target_minion_clears_same_turn_damage_without_targeting_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0664",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Heal-target-minion Magic offers only minions. A Death's Door Avatar is never a legal target. Healing an undamaged minion is a paid no-op: no heal event is emitted and the minion stays at zero damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0664_heal_target_minion_excludes_deaths_door_avatar_and_noops_at_cap"
+      }
     }
   ]
 }
