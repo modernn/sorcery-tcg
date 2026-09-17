@@ -1,9 +1,11 @@
 //! Direct proofs for silence-and-tap-nearby-minion then may-draw-spell
-//! Magic (RULE-CATALOG-0553–0554).
+//! Magic (RULE-CATALOG-0553–0554, RULE-CATALOG-1024).
 //!
 //! Ordinary Magic can Silence and tap one nearby minion, then may draw one
 //! hidden spell. Silence is this-turn ability loss, not Disable. A far
-//! minion is not offered. Declining the draw still Silences and taps.
+//! minion is not offered. Declining the draw still Silences and taps. While
+//! Deathrites wait for ordering, Insult Magic stays withheld until the chain
+//! drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -62,6 +64,38 @@ fn dummy() -> Value {
         "cardType": "magic",
         "healController": 1,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -225,6 +259,157 @@ fn seed_with(required: &[&str]) -> String {
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required Insult opening cards")
+}
+
+fn deathrite_insult_manifest(seed: u32) -> String {
+    let fixture = "silence-tap-deathrite-withheld";
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-insult": insult(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-insult",
+                    "north-rain",
+                    "north-rain",
+                    "north-insult",
+                    "north-rain",
+                    "north-insult",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-visitor", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_insult_and_rain(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| {
+            ["north-insult", "north-rain"]
+                .into_iter()
+                .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+        })
+}
+
+fn insult_target_ids(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = insult_targets(session)
+        .into_iter()
+        .map(|(instance_id, _)| instance_id)
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+struct PendingDeathriteSilenceTapSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+    visitor_id: String,
+}
+
+fn try_pending_deathrite_with_unsilenced_visitor(
+    encoded: &str,
+) -> Option<PendingDeathriteSilenceTapSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let visitor = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    })?;
+    let visitor_id = visitor.0["cardInstanceId"].as_str()?.to_owned();
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_insult_and_rain(&state(&session)) {
+        return None;
+    }
+    let snapshot = state(&session);
+    let visitor_unit = unit(&snapshot, &visitor_id);
+    if !visitor_unit["silenced"].is_null() {
+        return None;
+    }
+    if visitor_unit["tapped"] != false {
+        return None;
+    }
+    if !insult_target_ids(&session).contains(&visitor_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSilenceTapSetup {
+        deathrite_ids,
+        session,
+        visitor_id,
+    })
+}
+
+fn deathrite_silence_tap_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_insult_manifest)
+        .find(|candidate| try_pending_deathrite_with_unsilenced_visitor(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with Insult Magic in hand")
 }
 
 fn south_plays_c1_and_summons_far(session: &mut Session) -> String {
@@ -412,4 +597,88 @@ fn rule_catalog_0554_insult_still_silences_and_taps_when_the_draw_is_declined() 
     assert!(unit(&after, &caster_id)["temporarySilenceSources"].is_null());
     assert!(unit(&after, &caster_id)["disableEffects"].is_null());
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1024_silence_tap_magic_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_silence_tap_seed_with(1024);
+    let mut setup = try_pending_deathrite_with_unsilenced_visitor(&encoded)
+        .expect("complete Insult Deathrite withheld setup");
+    let visitor_id = setup.visitor_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert_eq!(unit(&paused, &visitor_id)["tapped"], false);
+    assert!(unit(&paused, &visitor_id)["silenced"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(insult_target_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(unit(&resumed, &visitor_id)["tapped"], false);
+    assert!(unit(&resumed, &visitor_id)["silenced"].is_null());
+    assert!(insult_target_ids(session).contains(&visitor_id));
+
+    let (cast, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-insult"
+            && descriptor["target"]["instanceId"] == visitor_id
+            && descriptor["drawZone"].is_null()
+    });
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-silenced",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["instanceId"], visitor_id);
+    assert_eq!(receipt.events[1].payload["seat"], "south");
+    assert_eq!(
+        receipt.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    let after = state(session);
+    let silenced = unit(&after, &visitor_id);
+    assert_eq!(silenced["tapped"], true);
+    assert_eq!(silenced["silenced"], true);
+    assert_exact_replay(session);
 }
