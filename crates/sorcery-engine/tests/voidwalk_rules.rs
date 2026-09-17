@@ -103,8 +103,12 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
 fn keep(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "mulligan"
-            && descriptor["atlasOrder"] == json!([])
-            && descriptor["spellbookOrder"] == json!([])
+            && descriptor["atlasOrder"]
+                .as_array()
+                .is_some_and(|order| order.is_empty())
+            && descriptor["spellbookOrder"]
+                .as_array()
+                .is_some_and(|order| order.is_empty())
     });
 }
 
@@ -693,6 +697,111 @@ fn oversized_voidwalker() -> Value {
     }))
 }
 
+fn tunnel_flood_manifest(seed: u64) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "voidwalk-tunnel-flood" }))
+                .expect("authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-voidwalk-tunnel-flood-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-crosser": json!({
+                "attack": 2,
+                "burrowing": true,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "movementBonus": 1,
+                "submerge": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
+            "north-flood": json!({
+                "affectedSitesAreFlooded": true,
+                "cardType": "aura",
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
+            "north-land": site(&["earth"]),
+            "north-tunnel": json!({
+                "cardType": "site",
+                "connectsBurrowedAllies": true,
+                "elements": ["earth"],
+            }),
+            "north-water": site(&["water"]),
+            "south-avatar": avatar(),
+            "south-plain": json!({
+                "attack": 2,
+                "cardType": "minion",
+                "defense": 2,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            }),
+            "south-site": site(&["earth"]),
+        },
+        "decks": {
+            "north": {
+                "atlas": [
+                    "north-tunnel", "north-water", "north-land",
+                    "north-tunnel", "north-water", "north-land",
+                    "north-tunnel", "north-water", "north-land",
+                ],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-crosser", "north-flood", "north-crosser", "north-crosser",
+                    "north-crosser", "north-crosser", "north-crosser", "north-crosser",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 9],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-plain"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical manifest")
+}
+
+fn play_site_card(session: &mut Session, card_id: &str, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == cell
+    });
+}
+
+fn cast_flood_covering(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-flood"
+            && descriptor["cells"]
+                .as_array()
+                .is_some_and(|cells| cells.len() == 4 && cells.iter().any(|value| value == cell))
+    });
+}
+
+fn underground_path(descriptor: &Value) -> String {
+    descriptor["path"]
+        .as_array()
+        .expect("movement path")
+        .iter()
+        .map(|location| {
+            format!(
+                "{}/{}",
+                location["cell"].as_str().expect("path cell"),
+                location["region"].as_str().expect("path region")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn is_square_void_summon_at(cell: &'static str, cells: &[&str]) -> impl Fn(&Value) -> bool {
     let expected = json!(cells);
     move |descriptor: &Value| {
@@ -797,6 +906,50 @@ fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surf
             &json!("void"),
             &json!(["A2", "A3", "B2", "B3"])
         )
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0902_flooded_earth_routes_secret_tunnel_hop_underwater() {
+    let mut session = Session::new(&tunnel_flood_manifest(105))
+        .expect("valid flooded Secret Tunnel scenario");
+    keep(&mut session);
+    keep(&mut session);
+    play_site_card(&mut session, "north-tunnel", "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == "underground"
+    });
+    let crosser_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("burrowed identity")
+        .to_owned();
+    end_turn(&mut session);
+    draw_spell(&mut session);
+    play_site_card(&mut session, "south-site", "C1");
+    end_turn(&mut session);
+    draw_spell(&mut session);
+    play_site_card(&mut session, "north-land", "C3");
+    cast_flood_covering(&mut session, "C3");
+    end_turn(&mut session);
+    draw_spell(&mut session);
+    end_turn(&mut session);
+    draw_spell(&mut session);
+
+    let hop = |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == crosser_id.as_str()
+            && underground_path(descriptor) == "C4/underground,C3/underwater"
+    };
+    assert!(offers(&session, hop));
+    accept_where(&mut session, hop);
+    decline_attack_if_needed(&mut session);
+    let landed = realm_unit(&state(&session), &crosser_id).expect("flooded hop occupant");
+    assert_eq!(
+        (&landed["location"], &landed["region"]),
+        (&json!("C3"), &json!("underwater"))
     );
     assert_exact_replay(&session);
 }
