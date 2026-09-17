@@ -425,7 +425,7 @@ fn rule_catalog_0788_defend_moves_then_resolves_simultaneous_split_damage() {
 }
 
 #[test]
-fn takes_less_damage_should_prevent_each_simultaneous_lethal_source() {
+fn rule_catalog_0795_takes_less_damage_prevents_each_simultaneous_lethal_source() {
     let mut lethal_defender = minion(1, false);
     lethal_defender["lethal"] = json!(true);
     let mut resilient_attacker = attacker(2, 2);
