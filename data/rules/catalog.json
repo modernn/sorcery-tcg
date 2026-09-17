@@ -841,8 +841,8 @@
       ],
       "eventHints": [],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0043_bury_detaches_and_burrows_artifacts"
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_0680_bury_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
       }
     },
     {
@@ -15760,6 +15760,58 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/cave_in_legacy_rules.rs",
         "testName": "rule_catalog_0678_cave_in_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0679",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic burrows a chosen loose Artifact on an Earth site. After an uncarried Artifact occupies C1, casting moves that Artifact underground in place. This is distinct from ordinary-minion Bury death (0655) and from area Cave-In Artifact occupancy (0677).",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_0679_bury_burrows_a_loose_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0680",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic detaches an Avatar-carried Artifact and burrows it independently. The Avatar stays on the surface. Ordinary-minion Bury (0655) has no Artifact to detach, and area Cave-In (0678) targets the land site rather than the Artifact.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "artifact-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_0680_bury_detaches_an_avatar_carried_artifact_and_leaves_the_avatar"
       }
     }
   ]
