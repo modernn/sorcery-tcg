@@ -141,7 +141,7 @@ fn action_request(action: &sorcery_engine::contract::LegalAction) -> ActionReque
     clippy::too_many_lines,
     reason = "one direct scenario keeps action ordering, checkpoint branches, state, and replay together"
 )]
-fn rule_catalog_0012_sinkhole_sacrifices_sites_into_neutral_rubble() {
+fn rule_catalog_1121_sinkhole_sacrifices_nearby_site_into_neutral_rubble() {
     let mut session = Session::new(&manifest()).expect("valid Sinkhole scenario");
     keep(&mut session);
     keep(&mut session);
