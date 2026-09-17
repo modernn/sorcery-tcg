@@ -13,11 +13,10 @@ use sorcery_engine::eligibility::{
 const ENV_ONLY_HASH: &str =
     "sha256:5555555555555555555555555555555555555555555555555555555555555555";
 
-const _: () = assert!(ENV_ONLY_HASH != TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH);
-
 #[test]
 #[allow(unsafe_code)]
 fn rule_catalog_0895_runtime_hash_env_var_extends_private_local_allowlist() {
+    assert_ne!(ENV_ONLY_HASH, TEST_ELIGIBILITY_SCENARIO_AUTHORITY_HASH);
     let path = std::env::temp_dir().join("sorcery-eligibility-runtime-hash-0895.txt");
     std::fs::write(&path, format!("{ENV_ONLY_HASH}\n\nnot-a-hash\n"))
         .expect("write runtime hash file");

@@ -105,10 +105,10 @@ fn keep(session: &mut Session) {
         descriptor["kind"] == "mulligan"
             && descriptor["atlasOrder"]
                 .as_array()
-                .is_some_and(|order| order.is_empty())
+                .is_some_and(std::vec::Vec::is_empty)
             && descriptor["spellbookOrder"]
                 .as_array()
-                .is_some_and(|order| order.is_empty())
+                .is_some_and(std::vec::Vec::is_empty)
     });
 }
 
@@ -912,8 +912,8 @@ fn rule_catalog_0317_oversized_voidwalk_steps_between_void_squares_not_onto_surf
 
 #[test]
 fn rule_catalog_0902_flooded_earth_routes_secret_tunnel_hop_underwater() {
-    let mut session = Session::new(&tunnel_flood_manifest(105))
-        .expect("valid flooded Secret Tunnel scenario");
+    let mut session =
+        Session::new(&tunnel_flood_manifest(105)).expect("valid flooded Secret Tunnel scenario");
     keep(&mut session);
     keep(&mut session);
     play_site_card(&mut session, "north-tunnel", "C4");

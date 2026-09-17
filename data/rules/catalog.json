@@ -20613,6 +20613,248 @@
         "file": "crates/sorcery-engine/tests/eligibility_runtime_hash_invalid_rules.rs",
         "testName": "rule_catalog_0892_runtime_hash_file_skips_invalid_lines_without_widening_allowlist"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0893",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged zero-cost Chain Magic gates resolve-chain-magic and extend-chain-magic on independent mana checks at two mana per extra hop. With two mana and two staged hops, resolve-chain-magic is offered and a third extend-chain-magic is withheld. With one mana after two hops are already staged, neither resolve-chain-magic nor extend-chain-magic is offered until mana rises. With one mana and a single staged hop, extend-chain-magic is withheld while resolve-chain-magic remains legal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independently"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0894",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Chain Magic with a chosen-discard additional cost issues no resolve-chain-magic when the staged discardCardInstanceId is no longer in hand during Chain Magic phase, including after checkpoint resume of a staged chain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0894_chain_magic_resolve_is_unoffered_without_staged_discard_in_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0895",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Setting SORCERY_VERIFIED_AUTHORITY_HASHES_FILE before the runtime allowlist cache initializes extends the private-local authority allowlist so a hash listed only in that env-backed file classifies as verified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_runtime_hash_env_rules.rs",
+        "testName": "rule_catalog_0895_runtime_hash_env_var_extends_private_local_allowlist"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0896",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Staged Chain Magic with a pay-life additional cost does not offer resolve when current avatar life is below the printed cost, even if life was sufficient when the chain began.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "payLifeAsAdditionalCost",
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0896_chain_magic_resolve_is_unoffered_when_pay_life_cost_exceeds_current_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0897",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "When Geomancer rubble replacement spends the last Atlas card, two ordered terrain Deathrites must be committed before deferred site Genesis resumes, and deck-empty ends the game before Genesis mana gain.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesis",
+        "terrain"
+      ],
+      "actionHints": [
+        "order-deathrites",
+        "replace-rubble-with-top-atlas-site"
+      ],
+      "eventHints": [
+        "deathrite-order-committed",
+        "game-ended",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_terrain_rules.rs",
+        "testName": "rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis_when_atlas_is_empty"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0898",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries all three start-of-controller-turn pulses—Avatar life gain, Avatar life loss, and here-area damage—the Start Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing start-turn continuation path on a single resolve-start-turn-trigger action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnControllerGainsLife",
+        "atStartOfControllerTurnControllerLosesLife",
+        "atStartOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "avatar-healed",
+        "avatar-life-lost",
+        "start-turn-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_0898_start_turn_gain_loss_then_here_damage_on_same_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0899",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Ranged minion with attacking-only first strike resolves its projectile through the ranged pipeline without opening the melee first-strike window, and may still take its optional post-strike step afterward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "strikesFirstWhileAttacking",
+        "mayStepAfterRangedStrike"
+      ],
+      "actionHints": [
+        "shoot-projectile",
+        "resolve-ranged-step"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "strike-damage-allocated",
+        "damage-dealt",
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ranged_projectile_rules.rs",
+        "testName": "rule_catalog_0899_attacking_first_strike_does_not_replace_ranged_post_strike_step"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0900",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Takes-less prevention applies to each modified strike after next-strike double damage multiplication, reducing the doubled amount by one rather than the pre-modified power.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "takesLessDamage",
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "damage-dealt",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_prevention_rules.rs",
+        "testName": "rule_catalog_0900_takes_less_damage_reduces_each_modified_strike_after_doubling"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0901",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto Rubble at a cell with an underground Burrowing minion that lacks Submerge relayers that minion underwater and state-based region settlement kills it in the same site-played receipt, sending it to its owner's cemetery without entering deathrite-order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowing",
+        "elements",
+        "destroyTargetSite"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-destroyed",
+        "rubble-created",
+        "rubble-replaced",
+        "site-played",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_0901_water_flood_kills_buried_burrower_without_submerge_in_same_receipt"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0902",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Flood terrain overlay routes a burrowed Secret Tunnel hop onto flooded earth as underwater. A submerging ally at the controller's tunnel hops to a far controlled site that Flood has made Water and lands underwater, not underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "connectsBurrowedAllies",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "move-and-attack",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "movement"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/voidwalk_rules.rs",
+        "testName": "rule_catalog_0902_flooded_earth_routes_secret_tunnel_hop_underwater"
+      }
     }
   ]
 }
