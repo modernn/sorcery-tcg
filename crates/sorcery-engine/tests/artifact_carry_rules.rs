@@ -562,3 +562,290 @@ fn rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order()
     );
     assert_exact_replay(session);
 }
+fn drop_withheld_site() -> Value {
+    json!({
+        "cardType": "site",
+        "elements": ["earth"],
+    })
+}
+
+fn drop_withheld_bearer() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drop_withheld_rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drop_withheld_deathrite() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_drop_artifacts_manifest(seed: u32) -> String {
+    let fixture = "artifact-drop-deathrite-withheld";
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bearer": drop_withheld_bearer(),
+            "north-rain": drop_withheld_rain(),
+            "north-site": drop_withheld_site(),
+            "north-sword": power_artifact(),
+            "south-avatar": avatar(),
+            "south-minion": drop_withheld_deathrite(),
+            "south-site": drop_withheld_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-bearer",
+                    "north-sword",
+                    "north-rain",
+                    "north-rain",
+                    "north-bearer",
+                    "north-sword",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn drop_artifacts_offered(session: &Session, bearer_id: &str, sword_id: &str) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "drop-artifacts"
+                && action.descriptor["unit"]["instanceId"] == bearer_id
+                && action.descriptor["artifactInstanceIds"] == json!([sword_id])
+        })
+    })
+}
+
+fn carried_sword<'a>(current: &'a Value, sword_id: &str, bearer_id: &str) -> Option<&'a Value> {
+    current["realm"]["artifacts"]
+        .as_array()?
+        .iter()
+        .find(|artifact| {
+            artifact["instanceId"] == sword_id && artifact["bearer"]["instanceId"] == bearer_id
+        })
+}
+
+struct PendingDeathriteDropSetup {
+    bearer_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+    sword_id: String,
+}
+
+fn try_summon_drop_bearer(session: &mut Session) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-bearer"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    summoned["cardInstanceId"].as_str().map(ToOwned::to_owned)
+}
+
+fn try_cast_carried_sword(session: &mut Session, bearer_id: &str) -> Option<String> {
+    let (cast, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-sword"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    })?;
+    cast["cardInstanceId"].as_str().map(ToOwned::to_owned)
+}
+
+fn try_pending_deathrite_with_carried_artifact(encoded: &str) -> Option<PendingDeathriteDropSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let mut bearer_id = try_summon_drop_bearer(&mut session);
+    let mut sword_id = bearer_id
+        .as_deref()
+        .and_then(|bearer_id| try_cast_carried_sword(&mut session, bearer_id));
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if bearer_id.is_none() {
+        bearer_id = try_summon_drop_bearer(&mut session);
+    }
+    let bearer_id = bearer_id?;
+    if sword_id.is_none() {
+        sword_id = try_cast_carried_sword(&mut session, &bearer_id);
+    }
+    let sword_id = sword_id?;
+    if !drop_artifacts_offered(&session, &bearer_id, &sword_id) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    let paused = state(&session);
+    if paused["phase"] != "deathrite-order" {
+        return None;
+    }
+    realm_unit(&paused, &bearer_id)?;
+    carried_sword(&paused, &sword_id, &bearer_id)?;
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteDropSetup {
+        bearer_id,
+        deathrite_ids,
+        session,
+        sword_id,
+    })
+}
+
+fn deathrite_drop_artifacts_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_drop_artifacts_manifest)
+        .find(|candidate| try_pending_deathrite_with_carried_artifact(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a carried Artifact ready to Drop",
+        )
+}
+
+#[test]
+fn rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_drop_artifacts_seed_with(1131);
+    let mut setup = try_pending_deathrite_with_carried_artifact(&encoded)
+        .expect("complete Drop Artifacts Deathrite withheld setup");
+    let bearer_id = setup.bearer_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let sword_id = setup.sword_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(realm_unit(&paused, &bearer_id).is_some());
+    assert!(carried_sword(&paused, &sword_id, &bearer_id).is_some());
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "drop-artifacts")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(realm_unit(&resumed, &bearer_id).is_some());
+    assert!(carried_sword(&resumed, &sword_id, &bearer_id).is_some());
+    assert!(drop_artifacts_offered(session, &bearer_id, &sword_id));
+
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "drop-artifacts"
+            && descriptor["unit"]["instanceId"] == bearer_id
+            && descriptor["artifactInstanceIds"] == json!([sword_id])
+    });
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        ["artifacts-dropped"]
+    );
+    let loose = state(session)["realm"]["artifacts"]
+        .as_array()
+        .expect("realm artifacts")
+        .iter()
+        .find(|artifact| artifact["instanceId"] == sword_id)
+        .expect("dropped sword")
+        .clone();
+    assert!(loose["bearer"].is_null());
+    assert_eq!(loose["location"], "C4");
+    assert_eq!(loose["region"], "surface");
+    assert_exact_replay(session);
+}
