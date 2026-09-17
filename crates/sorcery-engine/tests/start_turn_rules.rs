@@ -6,7 +6,8 @@
 //! (RULE-CATALOG-0401–0402), thin-library draw-then-mill edges
 //! (RULE-CATALOG-0916), and direct draw-sites-then-teleport ordering
 //! (RULE-CATALOG-0936), and direct draw-sites-then-mill ordering
-//! (RULE-CATALOG-0948).
+//! (RULE-CATALOG-0948), and thin-Atlas draw-then-mill edges
+//! (RULE-CATALOG-0967).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2820,5 +2821,76 @@ fn rule_catalog_0948_start_turn_draw_sites_then_mill_sites_resolves_in_order_on_
         source_id
     );
     assert_eq!(state(&session)["phase"], "draw");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0967_start_turn_draw_sites_then_mill_sites_mills_no_op_when_atlas_has_one_card() {
+    let mut session = draw_sites_mill_sites_stack_start_turn(967, &["north-site"; 4]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let drawn_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("only site")["instanceId"]
+        .clone();
+    let atlas_before = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    assert_eq!(atlas_before, 1);
+    let hand_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand")
+        .len();
+    let cemetery_before = before["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    assert_eq!(event_types(&receipt), ["site-drawn"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
+    assert_eq!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .len(),
+        cemetery_before
+    );
     assert_exact_replay(&session);
 }
