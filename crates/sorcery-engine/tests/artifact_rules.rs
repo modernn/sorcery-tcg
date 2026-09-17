@@ -4,8 +4,9 @@
 //! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
 //! (RULE-CATALOG-0143), Siege Ballista activation withheld during deathrite-order
 //! (RULE-CATALOG-1144), the measured location a Payload Trebuchet blankets for those same two
-//! taps plus a discarded card (RULE-CATALOG-0144), and Payload Trebuchet activation withheld
-//! during deathrite-order (RULE-CATALOG-1145).
+//! taps plus a discarded card (RULE-CATALOG-0144), Payload Trebuchet activation withheld
+//! during deathrite-order (RULE-CATALOG-1145), and Artifact casting withheld during
+//! deathrite-order (RULE-CATALOG-1155).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -1935,5 +1936,188 @@ fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pendi
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(!trebuchet_offers(session, &artifact_id).is_empty());
     assert!(!descriptors_of_kind(session, "activate-artifact-discard-area-damage").is_empty());
+    assert_exact_replay(session);
+}
+
+fn deathrite_cast_artifact_manifest(seed: u32) -> String {
+    let cards = json!({
+        "cast-avatar": avatar(),
+        "cast-site": { "cardType": "site", "elements": ["earth"] },
+        "north-rain": {
+            "cardType": "magic",
+            "damageEachAbovegroundMinion": 1,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        },
+        "north-sword": power_artifact(0),
+        "south-minion": minion(json!({
+            "deathriteDrawSite": true,
+            "defense": 1,
+            "summonToAnySite": true,
+        })),
+    });
+    let decks = json!({
+        "north": {
+            "atlas": vec!["cast-site"; 6],
+            "avatar": "cast-avatar",
+            "spellbook": [
+                "north-sword",
+                "north-rain",
+                "north-rain",
+                "north-sword",
+                "north-rain",
+                "north-sword",
+            ],
+        },
+        "south": {
+            "atlas": vec!["cast-site"; 6],
+            "avatar": "cast-avatar",
+            "spellbook": vec!["south-minion"; 6],
+        },
+    });
+    manifest(
+        "synthetic-cast-artifact-deathrite-withheld-v1",
+        &cards,
+        &decks,
+        seed,
+    )
+}
+
+fn north_has_sword(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-sword"))
+}
+
+fn offers_cast_artifact(session: &Session) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-artifact"
+                && action.descriptor["cardId"] == "north-sword"
+                && action.descriptor["cell"] == "C4"
+                && action.descriptor["bearer"].is_null()
+        })
+    })
+}
+
+struct PendingDeathriteCastArtifactSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_cast_artifact(
+    encoded: &str,
+) -> Option<PendingDeathriteCastArtifactSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !north_has_sword(&state(&session)) || !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if !offers_cast_artifact(&session) {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteCastArtifactSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_cast_artifact_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_cast_artifact_manifest)
+        .find(|candidate| try_pending_deathrite_with_cast_artifact(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with legal cast-artifact in hand")
+}
+
+#[test]
+fn rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_cast_artifact_seed_with(1155);
+    let mut setup = try_pending_deathrite_with_cast_artifact(&encoded)
+        .expect("complete cast-artifact Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(north_has_sword(&paused));
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-artifact")
+    );
+    assert!(!offers_cast_artifact(session));
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(offers_cast_artifact(session));
+    assert!(!descriptors_of_kind(session, "cast-artifact").is_empty());
     assert_exact_replay(session);
 }
