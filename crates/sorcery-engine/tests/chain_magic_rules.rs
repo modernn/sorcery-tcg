@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0903–0904).
+//! 0885–0890, 0893–0894, 0896, 0903–0904, 0914).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -14,6 +14,9 @@
 //! 0896 covers pay-life resolve gating when life drops after begin.
 //! 0903 covers checkpoint resume preserving staged targets, discard choice,
 //! and legal resolve/extend actions mid-staged Chain Magic.
+//! 0914 covers Chain Magic phase routing: staged chains offer only
+//! extend-chain-magic and resolve-chain-magic from append_chain_magic_actions,
+//! not main-phase cast-magic, end-turn, or move-and-attack.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -461,6 +464,40 @@ fn offers_resolve_chain_magic(session: &Session) -> bool {
         .expect("staged Chain Magic actions")
         .iter()
         .any(|action| action.descriptor["kind"] == "resolve-chain-magic")
+}
+
+const CHAIN_MAGIC_PHASE_ACTION_KINDS: &[&str] =
+    &["begin-chain-magic", "extend-chain-magic", "resolve-chain-magic"];
+
+const MAIN_ACTIONS_FORBIDDEN_WHILE_CHAIN_STAGED: &[&str] =
+    &["cast-magic", "end-turn", "move-and-attack"];
+
+fn assert_staged_chain_magic_legal_actions_only(session: &Session) {
+    let snapshot = state(session);
+    assert_eq!(snapshot["phase"], "chain-magic");
+    assert!(snapshot["pendingChainMagic"].is_object());
+    let legal = session
+        .legal_actions()
+        .expect("staged Chain Magic legal_actions");
+    assert!(
+        !legal.is_empty(),
+        "append_chain_magic_actions must issue resolve-chain-magic or extend-chain-magic"
+    );
+    assert!(
+        legal.iter().all(|action| {
+            CHAIN_MAGIC_PHASE_ACTION_KINDS
+                .contains(&action.descriptor["kind"].as_str().unwrap_or(""))
+        }),
+        "Phase::ChainMagic legal_actions must only enumerate chain-magic actions"
+    );
+    assert!(
+        !legal.iter().any(|action| {
+            action.descriptor["kind"] == "begin-chain-magic"
+                || MAIN_ACTIONS_FORBIDDEN_WHILE_CHAIN_STAGED
+                    .contains(&action.descriptor["kind"].as_str().unwrap_or(""))
+        }),
+        "staged Chain Magic must issue no cast-magic, end-turn, move-and-attack, or begin-chain-magic"
+    );
 }
 
 fn sorted(mut ids: Vec<String>) -> Vec<String> {
@@ -1614,6 +1651,50 @@ fn rule_catalog_0903_chain_magic_checkpoint_resume_preserves_staged_targets_disc
     assert!(realm_unit(&after, &hops.first_id).is_none());
     assert!(realm_unit(&after, &hops.second_id).is_none());
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0914_chain_magic_phase_issues_only_chain_actions_while_staged() {
+    let encoded = (914..914 + 512)
+        .map(discard_hops_manifest)
+        .find(|candidate| try_setup_discard_hops(candidate).is_some())
+        .expect("bounded seed with discard Chain Magic, both nearby allies, and fodder in hand");
+    let (mut hops, fodder_id) =
+        try_setup_discard_hops(&encoded).expect("discard Chain Magic hops setup");
+    let main_before = hops.session.legal_actions().expect("main legal actions");
+    assert_eq!(state(&hops.session)["phase"], "main");
+    assert!(
+        main_before
+            .iter()
+            .any(|action| action.descriptor["kind"] == "cast-magic"),
+        "main phase must offer cast-magic before Chain Magic is staged"
+    );
+    assert!(
+        main_before
+            .iter()
+            .any(|action| action.descriptor["kind"] == "end-turn")
+    );
+    assert!(
+        main_before
+            .iter()
+            .any(|action| action.descriptor["kind"] == "move-and-attack")
+    );
+    assert!(
+        main_before
+            .iter()
+            .any(|action| action.descriptor["kind"] == "begin-chain-magic")
+    );
+
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    assert_staged_chain_magic_legal_actions_only(&hops.session);
+    assert!(offers_resolve_chain_magic(&hops.session));
+    assert!(!extend_ids(&hops.session).is_empty());
+    assert_exact_replay(&hops.session);
 }
 
 fn setup_hops_short(encoded: &str, skip_last_site: bool) -> ChainHops {
