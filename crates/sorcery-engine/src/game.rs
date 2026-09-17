@@ -28213,6 +28213,127 @@ pub mod catalog_proofs {
 
     #[expect(
         clippy::too_many_lines,
+        reason = "one direct payment proof keeps self-play admission and zero/one-card legality together"
+    )]
+    pub fn rule_catalog_0729_alternate_summon_payments_should_be_admitted_and_require_their_costs()
+    {
+        let discard_manifest = selfplay_manifest_with(417, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")]["discardRandomCardInsteadOfMana"] =
+                    json!(true);
+            }
+        });
+        Game::from_manifest_json(&discard_manifest)
+            .expect("valid random-discard manifest")
+            .ensure_selfplay_supported()
+            .expect("random-discard payment is self-play safe");
+
+        let sacrifice_manifest = selfplay_manifest_with(417, |manifest| {
+            manifest["cards"]["north-spell-1"]["sacrificeMinionAtSummoningLocationForManaDiscount"] =
+                json!(2);
+        });
+        Game::from_manifest_json(&sacrifice_manifest)
+            .expect("valid sacrifice-payment manifest")
+            .ensure_selfplay_supported()
+            .expect("sacrifice-discount payment is self-play safe");
+
+        let mut game = Game::from_manifest_json(&discard_manifest).expect("valid Aramos game");
+        let cell = Cell::parse("C4").expect("C4");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        let site_card = north.hand_atlas.remove(0);
+        north.atlas.extend(std::mem::take(&mut north.hand_atlas));
+        let aramos = north.hand_spellbook.remove(0);
+        north
+            .spellbook
+            .extend(std::mem::take(&mut north.hand_spellbook));
+        let aramos_instance_id = aramos.instance_id.clone();
+        north.hand_spellbook.push(aramos);
+        north.avatar.location = cell;
+        north.domain_established = true;
+        north.mana = 0;
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: site_card,
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        assert!(
+            !game
+                .legal_actions()
+                .expect("actions without a payment card")
+                .iter()
+                .any(|action| matches!(
+                    action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
+                        ..
+                    }
+                ))
+        );
+
+        let only_payment_card = game.position.players[seat_index(Seat::North)]
+            .atlas
+            .pop()
+            .expect("one Atlas payment card");
+        let payment_instance_id = only_payment_card.instance_id.clone();
+        game.position.players[seat_index(Seat::North)]
+            .hand_atlas
+            .push(only_payment_card);
+        game.position.players[seat_index(Seat::North)].mana = 1;
+        let payment_actions = game.legal_actions().expect("actions with one payment card");
+        assert!(payment_actions.iter().any(|action| matches!(
+            action.descriptor,
+            ActionDescriptor::SummonMinion {
+                mana_cost: 1,
+                payment_mode: None,
+                ..
+            }
+        )));
+        let action = payment_actions
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::SummonMinion {
+                        card_instance_id,
+                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
+                        ..
+                    } if *card_instance_id == aramos_instance_id
+                )
+            })
+            .expect("random-discard summon");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued random-discard summon");
+
+        assert_eq!(random_draws.len(), 1);
+        assert_eq!(random_draws[0].domain.exclusive_maximum, 1);
+        assert_eq!(random_draws[0].domain.kind, "card_index_candidate");
+        assert_eq!(random_draws[0].purpose, "summon_random_card_discard_cost");
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["card-discarded", "minion-summoned"]
+        );
+        assert_eq!(outcomes[0].1["instanceId"], payment_instance_id.as_str());
+        assert_eq!(outcomes[0].1["zone"], "atlas");
+        assert!(
+            game.position.players[seat_index(Seat::North)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == payment_instance_id)
+        );
+        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
+    }
+
+    #[expect(
+        clippy::too_many_lines,
         reason = "one Pick Up proof keeps owner, region, carried, Disable, and interaction filters together"
     )]
     pub fn rule_catalog_0727_pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units()
@@ -28846,127 +28967,6 @@ mod tests {
                 .ensure_selfplay_supported()
                 .expect("supported Magic effect is self-play safe");
         }
-    }
-
-    #[test]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one direct payment proof keeps self-play admission and zero/one-card legality together"
-    )]
-    fn alternate_summon_payments_should_be_admitted_and_require_their_costs() {
-        let discard_manifest = selfplay_manifest_with(417, |manifest| {
-            for ordinal in 1..=50 {
-                manifest["cards"][format!("north-spell-{ordinal}")]["discardRandomCardInsteadOfMana"] =
-                    json!(true);
-            }
-        });
-        Game::from_manifest_json(&discard_manifest)
-            .expect("valid random-discard manifest")
-            .ensure_selfplay_supported()
-            .expect("random-discard payment is self-play safe");
-
-        let sacrifice_manifest = selfplay_manifest_with(417, |manifest| {
-            manifest["cards"]["north-spell-1"]["sacrificeMinionAtSummoningLocationForManaDiscount"] =
-                json!(2);
-        });
-        Game::from_manifest_json(&sacrifice_manifest)
-            .expect("valid sacrifice-payment manifest")
-            .ensure_selfplay_supported()
-            .expect("sacrifice-discount payment is self-play safe");
-
-        let mut game = Game::from_manifest_json(&discard_manifest).expect("valid Aramos game");
-        let cell = Cell::parse("C4").expect("C4");
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        let site_card = north.hand_atlas.remove(0);
-        north.atlas.extend(std::mem::take(&mut north.hand_atlas));
-        let aramos = north.hand_spellbook.remove(0);
-        north
-            .spellbook
-            .extend(std::mem::take(&mut north.hand_spellbook));
-        let aramos_instance_id = aramos.instance_id.clone();
-        north.hand_spellbook.push(aramos);
-        north.avatar.location = cell;
-        north.domain_established = true;
-        north.mana = 0;
-        game.position.sites[cell.index()] = Some(SitePosition {
-            card: site_card,
-            controller: Seat::North,
-            last_flight_turn: None,
-            warded: false,
-        });
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-
-        assert!(
-            !game
-                .legal_actions()
-                .expect("actions without a payment card")
-                .iter()
-                .any(|action| matches!(
-                    action.descriptor,
-                    ActionDescriptor::SummonMinion {
-                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
-                        ..
-                    }
-                ))
-        );
-
-        let only_payment_card = game.position.players[seat_index(Seat::North)]
-            .atlas
-            .pop()
-            .expect("one Atlas payment card");
-        let payment_instance_id = only_payment_card.instance_id.clone();
-        game.position.players[seat_index(Seat::North)]
-            .hand_atlas
-            .push(only_payment_card);
-        game.position.players[seat_index(Seat::North)].mana = 1;
-        let payment_actions = game.legal_actions().expect("actions with one payment card");
-        assert!(payment_actions.iter().any(|action| matches!(
-            action.descriptor,
-            ActionDescriptor::SummonMinion {
-                mana_cost: 1,
-                payment_mode: None,
-                ..
-            }
-        )));
-        let action = payment_actions
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::SummonMinion {
-                        card_instance_id,
-                        payment_mode: Some(SummonPaymentMode::RandomCardDiscard),
-                        ..
-                    } if *card_instance_id == aramos_instance_id
-                )
-            })
-            .expect("random-discard summon");
-        let (outcomes, random_draws) = game
-            .apply_action_recorded(&action)
-            .expect("issued random-discard summon");
-
-        assert_eq!(random_draws.len(), 1);
-        assert_eq!(random_draws[0].domain.exclusive_maximum, 1);
-        assert_eq!(random_draws[0].domain.kind, "card_index_candidate");
-        assert_eq!(random_draws[0].purpose, "summon_random_card_discard_cost");
-        assert_eq!(
-            outcomes
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            ["card-discarded", "minion-summoned"]
-        );
-        assert_eq!(outcomes[0].1["instanceId"], payment_instance_id.as_str());
-        assert_eq!(outcomes[0].1["zone"], "atlas");
-        assert!(
-            game.position.players[seat_index(Seat::North)]
-                .cemetery
-                .iter()
-                .any(|card| card.instance_id == payment_instance_id)
-        );
-        assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
     }
 
     #[expect(

@@ -17055,6 +17055,30 @@
         "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
         "testName": "rule_catalog_0727_pick_up_and_drop_should_ignore_non_local_artifacts_and_disabled_units"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0729",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Alternate summon payment facts (random-card discard and local-minion sacrifice discount) are self-play safe, and random-card discard summons require an eligible hand card before issuing. Extends 0015\u20130016.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardRandomCardInsteadOfMana",
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "pay-cost"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_0729_alternate_summon_payments_should_be_admitted_and_require_their_costs"
+      }
     }
   ]
 }
