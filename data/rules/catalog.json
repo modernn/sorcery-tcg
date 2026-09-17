@@ -16925,6 +16925,27 @@
         "file": "crates/sorcery-engine/tests/overpower_rules.rs",
         "testName": "rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_stats"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0723",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sparkmage may activate at a nearby location that has rubble but no site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage"
+      ],
+      "eventHints": [
+        "sparkmage-activated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target"
+      }
     }
   ]
 }

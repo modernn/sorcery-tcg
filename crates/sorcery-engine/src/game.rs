@@ -28108,6 +28108,89 @@ pub mod catalog_proofs {
             .expect("warded target");
         assert_eq!((surviving.damage, surviving.warded), (1, false));
     }
+
+    pub fn rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target() {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-avatar"]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
+                json!(true);
+        });
+        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        let c4 = Cell::parse("C4").expect("C4");
+        game.position.rubble[c4.index()] = Some(
+            identity_hash(&json!({ "fixture": "sparkmage-rubble" })).expect("Rubble identity"),
+        );
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.avatar.tapped = false;
+        north.domain_established = true;
+        let candidate_card = north.hand_spellbook.remove(0);
+        game.position.units.push(UnitPosition {
+            card: candidate_card,
+            carried_lance_count: 0,
+            controller: Seat::North,
+            damage: 0,
+            disable_effects: Vec::new(),
+            disabled_until_damaged: false,
+            last_dropped_artifacts_turn: None,
+            last_interacted_turn: None,
+            last_picked_up_artifacts_turn: None,
+            location: c4,
+            occupied_cells: None,
+            planar_gate_voidwalk: false,
+            region: Region::Surface,
+            stealthed: false,
+            summoning_sickness: false,
+            tapped: false,
+            temporary_airborne_sources: Vec::new(),
+            temporary_charge_sources: Vec::new(),
+            temporary_first_strike_sources: Vec::new(),
+            temporary_lethal_sources: Vec::new(),
+            temporary_next_strike_double_sources: Vec::new(),
+            temporary_movement_sources: Vec::new(),
+            temporary_power_sources: Vec::new(),
+            temporary_ranged_sources: Vec::new(),
+            temporary_silence_sources: Vec::new(),
+            warded: false,
+        });
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+
+        let action = game
+            .legal_actions()
+            .expect("legal actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    action.descriptor,
+                    ActionDescriptor::ActivateSparkmage {
+                        target_location: Location {
+                            cell,
+                            region: Region::Surface,
+                        },
+                        ..
+                    } if cell == c4
+                )
+            })
+            .expect("Rubble is an existing surface target");
+        let mut speculative = game.clone();
+        speculative
+            .apply_action(&action)
+            .expect("speculative Sparkmage action");
+        let (outcomes, random_draws) = game
+            .apply_action_recorded(&action)
+            .expect("issued Sparkmage action");
+
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["sparkmage-activated"]
+        );
+        assert!(!random_draws.is_empty());
+        assert_eq!(speculative.position, game.position);
+        assert!(game.position.players[seat_index(Seat::North)].avatar.tapped);
+    }
 }
 
 #[cfg(test)]
@@ -28781,90 +28864,6 @@ mod tests {
                 .is_none()
         );
         assert_eq!(game.position.phase, Phase::Terminal);
-    }
-
-    #[test]
-    fn sparkmage_should_issue_and_accept_a_nearby_rubble_target() {
-        let manifest = selfplay_manifest_with(31, |manifest| {
-            manifest["cards"]["north-avatar"]["tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"] =
-                json!(true);
-        });
-        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
-        let c4 = Cell::parse("C4").expect("C4");
-        game.position.rubble[c4.index()] = Some(
-            identity_hash(&json!({ "fixture": "sparkmage-rubble" })).expect("Rubble identity"),
-        );
-        let north = &mut game.position.players[seat_index(Seat::North)];
-        north.avatar.tapped = false;
-        north.domain_established = true;
-        let candidate_card = north.hand_spellbook.remove(0);
-        game.position.units.push(UnitPosition {
-            card: candidate_card,
-            carried_lance_count: 0,
-            controller: Seat::North,
-            damage: 0,
-            disable_effects: Vec::new(),
-            disabled_until_damaged: false,
-            last_dropped_artifacts_turn: None,
-            last_interacted_turn: None,
-            last_picked_up_artifacts_turn: None,
-            location: c4,
-            occupied_cells: None,
-            planar_gate_voidwalk: false,
-            region: Region::Surface,
-            stealthed: false,
-            summoning_sickness: false,
-            tapped: false,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
-            warded: false,
-        });
-        game.position.active_seat = Seat::North;
-        game.position.decision_seat = Seat::North;
-        game.position.phase = Phase::Main;
-
-        let action = game
-            .legal_actions()
-            .expect("legal actions")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    action.descriptor,
-                    ActionDescriptor::ActivateSparkmage {
-                        target_location: Location {
-                            cell,
-                            region: Region::Surface,
-                        },
-                        ..
-                    } if cell == c4
-                )
-            })
-            .expect("Rubble is an existing surface target");
-        let mut speculative = game.clone();
-        speculative
-            .apply_action(&action)
-            .expect("speculative Sparkmage action");
-        let (outcomes, random_draws) = game
-            .apply_action_recorded(&action)
-            .expect("issued Sparkmage action");
-
-        assert_eq!(
-            outcomes
-                .iter()
-                .map(|(event_type, _)| event_type.as_str())
-                .collect::<Vec<_>>(),
-            ["sparkmage-activated"]
-        );
-        assert!(!random_draws.is_empty());
-        assert_eq!(speculative.position, game.position);
-        assert!(game.position.players[seat_index(Seat::North)].avatar.tapped);
     }
 
     #[test]

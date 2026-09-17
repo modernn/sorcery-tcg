@@ -1,3 +1,5 @@
+//! Direct proofs for Sparkmage activation (RULE-CATALOG-0148–0150, RULE-CATALOG-0723).
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -305,4 +307,9 @@ fn air_thresholds_should_select_a_hidden_candidate_deterministically_damage_it_a
     );
     assert_eq!(state(&session)["realm"]["units"], damage_before_zero);
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target();
 }
