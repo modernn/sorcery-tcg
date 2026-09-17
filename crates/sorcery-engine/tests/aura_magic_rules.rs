@@ -385,7 +385,7 @@ fn rule_catalog_0271_return_target_aura_returns_flood_to_its_owners_hand() {
 }
 
 #[test]
-fn destroy_target_aura_lifts_matching_immobile_area() {
+fn rule_catalog_0784_destroy_target_aura_lifts_matching_immobile_area() {
     let (mut session, aura_id) = after_north_aura("north-entangle", "destroyTargetAura");
     let before = state(&session);
     assert_eq!(before["realm"]["auras"][0]["cardId"], "north-entangle");

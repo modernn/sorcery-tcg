@@ -357,7 +357,7 @@ fn ignited_cards(ignited: &Value, north_damager: &Value, south_caster: &Value) -
 }
 
 #[test]
-fn ignited_should_die_before_turn_cleanup_unless_disabled() {
+fn rule_catalog_0789_ignited_dies_before_turn_cleanup_unless_disabled() {
     let ignited = minion(json!({
         "attack": 3,
         "charge": true,

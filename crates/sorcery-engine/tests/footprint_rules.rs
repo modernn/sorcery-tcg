@@ -591,7 +591,7 @@ fn rule_catalog_0066_an_aura_should_hold_an_oversized_footprint_it_barely_overla
 }
 
 #[test]
-fn oversized_ground_movement_should_check_every_new_terrain_cell() {
+fn rule_catalog_0791_oversized_ground_movement_checks_every_new_terrain_cell() {
     let (mut session, _, _, _) = setup_to_north_fourth_turn(true);
     let (giant, _) = summon_at(&mut session, "north-giant", "B3");
     end_and_draw_zone(&mut session, "atlas");

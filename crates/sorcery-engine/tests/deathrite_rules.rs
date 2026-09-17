@@ -349,7 +349,7 @@ fn rule_catalog_0776_simultaneous_deathrites_resolve_nap_then_ap_before_cemetery
 }
 
 #[test]
-fn bladderblimp_deathrite_should_count_each_players_nearby_controlled_sites() {
+fn rule_catalog_0787_bladderblimp_deathrite_counts_nearby_controlled_sites() {
     let manifest = combat_manifest(
         147,
         &json!({
