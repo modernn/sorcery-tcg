@@ -4078,8 +4078,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0196_draw_spells_magic_draws_hidden_spellbook_cards"
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_0645_draw_spells_magic_draws_hidden_spellbook_cards"
       }
     },
     {
@@ -4103,8 +4103,8 @@
         "game-ended"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0197_draw_spells_magic_exhausts_then_loses_on_empty_library"
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_0646_draw_spells_magic_exhausts_then_loses_on_empty_library"
       }
     },
     {
@@ -4177,8 +4177,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0200_draw_sites_magic_draws_hidden_atlas_cards"
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_0647_draw_sites_magic_draws_hidden_atlas_cards"
       }
     },
     {
@@ -4202,8 +4202,8 @@
         "game-ended"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0201_draw_sites_magic_exhausts_then_loses_on_empty_library"
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_0648_draw_sites_magic_exhausts_then_loses_on_empty_library"
       }
     },
     {
@@ -4374,8 +4374,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0208_destroy_target_site_is_prevented_on_a_protected_site"
+        "file": "crates/sorcery-engine/tests/destroy_site_rules.rs",
+        "testName": "rule_catalog_0624_destroy_target_site_is_prevented_on_a_protected_site"
       }
     },
     {
@@ -4424,8 +4424,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0210_return_target_site_is_prevented_on_a_protected_site"
+        "file": "crates/sorcery-engine/tests/return_site_rules.rs",
+        "testName": "rule_catalog_0626_return_target_site_is_prevented_on_a_protected_site"
       }
     },
     {
@@ -4472,8 +4472,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0212_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
+        "file": "crates/sorcery-engine/tests/return_artifact_rules.rs",
+        "testName": "rule_catalog_0631_return_target_artifact_returns_a_carried_artifact_to_its_owners_hand"
       }
     },
     {
@@ -4496,8 +4496,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0213_target_player_life_loss_reduces_avatar_life_without_dealing_damage"
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_0649_target_player_life_loss_reduces_avatar_life_without_dealing_damage"
       }
     },
     {
@@ -4521,8 +4521,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0214_target_player_life_loss_reaches_deaths_door_without_a_death_blow"
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_0650_target_player_life_loss_reaches_deaths_door_without_a_death_blow"
       }
     },
     {
@@ -4545,8 +4545,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0215_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap"
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_0651_target_player_life_gain_heals_an_enemy_avatar_to_its_printed_cap"
       }
     },
     {
@@ -4568,8 +4568,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0216_target_player_life_gain_cannot_leave_deaths_door"
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_0652_target_player_life_gain_cannot_leave_deaths_door"
       }
     },
     {
@@ -4592,8 +4592,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0217_untap_target_minion_readies_a_tapped_minion_without_breaking_ward"
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_0613_untap_magic_readies_a_tapped_minion_without_breaking_ward"
       }
     },
     {
@@ -4615,8 +4615,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0218_untap_target_minion_is_a_paid_noop_when_already_untapped"
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_0614_untap_magic_is_a_paid_noop_when_already_untapped"
       }
     },
     {
@@ -4639,8 +4639,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0219_tap_target_minion_exhausts_a_ready_minion"
+        "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
+        "testName": "rule_catalog_0611_tap_magic_exhausts_a_ready_minion"
       }
     },
     {
@@ -4663,8 +4663,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0220_tap_target_minion_is_absorbed_by_enemy_ward"
+        "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
+        "testName": "rule_catalog_0612_tap_magic_is_absorbed_by_enemy_ward"
       }
     },
     {
@@ -4778,8 +4778,8 @@
         "magic-resolved"
       ],
       "scenarioProof": {
-        "file": "crates/sorcery-engine/tests/magic_rules.rs",
-        "testName": "rule_catalog_0225_mill_spells_puts_opponent_library_cards_in_the_cemetery"
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_0627_mill_spells_puts_opponent_library_cards_in_the_cemetery"
       }
     },
     {
