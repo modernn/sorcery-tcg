@@ -1487,7 +1487,7 @@ fn adjacent_token_manifest(seed: u32, north_spellbook_count: usize) -> String {
 }
 
 #[test]
-fn adjacent_matching_site_genesis_should_draw_each_then_partially_deck_out() {
+fn rule_catalog_0848_adjacent_matching_site_genesis_draws_each_then_partially_decks_out() {
     let manifest = adjacent_draw_manifest(74);
     let mut session = Session::new(&manifest).expect("valid adjacent-draw site Genesis scenario");
     keep(&mut session);
@@ -1648,7 +1648,7 @@ fn rule_catalog_0405_site_genesis_draws_per_adjacent_then_discards_top_spells() 
 }
 
 #[test]
-fn site_genesis_should_publicly_discard_up_to_two_spells_without_deck_out() {
+fn rule_catalog_0849_site_genesis_publicly_discards_top_spells_without_deck_out() {
     for (seed, spellbook_count, discarded_count) in [(75, 5, 2), (76, 4, 1)] {
         let mut value = manifest_value(
             seed,
@@ -6094,7 +6094,7 @@ fn rule_catalog_0478_site_genesis_conditional_mana_immobilize_nearby_then_keep_s
 }
 
 #[test]
-fn seasonal_river_genesis_should_privately_keep_or_bottom_next_spell() {
+fn rule_catalog_0850_seasonal_river_genesis_privately_keeps_or_bottoms_next_spell() {
     let manifest =
         private_site_genesis_manifest(160, &json!({ "genesisMayBottomNextSpell": true }), 6);
     let before = state(&opening_checkpoint(&manifest));
@@ -6334,7 +6334,7 @@ fn observatory_genesis_should_privately_reorder_next_three_spells_without_drawin
 }
 
 #[test]
-fn private_spell_genesis_should_skip_an_empty_spellbook() {
+fn rule_catalog_0851_private_spell_genesis_skips_empty_spellbook() {
     for (facts, pending_field) in [
         (
             json!({ "genesisMayBottomNextSpell": true }),
@@ -6447,7 +6447,7 @@ fn replace_rubble_at_c3(session: &mut Session) -> Receipt {
 }
 
 #[test]
-fn hidden_spell_genesis_should_resume_after_private_rubble_replacement() {
+fn rule_catalog_0852_hidden_spell_genesis_resumes_after_private_rubble_replacement() {
     for (seed, facts, action_kind, pending_field) in [
         (
             170,
@@ -6750,7 +6750,7 @@ fn rule_catalog_0162_rubble_replacement_resumes_adjacent_same_card_spell_draws()
 }
 
 #[test]
-fn rubble_replacement_should_discard_top_spells_like_play_site() {
+fn rule_catalog_0853_rubble_replacement_discards_top_spells_like_play_site() {
     let atlas = ["cemetery-1", "cemetery-2", "cemetery-3", "cemetery-4"];
     let manifest = geomancer_manifest(181, &atlas, &json!({ "genesisDiscardTopSpells": 2 }));
     let mut session = opening_checkpoint(&manifest);
@@ -6783,7 +6783,7 @@ fn rubble_replacement_should_discard_top_spells_like_play_site() {
 }
 
 #[test]
-fn rubble_replacement_should_immobilize_nearby_after_the_first_area_expires() {
+fn rule_catalog_0854_rubble_replacement_immobilizes_nearby_after_first_area_expires() {
     let atlas = ["trap-1", "trap-2", "trap-3", "trap-4"];
     let manifest = geomancer_manifest(
         182,
@@ -6820,7 +6820,7 @@ fn rubble_replacement_should_immobilize_nearby_after_the_first_area_expires() {
 }
 
 #[test]
-fn rubble_replacement_should_strip_enemy_stealth_like_play_site() {
+fn rule_catalog_0855_rubble_replacement_strips_enemy_stealth_like_play_site() {
     let atlas = ["lodge-1", "lodge-2", "lodge-3", "lodge-4"];
     let mut value = geomancer_cards(183, &atlas, &json!({ "genesisEnemiesLoseStealth": true }));
     value["cards"]["north-minion"]["stealth"] = json!(true);
