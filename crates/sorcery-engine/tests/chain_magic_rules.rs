@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893–0894, 0896, 0904).
+//! 0885–0890, 0893–0894, 0896, 0903–0904).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -12,6 +12,8 @@
 //! 0904 covers extend withheld for the next hop while resolve stays legal at the
 //! current staged count when mana covers resolve but not extend.
 //! 0896 covers pay-life resolve gating when life drops after begin.
+//! 0903 covers checkpoint resume preserving staged targets, discard choice,
+//! and legal resolve/extend actions mid-staged Chain Magic.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -179,6 +181,51 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn discard_hops_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "chain-magic-discard-hops" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-chain-magic-discard-hops-v1",
+        },
+        "cards": {
+            "north-ally-a": minion(json!({})),
+            "north-ally-b": minion(json!({})),
+            "north-avatar": avatar(),
+            "north-chain": discard_chain(),
+            "north-fodder": fodder(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({})),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-chain",
+                    "north-ally-a",
+                    "north-ally-b",
+                    "north-fodder",
+                    "north-chain",
+                    "north-fodder",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
 }
 
 fn hops_manifest(seed: u32) -> String {
@@ -1413,8 +1460,8 @@ fn rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independen
 }
 
 #[test]
-fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_pool_while_resolve_remains_legal(
-) {
+fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_pool_while_resolve_remains_legal()
+ {
     const EXTRA_TARGET_MANA: u64 = 2;
     let encoded = (904..904 + 256)
         .map(hops_manifest)
@@ -1439,7 +1486,10 @@ fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_p
     assert_eq!(chosen_count, 1);
     let resolve_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count.saturating_sub(1));
     let extend_mana = EXTRA_TARGET_MANA.saturating_mul(chosen_count);
-    assert_eq!(resolve_mana, 0, "resolve uses mana_paid for the current count");
+    assert_eq!(
+        resolve_mana, 0,
+        "resolve uses mana_paid for the current count"
+    );
     assert_eq!(
         extend_mana, EXTRA_TARGET_MANA,
         "extend uses next_mana for one more hop"
@@ -1452,17 +1502,118 @@ fn rule_catalog_0904_extend_chain_magic_is_withheld_when_next_hop_mana_exceeds_p
         extend_ids(&hops.session).is_empty(),
         "extend-chain-magic needs {extend_mana} mana for the next hop while the caster has one"
     );
-    let legal = hops
-        .session
-        .legal_actions()
-        .expect("staged chain actions");
-    assert!(legal
-        .iter()
-        .any(|action| action.descriptor["kind"] == "resolve-chain-magic"));
-    assert!(!legal
-        .iter()
-        .any(|action| action.descriptor["kind"] == "extend-chain-magic"));
+    let legal = hops.session.legal_actions().expect("staged chain actions");
+    assert!(
+        legal
+            .iter()
+            .any(|action| action.descriptor["kind"] == "resolve-chain-magic")
+    );
+    assert!(
+        !legal
+            .iter()
+            .any(|action| action.descriptor["kind"] == "extend-chain-magic")
+    );
     assert_exact_replay(&hops.session);
+}
+
+fn try_setup_discard_hops(encoded: &str) -> Option<(ChainHops, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-ally-a", "north-ally-b"]) {
+        return None;
+    }
+    let hops = setup_hops(encoded);
+    let fodder_id = try_hand_instance(&state(&hops.session), "north-fodder")?;
+    Some((hops, fodder_id))
+}
+
+#[test]
+fn rule_catalog_0903_chain_magic_checkpoint_resume_preserves_staged_targets_discard_and_actions() {
+    let encoded = (903..903 + 512)
+        .map(discard_hops_manifest)
+        .find(|candidate| try_setup_discard_hops(candidate).is_some())
+        .expect("bounded seed with discard Chain Magic, both nearby allies, and fodder in hand");
+    let (mut hops, fodder_id) =
+        try_setup_discard_hops(&encoded).expect("discard Chain Magic hops setup");
+    accept_where(&mut hops.session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == hops.chain_id
+            && descriptor["target"]["instanceId"] == hops.first_id
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    let staged = state(&hops.session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    assert_eq!(
+        staged["pendingChainMagic"]["discardCardInstanceId"],
+        fodder_id
+    );
+    assert!(offers_resolve_chain_magic(&hops.session));
+    assert_eq!(
+        sorted(extend_ids(&hops.session)),
+        sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()])
+    );
+
+    let checkpoint = create_game_checkpoint(&hops.session).expect("staged chain checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized chain checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed chain checkpoint");
+    let mut session = resume_game_checkpoint(&parsed).expect("resumed chain session");
+    assert_eq!(state(&session), staged);
+    assert_eq!(
+        state(&session)["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": hops.first_id,
+            "kind": "minion",
+            "seat": "north",
+        }])
+    );
+    assert_eq!(
+        state(&session)["pendingChainMagic"]["discardCardInstanceId"],
+        fodder_id
+    );
+    assert!(offers_resolve_chain_magic(&session));
+    assert_eq!(
+        sorted(extend_ids(&session)),
+        sorted(vec![hops.avatar_id.clone(), hops.second_id.clone()])
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["instanceId"] == hops.second_id
+    });
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    assert_eq!(
+        event_types(&resolved),
+        [
+            "card-discarded",
+            "magic-cast",
+            "magic-damage-allocated",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "damage-dealt",
+            "minion-died",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(resolved.events[0].payload["instanceId"], fodder_id);
+    assert_eq!(
+        resolved.events[1].payload["discardCardInstanceId"],
+        fodder_id
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingChainMagic"].is_null());
+    assert!(realm_unit(&after, &hops.first_id).is_none());
+    assert!(realm_unit(&after, &hops.second_id).is_none());
+    assert_exact_replay(&session);
 }
 
 fn setup_hops_short(encoded: &str, skip_last_site: bool) -> ChainHops {
