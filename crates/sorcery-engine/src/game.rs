@@ -1843,6 +1843,30 @@ impl Game {
         self.position.players[0].avatar.life = life;
     }
 
+    /// Scenario proof helper: drop one North hand card without cemetery routing.
+    #[doc(hidden)]
+    pub fn test_remove_north_hand_card(&mut self, zone: &str, instance_id: &str) -> bool {
+        let player = &mut self.position.players[seat_index(Seat::North)];
+        match zone {
+            "atlas" => player
+                .hand_atlas
+                .iter()
+                .position(|card| card.instance_id.as_str() == instance_id)
+                .map(|index| {
+                    player.hand_atlas.remove(index);
+                }),
+            "spellbook" => player
+                .hand_spellbook
+                .iter()
+                .position(|card| card.instance_id.as_str() == instance_id)
+                .map(|index| {
+                    player.hand_spellbook.remove(index);
+                }),
+            _ => None,
+        }
+        .is_some()
+    }
+
     pub(crate) fn ensure_selfplay_supported(&self) -> Result<(), GameError> {
         for card in &self.rules.cards {
             if let Some(field) = unsupported_selfplay_fact(&card.facts) {

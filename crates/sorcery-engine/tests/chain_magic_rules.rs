@@ -1,5 +1,5 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
-//! 0885–0890, 0893).
+//! 0885–0890, 0893–0894, 0896).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -7,15 +7,17 @@
 //! is suppressed without enough mana, and hops cannot leave the caster region.
 //! 0885–0886 cover pay-life additional costs on Chain Magic resolution.
 //! 0887–0890 cover chosen-discard additional costs on Chain Magic.
+//! 0894 covers chosen-discard resolve gating when the staged discard leaves hand.
+//! 0893 covers staged mana gates on resolve-chain-magic and extend-chain-magic.
 //! 0896 covers pay-life resolve gating when life drops after begin.
 
 use serde_json::{Value, json};
+use sorcery_engine::action::ActionDescriptor;
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
 };
-use sorcery_engine::action::ActionDescriptor;
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::game::Game;
 use sorcery_engine::session::{Session, StepResult};
@@ -724,6 +726,30 @@ fn replay_game(session: &Session) -> Game {
     game
 }
 
+fn branch_without_staged_discard(serialized: &str, zone: &str, discard_id: &str) -> Game {
+    let parsed = parse_game_checkpoint(serialized).expect("parsed chain checkpoint");
+    let resumed = resume_game_checkpoint(&parsed).expect("resumed chain session");
+    let mut checkpoint_json: Value = serde_json::from_str(serialized).expect("checkpoint JSON");
+    let mut branched = replay_game(&resumed);
+    let mut edited = branched.authoritative_state();
+    edited["players"]["north"]["hand"][zone]
+        .as_array_mut()
+        .expect("north hand zone")
+        .retain(|card| card["instanceId"] != discard_id);
+    checkpoint_json["editedState"] = edited.clone();
+    assert!(
+        branched.test_remove_north_hand_card(zone, discard_id),
+        "edited checkpoint branch must drop the staged discard from {zone} hand"
+    );
+    assert_eq!(
+        branched.authoritative_state()["players"]["north"]["hand"][zone],
+        edited["players"]["north"]["hand"][zone],
+        "checkpoint JSON edit must match the branched hand: {}",
+        canonical_json(&checkpoint_json).expect("canonical edited checkpoint JSON")
+    );
+    branched
+}
+
 #[test]
 fn rule_catalog_0885_chain_magic_pay_life_is_paid_before_the_cast_resolves() {
     let (mut session, chain_id, target_id) = setup_pay_life_chain(20, 885);
@@ -1235,6 +1261,62 @@ fn rule_catalog_0890_chain_magic_issues_no_begin_without_a_chosen_discard_while_
 }
 
 #[test]
+fn rule_catalog_0894_chain_magic_resolve_is_unoffered_without_staged_discard_in_hand() {
+    let spellbook = [
+        "north-chain",
+        "north-fodder",
+        "north-fodder",
+        "north-chain",
+        "north-fodder",
+        "north-fodder",
+    ];
+    let encoded = (894..894 + 512)
+        .map(|seed| discard_chain_manifest(seed, &spellbook))
+        .find(|candidate| {
+            opening_has_all(candidate, &["north-chain", "north-fodder"])
+                && try_setup_discard_chain(candidate).is_some()
+        })
+        .expect("bounded seed with Chain Magic discard setup");
+    let (mut session, chain_id, fodder_id, target_id) =
+        try_setup_discard_chain(&encoded).expect("discard Chain Magic setup");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["discardCardInstanceId"] == fodder_id
+    });
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["discardCardInstanceId"],
+        fodder_id
+    );
+    assert!(offers_resolve_chain_magic(&session));
+
+    let checkpoint = create_game_checkpoint(&session).expect("staged chain checkpoint");
+    let serialized = serialize_game_checkpoint(&checkpoint).expect("serialized chain checkpoint");
+    let parsed = parse_game_checkpoint(&serialized).expect("parsed chain checkpoint");
+    let resumed = resume_game_checkpoint(&parsed).expect("resumed chain session");
+    assert_eq!(state(&resumed), staged);
+    assert!(offers_resolve_chain_magic(&resumed));
+
+    let branched = branch_without_staged_discard(&serialized, "spellbook", &fodder_id);
+    assert_eq!(
+        branched.authoritative_state()["pendingChainMagic"]["discardCardInstanceId"],
+        fodder_id
+    );
+    assert!(
+        !branched
+            .legal_actions()
+            .expect("branched legal actions")
+            .iter()
+            .any(|action| matches!(action.descriptor(), ActionDescriptor::ResolveChainMagic)),
+        "a staged discard that left hand must issue no resolve-chain-magic"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independently() {
     const EXTRA_TARGET_MANA: u64 = 2;
     let encoded = (893..893 + 256)
@@ -1284,6 +1366,29 @@ fn rule_catalog_0893_chain_magic_staged_mana_gates_resolve_and_extend_independen
         extend_ids(&hops.session).is_empty(),
         "a third hop would cost {} mana",
         EXTRA_TARGET_MANA * 3
+    );
+
+    let mut stuck = replay_game(&hops.session);
+    stuck.test_set_north_mana(1);
+    assert_eq!(stuck.authoritative_state()["players"]["north"]["mana"], 1);
+    assert!(
+        !stuck
+            .legal_actions()
+            .expect("stuck staged chain actions")
+            .iter()
+            .any(|action| matches!(action.descriptor(), ActionDescriptor::ResolveChainMagic)),
+        "two staged hops need {EXTRA_TARGET_MANA} mana to resolve"
+    );
+    assert!(
+        !stuck
+            .legal_actions()
+            .expect("stuck staged chain actions")
+            .iter()
+            .any(|action| matches!(
+                action.descriptor(),
+                ActionDescriptor::ExtendChainMagic { .. }
+            )),
+        "a third hop would exceed the one-mana pool"
     );
 
     let mut short = setup_hops_short(&encoded, true);
