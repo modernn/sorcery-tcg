@@ -1,5 +1,5 @@
 //! Direct proofs for heal-target-minion Magic (RULE-CATALOG-0298–0299,
-//! RULE-CATALOG-0663–0664).
+//! RULE-CATALOG-0663–0664, RULE-CATALOG-0908).
 //!
 //! Official Magic can remove damage from a living minion without targeting
 //! Avatars or breaking Ward. Healing a healthy minion is a paid no-op. End
@@ -208,6 +208,45 @@ fn avatar_with_life(life: u8) -> Value {
         "drawSpell": false,
         "life": life,
     })
+}
+
+fn cap_manifest(seed: u32, heal_amount: u8) -> String {
+    let fixture = format!("heal-target-minion-cap-{heal_amount}");
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-damage": magic(("damageTargetUnit", json!(1))),
+            "north-heal": magic(("healTargetMinion", json!(heal_amount))),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-visitor": visitor(false),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-damage", "north-damage", "north-damage", "north-heal", "north-heal", "north-heal"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-visitor"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
 }
 
 fn high_id_manifest(seed: u32, north_life: u8, damage: u8) -> String {
@@ -568,6 +607,62 @@ fn rule_catalog_0664_heal_target_minion_excludes_deaths_door_avatar_and_noops_at
     assert_eq!(
         after["players"]["north"]["avatar"]["deathDoorTurn"],
         death_door_turn
+    );
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0908_heal_target_minion_caps_at_current_damage_not_printed_amount() {
+    let encoded = (908..908 + 256)
+        .map(|seed| cap_manifest(seed, 3))
+        .find(|candidate| {
+            Session::new(candidate)
+                .ok()
+                .is_some_and(|preview| north_opening_has_damage_and_heal(&state(&preview)))
+        })
+        .expect("bounded seed with heal and damage Magic in the opening hand");
+    let (mut session, visitor_id) = after_visitor_on_c4_from(&encoded);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-damage"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == visitor_id
+    });
+    assert_eq!(
+        realm_unit(&state(&session), &visitor_id).expect("wounded visitor")["damage"],
+        1
+    );
+
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-heal"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == visitor_id
+    });
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-healed", "magic-resolved"]
+    );
+    let healed = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "minion-healed")
+        .expect("heal event");
+    assert_eq!(healed.payload["amount"], 1);
+    assert_eq!(healed.payload["attemptedAmount"], 3);
+    assert_eq!(healed.payload["damage"], 0);
+    assert_eq!(healed.payload["instanceId"], visitor_id);
+    assert_eq!(healed.payload["seat"], "south");
+    assert_eq!(
+        healed.payload["sourceInstanceId"],
+        descriptor["cardInstanceId"]
+    );
+
+    let after = state(&session);
+    assert_eq!(
+        realm_unit(&after, &visitor_id).expect("healed visitor")["damage"],
+        0
     );
     assert_eq!(after["terminal"]["status"], "active");
     assert_exact_replay(&session);
