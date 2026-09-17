@@ -1,7 +1,8 @@
-//! Direct proofs for kill-target-minion Magic (RULE-CATALOG-0619–0620).
+//! Direct proofs for kill-target-minion Magic (RULE-CATALOG-0619–0620, 1014).
 //!
 //! Kill-target-minion Magic destroys a healthy same-region minion. Enemy Ward
-//! absorbs the kill without destroying the minion.
+//! absorbs the kill without destroying the minion. Deathrite minions draw a
+//! site for their controller before magic-resolved.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -39,6 +40,12 @@ fn minion(ward: bool) -> Value {
     value
 }
 
+fn deathrite_minion() -> Value {
+    let mut value = minion(false);
+    value["deathriteDrawSite"] = json!(true);
+    value
+}
+
 fn kill_spell() -> Value {
     json!({
         "cardType": "magic",
@@ -52,6 +59,13 @@ fn finish_manifest(mut value: Value) -> String {
     value["manifestId"] =
         json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
     canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn atlas_len(snapshot: &Value, seat: &str) -> usize {
+    snapshot["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .len()
 }
 
 fn kill_target_manifest(seed: u32, ward: bool) -> String {
@@ -78,6 +92,41 @@ fn kill_target_manifest(seed: u32, ward: bool) -> String {
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn kill_target_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "kill-target-deathrite-draw" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-kill-target-deathrite-draw-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-kill": kill_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-kill"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 4],
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-minion"; 6],
             },
@@ -298,5 +347,66 @@ fn rule_catalog_0620_kill_target_minion_ward_absorbs_the_kill() {
     let survivor = realm_unit(&after, &enemy_id).expect("Ward survivor");
     assert_eq!(survivor["warded"], false);
     assert_eq!(survivor["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1014_kill_target_minion_deathrite_draws_for_controller_before_magic_resolved() {
+    let encoded = kill_target_deathrite_manifest(1014);
+    let mut session = opening_main(&encoded);
+    let enemy_id = stage_south_minion(&mut session);
+    let before = state(&session);
+    let north_atlas = atlas_len(&before, "north");
+    let south_atlas = atlas_len(&before, "south");
+    assert_eq!(
+        south_atlas, 1,
+        "thin South atlas leaves one site before the kill-target Deathrite draw"
+    );
+
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-kill"
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    let types = event_types(&receipt);
+    assert!(types.contains(&"magic-cast"));
+    assert!(types.contains(&"minion-killed"));
+    assert!(types.contains(&"site-drawn"));
+    assert!(types.contains(&"minion-died"));
+    assert!(types.contains(&"magic-resolved"));
+
+    let minion_killed = types
+        .iter()
+        .position(|event_type| *event_type == "minion-killed")
+        .expect("minion-killed index");
+    let site_drawn = types
+        .iter()
+        .position(|event_type| *event_type == "site-drawn")
+        .expect("site-drawn index");
+    let minion_died = types
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("minion-died index");
+    let magic_resolved = types
+        .iter()
+        .position(|event_type| *event_type == "magic-resolved")
+        .expect("magic-resolved index");
+    assert!(
+        minion_killed < site_drawn && site_drawn < minion_died && minion_died < magic_resolved,
+        "expected minion-killed, deathrite site-drawn, minion-died, then magic-resolved; got {types:?}"
+    );
+
+    let drawn = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "south");
+    assert_eq!(drawn.payload["sourceInstanceId"], enemy_id);
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &enemy_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_exact_replay(&session);
 }
