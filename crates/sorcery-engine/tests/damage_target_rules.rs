@@ -330,8 +330,7 @@ fn rule_catalog_0596_zap_ward_absorbs_the_damage() {
 }
 
 #[test]
-fn rule_catalog_1015_damage_target_minion_deathrite_draws_for_controller_before_magic_resolved()
-{
+fn rule_catalog_1015_damage_target_minion_deathrite_draws_for_controller_before_magic_resolved() {
     let encoded = seed_with_deathrite(1015);
     let (mut session, target_id) = setup_zap_target(&encoded);
     let before = state(&session);

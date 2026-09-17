@@ -23528,6 +23528,236 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1012_three_way_verified_private_synthetic_batch_downgrades_all_games"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1013",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, disable-target-nearby-minion-until-next-turn Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_1013_freeze_magic_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1014",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-minion Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "killTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_target_rules.rs",
+        "testName": "rule_catalog_1014_kill_target_minion_deathrite_draws_for_controller_before_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1015",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Damage-target-unit Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_target_rules.rs",
+        "testName": "rule_catalog_1015_damage_target_minion_deathrite_draws_for_controller_before_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1016",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here that kills a Deathrite minion draws a site for that minion's controller before the minion leaves play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "strikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_1016_genesis_strike_here_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1017",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "killMortalMinionsAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1017_kill_mortal_here_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1018",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-Ward-to-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantWardToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ward_rules.rs",
+        "testName": "rule_catalog_1018_grant_ward_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1019",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While deathrite-order is pending after a combat kill, move-and-attack is not offered until the Deathrite chain completes, then movement resumes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/combat_rules.rs",
+        "testName": "rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1020",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Begin-chain-magic omits a distant enemy minion beyond hop range as the first hop while still offering a nearby enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "chainMagic"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_1020_begin_chain_magic_omits_distant_enemy_minion_as_first_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1021",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic that kills a Deathrite minion draws a site for that minion's controller before magic-resolved.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_1021_kill_wounded_minion_deathrite_draws_for_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1022",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, grant-Stealth-to-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "stealth-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_1022_grant_stealth_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

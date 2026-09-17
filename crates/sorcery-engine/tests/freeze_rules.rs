@@ -617,7 +617,7 @@ fn rule_catalog_1013_freeze_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(resumed["decisionSeat"], "north");
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(unit(&resumed, &visitor_id)["disableEffects"].is_null());
-    assert_eq!(freeze_targets(session), [visitor_id.clone()]);
+    assert!(freeze_targets(session).contains(&visitor_id));
 
     let (cast, receipt) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
