@@ -16970,6 +16970,25 @@
         "file": "crates/sorcery-engine/tests/discard_random_damage_rules.rs",
         "testName": "rule_catalog_0724_discard_damage_should_ignore_disabled_or_removed_sources_and_count_oversized_once"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0725",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "isTower + gainsPowerRangedAndSpellcasterAtopTower: occupant gets +2 power whether site controller is owner or enemy. Distinct from 0151, which proves the owned-Tower case.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainsPowerRangedAndSpellcasterAtopTower",
+        "derived-power",
+        "isTower"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/tower_rules.rs",
+        "testName": "rule_catalog_0725_tower_should_grant_derived_stats_regardless_of_site_controller"
+      }
     }
   ]
 }
