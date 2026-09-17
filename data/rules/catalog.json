@@ -8646,7 +8646,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When one minion carries all three end-of-controller-turn pulses—Avatar life gain, Avatar life loss, and here-area damage—the End Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing end-turn continuation path.",
+      "plainLanguage": "When one minion carries all three end-of-controller-turn pulses\u2014Avatar life gain, Avatar life loss, and here-area damage\u2014the End Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing end-turn continuation path.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atEndOfControllerTurnControllerGainsLife",
@@ -14414,7 +14414,6 @@
       }
     },
     {
-<<<<<<< HEAD
       "ruleId": "RULE-CATALOG-0623",
       "requirementIds": [
         "RULE-02",
@@ -14561,6 +14560,53 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
         "testName": "rule_catalog_0628_mill_spells_is_a_paid_noop_on_an_empty_library"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0629",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic is the Atlas sibling of mill-spell Magic: it offers only both Avatars and puts top Atlas cards into the owner's cemetery in deck order without drawing or decking.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-discarded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_0629_mill_sites_puts_opponent_atlas_cards_in_the_cemetery"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0630",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Mill-site Magic that finds an empty Atlas is a paid no-op. It does not draw, does not lose to deck-out, and emits no discard events.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_0630_mill_sites_is_a_paid_noop_on_an_empty_atlas"
       }
     }
   ]
