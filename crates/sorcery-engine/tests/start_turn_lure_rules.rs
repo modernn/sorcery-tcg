@@ -737,3 +737,150 @@ fn rule_catalog_0926_start_turn_draw_then_lure_draws_last_spell_when_lure_no_ops
     assert_eq!(target["location"], "C1");
     assert_exact_replay(&session);
 }
+
+fn draw_site_lure_thin_library_manifest(seed: u32, north_atlas: &[&str]) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-site-lure-thin-library" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-site-lure-thin-library-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-source": minion(json!({
+                "atStartOfControllerTurnDrawSites": 1,
+                "atStartOfControllerTurnLureNearbyEnemyMinion": true,
+                "defense": 4,
+            })),
+            "south-avatar": avatar(),
+            "south-minion": minion(json!({ "summonToAnySite": true })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": north_atlas,
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-source"; 4],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn draw_site_lure_thin_library_start_turn(seed: u32, north_atlas: &[&str]) -> Session {
+    let mut session = Session::new(&draw_site_lure_thin_library_manifest(seed, north_atlas))
+        .expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    session
+}
+
+#[test]
+fn rule_catalog_0968_start_turn_draw_sites_then_lure_draws_last_site_when_lure_no_ops() {
+    let mut session = draw_site_lure_thin_library_start_turn(968, &["north-site"; 4]);
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let target_id = unit_id(&session, "south-minion");
+    let drawn_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("only site")["instanceId"]
+        .clone();
+    let library_before = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    assert_eq!(library_before, 1);
+    let hand_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand")
+        .len();
+    let legal = session.legal_actions().expect("empty start-turn draw-site-lure");
+    assert!(legal.iter().all(|action| {
+        action.descriptor["kind"] == "resolve-start-turn-trigger"
+            && action.descriptor["sourceInstanceId"] == source_id
+            && action.descriptor.get("lureTargetInstanceId").is_none()
+    }));
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+            && descriptor.get("lureTargetInstanceId").is_none()
+    });
+    assert_eq!(event_types(&receipt), ["site-drawn"]);
+    assert_eq!(receipt.events[0].payload["sourceInstanceId"], source_id);
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .len(),
+        hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_id)
+    );
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("unmoved south minion");
+    assert_eq!(target["location"], "C1");
+    assert_exact_replay(&session);
+}
