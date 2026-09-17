@@ -1,5 +1,5 @@
 //! Direct proofs for Sparkmage activation (RULE-CATALOG-0149–0150, RULE-CATALOG-0723,
-//! RULE-CATALOG-0802).
+//! RULE-CATALOG-0802, RULE-CATALOG-1137).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -98,6 +98,37 @@ fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (V
         panic!("engine-issued action must be accepted");
     };
     (descriptor, receipt)
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn offers_kind(session: &Session, kind: &str) -> bool {
+    session.legal_actions().ok().is_some_and(|actions| {
+        actions
+            .iter()
+            .any(|action| action.descriptor["kind"] == kind)
+    })
 }
 
 fn keep(session: &mut Session) {
@@ -313,4 +344,174 @@ fn rule_catalog_0865_air_thresholds_select_hidden_candidate_and_reset() {
 #[test]
 fn rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target();
+}
+
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_sparkmage_manifest(seed: u32) -> String {
+    let fixture = "sparkmage-deathrite-withheld";
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-{fixture}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar(true),
+            "north-rain": rain(),
+            "north-site": site(&["air"]),
+            "south-avatar": avatar(false),
+            "south-minion": deathrite_minion(),
+            "south-site": site(&["earth"]),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-rain"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+struct PendingDeathriteSparkmageSetup {
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_pending_deathrite_with_activate_sparkmage(
+    encoded: &str,
+) -> Option<PendingDeathriteSparkmageSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !offers_kind(&session, "activate-sparkmage") {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteSparkmageSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn deathrite_sparkmage_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_sparkmage_manifest)
+        .find(|candidate| try_pending_deathrite_with_activate_sparkmage(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites with legal activate-sparkmage")
+}
+
+#[test]
+fn rule_catalog_1137_activate_sparkmage_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_sparkmage_seed_with(1137);
+    let mut setup = try_pending_deathrite_with_activate_sparkmage(&encoded)
+        .expect("complete activate-sparkmage Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-sparkmage")
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert_eq!(resumed["players"]["north"]["avatar"]["tapped"], false);
+    assert!(offers_kind(session, "activate-sparkmage"));
+    assert_exact_replay(session);
 }
