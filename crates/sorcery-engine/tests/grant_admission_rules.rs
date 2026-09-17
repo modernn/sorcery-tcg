@@ -73,6 +73,26 @@ fn power_gift() -> Value {
     })
 }
 
+fn frog_token() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 0,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        "token": true,
+    })
+}
+
+fn token_gift() -> Value {
+    json!({
+        "cardType": "magic",
+        "summonTokenToAlliedMinionThenDrawSpell": "north-frog",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn stealth_gift() -> Value {
     json!({
         "cardType": "magic",
@@ -128,6 +148,7 @@ fn empty_library_manifest(seed: u32, gift_card: &Value, fixture: &str, revision:
         "cards": {
             "north-ally": ally(),
             "north-avatar": avatar(),
+            "north-frog": frog_token(),
             "north-gift": gift_card.clone(),
             "north-site": site(),
             "south-ally": ally(),
@@ -733,6 +754,81 @@ fn rule_catalog_0987_stealth_enemy_site_grant_then_empty_spellbook_is_a_deck_out
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(unit(&after, &raid_id)["stealthed"], true);
+    assert_eq!(after["terminal"]["status"], "finished");
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
+    let encoded = seed_with_ally_and_gift(
+        988,
+        &token_gift(),
+        "summon-token-then-draw-empty",
+        "synthetic-summon-token-then-draw-empty-v1",
+    );
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        state(&session)["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("empty library")
+            .len(),
+        0
+    );
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let (cast, granted) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-summoned",
+            "magic-resolved",
+            "game-ended"
+        ]
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    let ended = granted
+        .events
+        .iter()
+        .find(|event| event.event_type == "game-ended")
+        .expect("deck-out");
+    assert_eq!(ended.payload["reason"], "deck_empty");
+    assert_eq!(ended.payload["loser"], "north");
+    assert_eq!(ended.payload["winner"], "south");
+    let token_id = granted.events[1].payload["instanceId"]
+        .as_str()
+        .expect("token identity")
+        .to_owned();
+    assert_eq!(granted.events[1].payload["cardId"], "north-frog");
+    assert_eq!(granted.events[1].payload["cell"], "C4");
+    assert_eq!(granted.events[1].payload["token"], true);
+    assert_eq!(
+        granted.events[1].payload["sourceInstanceId"],
+        cast["cardInstanceId"]
+    );
+    let after = state(&session);
+    let token = unit(&after, &token_id);
+    assert_eq!(token["cardId"], "north-frog");
+    assert_eq!(token["location"], "C4");
+    assert_eq!(token["source"], "token");
     assert_eq!(after["terminal"]["status"], "finished");
     assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_exact_replay(&session);
