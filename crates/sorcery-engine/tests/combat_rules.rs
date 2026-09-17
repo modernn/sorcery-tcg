@@ -1276,7 +1276,7 @@ fn rule_catalog_0786_surviving_minion_damage_persists_until_end_phase() {
 }
 
 #[test]
-fn later_undefended_site_strikes_should_not_deliver_deaths_door_death_blows() {
+fn rule_catalog_0793_later_undefended_site_strikes_skip_deaths_door_death_blows() {
     let AttackSetup {
         attacker_instance_id,
         mut session,
