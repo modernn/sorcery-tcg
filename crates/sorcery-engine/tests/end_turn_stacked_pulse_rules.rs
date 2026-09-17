@@ -1,6 +1,6 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
-//! RULE-CATALOG-0915, RULE-CATALOG-0925).
+//! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -971,6 +971,63 @@ fn rule_catalog_0905_end_turn_loss_then_here_damage_on_same_minion() {
     assert_eq!(here_targets, expected_here_targets);
     let after = state(&session);
     assert_eq!(after["players"]["north"]["avatar"]["life"], 15);
+    assert_eq!(
+        after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == visitor_id)
+            .expect("visitor")["damage"],
+        0,
+        "end-turn here damage clears during end-phase cleanup unlike start-turn pulses"
+    );
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["activeSeat"], "south");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0935_end_turn_partial_gain_loss_then_here_damage_on_same_minion() {
+    let mut session = after_north_ready_to_end_turn_with_triple_pulser();
+    let source_id = unit_id(&session, "north-pulser");
+    let visitor_id = unit_id(&session, "south-visitor");
+    let north_avatar_id = avatar_id(&session, "north");
+    let before = state(&session);
+    assert_eq!(before["players"]["north"]["avatar"]["life"], 18);
+    assert_eq!(before["phase"], "main");
+    assert_eq!(before["activeSeat"], "north");
+    let (_, receipt) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let heal_index = event_index(&receipt, "avatar-healed").expect("partial life gain event");
+    let loss_index = event_index(&receipt, "avatar-life-lost").expect("life loss event");
+    let damage_index =
+        event_index(&receipt, "end-turn-damage-allocated").expect("here damage event");
+    assert!(
+        heal_index < loss_index && loss_index < damage_index,
+        "below printed life, end-turn triple pulses must resolve partial gain, then loss, then here-area damage"
+    );
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-healed"
+            && event.payload["amount"] == 2
+            && event.payload["attemptedAmount"] == 3
+            && event.payload["life"] == 20
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "avatar-life-lost"
+            && event.payload["amount"] == 2
+            && event.payload["life"] == 18
+            && event.payload["seat"] == "north"
+            && event.payload["sourceInstanceId"] == source_id
+    }));
+    let mut here_targets = allocated_here_damage_targets(&receipt, &source_id);
+    here_targets.sort_by_key(Value::to_string);
+    let mut expected_here_targets = vec![north_avatar_id, visitor_id.clone()];
+    expected_here_targets.sort_by_key(Value::to_string);
+    assert_eq!(here_targets, expected_here_targets);
+    let after = state(&session);
+    assert_eq!(after["players"]["north"]["avatar"]["life"], 17);
     assert_eq!(
         after["realm"]["units"]
             .as_array()
