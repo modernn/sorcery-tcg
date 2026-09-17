@@ -148,7 +148,6 @@ fn empty_library_manifest(seed: u32, gift_card: &Value, fixture: &str, revision:
         "cards": {
             "north-ally": ally(),
             "north-avatar": avatar(),
-            "north-frog": frog_token(),
             "north-gift": gift_card.clone(),
             "north-site": site(),
             "south-ally": ally(),
@@ -249,6 +248,48 @@ fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
         .expect("expected realm unit")
 }
 
+fn empty_library_token_manifest(
+    seed: u32,
+    gift_card: &Value,
+    fixture: &str,
+    revision: &str,
+) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": revision,
+        },
+        "cards": {
+            "north-ally": ally(),
+            "north-avatar": avatar(),
+            "north-frog": frog_token(),
+            "north-gift": gift_card.clone(),
+            "north-site": site(),
+            "south-ally": ally(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-ally", "north-gift", "north-gift"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-ally"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn seed_with_ally_and_gift(start: u32, gift_card: &Value, fixture: &str, revision: &str) -> String {
     (start..start + 256)
         .map(|seed| empty_library_manifest(seed, gift_card, fixture, revision))
@@ -257,6 +298,21 @@ fn seed_with_ally_and_gift(start: u32, gift_card: &Value, fixture: &str, revisio
             hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-gift")
         })
         .expect("bounded seed with ally and gift Magic filling the opening hand")
+}
+
+fn seed_with_ally_and_token_gift(
+    start: u32,
+    gift_card: &Value,
+    fixture: &str,
+    revision: &str,
+) -> String {
+    (start..start + 256)
+        .map(|seed| empty_library_token_manifest(seed, gift_card, fixture, revision))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-gift")
+        })
+        .expect("bounded seed with ally and token gift Magic filling the opening hand")
 }
 
 fn empty_library_enemy_site_stealth_manifest(seed: u32, fixture: &str, revision: &str) -> String {
@@ -761,7 +817,7 @@ fn rule_catalog_0987_stealth_enemy_site_grant_then_empty_spellbook_is_a_deck_out
 
 #[test]
 fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
-    let encoded = seed_with_ally_and_gift(
+    let encoded = seed_with_ally_and_token_gift(
         988,
         &token_gift(),
         "summon-token-then-draw-empty",

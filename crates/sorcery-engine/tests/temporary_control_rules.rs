@@ -2691,7 +2691,10 @@ fn deathrite_instance_id(snapshot: &Value) -> Option<String> {
 fn try_advance_hijacked_turn_draws(session: &mut Session) -> bool {
     while session.legal_actions().ok().is_some_and(|actions| {
         actions.iter().any(|action| {
-            matches!(action.descriptor["kind"].as_str(), Some("draw-site" | "draw"))
+            matches!(
+                action.descriptor["kind"].as_str(),
+                Some("draw-site" | "draw")
+            )
         })
     }) {
         if !try_accept_where(session, |descriptor| {

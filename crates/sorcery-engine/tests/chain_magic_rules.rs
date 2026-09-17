@@ -1,10 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-<<<<<<< HEAD
-//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0985).
-=======
-//! 0943–0944, 0952, 0955, 0970, 0981, 0985–0986).
->>>>>>> 7b7c003e (Add RULE-CATALOG-0986 chain magic avatar-then-minion hop proof)
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages

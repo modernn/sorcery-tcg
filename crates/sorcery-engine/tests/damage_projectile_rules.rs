@@ -840,7 +840,10 @@ fn rule_catalog_0990_fixed_projectile_deathrite_draws_for_minion_controller_on_k
             "minion-died",
         ]
     );
-    assert_eq!(receipt.events[1].payload["targetInstanceId"], setup.far_target_id);
+    assert_eq!(
+        receipt.events[1].payload["targetInstanceId"],
+        setup.far_target_id
+    );
     let drawn = receipt
         .events
         .iter()

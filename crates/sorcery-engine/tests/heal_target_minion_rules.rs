@@ -745,7 +745,7 @@ fn deathrite_heal_manifest(seed: u32) -> String {
                 "avatar": "south-avatar",
                 "spellbook": vec!["south-minion"; 4]
                     .into_iter()
-                    .chain(std::iter::repeat("south-visitor").take(2))
+                    .chain(std::iter::repeat_n("south-visitor", 2))
                     .collect::<Vec<_>>(),
             },
         },
@@ -774,9 +774,7 @@ struct PendingDeathriteHealSetup {
     visitor_id: String,
 }
 
-fn try_pending_deathrite_with_wounded_visitor(
-    encoded: &str,
-) -> Option<PendingDeathriteHealSetup> {
+fn try_pending_deathrite_with_wounded_visitor(encoded: &str) -> Option<PendingDeathriteHealSetup> {
     let mut session = Session::new(encoded).ok()?;
     keep(&mut session);
     keep(&mut session);

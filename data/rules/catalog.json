@@ -22808,6 +22808,255 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_0982_mixed_allowlisted_and_non_allowlisted_private_local_batch_stays_unranked_for_both"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0983",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and random teleport, exactly one Atlas card remains, and the Start Phase draws that sole site before teleport on the same trigger.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_0983_start_turn_draw_sites_then_teleport_draws_last_site_before_teleport_on_thin_atlas"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0984",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Resolving Chain Magic that kills a Deathrite minion draws a site for that minion's controller and emits magic-resolved only after the Deathrite settlement tail completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "deathriteDrawSite",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0984_resolve_chain_magic_magic_deathrite_draws_before_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0985",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After begin-chain-magic stages a nearby enemy minion, extend-chain-magic omits a distant enemy Avatar as the second hop.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0985_extend_chain_magic_omits_distant_enemy_avatar_as_second_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0986",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "begin-chain-magic may target a nearby enemy Avatar as the first hop, then extend-chain-magic may add a nearby enemy minion as the second hop before resolve.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic",
+        "extend-chain-magic",
+        "resolve-chain-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "avatar-life-lost",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0986_begin_chain_magic_avatar_first_hop_then_extend_minion_second_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0987",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "grant-Stealth-to-an-allied-minion-on-an-enemy-site then draw-spell Magic ends the game in a deck-out when the post-grant draw empties the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOnEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-stealthed",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0987_stealth_enemy_site_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0988",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "summon-token-to-allied-minion then draw-spell Magic ends the game in a deck-out when the follow-up draw empties the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-summoned",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0989",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic ends the game in a deck-out when the final draw empties the Spellbook.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0989_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0990",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A fixed projectile that kills a Deathrite minion draws a site for that minion's controller in the same strike receipt.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDrawSite",
+        "fixedProjectile"
+      ],
+      "actionHints": [
+        "activate-projectile"
+      ],
+      "eventHints": [
+        "projectile-shot",
+        "projectile-damage-allocated",
+        "damage-dealt",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0990_fixed_projectile_deathrite_draws_for_minion_controller_on_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0991",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed first-strike defender with Deathrite pauses in deathrite-order during Defend, resolves the chain once, then resumes the remaining strike window exactly once.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "deathriteDamageEachUnitHere",
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "declare-attack",
+        "defend",
+        "close-defend",
+        "allocate-strike",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "deathrite-damage-allocated",
+        "minion-died",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/first_strike_rules.rs",
+        "testName": "rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_resumes_once"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0992",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, heal-target-minion Magic is not offered and cannot be cast until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_0992_heal_target_minion_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }
