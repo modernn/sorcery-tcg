@@ -9,7 +9,8 @@
 //! (RULE-CATALOG-0948), and thin-Atlas draw-then-mill edges
 //! (RULE-CATALOG-0967), and thin-library draw-then-teleport edges
 //! (RULE-CATALOG-0980), and thin-Atlas draw-then-teleport edges
-//! (RULE-CATALOG-0983).
+//! (RULE-CATALOG-0983), and thin-library draw-sites-then-draw-spells edges
+//! (RULE-CATALOG-0995).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -2974,6 +2975,126 @@ fn rule_catalog_0983_start_turn_draw_sites_then_teleport_draws_last_site_before_
             .find(|unit| unit["instanceId"] == source_id)
             .expect("source after teleport")["location"],
         location_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0995_start_turn_draw_sites_then_draw_spells_on_thin_libraries() {
+    let mut session = draw_sites_draw_spells_stack_start_turn(
+        995,
+        &["north-site"; 4],
+        &["north-spell-card", "north-source", "north-source", "north-source"],
+    );
+    assert_eq!(state(&session)["phase"], "start-turn");
+    let before = state(&session);
+    let source_id = before["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-source")
+        .expect("source minion")["instanceId"]
+        .clone();
+    let drawn_site_id = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .first()
+        .expect("only site")["instanceId"]
+        .clone();
+    let drawn_spell_id = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .first()
+        .expect("only spell")["instanceId"]
+        .clone();
+    let atlas_before = before["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .len();
+    let spellbook_before = before["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .len();
+    assert_eq!(atlas_before, 1);
+    assert_eq!(spellbook_before, 1);
+    let atlas_hand_before = before["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .expect("north Atlas hand")
+        .len();
+    let spell_hand_before = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north hand")
+        .len();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-start-turn-trigger"
+            && descriptor["sourceInstanceId"] == source_id
+    });
+    let site_draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "site-drawn")
+        .expect("site-drawn event");
+    let spell_draw_index = receipt
+        .events
+        .iter()
+        .position(|event| event.event_type == "spell-drawn")
+        .expect("spell-drawn event");
+    assert!(
+        site_draw_index < spell_draw_index,
+        "Atlas draw must resolve before Spellbook draw on the same minion Start Phase trigger"
+    );
+    assert_eq!(
+        receipt.events[site_draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    assert_eq!(
+        receipt.events[spell_draw_index].payload["sourceInstanceId"],
+        source_id
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "draw");
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_eq!(
+        after["players"]["north"]["atlas"]
+            .as_array()
+            .expect("north Atlas")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["spellbook"]
+            .as_array()
+            .expect("north Spellbook")
+            .len(),
+        0
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .len(),
+        atlas_hand_before + 1
+    );
+    assert_eq!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .len(),
+        spell_hand_before + 1
+    );
+    assert!(
+        after["players"]["north"]["hand"]["atlas"]
+            .as_array()
+            .expect("north Atlas hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_site_id)
+    );
+    assert!(
+        after["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .expect("north hand")
+            .iter()
+            .any(|card| card["instanceId"] == drawn_spell_id)
     );
     assert_exact_replay(&session);
 }
