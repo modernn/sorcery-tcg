@@ -712,8 +712,8 @@ fn rule_catalog_0255_genesis_strike_is_not_doubled_when_the_struck_unit_is_not_n
 }
 
 #[test]
-fn rule_catalog_0953_genesis_strike_deals_double_damage_when_enemies_share_the_newcomers_cell_with_nearby_mask(
-) {
+fn rule_catalog_0953_genesis_strike_deals_double_damage_when_enemies_share_the_newcomers_cell_with_nearby_mask()
+ {
     let mut session = after_south_pair_shares_c4_with_mask(true);
     let first_target = unit_id(&session, "south-minion");
     let second_target = state(&session)["realm"]["units"]

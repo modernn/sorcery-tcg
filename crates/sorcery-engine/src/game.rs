@@ -11023,22 +11023,28 @@ impl Game {
             self.position.state_version += 1;
             return Ok(());
         };
-        outcomes.push("projectile-damage-allocated", || {
-            json!({
-                "amount": amount,
-                "sourceInstanceId": shooter_instance_id,
-                "targetInstanceId": target.instance_id(),
-            })
-        });
         let target_kind = match target {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
+        let allocated = self.nearby_unit_strike_amount(
+            amount,
+            target_kind,
+            target.seat(),
+            target.instance_id(),
+        )?;
+        outcomes.push("projectile-damage-allocated", || {
+            json!({
+                "amount": allocated,
+                "sourceInstanceId": shooter_instance_id,
+                "targetInstanceId": target.instance_id(),
+            })
+        });
         let damage = self.apply_simple_damage(
             target_kind,
             target.seat(),
             target.instance_id(),
-            amount,
+            allocated,
             UnitDamageSource {
                 current_power,
                 lethal,

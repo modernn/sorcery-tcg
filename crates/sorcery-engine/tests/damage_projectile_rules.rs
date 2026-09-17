@@ -142,18 +142,18 @@ fn event_types(receipt: &Receipt) -> Vec<&str> {
         .collect()
 }
 
-fn strike_amount(receipt: &Receipt, target_id: &str) -> i64 {
+fn projectile_amount(receipt: &Receipt, target_id: &str) -> i64 {
     receipt
         .events
         .iter()
         .find(|event| {
-            event.event_type == "strike-damage-allocated"
+            event.event_type == "projectile-damage-allocated"
                 && event.payload["targetInstanceId"] == target_id
         })
-        .expect("strike allocation")
+        .expect("projectile allocation")
         .payload["amount"]
         .as_i64()
-        .expect("strike amount")
+        .expect("projectile amount")
 }
 
 fn unit_id(session: &Session, card_id: &str) -> String {
@@ -711,8 +711,8 @@ fn cast_south_mask(session: &mut Session, bearer_id: &str) {
 }
 
 fn after_fixed_projectile_mask_ready() -> Session {
-    let mut session =
-        Session::new(&mask_fixed_projectile_manifest()).expect("valid fixed-projectile mask session");
+    let mut session = Session::new(&mask_fixed_projectile_manifest())
+        .expect("valid fixed-projectile mask session");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -760,13 +760,13 @@ fn after_fixed_projectile_mask_ready() -> Session {
 }
 
 #[test]
-fn rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask(
-) {
+fn rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask()
+ {
     let mut session = after_fixed_projectile_mask_ready();
     let shooter_id = unit_id(&session, "north-shooter");
     let target_id = unit_id(&session, "south-minion");
     let receipt = fire_south(&mut session, &shooter_id, &target_id);
-    assert_eq!(strike_amount(&receipt, &target_id), 2);
+    assert_eq!(projectile_amount(&receipt, &target_id), 2);
     assert!(
         state(&session)["realm"]["units"]
             .as_array()

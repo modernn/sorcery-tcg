@@ -22070,6 +22070,246 @@
         "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
         "testName": "rule_catalog_0952_chain_magic_is_unoffered_when_printed_spellcaster_has_zero_legal_first_hops"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0953",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here deals double damage to every enemy sharing the newcomer's cell when a nearby-double-strike source is present. Each co-located enemy is struck separately with the multiplier measured at that cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/nearby_double_strike_rules.rs",
+        "testName": "rule_catalog_0953_genesis_strike_deals_double_damage_when_enemies_share_the_newcomers_cell_with_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0954",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04"
+      ],
+      "plainLanguage": "A fixed-damage projectile strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location and emits projectile-damage-allocated.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapToShootProjectileDamage",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [
+        "shoot-damage-projectile"
+      ],
+      "eventHints": [
+        "projectile-damage-allocated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
+        "testName": "rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0955",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "begin-chain-magic may target a nearby enemy Avatar as the first hop when the printed Spellcaster caster has legal nearby hops in its region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits",
+        "spellcaster"
+      ],
+      "actionHints": [
+        "begin-chain-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chain_magic_rules.rs",
+        "testName": "rule_catalog_0955_begin_chain_magic_may_target_nearby_enemy_avatar_as_first_hop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0956",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an ally +1 movement this turn and then draws a spell ends the game in deck-out when the Spellbook is empty after the grant resolves, without drawing a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "movement-granted",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0956_movement_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0957",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants Stealth to allied minions this turn and then draws a spell ends the game in deck-out when the Spellbook is empty after the grant resolves, without drawing a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0957_stealth_grant_then_empty_spellbook_is_a_deck_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0958",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Sacrifice-to-steal Artifact control may transfer a distant tapped enemy Deathrite minion to the bearer, and when the thief kills it before the bearer leaves play the Deathrite draws a site for the thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "activate-artifact-sacrifice-control",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-sacrificed",
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0958_sacrifice_artifact_control_transfers_distant_deathrite_to_thief_before_bearer_leaves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0959",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Nearby-Avatar discard control may transfer a distant enemy Deathrite minion to the thief, and when the thief kills it before permanent control settles the Deathrite draws a site for the thief.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyAvatarsMayDiscardCardToGainControlOfThis",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "activate-discard-to-gain-control",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-control-changed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/temporary_control_rules.rs",
+        "testName": "rule_catalog_0959_nearby_avatar_discard_control_transfers_distant_deathrite_to_thief_before_permanent_control"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0960",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "When one minion carries both start-of-controller-turn Atlas draw and nearby-enemy lure, the draw resolves before the lure on the same Start Phase trigger.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_lure_rules.rs",
+        "testName": "rule_catalog_0960_start_turn_draw_sites_then_lure_resolves_in_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0961",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A finished synthetic-authority game stays unranked when evaluated under batch policy that includes only synthetic manifests.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_0961_synthetic_only_batch_keeps_synthetic_game_unranked"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-0962",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Magic that grants an allied minion +2 power this turn and then draws a spell ends the game in deck-out when the Spellbook is empty after the grant resolves, without drawing a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantPowerTwoToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "power-granted",
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out"
+      }
     }
   ]
 }
