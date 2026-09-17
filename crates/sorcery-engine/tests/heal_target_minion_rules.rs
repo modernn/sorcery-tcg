@@ -1,5 +1,6 @@
 //! Direct proofs for heal-target-minion Magic (RULE-CATALOG-0298–0299,
-//! RULE-CATALOG-0663–0664, RULE-CATALOG-0908, RULE-CATALOG-0992).
+//! RULE-CATALOG-0663–0664, RULE-CATALOG-0908, RULE-CATALOG-0992,
+//! RULE-CATALOG-0997).
 //!
 //! Official Magic can remove damage from a living minion without targeting
 //! Avatars or breaking Ward. Healing a healthy minion is a paid no-op. End
@@ -927,6 +928,46 @@ fn rule_catalog_0992_heal_target_minion_withheld_during_pending_deathrite_order(
     assert_eq!(
         realm_unit(&state(session), &visitor_id).expect("partially healed visitor")["damage"],
         1
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_0997_end_turn_and_summon_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_heal_seed_with(997);
+    let mut setup = try_pending_deathrite_with_wounded_visitor(&encoded)
+        .expect("complete end-turn/summon Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "end-turn"
+                    && action.descriptor["kind"] != "summon-minion"
+            })
+    );
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "end-turn")
     );
     assert_exact_replay(session);
 }
