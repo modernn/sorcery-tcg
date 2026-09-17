@@ -1,6 +1,7 @@
 //! Direct proofs that nearby doubled unit strikes apply to Ranged projectiles,
-//! Genesis strikes (RULE-CATALOG-0252–0255, RULE-CATALOG-0953), Leap Attack
-//! strikes (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947).
+//! Genesis strikes (RULE-CATALOG-0252–0255, RULE-CATALOG-0953, RULE-CATALOG-0969), Leap Attack
+//! strikes (RULE-CATALOG-0945), and ally-strike-here Magic (RULE-CATALOG-0947,
+//! RULE-CATALOG-0966).
 //!
 //! Official Mask of Mayhem FAQ doubles a strike when the struck unit is nearby
 //! the source, including distant Ranged strikers. Ordinary combat already uses
@@ -752,6 +753,47 @@ fn rule_catalog_0953_genesis_strike_deals_double_damage_when_enemies_share_the_n
 }
 
 #[test]
+fn rule_catalog_0969_genesis_strike_each_co_located_enemy_is_not_doubled_without_nearby_mask() {
+    let mut session = after_south_pair_shares_c4_with_mask(false);
+    let first_target = unit_id(&session, "south-minion");
+    let second_target = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["cardId"] == "south-minion" && unit["instanceId"] != first_target)
+        .expect("second south minion at C4")["instanceId"]
+        .clone();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-titan"
+            && descriptor["cell"] == "C4"
+    });
+    let undoubled: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .map(|event| {
+            assert_eq!(event.payload["amount"], 1);
+            event.payload["targetInstanceId"].clone()
+        })
+        .collect();
+    assert_eq!(undoubled.len(), 2);
+    assert!(undoubled.contains(&first_target));
+    assert!(undoubled.contains(&second_target));
+    let after = state(&session);
+    for target_id in [&first_target, &second_target] {
+        let target = after["realm"]["units"]
+            .as_array()
+            .expect("units")
+            .iter()
+            .find(|unit| unit["instanceId"] == *target_id)
+            .expect("south minion survives an undoubled 1-power Genesis strike");
+        assert_eq!(target["damage"], 1);
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
 fn rule_catalog_0947_ally_strike_magic_deals_double_damage_when_the_struck_enemy_is_nearby() {
     let mut session = after_ally_strike_ready(true);
     let ally_id = unit_id(&session, "north-ally");
@@ -771,5 +813,28 @@ fn rule_catalog_0947_ally_strike_magic_deals_double_damage_when_the_struck_enemy
             .all(|unit| unit["instanceId"] != target_id),
         "a 1-power nearby ally-strike Magic hit must deal 2 and kill a 2-defense minion"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0966_ally_strike_magic_is_not_doubled_when_struck_enemy_is_not_nearby_mask() {
+    let mut session = after_ally_strike_ready(false);
+    let ally_id = unit_id(&session, "north-ally");
+    let target_id = unit_id(&session, "south-minion");
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    assert_eq!(strike_amount(&receipt, &target_id), 1);
+    let after = state(&session);
+    let target = after["realm"]["units"]
+        .as_array()
+        .expect("units")
+        .iter()
+        .find(|unit| unit["instanceId"] == target_id)
+        .expect("south minion survives an undoubled 1-power ally-strike Magic hit");
+    assert_eq!(target["damage"], 1);
     assert_exact_replay(&session);
 }
