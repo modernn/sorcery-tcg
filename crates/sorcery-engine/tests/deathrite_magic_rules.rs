@@ -1,10 +1,13 @@
-//! Direct proofs for nearby-control Magic and Deathrite (RULE-CATALOG-0659–0660).
+//! Direct proofs for nearby-control Magic and Deathrite (RULE-CATALOG-0659–0660,
+//! RULE-CATALOG-0977).
 //!
 //! `gainControlOfTargetNearbyMinion` transfers a nearby minion to the caster.
 //! Deathrite follows the new controller: targeted Magic is a non-unit source,
 //! so killing the stolen minion draws a site for the thief while the corpse
 //! still enters the owner's cemetery. A far minion is not a legal steal, and
 //! the same Magic damage still resolves Deathrite for the original controller.
+//! Distinct from the private Mesmerism fight path, `0977` proves the draw on a
+//! later turn via Magic damage rather than immediate same-turn or combat death.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -375,5 +378,77 @@ fn rule_catalog_0660_mesmerism_does_not_steal_a_far_minion_and_deathrite_stays_w
     assert_eq!(atlas_len(&finished, "south"), south_atlas - 1);
     assert_eq!(atlas_len(&finished, "north"), north_atlas);
     assert!(cemetery_has(&finished, "south", &far_id));
+    assert_exact_replay(&session);
+}
+
+fn end_then_draw(session: &mut Session, zone: &str) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == zone
+    });
+}
+
+#[test]
+fn rule_catalog_0977_mesmerism_deathrite_draws_for_new_controller_on_delayed_kill_not_only_fight() {
+    let encoded = seed_with(977);
+    let mut session = opening_main(&encoded);
+    let nearby_id = stage_south_minion(&mut session, "C4");
+    assert_eq!(mesmerism_targets(&session), [nearby_id.as_str()]);
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mesmerism"
+            && descriptor["target"]["instanceId"] == nearby_id
+    });
+    let stolen_state = state(&session);
+    let stolen = realm_unit(&stolen_state, &nearby_id).expect("stolen minion");
+    assert_eq!(stolen["controller"], "north");
+    assert_eq!(stolen["owner"], "south");
+
+    end_then_draw(&mut session, "spellbook");
+    end_then_draw(&mut session, "spellbook");
+    let delayed = state(&session);
+    let still_stolen = realm_unit(&delayed, &nearby_id).expect("minion still controlled");
+    assert_eq!(still_stolen["controller"], "north");
+    assert_eq!(still_stolen["owner"], "south");
+
+    let north_atlas = atlas_len(&delayed, "north");
+    let south_atlas = atlas_len(&delayed, "south");
+    let (lash, killed) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == nearby_id
+    });
+    let spell_id = lash["cardInstanceId"]
+        .as_str()
+        .expect("Lash identity")
+        .to_owned();
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "site-drawn",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["sourceInstanceId"], spell_id);
+    assert_eq!(killed.events[1].payload["targetInstanceId"], nearby_id);
+    let drawn = killed
+        .events
+        .iter()
+        .find(|event| event.event_type == "site-drawn")
+        .expect("Deathrite site draw");
+    assert_eq!(drawn.payload["seat"], "north");
+    assert_eq!(drawn.payload["sourceInstanceId"], nearby_id);
+
+    let finished = state(&session);
+    assert!(realm_unit(&finished, &nearby_id).is_none());
+    assert_eq!(atlas_len(&finished, "north"), north_atlas - 1);
+    assert_eq!(atlas_len(&finished, "south"), south_atlas);
+    assert!(cemetery_has(&finished, "south", &nearby_id));
+    assert!(!cemetery_has(&finished, "north", &nearby_id));
     assert_exact_replay(&session);
 }
