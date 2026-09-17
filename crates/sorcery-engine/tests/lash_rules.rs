@@ -1,5 +1,5 @@
 //! Direct proofs for Lash damage-then-untap Magic (RULE-CATALOG-0024, 0699,
-//! RULE-CATALOG-1062).
+//! RULE-CATALOG-1062, RULE-CATALOG-1120).
 //!
 //! `damageTargetUnit` with `targetNearby` and `untapTargetMinionAfterDamage`
 //! offers only a nearby minion, deals printed damage, and untaps the target
@@ -495,7 +495,7 @@ fn rule_catalog_0699_lash_damages_then_untaps_only_a_surviving_nearby_minion() {
 }
 
 #[test]
-fn rule_catalog_0699_lash_lethal_damage_does_not_untap() {
+fn rule_catalog_1120_lash_lethal_damage_does_not_untap() {
     let encoded = seed_with(1, 1699);
     let mut session = opening_main(&encoded);
     let (nearby_id, distant_id) = setup_nearby_and_distant(&mut session);
