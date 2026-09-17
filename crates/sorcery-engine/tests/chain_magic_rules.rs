@@ -1,6 +1,6 @@
 //! Direct proofs for 1×1 Chain Magic hops (RULE-CATALOG-0030, 0696, 0709,
 //! 0885–0890, 0893–0894, 0896, 0903–0904, 0913–0914, 0923–0924, 0933–0934,
-//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996).
+//! 0943–0944, 0952, 0955, 0970, 0981, 0984–0986, 0996, 1010).
 //!
 //! 0385–0386 already cover oversized Spellcaster footprint hops. 0696 keeps
 //! the 0030 leftover: a 1×1 caster stages distinct nearby hops, then damages
@@ -52,6 +52,9 @@
 //! before resolve damages both staged targets.
 //! 0996 covers the 0986 two-hop flow when the second hop is a Deathrite minion:
 //! resolve kills the minion, site-drawn settles before magic-resolved.
+//! 1010 covers begin-chain-magic staging a nearby enemy minion as the first hop,
+//! then extend-chain-magic adding a second nearby enemy minion before resolve.
+//! Distinct from 0986, which uses Avatar as the first hop.
 
 use serde_json::{Value, json};
 use sorcery_engine::action::ActionDescriptor;
@@ -3312,6 +3315,106 @@ fn try_setup_spellcaster_begin_avatar_extend_minion_hop(
     ))
 }
 
+fn try_setup_spellcaster_begin_minion_extend_minion_hop(
+    encoded: &str,
+) -> Option<(Session, String, String, String, String)> {
+    if !opening_has_all(encoded, &["north-chain", "north-caster"]) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let (first_minion, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C2"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
+    })?;
+    let (second_minion, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "D2"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (caster, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C3"
+    })?;
+    let before = state(&session);
+    let first_minion_id = first_minion["cardInstanceId"]
+        .as_str()
+        .expect("first minion identity")
+        .to_owned();
+    let second_minion_id = second_minion["cardInstanceId"]
+        .as_str()
+        .expect("second minion identity")
+        .to_owned();
+    if first_minion_id == second_minion_id {
+        return None;
+    }
+    let chain_id = try_hand_instance(&before, "north-chain")?;
+    let caster_id = caster["cardInstanceId"]
+        .as_str()
+        .expect("printed caster identity")
+        .to_owned();
+    let caster_unit = realm_unit(&before, &caster_id)?;
+    let first_unit = realm_unit(&before, &first_minion_id)?;
+    let second_unit = realm_unit(&before, &second_minion_id)?;
+    if caster_unit["location"] != "C3" || caster_unit["region"] != "surface" {
+        return None;
+    }
+    if first_unit["location"] != "C2" || first_unit["region"] != "surface" {
+        return None;
+    }
+    if second_unit["location"] != "D2" || second_unit["region"] != "surface" {
+        return None;
+    }
+    let begin_targets = chain_ids(&session, &chain_id);
+    if !begin_targets.contains(&first_minion_id) {
+        return None;
+    }
+    Some((
+        session,
+        chain_id,
+        caster_id,
+        first_minion_id,
+        second_minion_id,
+    ))
+}
+
 #[test]
 fn rule_catalog_0986_begin_chain_magic_avatar_first_hop_then_extend_minion_second_hop() {
     let encoded = (986..986 + 512)
@@ -3405,6 +3508,119 @@ fn rule_catalog_0986_begin_chain_magic_avatar_first_hop_then_extend_minion_secon
         life_before - 2
     );
     assert!(realm_unit(&state(&session), &south_minion_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1010_begin_chain_magic_minion_first_hop_then_extend_second_minion() {
+    let encoded = (1010..1010 + 512)
+        .map(spellcaster_avatar_manifest)
+        .find(|candidate| try_setup_spellcaster_begin_minion_extend_minion_hop(candidate).is_some())
+        .expect(
+            "bounded seed with Chain Magic, printed Spellcaster at C3, nearby South minion at C2 for begin, and nearby South minion at D2 for extend",
+        );
+    let (mut session, chain_id, caster_id, first_minion_id, second_minion_id) =
+        try_setup_spellcaster_begin_minion_extend_minion_hop(&encoded)
+            .expect("spellcaster begin minion extend minion hop setup");
+    let (_, begin) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "begin-chain-magic"
+            && descriptor["cardInstanceId"] == chain_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == first_minion_id
+    });
+    assert!(begin.events.is_empty());
+    let staged = state(&session);
+    assert_eq!(staged["phase"], "chain-magic");
+    assert_eq!(
+        staged["pendingChainMagic"]["targets"],
+        json!([{
+            "instanceId": first_minion_id,
+            "kind": "minion",
+            "seat": "south",
+        }])
+    );
+    assert!(
+        extend_ids(&session).contains(&second_minion_id),
+        "extend-chain-magic must offer the nearby enemy minion as a second hop"
+    );
+    assert!(
+        !extend_ids(&session).contains(&first_minion_id),
+        "extend-chain-magic must omit the already-staged minion hop"
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "extend-chain-magic"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["seat"] == "south"
+            && descriptor["target"]["instanceId"] == second_minion_id
+    });
+    let extended = state(&session);
+    assert_eq!(
+        extended["pendingChainMagic"]["targets"],
+        json!([
+            {
+                "instanceId": first_minion_id,
+                "kind": "minion",
+                "seat": "south",
+            },
+            {
+                "instanceId": second_minion_id,
+                "kind": "minion",
+                "seat": "south",
+            }
+        ])
+    );
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "resolve-chain-magic"
+    });
+    let damaged: Vec<_> = resolved
+        .events
+        .iter()
+        .filter(|event| event.event_type == "magic-damage-allocated")
+        .map(|event| event.payload.clone())
+        .collect();
+    assert_eq!(
+        damaged,
+        [&first_minion_id, &second_minion_id]
+            .into_iter()
+            .map(|target_instance_id| json!({
+                "amount": 2,
+                "sourceInstanceId": chain_id,
+                "targetInstanceId": target_instance_id,
+            }))
+            .collect::<Vec<_>>()
+    );
+    let first_death = event_types(&resolved)
+        .iter()
+        .position(|event_type| *event_type == "minion-died")
+        .expect("first chained death");
+    assert!(
+        resolved
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event.event_type == "magic-damage-allocated")
+            .all(|(index, _)| index < first_death)
+    );
+    assert!(
+        resolved
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event.event_type == "damage-dealt")
+            .all(|(index, _)| index < first_death)
+    );
+    assert!(
+        !event_types(&resolved).contains(&"avatar-life-lost"),
+        "minion-only hops must not damage Avatar life"
+    );
+    assert_eq!(event_types(&resolved).last(), Some(&"magic-resolved"));
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingChainMagic"].is_null());
+    assert!(realm_unit(&after, &first_minion_id).is_none());
+    assert!(realm_unit(&after, &second_minion_id).is_none());
     assert_exact_replay(&session);
 }
 
