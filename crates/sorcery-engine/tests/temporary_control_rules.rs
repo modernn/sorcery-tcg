@@ -3143,3 +3143,216 @@ fn rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending
     assert!(potion_targets(session).contains(&near_id));
     assert_exact_replay(session);
 }
+fn discard_gain_control_deathrite_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "nearby-avatar-discard-control-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-nearby-avatar-discard-control-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dummy": dummy(),
+            "north-rain": rain(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-deathrite": deathrite(),
+            "south-sellsword": sellsword(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 8],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-dummy",
+                    "north-rain",
+                    "north-dummy",
+                    "north-rain",
+                    "north-dummy",
+                    "north-rain",
+                    "north-dummy",
+                    "north-rain"
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 8],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-sellsword",
+                    "south-deathrite",
+                    "south-deathrite",
+                    "south-sellsword",
+                    "south-deathrite",
+                    "south-deathrite",
+                    "south-sellsword",
+                    "south-deathrite"
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn north_has_rain_and_dummy(snapshot: &Value) -> bool {
+    let hand = snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North Spellbook");
+    ["north-dummy", "north-rain"]
+        .into_iter()
+        .all(|card_id| hand.iter().any(|card| card["cardId"] == card_id))
+}
+
+fn realm_card_instance_ids(snapshot: &Value, card_id: &str) -> Vec<String> {
+    snapshot["realm"]["units"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|unit| unit["cardId"] == card_id)
+        .filter_map(|unit| unit["instanceId"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+struct PendingDeathriteDiscardGainControlSetup {
+    deathrite_ids: [String; 2],
+    sellsword_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_with_activate_discard_to_gain_control(
+    encoded: &str,
+) -> Option<PendingDeathriteDiscardGainControlSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !try_end_then_draw(&mut session, "spellbook")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        })
+        || !try_end_then_draw(&mut session, "spellbook")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+        })
+        || !try_end_then_draw(&mut session, "spellbook")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-sellsword"
+                && descriptor["cell"] == "C3"
+        })
+    {
+        return None;
+    }
+    let sellsword_id = realm_card_instance_ids(&state(&session), "south-sellsword")
+        .into_iter()
+        .next()?;
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    }) || !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    }) {
+        return None;
+    }
+    let mut deathrite_ids: [String; 2] =
+        realm_card_instance_ids(&state(&session), "south-deathrite")
+            .try_into()
+            .ok()?;
+    deathrite_ids.sort_unstable();
+    if !try_end_then_draw(&mut session, "spellbook")
+        || !north_has_rain_and_dummy(&state(&session))
+        || !sellsword_steal_ids(&session).contains(&sellsword_id)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+        })
+        || state(&session)["phase"] != "deathrite-order"
+    {
+        return None;
+    }
+    Some(PendingDeathriteDiscardGainControlSetup {
+        deathrite_ids,
+        sellsword_id,
+        session,
+    })
+}
+
+fn deathrite_discard_gain_control_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(discard_gain_control_deathrite_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_activate_discard_to_gain_control(candidate).is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal activate-discard-to-gain-control",
+        )
+}
+
+#[test]
+fn rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_discard_gain_control_seed_with(1162);
+    let mut setup = try_pending_deathrite_with_activate_discard_to_gain_control(&encoded)
+        .expect("complete activate-discard-to-gain-control Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let sellsword_id = setup.sellsword_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    let sellsword = realm_unit(&paused, &sellsword_id).expect("Sellsword remains in play");
+    assert_eq!(sellsword["location"], "C3");
+    assert_eq!(sellsword["damage"], 1);
+    assert!(deathrite_ids.iter().all(|instance_id| {
+        paused["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != *instance_id)
+    }));
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "activate-discard-to-gain-control")
+    );
+    assert!(sellsword_steal_ids(session).is_empty());
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        sellsword_steal_ids(session).contains(&sellsword_id),
+        "activate-discard-to-gain-control returns after Deathrites drain"
+    );
+    assert_exact_replay(session);
+}
