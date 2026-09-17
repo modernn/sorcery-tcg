@@ -1,7 +1,9 @@
 //! Direct proofs for Water site terrain settlement: underwater Deathrite source
 //! region preservation, Genesis resume after ordered Deathrites
-//! (RULE-CATALOG-0713–0714), and state-based region settlement when Water floods
-//! underground Burrowing minions without Submerge (RULE-CATALOG-0901).
+//! (RULE-CATALOG-0713–0714), state-based region settlement when Water floods
+//! underground Burrowing minions without Submerge (RULE-CATALOG-0901), and the
+//! burrow-to-submerge relayer that lets dual-region occupants survive the same
+//! flood (RULE-CATALOG-0909).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -53,6 +55,18 @@ fn burrowing_minion() -> Value {
     })
 }
 
+fn dual_region_minion() -> Value {
+    json!({
+        "attack": 1,
+        "burrowing": true,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "submerge": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn destroy_site() -> Value {
     json!({
         "cardType": "magic",
@@ -68,20 +82,33 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn flood_settlement_manifest(seed: u32) -> String {
+fn flood_settlement_manifest(seed: u32, dual_region: bool) -> String {
+    let (south_minion, south_key, fixture) = if dual_region {
+        (
+            dual_region_minion(),
+            "south-dualer",
+            "water-flood-dual-region-settlement",
+        )
+    } else {
+        (
+            burrowing_minion(),
+            "south-burrower",
+            "water-flood-burrower-settlement",
+        )
+    };
     finish_manifest(json!({
         "authority": {
-            "contentHash": identity_hash(&json!({ "fixture": "water-flood-burrower-settlement" }))
+            "contentHash": identity_hash(&json!({ "fixture": fixture }))
                 .expect("synthetic authority identity"),
             "mode": "synthetic",
-            "revisionId": "synthetic-water-flood-burrower-settlement-v1",
+            "revisionId": format!("synthetic-{fixture}-v1"),
         },
         "cards": {
             "north-avatar": avatar(),
             "north-destroy": destroy_site(),
             "north-earth": earth_site(),
             "south-avatar": avatar(),
-            "south-burrower": burrowing_minion(),
+            south_key: south_minion,
             "south-earth": earth_site(),
             "south-water": water_site(),
         },
@@ -94,7 +121,7 @@ fn flood_settlement_manifest(seed: u32) -> String {
             "south": {
                 "atlas": ["south-earth", "south-water", "south-earth", "south-earth", "south-earth", "south-earth"],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-burrower"; 6],
+                "spellbook": vec![south_key; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -191,9 +218,14 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn seed_with(start: u32) -> String {
+fn seed_with(start: u32, dual_region: bool) -> String {
+    let minion_id = if dual_region {
+        "south-dualer"
+    } else {
+        "south-burrower"
+    };
     (start..start + 256)
-        .map(flood_settlement_manifest)
+        .map(|seed| flood_settlement_manifest(seed, dual_region))
         .find(|candidate| {
             let preview = Session::new(candidate).expect("flood settlement candidate");
             let snapshot = state(&preview);
@@ -203,13 +235,13 @@ fn seed_with(start: u32) -> String {
             let south_atlas = snapshot["players"]["south"]["hand"]["atlas"]
                 .as_array()
                 .expect("South opening atlas");
-            south_hand.iter().any(|card| card["cardId"] == "south-burrower")
+            south_hand.iter().any(|card| card["cardId"] == minion_id)
                 && south_atlas.iter().any(|card| card["cardId"] == "south-water")
                 && snapshot["players"]["north"]["hand"]["spellbook"]
                     .as_array()
                     .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-destroy"))
         })
-        .expect("bounded seed with Destroy, Burrower, and Water site")
+        .expect("bounded seed with Destroy, subsurface minion, and Water site")
 }
 
 fn south_draw_spellbook(session: &mut Session) {
@@ -223,7 +255,7 @@ fn south_draw_spellbook(session: &mut Session) {
 
 #[test]
 fn rule_catalog_0901_water_flood_kills_buried_burrower_without_submerge_in_same_receipt() {
-    let encoded = seed_with(901);
+    let encoded = seed_with(901, false);
     let mut session = opening_main(&encoded);
     south_draw_spellbook(&mut session);
     accept_where(&mut session, "south play C1", |descriptor| {
@@ -295,5 +327,77 @@ fn rule_catalog_0901_water_flood_kills_buried_burrower_without_submerge_in_same_
     assert!(after["pendingDeathrites"].is_null());
     assert!(realm_unit(&after, &target_id).is_none());
     assert!(cemetery_has(&after, "south", &target_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_0909_water_flood_relayers_dual_region_minion_underwater_without_settlement_death(
+) {
+    let encoded = seed_with(909, true);
+    let mut session = opening_main(&encoded);
+    south_draw_spellbook(&mut session);
+    accept_where(&mut session, "south play C1", |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(&mut session, "summon dualer underground", |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-dualer"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"] == "underground"
+    });
+    let target_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("dual-region identity")
+        .to_owned();
+    south_draw_spellbook(&mut session);
+    let c1_site_id = state(&session)["realm"]["sites"]["C1"]["instanceId"]
+        .as_str()
+        .expect("South earth site identity")
+        .to_owned();
+    let destroy_id = state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("North hand")
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")
+        .expect("Destroy in hand")["instanceId"]
+        .as_str()
+        .expect("Destroy identity")
+        .to_owned();
+    accept_where(&mut session, "north destroy C1", |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == destroy_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == c1_site_id
+    });
+    assert_eq!(
+        realm_unit(&state(&session), &target_id).expect("buried dual-region minion")["region"],
+        "underground"
+    );
+    south_draw_spellbook(&mut session);
+    if state(&session)["players"]["south"]["hand"]["atlas"]
+        .as_array()
+        .is_none_or(|hand| !hand.iter().any(|card| card["cardId"] == "south-water"))
+    {
+        accept_where(&mut session, "south draw-site", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    let (_, flooded) = accept_where(&mut session, "south play water on rubble", |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-water"
+            && descriptor["cell"] == "C1"
+    });
+    assert_eq!(
+        event_types(&flooded),
+        ["rubble-replaced", "site-played"],
+        "dual-region minion must relayer underwater and survive state-based settlement"
+    );
+    let after = state(&session);
+    assert_eq!(after["phase"], "main");
+    assert!(after["pendingDeathrites"].is_null());
+    let occupant = realm_unit(&after, &target_id).expect("surviving dual-region minion");
+    assert_eq!(occupant["location"], "C1");
+    assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&after, "south", &target_id));
     assert_exact_replay(&session);
 }
