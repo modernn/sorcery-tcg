@@ -1,5 +1,5 @@
 //! Direct proofs for Flood and Drought terrain Auras (RULE-CATALOG-0266–0267,
-//! RULE-CATALOG-0775, RULE-CATALOG-0912).
+//! RULE-CATALOG-0775, RULE-CATALOG-0912, RULE-CATALOG-1169).
 //!
 //! Official Flood is a persistent 2×2 Aura: affected sites are flooded, so they
 //! are Water sites and still provide their other elemental affinities. Official
@@ -48,6 +48,17 @@ fn minion() -> Value {
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn landbound() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "landbound": true,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -262,6 +273,74 @@ fn composition_opening() -> Session {
         .expect("bounded seed opening with 2x2 Landbound, Flood, and Drought")
 }
 
+fn landbound_movement_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "terrain-aura-landbound-movement" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-terrain-aura-landbound-movement-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-flood": flood(),
+            "north-landbound": landbound(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-drought": drought(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-landbound",
+                    "north-landbound",
+                    "north-landbound",
+                    "north-flood",
+                    "north-flood",
+                    "north-flood",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-drought",
+                    "south-drought",
+                    "south-drought",
+                    "south-minion",
+                    "south-minion",
+                    "south-minion",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn landbound_movement_opening() -> Session {
+    (1..=4096)
+        .map(landbound_movement_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Landbound movement candidate");
+            let north_spells = opening_spell_ids(&session, "north");
+            let south_spells = opening_spell_ids(&session, "south");
+            (north_spells.iter().any(|card| card == "north-landbound")
+                && north_spells.iter().any(|card| card == "north-flood")
+                && south_spells.iter().any(|card| card == "south-drought"))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Landbound, Flood, and Drought")
+}
+
 fn play_site_at(session: &mut Session, cell: &str) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == cell
@@ -306,6 +385,29 @@ fn cells_include(descriptor: &Value, cell: &str) -> bool {
     descriptor["cells"]
         .as_array()
         .is_some_and(|cells| cells.len() == 4 && cells.iter().any(|value| value == cell))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .any(|action| predicate(&action.descriptor))
+}
+
+fn moves_bound(bound_id: &str) -> impl Fn(&Value) -> bool + '_ {
+    move |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack" && descriptor["unitInstanceId"] == bound_id
+    }
+}
+
+fn moves_bound_to(bound_id: &str, cell: &str) -> impl Fn(&Value) -> bool + '_ {
+    move |descriptor: &Value| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == bound_id
+            && descriptor["to"]["cell"] == cell
+            && descriptor["to"]["region"] == "surface"
+    }
 }
 
 fn cast_covering(session: &mut Session, card_id: &str, cell: &str) -> Value {
@@ -475,5 +577,59 @@ fn rule_catalog_0912_later_drought_wins_over_flood_and_re_enables_square_landbou
     assert_eq!(after["realm"]["auras"].as_array().expect("auras").len(), 2);
     assert_eq!(after["realm"]["auras"][0]["cardId"], "north-flood");
     assert_eq!(after["realm"]["auras"][1]["cardId"], "south-drought");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1169_drought_after_flood_restores_landbound_movement_on_site() {
+    let mut session = landbound_movement_opening();
+    keep(&mut session);
+    keep(&mut session);
+    play_site_at(&mut session, "C4");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-landbound"
+            && descriptor["cell"] == "C4"
+    });
+    let bound_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Landbound identity")
+        .to_owned();
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    end_then_draw(&mut session, "spellbook");
+    play_site_at(&mut session, "C1");
+    end_then_draw(&mut session, "atlas");
+    play_site_at(&mut session, "C3");
+    assert!(
+        offers(&session, moves_bound_to(&bound_id, "C3")),
+        "a ready Landbound minion can step from one earth site to the next"
+    );
+    cast_covering(&mut session, "north-flood", "C4");
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], true);
+    assert_eq!(observed_unit(&session, &bound_id)["location"], "C4");
+    assert!(
+        !offers(&session, moves_bound(&bound_id)),
+        "Flood turns the occupied earth site into Water, so Landbound movement is withheld"
+    );
+    end_then_draw(&mut session, "atlas");
+    cast_covering(&mut session, "south-drought", "C4");
+    assert_eq!(observed_unit(&session, &bound_id)["disabled"], false);
+    assert_eq!(observed_unit(&session, &bound_id)["location"], "C4");
+    end_then_draw(&mut session, "spellbook");
+    assert!(
+        offers(&session, moves_bound_to(&bound_id, "C3")),
+        "later Drought restores the occupied earth site, so Landbound movement returns"
+    );
+    accept_where(&mut session, moves_bound_to(&bound_id, "C3"));
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    });
+    let after = observed_unit(&session, &bound_id);
+    assert_eq!(after["disabled"], false);
+    assert_eq!(after["location"], "C3");
+    let realm = state(&session);
+    assert_eq!(realm["realm"]["auras"].as_array().expect("auras").len(), 2);
+    assert_eq!(realm["realm"]["auras"][0]["cardId"], "north-flood");
+    assert_eq!(realm["realm"]["auras"][1]["cardId"], "south-drought");
     assert_exact_replay(&session);
 }
