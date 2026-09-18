@@ -5034,6 +5034,13 @@ function gameDefinition(
   throw new Error(`actual card ${card.stableId} lacks required supported facts`);
 }
 
+export function baselineGameDefinition(
+  card: NormalizedCard,
+  drawSpell = false,
+): GameCardDefinition {
+  return gameDefinition(card, drawSpell);
+}
+
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,

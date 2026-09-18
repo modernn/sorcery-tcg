@@ -78,6 +78,7 @@ test('creates a canonical candidate snapshot without participant identity or loc
             sourceCardName: null,
           },
         ],
+        sourceText: '~~Avatar~~\n1 Pathfinder\nunknown row',
         sourceUrl: null,
       },
       resultEvidence: { placement: 1 },

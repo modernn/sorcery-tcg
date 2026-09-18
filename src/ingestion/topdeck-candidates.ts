@@ -12,7 +12,7 @@ export type TopDeckCandidateSnapshot = Readonly<{
   source: TopDeckIngestion['source'];
   tournaments: readonly Readonly<{
     candidates: readonly Readonly<{
-      deck: Readonly<Pick<TopDeckDeck, 'opaqueStructuredDeck' | 'rows' | 'sourceUrl'>>;
+      deck: Readonly<Pick<TopDeckDeck, 'opaqueStructuredDeck' | 'rows' | 'sourceText' | 'sourceUrl'>>;
       resultEvidence: Readonly<{ placement: number }>;
     }>[];
     participantCount: number;
@@ -32,6 +32,7 @@ export function createTopDeckCandidateSnapshot(
         deck: {
           opaqueStructuredDeck: deck.opaqueStructuredDeck,
           rows: deck.rows,
+          sourceText: deck.sourceText,
           sourceUrl: deck.sourceUrl,
         },
         resultEvidence: { placement },
