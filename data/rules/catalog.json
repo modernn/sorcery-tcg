@@ -30553,6 +30553,236 @@
         "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
         "testName": "rule_catalog_1332_destroy_drought_aura_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1333",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-aura Magic that would return Flood is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAura",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1333_return_flood_aura_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1334",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, return-target-aura Magic that would return Drought is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAura",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1334_return_drought_aura_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1335",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of twenty-eight synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1335_twenty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1336",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Returning Flood flips a covered earth site back to land. A Burrowing and Submerge minion Flood had relayered underwater is relayered underground and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "returnTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1336_returning_flood_relayers_dual_region_minion_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1337",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Returning Drought flips a covered Water site back to Water. A Burrowing and Submerge minion Drought had relayered underground is relayered underwater and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "returnTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1337_returning_drought_relayers_dual_region_minion_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1338",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Flood on an occupied Earth site makes that cell count as Water immediately. After the site becomes Flood-covered Rubble, playing printed Earth there replaces the Rubble with a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1338_playing_earth_onto_flooded_earth_site_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1339",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Drought on an occupied Water site makes that cell count as land immediately. After the site becomes Drought-covered Rubble, playing printed Water there replaces the Rubble with a land site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1339_playing_water_onto_drought_water_site_creates_land"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1340",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering an occupied Earth site, play-site stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1340_play_earth_on_flooded_occupied_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1341",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Drought covering an occupied Water site, play-site stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1341_play_water_on_drought_occupied_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1342",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of twenty-nine synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1342_twenty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
