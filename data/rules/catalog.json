@@ -38299,8 +38299,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1710_one_hundred_sixty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1711",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1711_one_hundred_sixty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1712",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1712_one_hundred_sixty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1713",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Pull-adjacent-unit-to-water-site then draw-spell Magic leaves a pulled allied minion at the water site after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1713_riptide_pull_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1714",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second pull-adjacent-unit-to-water-site then draw-spell cast without an adjacent unit still draws a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1714_second_riptide_without_adjacent_unit_still_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1715",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Pull-adjacent-unit-to-water-site then draw-spell Magic co-locates a pulled minion with an allied occupant already at the water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1715_riptide_pull_co_locates_with_occupant_at_the_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1716",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Pull-adjacent-unit-to-water-site then draw-spell Magic pulls only from units bordering the chosen Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1716_riptide_at_one_water_site_pulls_only_from_that_site_border"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1717",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Pull-adjacent-unit-to-water-site then draw-spell Magic does not offer an allied minion already occupying the target Water site as a pull target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1717_ally_occupying_water_site_is_not_offered_as_pull_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1718",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a no-op pull-adjacent-unit-to-water-site then draw-spell cast, a later cast pulls a newly summoned adjacent ally onto the water site and draws.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "pullAdjacentAbovegroundUnitToTargetWaterSiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/pull_water_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1718_second_riptide_pulls_newly_arrived_adjacent_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1719",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1719_one_hundred_sixty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1720",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1720_one_hundred_sixty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1710,
+  "rustSupportedCount": 1720,
   "typescriptSupportedCount": 0
 }

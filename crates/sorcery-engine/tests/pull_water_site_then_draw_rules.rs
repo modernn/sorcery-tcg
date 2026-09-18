@@ -1,5 +1,6 @@
 //! Direct proofs for pull-adjacent-aboveground-unit-to-target-water-site
-//! then draw-spell Magic (RULE-CATALOG-0547–0548, RULE-CATALOG-1069).
+//! then draw-spell Magic (RULE-CATALOG-0547–0548, RULE-CATALOG-1069,
+//! RULE-CATALOG-1713–1718).
 //!
 //! Ordinary Magic can target a Water site, pull one aboveground unit that
 //! borders that site onto it, and then draw one spell. A unit occupying the
@@ -43,6 +44,17 @@ fn grounded() -> Value {
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn raider() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -316,6 +328,170 @@ fn south_plays_c1_then_north_draws_atlas(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
     });
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn riptide_manifest_with_spellbook(seed: u32, spellbook: &[&str]) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-riptide": riptide(),
+        "north-site": water_site(),
+        "south-avatar": avatar(),
+        "south-raider": raider(),
+        "south-site": earth_site(),
+    });
+    if spellbook.contains(&"north-ally") {
+        cards["north-ally"] = grounded();
+    }
+    if spellbook.contains(&"north-second") {
+        cards["north-second"] = grounded();
+    }
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "pull-water-site-proof" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-pull-water-site-proof-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-raider"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_spellbook(required: &[&str], start: u32) -> String {
+    let spellbook = vec![
+        "north-ally",
+        "north-second",
+        "north-riptide",
+        "north-riptide",
+        "north-riptide",
+        "north-riptide",
+    ];
+    (start..start + 256)
+        .map(|seed| riptide_manifest_with_spellbook(seed, &spellbook))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required Riptide opening cards")
+}
+
+fn lay_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn host_setup_adjacent_ally(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-riptide"], start);
+    let mut session = opening_main(&encoded);
+    south_plays_c1(&mut session);
+    lay_site_at(&mut session, "C3");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    (session, ally_id)
+}
+
+fn host_setup_with_two_riptides(start: u32) -> Session {
+    let encoded = seed_with_spellbook(&["north-riptide", "north-riptide"], start);
+    opening_main(&encoded)
+}
+
+fn host_setup_with_ally_on_site(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-riptide"], start);
+    let mut session = opening_main(&encoded);
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    (session, ally_id)
+}
+
+fn host_setup_with_allies_at_c4_and_c3(start: u32) -> (Session, String, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-second", "north-riptide"], start);
+    let mut session = opening_main(&encoded);
+    let (home, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let home_id = home["cardInstanceId"]
+        .as_str()
+        .expect("home ally identity")
+        .to_owned();
+    south_plays_c1(&mut session);
+    lay_site_at(&mut session, "C3");
+    let (away, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let away_id = away["cardInstanceId"]
+        .as_str()
+        .expect("away ally identity")
+        .to_owned();
+    (session, home_id, away_id)
+}
+
+fn cast_riptide_pull(session: &mut Session, cell: &str, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-riptide"
+            && descriptor["targetLocation"]["cell"] == cell
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn cast_riptide_no_target(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-riptide"
+            && descriptor["target"].is_null()
+            && descriptor["targetLocation"].is_null()
+    });
+    receipt
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -748,4 +924,120 @@ fn rule_catalog_1069_pull_water_site_then_draw_withheld_during_pending_deathrite
     );
     assert_eq!(unit(&state(session), &ally_id)["location"], "C4");
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1713_riptide_pull_persists_after_turns_pass() {
+    let (mut session, ally_id) = host_setup_adjacent_ally(1713);
+    cast_riptide_pull(&mut session, "C4", &ally_id);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    advance_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1714_second_riptide_without_adjacent_unit_still_draws() {
+    let mut session = host_setup_with_two_riptides(1714);
+    south_plays_c1(&mut session);
+    let first = cast_riptide_no_target(&mut session);
+    assert_eq!(
+        event_types(&first),
+        ["magic-cast", "spell-drawn", "magic-resolved"]
+    );
+    let second = cast_riptide_no_target(&mut session);
+    assert_eq!(
+        event_types(&second),
+        ["magic-cast", "spell-drawn", "magic-resolved"]
+    );
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "unit-teleported")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1715_riptide_pull_co_locates_with_occupant_at_the_water_site() {
+    let (mut session, home_id, away_id) = host_setup_with_allies_at_c4_and_c3(1715);
+    assert!(
+        riptide_offers(&session)
+            .iter()
+            .any(|(cell, target)| cell == "C4" && target.as_deref() == Some(away_id.as_str()))
+    );
+    let granted = cast_riptide_pull(&mut session, "C4", &away_id);
+    assert!(event_types(&granted).contains(&"unit-teleported"));
+    assert_eq!(unit(&state(&session), &home_id)["location"], "C4");
+    assert_eq!(unit(&state(&session), &away_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1716_riptide_at_one_water_site_pulls_only_from_that_site_border() {
+    let (mut session, home_id, away_id) = host_setup_with_allies_at_c4_and_c3(1716);
+    assert_eq!(unit(&state(&session), &home_id)["location"], "C4");
+    assert_eq!(unit(&state(&session), &away_id)["location"], "C3");
+    let offered = riptide_offers(&session);
+    assert!(
+        offered
+            .iter()
+            .any(|(cell, target)| cell == "C3" && target.as_deref() == Some(home_id.as_str()))
+    );
+    assert!(
+        !offered
+            .iter()
+            .any(|(cell, target)| cell == "C3" && target.as_deref() == Some(away_id.as_str()))
+    );
+    let granted = cast_riptide_pull(&mut session, "C3", &home_id);
+    assert_eq!(granted.events[1].payload["targetInstanceId"], home_id);
+    assert_eq!(granted.events[1].payload["from"]["cell"], "C4");
+    assert_eq!(granted.events[1].payload["to"]["cell"], "C3");
+    assert_eq!(unit(&state(&session), &home_id)["location"], "C3");
+    assert_eq!(unit(&state(&session), &away_id)["location"], "C3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1717_ally_occupying_water_site_is_not_offered_as_pull_target() {
+    let (session, ally_id) = host_setup_with_ally_on_site(1717);
+    let offered = riptide_offers(&session);
+    assert!(
+        !offered
+            .iter()
+            .any(|(cell, target)| cell == "C4" && target.as_deref() == Some(ally_id.as_str()))
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1718_second_riptide_pulls_newly_arrived_adjacent_ally() {
+    let encoded = seed_with_spellbook(&["north-ally", "north-riptide", "north-riptide"], 1718);
+    let mut session = opening_main(&encoded);
+    south_plays_c1(&mut session);
+    cast_riptide_no_target(&mut session);
+    lay_site_at(&mut session, "C3");
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("adjacent ally identity")
+        .to_owned();
+    let granted = cast_riptide_pull(&mut session, "C4", &ally_id);
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "unit-teleported",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_exact_replay(&session);
 }
