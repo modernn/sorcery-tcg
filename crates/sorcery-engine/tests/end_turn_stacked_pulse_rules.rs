@@ -2,7 +2,7 @@
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
 //! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935), and deferred
 //! end-turn here-area pulses withheld during deathrite-order
-//! (RULE-CATALOG-1208–1210).
+//! (RULE-CATALOG-1208–1220).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1393,5 +1393,77 @@ fn rule_catalog_1210_end_turn_triple_pulse_here_damage_withheld_during_pending_d
         .expect("bounded seed that reaches pending Deathrites during triple end-turn withhold");
     let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
         .expect("complete triple end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+#[test]
+fn rule_catalog_1218_end_turn_partial_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1218..1218 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(
+                seed,
+                "north-stack",
+                stacked_partial_gain_here_damage(),
+            )
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites during partial-gain-here end-turn withhold",
+        );
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete partial-gain-here end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+fn stacked_loss_gain_here_damage() -> Value {
+    json!({
+        "atEndOfControllerTurnControllerLosesLife": 2,
+        "atEndOfControllerTurnControllerGainsLife": 3,
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+#[test]
+fn rule_catalog_1219_end_turn_loss_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1219..1219 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(
+                seed,
+                "north-stack",
+                stacked_loss_gain_here_damage(),
+            )
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites during loss-gain-here end-turn withhold",
+        );
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete loss-gain-here end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+#[test]
+fn rule_catalog_1220_end_turn_dual_here_damage_pulse_withheld_during_pending_deathrite_order() {
+    let encoded = (1220..1220 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(seed, "north-pulser-b", end_turn_here_pulser())
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-pulser-b").is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites during dual-here end-turn withhold");
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-pulser-b")
+        .expect("complete dual-here end-turn Deathrite withheld setup");
     assert_end_turn_pulse_withheld(setup);
 }
