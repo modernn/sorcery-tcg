@@ -30107,6 +30107,125 @@
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
         "testName": "rule_catalog_1312_malakhim_untap_and_ignited_death_withheld_during_pending_end_turn_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1313",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, nearby-must-attack Move and Attack stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "nearbyMinionsMustAttackIfAble"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/must_attack_rules.rs",
+        "testName": "rule_catalog_1313_nearby_must_attack_move_and_attack_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1314",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto empty Rubble replaces the Rubble with that Water site and resolves site entry normally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1314_playing_water_onto_empty_rubble_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1315",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Water on Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1315_play_water_on_rubble_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1316",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of twenty-six synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1316_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1317",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing an Earth site onto empty Rubble replaces the Rubble with that Earth site and resolves site entry normally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1317_playing_earth_onto_empty_rubble_creates_earth_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1318",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Earth on Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1318_play_earth_on_rubble_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

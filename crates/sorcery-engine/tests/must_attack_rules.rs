@@ -1,4 +1,4 @@
-//! Direct proofs for mandatory unit attacks (RULE-CATALOG-0243–0246, 1170).
+//! Direct proofs for mandatory unit attacks (RULE-CATALOG-0243–0246, 1170, 1181, 1313).
 //!
 //! Official cards such as Twinnax Berserker require a minion to attack a unit
 //! whenever it can. Official cards such as the Green Knight require enemy
@@ -11,12 +11,25 @@ use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
 
 fn avatar() -> Value {
+    avatar_with_draw_spell(false)
+}
+
+fn avatar_with_draw_spell(draw_spell: bool) -> Value {
     json!({
         "attack": 1,
         "cardType": "avatar",
         "defense": 1,
-        "drawSpell": false,
+        "drawSpell": draw_spell,
         "life": 20,
+    })
+}
+
+fn mask() -> Value {
+    json!({
+        "cardType": "artifact",
+        "manaCost": 0,
+        "nearbyMinionsMustAttackIfAble": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
 
@@ -945,6 +958,240 @@ fn rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending
                 && action.descriptor["to"]["cell"] == "C4"
         }),
         "enemies-must-attack Move and Attack returns after Deathrites drain"
+    );
+    assert_exact_replay(session);
+}
+
+fn deathrite_nearby_must_attack_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "nearby-must-attack-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-nearby-must-attack-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-deathrite": minion(json!({
+                "attack": 1,
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "north-site": site(),
+            "north-source": minion(json!({
+                "charge": true,
+                "genesisDamageEachOtherUnitHere": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-mask": mask(),
+            "south-minion": minion(json!({
+                "attack": 1,
+                "defense": 2,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-deathrite",
+                    "north-deathrite",
+                    "north-source",
+                    "north-deathrite",
+                    "north-deathrite",
+                    "north-source",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-mask",
+                    "south-minion",
+                    "south-minion",
+                    "south-mask",
+                    "south-minion",
+                    "south-mask",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn opening_has_cards(encoded: &str, seat: &str, zone: &str, card_ids: &[&str]) -> bool {
+    let Ok(session) = Session::new(encoded) else {
+        return false;
+    };
+    let Some(hand) = session.replay_value().ok().and_then(|value| {
+        value["state"]["players"][seat]["hand"][zone]
+            .as_array()
+            .cloned()
+    }) else {
+        return false;
+    };
+    card_ids
+        .iter()
+        .all(|card_id| hand.iter().any(|card| card["cardId"] == *card_id))
+}
+
+fn try_pending_deathrite_with_nearby_must_attack(
+    encoded: &str,
+) -> Option<PendingDeathriteMustAttackSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        })
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "south-site"
+                && descriptor["cell"] == "C1"
+        })
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-minion"
+                && descriptor["cell"] == "C4"
+        })
+    {
+        return None;
+    }
+    let bearer_id = unit_instance_id(&state(&session), "south-minion")?;
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-mask"
+            && descriptor["bearer"]["instanceId"] == bearer_id
+    }) || !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+        })
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-deathrite"
+                && descriptor["cell"] == "C4"
+                && descriptor["region"].is_null()
+        })
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "north-deathrite"
+                && descriptor["cell"] == "C4"
+                && descriptor["region"].is_null()
+        })
+    {
+        return None;
+    }
+    let target_id = unit_instance_id(&state(&session), "south-minion")?;
+    let mut deathrite_ids: [String; 2] = state(&session)["realm"]["units"]
+        .as_array()?
+        .iter()
+        .filter(|unit| unit["cardId"] == "north-deathrite")
+        .filter_map(|unit| unit["instanceId"].as_str().map(ToOwned::to_owned))
+        .collect::<Vec<_>>()
+        .try_into()
+        .ok()?;
+    deathrite_ids.sort_unstable();
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-source"
+            && descriptor["cell"] == "C4"
+    }) || state(&session)["phase"] != "deathrite-order"
+    {
+        return None;
+    }
+    let source_id = unit_instance_id(&state(&session), "north-source")?;
+    if unit_instance_id(&state(&session), "south-minion").as_ref() != Some(&target_id) {
+        return None;
+    }
+    Some(PendingDeathriteMustAttackSetup {
+        deathrite_ids,
+        session,
+        source_id,
+        target_id,
+    })
+}
+
+fn deathrite_nearby_must_attack_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(deathrite_nearby_must_attack_manifest)
+        .filter(|candidate| {
+            opening_has_cards(candidate, "south", "spellbook", &["south-mask", "south-minion"])
+                && opening_has_cards(
+                    candidate,
+                    "north",
+                    "spellbook",
+                    &["north-deathrite", "north-deathrite", "north-source"],
+                )
+        })
+        .find(|candidate| try_pending_deathrite_with_nearby_must_attack(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites with a nearby-must-attack Charge minion in range",
+        )
+}
+
+#[test]
+fn rule_catalog_1313_nearby_must_attack_move_and_attack_withheld_during_pending_deathrite_order() {
+    let encoded = deathrite_nearby_must_attack_seed_with(1313);
+    let mut setup = try_pending_deathrite_with_nearby_must_attack(&encoded)
+        .expect("complete nearby-must-attack Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let source_id = setup.source_id.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "north");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "move-and-attack"),
+        "nearby-must-attack Move and Attack stays withheld until Deathrites are ordered"
+    );
+
+    let order_sources: Vec<_> = session
+        .legal_actions()
+        .expect("Deathrite order actions")
+        .into_iter()
+        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .map(|action| {
+            action.descriptor["sourceInstanceId"]
+                .as_str()
+                .expect("Deathrite source")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(order_sources, deathrite_ids);
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    let legal = session.legal_actions().expect("mandatory attacks");
+    assert!(!legal.is_empty());
+    assert!(
+        legal.iter().all(|action| {
+            action.descriptor["kind"] == "move-and-attack"
+                && action.descriptor["unitInstanceId"] == source_id
+                && action.descriptor["to"]["cell"] == "C4"
+        }),
+        "nearby-must-attack Move and Attack returns after Deathrites drain"
     );
     assert_exact_replay(session);
 }

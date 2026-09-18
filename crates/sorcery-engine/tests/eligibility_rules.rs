@@ -1536,6 +1536,37 @@ fn rule_catalog_1281_twenty_two_game_synthetic_batch_stays_unranked_unverified_a
 }
 
 #[test]
+fn rule_catalog_1316_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [
+        362_u32, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378,
+        379, 380, 381, 382, 383, 384, 385, 386, 387,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 26);
+    assert_eq!(records.len(), 26);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+
+#[test]
 fn rule_catalog_1311_twenty_five_game_synthetic_batch_stays_unranked_unverified_authority() {
     let seeds = [
         337_u32, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353,
