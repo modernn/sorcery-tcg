@@ -1,6 +1,6 @@
 //! Direct proofs that leaving Flood or Drought relayers lower-layer occupants
 //! (RULE-CATALOG-0339–0340, RULE-CATALOG-1336–1337, RULE-CATALOG-1355–1358,
-//! RULE-CATALOG-1363–1366), and that destroy-target-
+//! RULE-CATALOG-1363–1366, RULE-CATALOG-1415–1418), and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
 //! deathrite-order (RULE-CATALOG-1331–1334).
 //!
@@ -646,6 +646,110 @@ fn flood_destroy_withheld_manifest(seed: u32) -> String {
     }))
 }
 
+fn flood_water_occupied_destroy_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-destroy-flood-water-occupied-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-destroy-flood-water-occupied-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-flood": flood(),
+            "north-rain": rain_spell(),
+            "north-water": water(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_earth_occupied_destroy_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-destroy-drought-earth-occupied-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-destroy-drought-earth-occupied-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "north-rain": rain_spell(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-dualer",
+                    "north-rain",
+                    "north-drought",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn drought_destroy_withheld_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
@@ -1020,6 +1124,74 @@ fn drought_occupied_return_withheld_seed_with(start: u32) -> String {
         )
 }
 
+fn flood_water_occupied_destroy_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(flood_water_occupied_destroy_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_occupied_destroy(
+                candidate,
+                "north-water",
+                "underwater",
+                "north-flood",
+            )
+            .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Flood destroy on occupied Water site",
+        )
+}
+
+fn drought_earth_occupied_destroy_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(drought_earth_occupied_destroy_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_occupied_destroy(
+                candidate,
+                "north-earth",
+                "underground",
+                "north-drought",
+            )
+            .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Drought destroy on occupied Earth site",
+        )
+}
+
+fn flood_water_occupied_return_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(flood_water_occupied_return_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_occupied_return(
+                candidate,
+                "north-water",
+                "underwater",
+                "north-flood",
+            )
+            .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Flood return on occupied Water site",
+        )
+}
+
+fn drought_earth_occupied_return_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(drought_earth_occupied_return_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_occupied_return(
+                candidate,
+                "north-earth",
+                "underground",
+                "north-drought",
+            )
+            .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Drought return on occupied Earth site",
+        )
+}
+
 #[test]
 fn rule_catalog_1331_destroy_flood_aura_withheld_during_pending_deathrite_order() {
     let encoded = flood_destroy_withheld_seed_with(1331);
@@ -1204,6 +1376,110 @@ fn flood_return_withheld_manifest(seed: u32) -> String {
                     "north-dualer",
                     "north-rain",
                     "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-return",
+                    "south-minion",
+                    "south-return",
+                    "south-minion",
+                    "south-return",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_water_occupied_return_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-return-flood-water-occupied-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-return-flood-water-occupied-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-flood": flood(),
+            "north-rain": rain_spell(),
+            "north-water": water(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-return": return_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-return",
+                    "south-minion",
+                    "south-return",
+                    "south-minion",
+                    "south-return",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_earth_occupied_return_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-return-drought-earth-occupied-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-return-drought-earth-occupied-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "north-rain": rain_spell(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-return": return_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-dualer",
+                    "north-rain",
+                    "north-drought",
                     "north-dualer",
                     "north-rain",
                 ],
@@ -1712,6 +1988,206 @@ fn rule_catalog_1366_return_drought_aura_withheld_during_pending_deathrite_order
         "north-drought",
     )
     .expect("complete Drought return on occupied Water site Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_return_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_return_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-return"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1415_destroy_flood_aura_withheld_during_pending_deathrite_order_on_occupied_water_site()
+ {
+    let encoded = flood_water_occupied_destroy_withheld_seed_with(1415);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-flood",
+    )
+    .expect("complete Flood destroy on occupied Water site Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1416_destroy_drought_aura_withheld_during_pending_deathrite_order_on_occupied_earth_site()
+ {
+    let encoded = drought_earth_occupied_destroy_withheld_seed_with(1416);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-drought",
+    )
+    .expect("complete Drought destroy on occupied Earth site Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1417_return_flood_aura_withheld_during_pending_deathrite_order_on_occupied_water_site()
+ {
+    let encoded = flood_water_occupied_return_withheld_seed_with(1417);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_return(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-flood",
+    )
+    .expect("complete Flood return on occupied Water site Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_return_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_return_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-return"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1418_return_drought_aura_withheld_during_pending_deathrite_order_on_occupied_earth_site()
+ {
+    let encoded = drought_earth_occupied_return_withheld_seed_with(1418);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_return(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-drought",
+    )
+    .expect("complete Drought return on occupied Earth site Deathrite withheld setup");
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;

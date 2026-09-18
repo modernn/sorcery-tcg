@@ -16,7 +16,8 @@
 //! overlay-covered occupied sites withheld during deathrite-order
 //! (RULE-CATALOG-1340–1341, RULE-CATALOG-1346–1347,
 //! RULE-CATALOG-1373–1376, RULE-CATALOG-1382, RULE-CATALOG-1391,
-//! RULE-CATALOG-1399–1400, RULE-CATALOG-1403–1406, RULE-CATALOG-1411).
+//! RULE-CATALOG-1399–1400, RULE-CATALOG-1403–1406, RULE-CATALOG-1411,
+//! RULE-CATALOG-1414).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -3278,4 +3279,24 @@ fn rule_catalog_1411_water_site_cast_minion_still_withheld_after_pending_deathri
         "Drought on an occupied Earth site must keep that cell land after Deathrites complete"
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1414_water_site_cast_minion_withheld_during_pending_deathrite_order_on_drought_occupied_earth()
+ {
+    let encoded = drought_earth_c3_water_cast_seed_with(1414);
+    let setup = try_pending_deathrite_with_drought_occupied_earth_c3_cast_summon(&encoded)
+        .expect("complete water-site cast summon Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+    assert_exact_replay(&setup.session);
 }

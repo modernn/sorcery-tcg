@@ -7,7 +7,7 @@
 //! replacement play after destroy (RULE-CATALOG-1338–1339,
 //! RULE-CATALOG-1344–1345, RULE-CATALOG-1349–1350, RULE-CATALOG-1367–1368,
 //! RULE-CATALOG-1377–1381, RULE-CATALOG-1387–1390, RULE-CATALOG-1392,
-//! RULE-CATALOG-1397–1398, RULE-CATALOG-1401–1402, RULE-CATALOG-1412).
+//! RULE-CATALOG-1397–1398, RULE-CATALOG-1401–1402, RULE-CATALOG-1412–1413).
 //!
 //! Playing Water onto rubble already floods underground occupants. Overlay
 //! Auras already convert layers when they enter or leave. Playing a site onto
@@ -1873,6 +1873,28 @@ fn flooded_water_occupied_ready_for_earth_play() -> Session {
         .expect("bounded seed with legal Earth play after flooded occupied Water site")
 }
 
+fn drought_earth_occupied_ready_for_earth_play() -> Session {
+    (1..4096)
+        .find_map(|seed| {
+            let mut session = Session::new(&drought_earth_site_type_manifest(seed)).ok()?;
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            if !(atlas.iter().filter(|card| *card == "north-earth").count() >= 2
+                && spells.contains(&"north-drought".to_owned())
+                && spells.contains(&"north-water-cast".to_owned()))
+            {
+                return None;
+            }
+            drought_earth_site_at_c3(&mut session);
+            if offers_play_earth_on_c3(&session) {
+                return Some(session);
+            }
+            maybe_draw_site_for_play(&mut session);
+            offers_play_earth_on_c3(&session).then_some(session)
+        })
+        .expect("bounded seed with legal Earth play after drought occupied Earth site")
+}
+
 fn flooded_water_occupied_ready_for_water_play() -> Session {
     (1..4096)
         .find_map(|seed| {
@@ -1970,6 +1992,21 @@ fn rule_catalog_1412_playing_water_onto_flooded_occupied_water_creates_water_sit
     assert!(
         summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
         "printed Water played onto a flooded occupied Water site must remain a Water site"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1413_playing_earth_onto_drought_occupied_earth_creates_land() {
+    let mut session = drought_earth_occupied_ready_for_earth_play();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "printed Earth played onto a drought occupied Earth site must remain land"
     );
     assert_exact_replay(&session);
 }
