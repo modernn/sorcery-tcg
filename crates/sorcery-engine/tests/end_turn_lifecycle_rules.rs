@@ -944,3 +944,133 @@ fn rule_catalog_1262_drawrite_b_death_withheld_during_pending_end_turn_deathrite
     );
     assert_exact_replay(&session);
 }
+
+fn malakhim_untap_withheld_cards() -> Value {
+    let mut cards = end_turn_deathrite_cards(false);
+    cards["north-filler"] = minion(json!({}));
+    cards["north-malakhim"] = minion(json!({
+        "attack": 4,
+        "defense": 4,
+        "untapsAtEndOfControllerTurn": true,
+    }));
+    cards
+}
+
+fn malakhim_untap_withheld_manifest(seed: u32) -> String {
+    manifest(
+        seed,
+        &malakhim_untap_withheld_cards(),
+        &[
+            "north-malakhim",
+            "north-ignited",
+            "north-drawrite-a",
+            "north-drawrite-b",
+            "north-filler",
+            "north-filler",
+        ],
+        &["south-filler"; 3],
+        6,
+    )
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn try_malakhim_untap_withheld(encoded: &str) -> Option<(Session, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let (malakhim_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-malakhim"
+    })?;
+    let malakhim_id = malakhim_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-filler"
+            && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == malakhim_id
+            && descriptor["from"]["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    })?;
+    for card_id in ["north-ignited", "north-drawrite-a", "north-drawrite-b"] {
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cardId"] == card_id
+        })?;
+    }
+    let (_, trigger) =
+        try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if unit(&state(&session), &malakhim_id)["tapped"] != true {
+        return None;
+    }
+    if trigger.events.iter().any(|event| {
+        event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
+    }) {
+        return None;
+    }
+    Some((session, malakhim_id))
+}
+
+#[test]
+fn rule_catalog_1282_malakhim_untap_withheld_during_pending_end_turn_deathrite_order() {
+    let encoded = (1282..1282 + 2048)
+        .map(malakhim_untap_withheld_manifest)
+        .find(|candidate| try_malakhim_untap_withheld(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites before Malakhim untap");
+    let (mut session, malakhim_id) =
+        try_malakhim_untap_withheld(&encoded).expect("complete Malakhim untap withheld setup");
+    assert_eq!(state(&session)["phase"], "deathrite-order");
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+    });
+    assert!(
+        resolved.events.iter().any(|event| {
+            event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
+        }),
+        "Malakhim untap must resume after deathrite-order clears"
+    );
+    assert_exact_replay(&session);
+}
