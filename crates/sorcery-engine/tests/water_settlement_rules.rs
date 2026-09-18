@@ -17,7 +17,8 @@
 //! (RULE-CATALOG-1340–1341, RULE-CATALOG-1346–1347,
 //! RULE-CATALOG-1373–1376, RULE-CATALOG-1382, RULE-CATALOG-1391,
 //! RULE-CATALOG-1399–1400, RULE-CATALOG-1403–1406, RULE-CATALOG-1411,
-//! RULE-CATALOG-1414, RULE-CATALOG-1435, RULE-CATALOG-1445).
+//! RULE-CATALOG-1414, RULE-CATALOG-1435, RULE-CATALOG-1445,
+//! RULE-CATALOG-1476).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -3859,6 +3860,42 @@ fn flooded_water_c3_draw_site_seed_with(start: u32) -> String {
         )
 }
 
+fn flooded_water_c3_draw_site_after_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(flooded_water_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(candidate)
+                .is_some_and(|mut setup| {
+                    let withheld = setup.session.legal_actions().is_ok_and(|actions| {
+                        actions.iter().all(|action| {
+                            action.descriptor["kind"] != "draw-site"
+                                && action.descriptor["kind"] != "play-site"
+                        })
+                    });
+                    if !withheld {
+                        return false;
+                    }
+                    let deathrite_ids = setup.deathrite_ids.clone();
+                    let session = &mut setup.session;
+                    try_accept_where(session, |descriptor| {
+                        descriptor["kind"] == "order-deathrites"
+                            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+                    }) && {
+                        let resumed = state(session);
+                        resumed["phase"] == "main"
+                            && resumed["decisionSeat"] == "north"
+                            && resumed["pendingDeathrites"].is_null()
+                            && session.legal_actions().is_ok_and(|actions| {
+                                actions
+                                    .iter()
+                                    .any(|action| action.descriptor["kind"] == "draw-site")
+                            })
+                    }
+                })
+        })
+        .expect("bounded seed that resumes draw-site after Deathrites on flooded occupied Water")
+}
+
 fn flooded_earth_c3_play_site_seed_with(start: u32) -> String {
     (start..start + 4096)
         .map(flooded_earth_c3_play_site_manifest)
@@ -3922,6 +3959,42 @@ fn drought_earth_c3_draw_site_seed_with(start: u32) -> String {
         .expect(
             "bounded seed that reaches pending Deathrites with draw-site withheld on drought occupied Earth",
         )
+}
+
+fn drought_earth_c3_draw_site_after_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(drought_earth_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(candidate)
+                .is_some_and(|mut setup| {
+                    let withheld = setup.session.legal_actions().is_ok_and(|actions| {
+                        actions.iter().all(|action| {
+                            action.descriptor["kind"] != "draw-site"
+                                && action.descriptor["kind"] != "play-site"
+                        })
+                    });
+                    if !withheld {
+                        return false;
+                    }
+                    let deathrite_id = setup.deathrite_ids[0].clone();
+                    if !try_accept_where(&mut setup.session, |descriptor| {
+                        descriptor["kind"] == "order-deathrites"
+                            && descriptor["sourceInstanceId"] == deathrite_id
+                    }) {
+                        return false;
+                    }
+                    let resumed = state(&setup.session);
+                    resumed["phase"] == "main"
+                        && resumed["decisionSeat"] == "north"
+                        && resumed["pendingDeathrites"].is_null()
+                        && setup.session.legal_actions().is_ok_and(|actions| {
+                            actions
+                                .iter()
+                                .any(|action| action.descriptor["kind"] == "draw-site")
+                        })
+                })
+        })
+        .expect("bounded seed that resumes draw-site after Deathrites on drought occupied Earth")
 }
 
 fn drought_water_c3_play_site_seed_with(start: u32) -> String {
@@ -4077,6 +4150,54 @@ fn rule_catalog_1465_draw_site_withheld_during_pending_deathrite_order_on_floode
         "draw-site stays withheld during deathrite-order (mutually exclusive with play-site)"
     );
     assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1475_draw_site_offered_after_pending_deathrite_order_on_flooded_occupied_water_at_c3()
+ {
+    let encoded = flooded_water_c3_draw_site_after_seed_with(1475);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let mut setup = try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(&encoded)
+        .expect("complete draw-site-on-flooded-occupied-water Deathrite resume setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "draw-site" && action.descriptor["kind"] != "play-site"
+            }),
+        "draw-site stays withheld during deathrite-order (mutually exclusive with play-site)"
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "draw-site"),
+        "draw-site is offered again after Deathrites when atlas lacks the needed site card"
+    );
+    assert_exact_replay(session);
 }
 
 #[test]
@@ -4248,6 +4369,65 @@ fn rule_catalog_1466_draw_site_withheld_during_pending_deathrite_order_on_drough
             })
     );
     assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1476_draw_site_offered_after_pending_deathrite_order_on_drought_occupied_earth_at_c3()
+ {
+    let encoded = drought_earth_c3_draw_site_after_seed_with(1476);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let mut setup = try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(&encoded)
+        .expect("complete draw-site after drought occupied Earth Deathrite resume setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "draw-site" && action.descriptor["kind"] != "play-site"
+            })
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| action.descriptor["kind"] == "draw-site"),
+        "draw-site is offered again after Deathrites when a site is still needed"
+    );
+    if !session
+        .legal_actions()
+        .expect("resumed legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "north-earth"
+                && action.descriptor["cell"] == "C3"
+        })
+    {
+        accept_where(session, "north draw-site for earth", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert_exact_replay(session);
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Direct proofs that leaving Flood or Drought relayers lower-layer occupants
 //! (RULE-CATALOG-0339–0340, RULE-CATALOG-1336–1337, RULE-CATALOG-1355–1358,
-//! RULE-CATALOG-1363–1366, RULE-CATALOG-1415–1418, RULE-CATALOG-1425–1428),
+//! RULE-CATALOG-1363–1366, RULE-CATALOG-1415–1418, RULE-CATALOG-1425–1428,
+//! RULE-CATALOG-1481–1482),
 //! and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
 //! deathrite-order (RULE-CATALOG-1331–1334).
@@ -1042,6 +1043,7 @@ fn drought_destroy_withheld_manifest(seed: u32) -> String {
 struct PendingOverlayDestroySetup {
     aura_id: String,
     deathrite_ids: [String; 2],
+    dualer_id: String,
     session: Session,
 }
 
@@ -1098,7 +1100,7 @@ fn try_pending_deathrite_with_overlay_destroy(
             && descriptor["cell"] == "C4"
             && descriptor["region"] == region
     })?;
-    let _dualer_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    let dualer_id = summoned["cardInstanceId"].as_str()?.to_owned();
     try_accept_where_overlay(&mut session, |descriptor| {
         covers_c4(descriptor, overlay_card)
     })?;
@@ -1152,6 +1154,7 @@ fn try_pending_deathrite_with_overlay_destroy(
     Some(PendingOverlayDestroySetup {
         aura_id: overlay_id,
         deathrite_ids,
+        dualer_id,
         session,
     })
 }
@@ -1192,7 +1195,7 @@ fn try_pending_deathrite_with_overlay_occupied_destroy(
             && descriptor["cell"] == "C3"
             && descriptor["region"] == region
     })?;
-    let _dualer_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    let dualer_id = summoned["cardInstanceId"].as_str()?.to_owned();
     try_accept_where_overlay(&mut session, |descriptor| {
         covers_c3(descriptor, overlay_card)
     })?;
@@ -1241,6 +1244,7 @@ fn try_pending_deathrite_with_overlay_occupied_destroy(
     Some(PendingOverlayDestroySetup {
         aura_id: overlay_id,
         deathrite_ids,
+        dualer_id,
         session,
     })
 }
@@ -1307,6 +1311,23 @@ fn flood_occupied_destroy_withheld_seed_with(start: u32) -> String {
         })
         .expect(
             "bounded seed that reaches pending Deathrites with Flood destroy on occupied Earth site",
+        )
+}
+
+fn flood_occupied_earth_c3_destroy_relayer_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(flood_destroy_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_occupied_destroy(
+                candidate,
+                "north-earth",
+                "underground",
+                "north-flood",
+            )
+            .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Flood destroy on occupied Earth at C3",
         )
 }
 
@@ -2582,4 +2603,134 @@ fn rule_catalog_1428_returning_drought_on_occupied_earth_site_relayers_dual_regi
     assert_eq!(occupant["region"], "underground");
     assert!(!cemetery_has(&current, &dualer_id));
     assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1481_destroying_flood_on_occupied_earth_at_c3_relayers_underwater_after_deathrite_order()
+ {
+    let encoded = flood_occupied_earth_c3_destroy_relayer_seed_with(1481);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-flood",
+    )
+    .expect("complete Flood destroy on occupied Earth site Deathrite relayer setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let dualer_id = setup.dualer_id.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-earth"
+    );
+    assert_eq!(
+        realm_unit(&state(session), &dualer_id)["region"],
+        "underwater"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "destroying Flood on occupied Earth after deathrite-order must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underground");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1482_destroying_drought_on_occupied_water_at_c3_relayers_underwater_after_deathrite_order()
+ {
+    let encoded = drought_occupied_destroy_withheld_seed_with(1482);
+    let mut setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-drought",
+    )
+    .expect("complete Drought destroy on occupied Water site Deathrite relayer setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let dualer_id = setup.dualer_id.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
+    );
+    assert_eq!(
+        realm_unit(&state(session), &dualer_id)["region"],
+        "underground"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "destroying Drought on occupied Water after deathrite-order must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(session);
 }
