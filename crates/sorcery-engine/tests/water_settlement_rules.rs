@@ -15,7 +15,7 @@
 //! withheld during deathrite-order (RULE-CATALOG-1326), and play-site on
 //! overlay-covered occupied sites withheld during deathrite-order
 //! (RULE-CATALOG-1340–1341, RULE-CATALOG-1346–1347,
-//! RULE-CATALOG-1373–1376, RULE-CATALOG-1382).
+//! RULE-CATALOG-1373–1376, RULE-CATALOG-1382, RULE-CATALOG-1391).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -1551,6 +1551,161 @@ fn flooded_occupied_water_cast_deathrite_seed_with(start: u32) -> String {
         )
 }
 
+fn drought_water_c3_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drought-water-c3-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drought-water-c3-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought_aura(),
+            "north-rain": rain_spell(),
+            "north-water": water_site(),
+            "north-water-cast": water_cast_minion(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": [
+                    "north-water",
+                    "north-water",
+                    "north-water",
+                    "north-water",
+                    "north-water",
+                    "north-water",
+                ],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-rain",
+                    "north-water-cast",
+                    "north-drought",
+                    "north-rain",
+                    "north-water-cast",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn overlay_covers_c3(descriptor: &Value, card_id: &str) -> bool {
+    descriptor["kind"] == "cast-aura"
+        && descriptor["cardId"] == card_id
+        && descriptor["cells"]
+            .as_array()
+            .is_some_and(|cells| cells.iter().any(|value| value == "C3"))
+}
+
+fn pass_turn_draw_spellbook(session: &mut Session) -> bool {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")
+        && try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+}
+
+fn try_pending_deathrite_with_drought_occupied_water_cast_summon(
+    encoded: &str,
+) -> Option<PendingDeathriteWaterOnRubbleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "north-water"
+                && descriptor["cell"] == "C3"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            overlay_covers_c3(descriptor, "north-drought")
+        })
+    {
+        return None;
+    }
+    if state(&session)["realm"]["sites"]["C3"]["cardId"] != "north-water" {
+        return None;
+    }
+    if !pass_turn_draw_spellbook(&mut session) {
+        return None;
+    }
+    let first = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    if !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+    {
+        return None;
+    }
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if state(&session)["phase"] != "deathrite-order"
+        && (!try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+        }) || state(&session)["phase"] != "deathrite-order")
+    {
+        return None;
+    }
+    if !state(&session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-water-cast"))
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteWaterOnRubbleSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn drought_occupied_water_cast_deathrite_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(drought_water_c3_deathrite_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_drought_occupied_water_cast_summon(candidate).is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with a water-site cast minion on drought occupied Water",
+        )
+}
+
 fn flooded_water_occupied_deathrite_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
@@ -2270,6 +2425,55 @@ fn rule_catalog_1382_water_site_cast_minion_withheld_during_pending_deathrite_or
                     && action.descriptor["cardId"] == "north-water-cast"
                     && action.descriptor["cell"] == "C1"
             })
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1391_water_site_cast_minion_still_withheld_after_pending_deathrite_order_on_drought_occupied_water()
+ {
+    let encoded = drought_occupied_water_cast_deathrite_seed_with(1391);
+    let mut setup = try_pending_deathrite_with_drought_occupied_water_cast_summon(&encoded)
+        .expect("complete water-site cast summon Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_ne!(paused["realm"]["sites"]["C3"]["rubble"], true);
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        paused["players"]["north"]["hand"]["spellbook"]
+            .as_array()
+            .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-water-cast"))
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        !session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "summon-minion"
+                    && action.descriptor["cardId"] == "north-water-cast"
+                    && action.descriptor["cell"] == "C3"
+            }),
+        "Drought on an occupied Water site must keep that cell land after Deathrites complete"
     );
     assert_exact_replay(session);
 }

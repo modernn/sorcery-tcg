@@ -31670,6 +31670,227 @@
         "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
         "testName": "rule_catalog_1382_water_site_cast_minion_withheld_during_pending_deathrite_order_on_flooded_occupied_earth_then_offered"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1383",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1383_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1384",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-one-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1384_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1385",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-two-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1385_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1386",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-three-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1386_forty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1387",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto a flooded occupied Water site relayers a Burrowing and Submerge minion underwater and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1387_playing_water_onto_flooded_occupied_water_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1388",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Earth onto a drought occupied Earth site relayers a Burrowing and Submerge minion underground and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1388_playing_earth_onto_drought_occupied_earth_relayers_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1389",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto a drought occupied Water site relayers a Burrowing and Submerge minion underground, keeps it in play, and creates land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1389_playing_water_onto_drought_occupied_water_creates_land_and_relayers_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1390",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Earth onto a flooded occupied Water site relayers a Burrowing and Submerge minion underwater and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1390_playing_earth_onto_flooded_occupied_water_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1391",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the game completes a pending Deathrite chain with Drought covering an occupied Water site, summon-minion to that land-effective cell stays withheld.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1391_water_site_cast_minion_still_withheld_after_pending_deathrite_order_on_drought_occupied_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1392",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto a drought occupied Earth site relayers a Burrowing and Submerge minion underground and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1392_playing_water_onto_drought_occupied_earth_relayers_underground"
+      }
     }
   ]
 }
