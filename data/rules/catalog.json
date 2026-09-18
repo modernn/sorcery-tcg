@@ -43237,8 +43237,216 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1960_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1961",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1961_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1962",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1962_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1963",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic leaves a leaped ally at its destination after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1963_leaped_ally_stays_at_its_destination_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1964",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast still resolves as a paid no-op when no enemy is at the destination.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1964_second_leap_without_an_enemy_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1965",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast strikes a newly arrived enemy after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "unit-stepped",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1965_second_leap_strikes_a_newly_arrived_enemy_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1966",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic offers every controlled ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "unit-stepped",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1966_leap_offers_every_controlled_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1967",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic strikes a nearby enemy without affecting a far enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "unit-stepped",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1967_leap_leaves_a_far_enemy_unstruck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1968",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast strikes a newly summoned enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "unit-stepped",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_rules.rs",
+        "testName": "rule_catalog_1968_second_leap_strikes_a_newly_summoned_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1969",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1969_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1970",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1970_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1960,
+  "rustSupportedCount": 1970,
   "typescriptSupportedCount": 0
 }
