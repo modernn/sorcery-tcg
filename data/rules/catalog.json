@@ -39278,8 +39278,202 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1760_one_hundred_eighty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1761",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1761_one_hundred_eighty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1762",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1762_one_hundred_eighty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1763",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic leaves a killed enemy in its owner's cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1763_killed_enemy_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1764",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ally-strikes-each-enemy-at-its-location cast with no enemy at the ally cell still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1764_second_spin_without_an_enemy_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1765",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After an ally-strikes-each-enemy-at-its-location cast, a later cast strikes a newly arrived enemy at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1765_second_spin_strikes_a_newly_arrived_enemy_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1766",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic can strike via the caster Avatar while a minion ally at the same cell stays untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1766_spin_strikes_via_avatar_anchor_while_minion_ally_stays_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1767",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic strikes a co-located enemy without damaging a far enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1767_spin_leaves_a_far_enemy_unstruck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1768",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-strikes-each-enemy-at-its-location Magic simultaneously strikes every enemy sharing the ally's current cell and region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyStrikesEachEnemyAtItsLocation"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_strike_here_rules.rs",
+        "testName": "rule_catalog_1768_spin_strikes_every_enemy_sharing_the_ally_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1769",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1769_one_hundred_eighty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1770",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1770_one_hundred_eighty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1760,
+  "rustSupportedCount": 1770,
   "typescriptSupportedCount": 0
 }

@@ -1,5 +1,6 @@
 //! Direct proofs for ally-strikes-each-enemy-at-its-location Magic
-//! (RULE-CATALOG-0557–0558, 1011, 1093).
+//! (RULE-CATALOG-0557–0558, RULE-CATALOG-1011, RULE-CATALOG-1093,
+//! RULE-CATALOG-1763–1768).
 //!
 //! 1011 covers ally strike here killing a Deathrite minion: the controller
 //! draws a site and magic-resolved only appears after deathrite settlement.
@@ -238,21 +239,145 @@ fn spin_ally_ids(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
-    seed_with_manifest(required, spin_manifest)
+    seed_with_start(557, required)
+}
+
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    seed_with_manifest(start, required, spin_manifest)
 }
 
 fn seed_with_deathrite(required: &[&str]) -> String {
-    seed_with_manifest(required, spin_deathrite_manifest)
+    seed_with_manifest(1011, required, spin_deathrite_manifest)
 }
 
-fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
-    (557..557 + 256)
+fn seed_with_manifest(start: u32, required: &[&str], manifest: impl Fn(u32) -> String) -> String {
+    (start..start + 256)
         .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_north_ally(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned()
+}
+
+fn opening_with_ally(encoded: &str) -> (Session, String) {
+    let mut session = opening_main(encoded);
+    let ally_id = summon_north_ally(&mut session);
+    (session, ally_id)
+}
+
+fn host_setup(start: u32) -> (Session, String) {
+    let encoded = seed_with_start(start, &["north-ally", "north-spin"]);
+    opening_with_ally(&encoded)
+}
+
+fn avatar_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar identity")
+        .to_owned()
+}
+
+fn cast_spin(session: &mut Session, ally_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+    });
+    receipt
+}
+
+fn cast_spin_via_avatar(session: &mut Session) -> Receipt {
+    let avatar = avatar_id(&state(session));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-spin"
+            && descriptor["ally"]["kind"] == "avatar"
+            && descriptor["ally"]["instanceId"] == avatar
+    });
+    receipt
+}
+
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn south_double_raids_c4(session: &mut Session) -> (String, String) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (first, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let (second, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (
+        first["cardInstanceId"]
+            .as_str()
+            .expect("first enemy identity")
+            .to_owned(),
+        second["cardInstanceId"]
+            .as_str()
+            .expect("second enemy identity")
+            .to_owned(),
+    )
 }
 
 fn atlas_len(snapshot: &Value, seat: &str) -> usize {
@@ -724,4 +849,154 @@ fn rule_catalog_1093_ally_strike_here_withheld_during_pending_deathrite_order() 
             .any(|card| card["instanceId"] == nearby_id)
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1763_killed_enemy_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_manifest(1763, &["north-ally", "north-spin"], spin_deathrite_manifest);
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    let (_, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    cast_spin(&mut session, &ally_id);
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == nearby_id)
+    );
+    advance_full_round(&mut session);
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == nearby_id)
+    );
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_eq!(unit(&state(&session), &ally_id)["tapped"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1764_second_spin_without_an_enemy_is_still_a_paid_noop() {
+    let encoded = seed_with_manifest(
+        1764,
+        &["north-ally", "north-spin", "north-spin"],
+        spin_deathrite_manifest,
+    );
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    let (_, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let first = cast_spin(&mut session, &ally_id);
+    assert!(event_types(&first).contains(&"minion-died"));
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == nearby_id)
+    );
+    let second = cast_spin(&mut session, &ally_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1765_second_spin_strikes_a_newly_arrived_enemy_at_the_same_cell() {
+    let encoded = seed_with_manifest(
+        1765,
+        &["north-ally", "north-spin", "north-spin"],
+        spin_deathrite_manifest,
+    );
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    let (_, first_nearby) = south_plays_c1_and_raids_c4(&mut session);
+    cast_spin(&mut session, &ally_id);
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == first_nearby)
+    );
+    let second_nearby = south_raids_c4(&mut session);
+    let struck = cast_spin(&mut session, &ally_id);
+    let allocations: Vec<_> = struck
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .collect();
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].payload["targetInstanceId"], second_nearby);
+    assert!(event_types(&struck).contains(&"minion-died"));
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == second_nearby)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1766_spin_strikes_via_avatar_anchor_while_minion_ally_stays_untouched() {
+    let encoded = seed_with_start(1766, &["north-ally", "north-spin"]);
+    let mut session = opening_main(&encoded);
+    let ally_id = summon_north_ally(&mut session);
+    let (_far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let struck = cast_spin_via_avatar(&mut session);
+    let avatar = avatar_id(&state(&session));
+    let allocations: Vec<_> = struck
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .collect();
+    assert_eq!(allocations.len(), 1);
+    assert_eq!(allocations[0].payload["strikerInstanceId"], avatar);
+    assert_eq!(allocations[0].payload["targetInstanceId"], nearby_id);
+    assert_eq!(unit(&state(&session), &nearby_id)["damage"], 1);
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_eq!(unit(&state(&session), &ally_id)["tapped"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1767_spin_leaves_a_far_enemy_unstruck() {
+    let (mut session, ally_id) = host_setup(1767);
+    let (far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    cast_spin(&mut session, &ally_id);
+    assert_eq!(unit(&state(&session), &nearby_id)["damage"], 2);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1768_spin_strikes_every_enemy_sharing_the_ally_cell() {
+    let (mut session, ally_id) = host_setup(1768);
+    let (first_nearby, second_nearby) = south_double_raids_c4(&mut session);
+    let struck = cast_spin(&mut session, &ally_id);
+    let allocations: Vec<_> = struck
+        .events
+        .iter()
+        .filter(|event| event.event_type == "strike-damage-allocated")
+        .collect();
+    assert_eq!(allocations.len(), 2);
+    let targets: Vec<_> = allocations
+        .iter()
+        .map(|event| {
+            event.payload["targetInstanceId"]
+                .as_str()
+                .expect("strike target")
+                .to_owned()
+        })
+        .collect();
+    assert!(targets.contains(&first_nearby));
+    assert!(targets.contains(&second_nearby));
+    assert_eq!(unit(&state(&session), &first_nearby)["damage"], 2);
+    assert_eq!(unit(&state(&session), &second_nearby)["damage"], 2);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert!(!event_types(&struck).contains(&"unit-stepped"));
+    assert_exact_replay(&session);
 }
