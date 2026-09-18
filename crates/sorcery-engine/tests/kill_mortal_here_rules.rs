@@ -1,5 +1,6 @@
 //! Direct proofs for kill-mortal-minions-at-location-within-two-steps Magic
-//! (RULE-CATALOG-0567–0568, 1017, 1096).
+//! (RULE-CATALOG-0567–0568, RULE-CATALOG-1017, RULE-CATALOG-1096,
+//! RULE-CATALOG-1813–1818).
 //!
 //! 1017 covers kill mortal here killing a Deathrite minion: the controller
 //! draws a site and magic-resolved only appears after deathrite settlement.
@@ -125,7 +126,15 @@ fn mortality_manifest_with_mortal(seed: u32, north_mortal: &Value) -> String {
             "north-mortality": mortality(),
             "north-site": earth_site(),
             "south-avatar": avatar(),
-            "south-mortal": mortal(),
+            "south-mortal": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "mortal": true,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
             "south-site": earth_site(),
         },
         "decks": {
@@ -136,8 +145,10 @@ fn mortality_manifest_with_mortal(seed: u32, north_mortal: &Value) -> String {
                     "north-mortal",
                     "north-beast",
                     "north-mortality",
+                    "north-mortality",
                     "north-mortal",
                     "north-beast",
+                    "north-mortality",
                     "north-mortality",
                 ],
             },
@@ -256,21 +267,168 @@ fn mortality_locations(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
-    seed_with_manifest(required, mortality_manifest)
+    seed_with_start(567, required)
 }
 
 fn seed_with_deathrite(required: &[&str]) -> String {
-    seed_with_manifest(required, mortality_deathrite_manifest)
+    seed_with_manifest(1017, required, mortality_deathrite_manifest)
 }
 
-fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
-    (567..567 + 256)
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    seed_with_manifest(start, required, mortality_manifest)
+}
+
+fn seed_with_manifest(start: u32, required: &[&str], manifest: impl Fn(u32) -> String) -> String {
+    (start..start + 256)
         .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn mortality_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mortality")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_mortality(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mortality"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-mortal"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn seed_with_two_mortality_spells_in_hand_after_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = mortality_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-mortal").count() < 1
+                || !hand.iter().any(|card| card == "north-mortality")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-mortal", "C4");
+            (mortality_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Mortality spells in hand after setup")
+}
+
+fn allies_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mortal")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+struct SecondMortalityKillSetup {
+    second_mortal: String,
+    session: Session,
+}
+
+fn try_second_mortality_kill_prefix(encoded: &str) -> Option<SecondMortalityKillSetup> {
+    let mut session = opening_main(encoded);
+    let first_mortal = summon_at(&mut session, "north-mortal", "C4");
+    cast_mortality(&mut session, "C4");
+    if !cemetery_has(&state(&session), "north", &first_mortal) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    let snap = state(&session);
+    if mortality_spells_in_hand(&snap) < 1 || allies_in_hand(&snap) < 1 {
+        return None;
+    }
+    let second_mortal = summon_at(&mut session, "north-mortal", "C4");
+    mortality_locations(&session)
+        .contains(&"C4".to_owned())
+        .then_some(SecondMortalityKillSetup {
+            second_mortal,
+            session,
+        })
+}
+
+fn seed_for_second_mortality_kill(start: u32) -> String {
+    (start..start + 8192)
+        .find_map(|seed| {
+            let encoded = mortality_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-mortal")
+                || !hand.iter().any(|card| card == "north-mortality")
+            {
+                return None;
+            }
+            try_second_mortality_kill_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Mortality kill setup")
 }
 
 fn summon_at(session: &mut Session, card_id: &str, cell: &str) -> String {
@@ -552,6 +710,146 @@ fn rule_catalog_0568_location_with_only_a_non_mortal_is_a_paid_noop() {
     assert_eq!(unit(&after, &beast_id)["location"], "C4");
     assert_eq!(unit(&after, &beast_id)["damage"], 0);
     assert!(!cemetery_has(&after, "north", &beast_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1813_killed_mortal_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_start(1813, &["north-mortal", "north-mortality"]);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    cast_mortality(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    advance_full_round(&mut session);
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1814_second_mortality_without_a_mortal_is_still_a_paid_noop() {
+    let encoded = seed_with_two_mortality_spells_in_hand_after_setup(1814);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    let first = cast_mortality(&mut session, "C4");
+    assert!(event_types(&first).contains(&"minion-killed"));
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    let second = cast_mortality(&mut session, "C4");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1815_second_mortality_kills_a_newly_arrived_mortal_at_the_same_cell() {
+    let encoded = seed_with_two_mortality_spells_in_hand_after_setup(1815);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    cast_mortality(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    let nearby_id = south_raids_c4(&mut session);
+    let killed = cast_mortality(&mut session, "C4");
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["instanceId"], nearby_id);
+    assert!(cemetery_has(&state(&session), "south", &nearby_id));
+    assert_exact_replay(&session);
+}
+
+fn seed_with_two_mortals_at_c4(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = mortality_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-mortal").count() < 2
+                || !hand.iter().any(|card| card == "north-mortality")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-mortal", "C4");
+            try_accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-mortal"
+                    && descriptor["cell"] == "C4"
+                    && descriptor["region"].is_null()
+            })?;
+            Some(encoded)
+        })
+        .expect("bounded seed reaching two Mortals at C4")
+}
+
+#[test]
+fn rule_catalog_1816_mortality_kills_every_mortal_sharing_the_target_cell() {
+    let encoded = seed_with_two_mortals_at_c4(1816);
+    let mut session = opening_main(&encoded);
+    let first_mortal = summon_at(&mut session, "north-mortal", "C4");
+    let second_mortal = summon_at(&mut session, "north-mortal", "C4");
+    let killed = cast_mortality(&mut session, "C4");
+    let kills: Vec<_> = killed
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-killed")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("killed minion")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(kills.len(), 2);
+    assert!(kills.contains(&first_mortal));
+    assert!(kills.contains(&second_mortal));
+    assert!(cemetery_has(&state(&session), "north", &first_mortal));
+    assert!(cemetery_has(&state(&session), "north", &second_mortal));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1817_mortality_leaves_a_far_mortal_untouched() {
+    let encoded = seed_with_start(1817, &["north-mortal", "north-beast", "north-mortality"]);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    let beast_id = summon_at(&mut session, "north-beast", "C4");
+    let far_id = south_plays_c1_and_summons(&mut session);
+    cast_mortality(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    assert_eq!(unit(&state(&session), &beast_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert!(!cemetery_has(&state(&session), "south", &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1818_second_mortality_kills_a_newly_summoned_mortal() {
+    let encoded = seed_for_second_mortality_kill(1818);
+    let SecondMortalityKillSetup {
+        mut session,
+        second_mortal,
+    } = try_second_mortality_kill_prefix(&encoded).expect("second Mortality kill prefix");
+    let killed = cast_mortality(&mut session, "C4");
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["instanceId"], second_mortal);
+    assert!(cemetery_has(&state(&session), "north", &second_mortal));
     assert_exact_replay(&session);
 }
 

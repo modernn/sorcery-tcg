@@ -40254,8 +40254,205 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1810_two_hundred_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1811",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1811_two_hundred_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1812",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1812_two_hundred_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1813",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic leaves a killed Mortal in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1813_killed_mortal_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1814",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-mortal-minions-at-location-within-two-steps spells in hand, a second cast at an empty Mortal set is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1814_second_mortality_without_a_mortal_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1815",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After kill-mortal-minions-at-location-within-two-steps clears a cell, a later cast kills a newly arrived Mortal at that same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1815_second_mortality_kills_a_newly_arrived_mortal_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1816",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic kills every Mortal minion sharing the target cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1816_mortality_kills_every_mortal_sharing_the_target_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1817",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-mortal-minions-at-location-within-two-steps Magic kills a nearby Mortal while a far Mortal stays untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1817_mortality_leaves_a_far_mortal_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1818",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a kill-mortal-minions-at-location-within-two-steps cast, a later cast kills a newly summoned Mortal.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killMortalMinionsAtLocationWithinTwoSteps",
+        "mortal"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/kill_mortal_here_rules.rs",
+        "testName": "rule_catalog_1818_second_mortality_kills_a_newly_summoned_mortal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1819",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1819_two_hundred_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1820",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1820_two_hundred_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1810,
+  "rustSupportedCount": 1820,
   "typescriptSupportedCount": 0
 }
