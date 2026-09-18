@@ -1,9 +1,11 @@
-//! Direct proofs for grant-+2-this-turn then draw-spell Magic (RULE-CATALOG-0529–0530).
+//! Direct proofs for grant-+2-this-turn then draw-spell Magic (RULE-CATALOG-0529–0530,
+//! RULE-CATALOG-1061, RULE-CATALOG-1633–1638).
 //!
 //! Ordinary Magic can give an allied minion +2 power this turn and then draw
 //! one spell. Avatars and enemy minions are not offered. The power uses the
 //! shared this-turn source list and expires at End Phase. An empty Spellbook
-//! after the grant is a deck-out.
+//! after the grant is a deck-out. Strike damage follows current derived power,
+//! including printed attack plus active temporary grants.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -682,4 +684,381 @@ fn rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_ord
             .any(|card| card["instanceId"] == library_top)
     );
     assert_exact_replay(session);
+}
+
+fn striker() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_striker() -> Value {
+    json!({
+        "attack": 5,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn plain_striker() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn tough_target() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 10,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn power_combat_manifest_with_north_ally(ally: &Value, seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-power-combat" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-power-combat-v1",
+        },
+        "cards": {
+            "north-ally": ally,
+            "north-avatar": avatar(),
+            "north-gift": gift(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": tough_target(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-gift",
+                    "north-gift",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct PowerCombatSetup {
+    ally_id: String,
+    enemy_id: String,
+    session: Session,
+}
+
+fn try_power_combat_setup(encoded: &str) -> Option<PowerCombatSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let enemy = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C4"
+    })?;
+    let enemy_id = enemy.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "draw")?;
+    Some(PowerCombatSetup {
+        ally_id,
+        enemy_id,
+        session,
+    })
+}
+
+fn power_combat_setup(ally: &Value, start: u32) -> PowerCombatSetup {
+    (start..start + 256)
+        .map(|seed| power_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| try_power_combat_setup(&candidate))
+        .expect("bounded seed reaching combat setup with ally and enemy on board")
+}
+
+fn power_combat_setup_with_gift(ally: &Value, start: u32) -> PowerCombatSetup {
+    (start..start + 256)
+        .map(|seed| power_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| {
+            let setup = try_power_combat_setup(&candidate)?;
+            gift_ally_ids(&setup.session)
+                .contains(&setup.ally_id)
+                .then_some(setup)
+        })
+        .expect("bounded seed reaching combat setup with grant-power Magic in hand")
+}
+
+fn grant_power(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    })
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn expire_grant_power(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "power-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryPowerSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn strike_minion(session: &mut Session, attacker_id: &str, enemy_id: &str) -> Receipt {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["to"]["cell"] == "C4"
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+    }
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    let (_, fight) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    if state(session)["phase"] == "intercept" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+    fight
+}
+
+fn strike_allocated_to_target(fight: &Receipt, attacker_id: &str, enemy_id: &str) -> u8 {
+    u8::try_from(
+        fight
+            .events
+            .iter()
+            .find(|event| {
+                event.event_type == "strike-damage-allocated"
+                    && event.payload["strikerInstanceId"] == attacker_id
+                    && event.payload["targetInstanceId"] == enemy_id
+            })
+            .expect("strike allocation")
+            .payload["amount"]
+            .as_u64()
+            .expect("allocated strike power"),
+    )
+    .expect("strike power fits u8")
+}
+
+#[test]
+fn rule_catalog_1633_printed_power_strikes_at_full_attack_without_grant() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup(&printed_striker(), 1633);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 5);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 5);
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryPowerSources")
+            .is_none()
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1634_granted_power_strikes_at_boosted_power_before_end_of_turn() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup_with_gift(&striker(), 1634);
+    let (descriptor, receipt) = grant_power(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "power-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[1].payload["amount"], 2);
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryPowerSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 5);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 5);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1635_granted_power_expires_before_ally_strikes_at_base_power_on_later_turn() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup_with_gift(&striker(), 1635);
+    let (descriptor, _) = grant_power(&mut session, &ally_id);
+    expire_grant_power(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1636_printed_power_still_strikes_at_full_attack_after_grant_expires_on_later_turn() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup_with_gift(&printed_striker(), 1636);
+    let (descriptor, _) = grant_power(&mut session, &ally_id);
+    expire_grant_power(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 5);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 5);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1637_printed_and_granted_power_compose_while_grant_is_active() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup_with_gift(&printed_striker(), 1637);
+    let (descriptor, receipt) = grant_power(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "power-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryPowerSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 7);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 7);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1638_printed_power_outlasts_expired_grant_while_plain_ally_strikes_at_base_power() {
+    let PowerCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = power_combat_setup_with_gift(&printed_striker(), 1638);
+    let (descriptor, _) = grant_power(&mut session, &ally_id);
+    expire_grant_power(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let PowerCombatSetup {
+        session: mut plain,
+        ally_id: plain_ally,
+        enemy_id: plain_enemy,
+    } = power_combat_setup_with_gift(&plain_striker(), 1638);
+    let (plain_descriptor, _) = grant_power(&mut plain, &plain_ally);
+    expire_grant_power(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    let plain_fight = strike_minion(&mut plain, &plain_ally, &plain_enemy);
+    assert_eq!(
+        strike_allocated_to_target(&plain_fight, &plain_ally, &plain_enemy),
+        2
+    );
+
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 5);
+    assert_exact_replay(&session);
 }
