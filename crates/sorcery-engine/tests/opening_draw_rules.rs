@@ -507,6 +507,73 @@ fn site() -> Value {
     json!({ "cardType": "site", "elements": ["earth"] })
 }
 
+fn water_site() -> Value {
+    json!({ "cardType": "site", "elements": ["water"] })
+}
+
+fn geomancer_avatar() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "avatar",
+        "defense": 1,
+        "drawSpell": false,
+        "earthSitePlayCreatesAdjacentRubble": true,
+        "life": 20,
+    })
+}
+
+fn north_second_main_from_manifest(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    session
+}
+
+fn site_play_manifest(seed: u32, avatar_card: Value, site_card: Value) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "site-play-create-rubble", "seed": seed }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": format!("synthetic-site-play-create-rubble-{seed}-v1"),
+        },
+        "cards": {
+            "north-avatar": avatar_card,
+            "north-rain": rain(),
+            "north-site": site_card,
+            "south-avatar": avatar(false),
+            "south-rain": rain(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-rain"; 6],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-rain"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn rain() -> Value {
     json!({
         "cardType": "magic",
@@ -1015,5 +1082,52 @@ fn rule_catalog_1536_non_geomancer_earth_site_play_omits_create_rubble_at() {
         .find(|event| event.event_type == "site-played")
         .expect("first site-played event");
     assert!(first_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1543_geomancer_earth_site_play_includes_create_rubble_at() {
+    let mut session =
+        north_second_main_from_manifest(&site_play_manifest(1543, geomancer_avatar(), site()));
+    let (second, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cell"] == "C3"
+            && descriptor.get("createRubbleAt").is_some()
+    });
+    let rubble_cell = second["createRubbleAt"]
+        .as_str()
+        .expect("adjacent rubble cell");
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["site-played", "rubble-created"]
+    );
+    assert_eq!(receipt.events[1].payload["cell"], rubble_cell);
+    assert_eq!(
+        state(&session)["realm"]["sites"][rubble_cell]["rubble"],
+        true
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1544_non_geomancer_water_site_play_omits_create_rubble_at() {
+    let mut session =
+        north_second_main_from_manifest(&site_play_manifest(1544, avatar(false), water_site()));
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert!(second.get("createRubbleAt").is_none());
+    let second_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .filter(|event| event.event_type == "site-played")
+        .nth(1)
+        .expect("second site-played event");
+    assert!(second_play.payload.get("createRubbleAt").is_none());
     assert_exact_replay(&session);
 }

@@ -1,5 +1,6 @@
 //! Direct proofs for grant-First-Strike-this-turn Magic (RULE-CATALOG-0282–0283,
-//! RULE-CATALOG-1108, RULE-CATALOG-1533–1535, RULE-CATALOG-1537, RULE-CATALOG-1539).
+//! RULE-CATALOG-1108, RULE-CATALOG-1533–1535, RULE-CATALOG-1537, RULE-CATALOG-1539,
+//! RULE-CATALOG-1545–1548).
 //!
 //! Official Magic can grant First Strike for the current turn. The grant uses
 //! the same ally choice as Charge, persists only on minions, and expires
@@ -158,6 +159,17 @@ fn defending_only_fighter() -> Value {
         "defense": 3,
         "manaCost": 0,
         "strikesFirstWhileDefending": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn attacking_only_fighter() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "strikesFirstWhileAttacking": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -554,6 +566,66 @@ fn rule_catalog_1539_granted_first_strike_expires_before_opponent_turn_combat() 
     });
     south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
     assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1545_attacking_only_printed_plus_grant_trades_after_grant_expires_while_defending()
+{
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1546_attacking_only_printed_plus_grant_strikes_first_while_attacking() {
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1547_attacking_only_printed_without_grant_trades_simultaneously_while_defending() {
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    through_north_pass_to_south_main(&mut session);
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1548_defending_only_printed_without_grant_strikes_first_while_defending() {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    through_north_pass_to_south_main(&mut session);
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
 }
