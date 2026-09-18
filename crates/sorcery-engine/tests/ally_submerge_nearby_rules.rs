@@ -1,5 +1,5 @@
 //! Direct proofs for ally-submerges-target-nearby-minion Magic
-//! (RULE-CATALOG-0555–0556, RULE-CATALOG-1056).
+//! (RULE-CATALOG-0555–0556, RULE-CATALOG-1056, RULE-CATALOG-1753–1758).
 //!
 //! Ordinary Magic chooses a controlled ally, then submerges one other
 //! minion nearby that ally. Nearby is measured from the ally, not the
@@ -250,6 +250,99 @@ fn seed_with(water: bool, start: u32, required: &[&str]) -> String {
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn summon_north_ally(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned()
+}
+
+fn opening_with_ally(encoded: &str) -> (Session, String) {
+    let mut session = opening_main(encoded);
+    let ally_id = summon_north_ally(&mut session);
+    (session, ally_id)
+}
+
+fn host_setup(water: bool, start: u32) -> (Session, String) {
+    let encoded = seed_with(water, start, &["north-ally", "north-trial"]);
+    opening_with_ally(&encoded)
+}
+
+fn host_setup_with_two_trials(water: bool, start: u32) -> (Session, String) {
+    let encoded = seed_with(water, start, &["north-ally", "north-trial", "north-trial"]);
+    opening_with_ally(&encoded)
+}
+
+fn cast_trial_submerge(session: &mut Session, ally_id: &str, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-trial"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn avatar_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar identity")
+        .to_owned()
+}
+
+fn cast_trial_submerge_via_avatar(session: &mut Session, target_id: &str) -> Receipt {
+    let avatar = avatar_id(&state(session));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-trial"
+            && descriptor["ally"]["kind"] == "avatar"
+            && descriptor["ally"]["instanceId"] == avatar
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
 }
 
 fn south_plays_c1_and_raids_c4(session: &mut Session) -> (String, String) {
@@ -612,4 +705,99 @@ fn rule_catalog_1056_ally_submerge_magic_withheld_during_pending_deathrite_order
     assert_eq!(unit(&state(session), &nearby_id)["region"], "underwater");
     assert_eq!(unit(&state(session), &ally_id)["region"], "surface");
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1753_submerged_minion_stays_underwater_after_turns_pass() {
+    let (mut session, ally_id) = host_setup(true, 1753);
+    let (_far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    cast_trial_submerge(&mut session, &ally_id, &nearby_id);
+    assert_eq!(unit(&state(&session), &nearby_id)["region"], "underwater");
+    advance_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &nearby_id)["region"], "underwater");
+    assert_eq!(unit(&state(&session), &ally_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1754_second_trial_omits_an_already_submerged_minion() {
+    let (mut session, ally_id) = host_setup_with_two_trials(true, 1754);
+    let (_far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let first = cast_trial_submerge(&mut session, &ally_id, &nearby_id);
+    assert_eq!(
+        event_types(&first),
+        ["magic-cast", "minion-submerged", "magic-resolved"]
+    );
+    assert!(
+        !trial_pairs(&session)
+            .iter()
+            .any(|(_, target)| target == &nearby_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1755_second_earth_trial_on_the_same_pair_is_still_a_paid_noop() {
+    let (mut session, ally_id) = host_setup_with_two_trials(false, 1755);
+    let (_far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let first = cast_trial_submerge(&mut session, &ally_id, &nearby_id);
+    assert_eq!(event_types(&first), ["magic-cast", "magic-resolved"]);
+    let second = cast_trial_submerge(&mut session, &ally_id, &nearby_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &nearby_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1756_trial_submerges_via_avatar_anchor_while_ally_stays_above() {
+    let encoded = seed_with(true, 1756, &["north-ally", "north-trial"]);
+    let mut session = opening_main(&encoded);
+    let ally_id = summon_north_ally(&mut session);
+    let (_far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    let submerged = cast_trial_submerge_via_avatar(&mut session, &nearby_id);
+    assert_eq!(
+        event_types(&submerged),
+        ["magic-cast", "minion-submerged", "magic-resolved"]
+    );
+    assert_eq!(unit(&state(&session), &nearby_id)["region"], "underwater");
+    assert_eq!(unit(&state(&session), &ally_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1757_trial_leaves_a_far_minion_on_the_surface() {
+    let (mut session, ally_id) = host_setup(true, 1757);
+    let (far_id, nearby_id) = south_plays_c1_and_raids_c4(&mut session);
+    cast_trial_submerge(&mut session, &ally_id, &nearby_id);
+    assert_eq!(unit(&state(&session), &nearby_id)["region"], "underwater");
+    assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1758_second_trial_submerges_a_newly_arrived_nearby_minion() {
+    let (mut session, ally_id) = host_setup_with_two_trials(true, 1758);
+    let (_far_id, first_nearby) = south_plays_c1_and_raids_c4(&mut session);
+    cast_trial_submerge(&mut session, &ally_id, &first_nearby);
+    assert_eq!(
+        unit(&state(&session), &first_nearby)["region"],
+        "underwater"
+    );
+    let second_nearby = south_raids_c4(&mut session);
+    assert_eq!(unit(&state(&session), &second_nearby)["region"], "surface");
+    let submerged = cast_trial_submerge(&mut session, &ally_id, &second_nearby);
+    assert_eq!(
+        event_types(&submerged),
+        ["magic-cast", "minion-submerged", "magic-resolved"]
+    );
+    assert_eq!(submerged.events[1].payload["instanceId"], second_nearby);
+    assert_eq!(
+        unit(&state(&session), &second_nearby)["region"],
+        "underwater"
+    );
+    assert_eq!(
+        unit(&state(&session), &first_nearby)["region"],
+        "underwater"
+    );
+    assert_exact_replay(&session);
 }

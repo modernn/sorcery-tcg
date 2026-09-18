@@ -39086,8 +39086,200 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1750_one_hundred_seventy_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1751",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1751_one_hundred_seventy_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1752",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1752_one_hundred_seventy_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1753",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-submerges-target-nearby-minion Magic leaves a submerged minion underwater after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1753_submerged_minion_stays_underwater_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1754",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ally-submerges-target-nearby-minion cast omits an already submerged minion from its offers.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1754_second_trial_omits_an_already_submerged_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1755",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ally-submerges-target-nearby-minion cast on the same ally and minion at an Earth site still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1755_second_earth_trial_on_the_same_pair_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1756",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-submerges-target-nearby-minion Magic can submerge a nearby minion measured from the caster Avatar while the chosen ally stays on the surface.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1756_trial_submerges_via_avatar_anchor_while_ally_stays_above"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1757",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-submerges-target-nearby-minion Magic submerges a nearby minion without moving a far minion on the surface.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1757_trial_leaves_a_far_minion_on_the_surface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1758",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After an ally-submerges-target-nearby-minion cast, a later cast submerges a newly arrived nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allySubmergesTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_submerge_nearby_rules.rs",
+        "testName": "rule_catalog_1758_second_trial_submerges_a_newly_arrived_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1759",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1759_one_hundred_seventy_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1760",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1760_one_hundred_eighty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1750,
+  "rustSupportedCount": 1760,
   "typescriptSupportedCount": 0
 }
