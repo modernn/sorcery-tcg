@@ -40045,8 +40045,217 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1800_one_hundred_ninety_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1801",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1801_one_hundred_ninety_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1802",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1802_one_hundred_ninety_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1803",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-next-strike-double Magic leaves a killed enemy in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1803_killed_enemy_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1804",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second grant-next-strike-double cast stacks sources without doubling strike damage twice.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1805",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a wounding ally strike, a second granted ally still strikes at doubled power.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1805_wounding_ally_leaves_a_second_granted_ally_to_strike_at_double_power"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1806",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-next-strike-double Magic can mark an Avatar anchor while a minion ally stays unmarked.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1806_grant_double_via_avatar_anchor_while_minion_ally_stays_unmarked"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1807",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A granted next-strike-double strike kills its target while a far enemy minion stays untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1807_granted_strike_leaves_a_far_enemy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1808",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a grant-next-strike-double cast, a later cast doubles a newly summoned ally strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1808_second_grant_doubles_a_newly_summoned_ally_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1809",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1809_one_hundred_ninety_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1810",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1810_two_hundred_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1800,
+  "rustSupportedCount": 1810,
   "typescriptSupportedCount": 0
 }

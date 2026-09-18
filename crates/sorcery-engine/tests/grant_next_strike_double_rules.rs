@@ -1,5 +1,6 @@
 //! Direct proofs for grant-double-damage-next-strike Magic (RULE-CATALOG-0565–0566,
-//! RULE-CATALOG-0979, RULE-CATALOG-1090, RULE-CATALOG-1643–1648).
+//! RULE-CATALOG-0979, RULE-CATALOG-1090, RULE-CATALOG-1643–1648,
+//! RULE-CATALOG-1803–1808).
 //!
 //! Official Magic can mark an ally so its next unit strike this turn deals
 //! double damage. The grant uses the shared ally choice, doubles only unit
@@ -113,7 +114,7 @@ fn manifest_cards(enemy_card: &str, enemy: Value) -> Value {
     cards
 }
 
-fn manifest() -> String {
+fn grant_manifest_with_seed(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "grant-next-strike-double" }))
@@ -126,7 +127,14 @@ fn manifest() -> String {
             "north": {
                 "atlas": vec!["north-site"; 6],
                 "avatar": "north-avatar",
-                "spellbook": ["north-ally", "north-grant", "north-grant"],
+                "spellbook": [
+                    "north-ally",
+                    "north-ally",
+                    "north-grant",
+                    "north-grant",
+                    "north-grant",
+                    "north-grant",
+                ],
             },
             "south": {
                 "atlas": vec!["south-site"; 6],
@@ -137,8 +145,12 @@ fn manifest() -> String {
         "engineVersion": "sorcery-core-v1",
         "firstSeat": "north",
         "schemaVersion": 1,
-        "seed": 1,
+        "seed": seed,
     }))
+}
+
+fn manifest() -> String {
+    grant_manifest_with_seed(1)
 }
 
 fn deathrite_manifest() -> String {
@@ -286,6 +298,323 @@ fn grant_ally_ids(session: &Session) -> Vec<String> {
         .collect()
 }
 
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn grant_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-grant")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn allies_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-ally")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+struct KillableCombatSetup {
+    ally_id: String,
+    enemy_id: String,
+    session: Session,
+}
+
+fn try_killable_combat_setup(encoded: &str) -> Option<KillableCombatSetup> {
+    let mut session = opening_main_with(encoded);
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    Some(KillableCombatSetup {
+        ally_id,
+        enemy_id,
+        session,
+    })
+}
+
+fn killable_combat_setup_with_grant(start: u32) -> KillableCombatSetup {
+    (start..start + 2048)
+        .map(grant_manifest_with_seed)
+        .find_map(|candidate| {
+            let setup = try_killable_combat_setup(&candidate)?;
+            grant_ally_ids(&setup.session)
+                .contains(&setup.ally_id)
+                .then_some(setup)
+        })
+        .expect("bounded seed reaching killable combat setup with grant in hand")
+}
+
+fn seed_with_two_grants_in_hand_after_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = grant_manifest_with_seed(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 1
+                || !hand.iter().any(|card| card == "north-grant")
+            {
+                return None;
+            }
+            let setup = try_killable_combat_setup(&encoded)?;
+            (grant_spells_in_hand(&state(&setup.session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Grant spells in hand after combat setup")
+}
+
+struct NewAllyDoubleGrantSetup {
+    second_ally: String,
+    second_enemy: String,
+    session: Session,
+}
+
+fn try_new_ally_double_grant_prefix(encoded: &str) -> Option<NewAllyDoubleGrantSetup> {
+    let KillableCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = try_killable_combat_setup(encoded)?;
+    let snap = state(&session);
+    if grant_spells_in_hand(&snap) < 1 || allies_in_hand(&snap) < 1 {
+        return None;
+    }
+    if !grant_ally_ids(&session).contains(&ally_id) {
+        return None;
+    }
+    grant_double(&mut session, &ally_id);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    if !cemetery_has(&session, "south", &enemy_id) {
+        return None;
+    }
+    let second_enemy = south_summons_replacement_tough_at_c4(&mut session);
+    let second_ally = summon_north_ally_at(&mut session, "C4");
+    pass_turn_to_north_spellbook(&mut session);
+    grant_ally_ids(&session)
+        .contains(&second_ally)
+        .then_some(NewAllyDoubleGrantSetup {
+            second_ally,
+            second_enemy,
+            session,
+        })
+}
+
+fn seed_for_new_ally_double_grant(start: u32) -> String {
+    (start..start + 8192)
+        .find_map(|seed| {
+            let encoded = grant_manifest_with_seed(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 2
+                || !hand.iter().any(|card| card == "north-grant")
+            {
+                return None;
+            }
+            try_new_ally_double_grant_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching new-ally double-grant strike setup")
+}
+
+struct TwoAllyCombatSetup {
+    first_ally: String,
+    second_ally: String,
+    enemy_id: String,
+    session: Session,
+}
+
+fn two_ally_combat_setup(start: u32) -> TwoAllyCombatSetup {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = grant_manifest_with_seed(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 2
+                || !hand.iter().any(|card| card == "north-grant")
+            {
+                return None;
+            }
+            let mut session = opening_main_with(&encoded);
+            let first_ally = summon_north_ally(&mut session);
+            let enemy_id = south_summons_tough_at_c4(&mut session);
+            let second_ally = summon_north_ally_at(&mut session, "C4");
+            pass_turn_to_north_spellbook(&mut session);
+            (grant_spells_in_hand(&state(&session)) >= 1
+                && grant_ally_ids(&session).contains(&second_ally))
+            .then_some(TwoAllyCombatSetup {
+                first_ally,
+                second_ally,
+                enemy_id,
+                session,
+            })
+        })
+        .expect("bounded seed reaching two-ally combat setup with grant in hand")
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| descriptor["kind"] == "draw");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn avatar_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar identity")
+        .to_owned()
+}
+
+fn summon_north_ally_at(session: &mut Session, cell: &str) -> String {
+    let (descriptor, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == cell
+    });
+    descriptor["cardInstanceId"]
+        .as_str()
+        .expect("ally identity")
+        .to_owned()
+}
+
+fn grant_double_via_avatar(session: &mut Session) -> (Value, Receipt) {
+    let avatar = avatar_id(&state(session));
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-grant"
+            && descriptor["ally"]["kind"] == "avatar"
+            && descriptor["ally"]["instanceId"] == avatar
+    })
+}
+
+fn soft_enemy() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn soft_combat_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-next-strike-double-soft" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-next-strike-double-soft-v1",
+        },
+        "cards": {
+            "north-ally": striker(),
+            "north-avatar": avatar(),
+            "north-grant": grant(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": soft_enemy(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": ["north-ally", "north-grant", "north-grant"],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn soft_combat_setup(start: u32) -> DoubleCombatSetup {
+    (start..start + 2048)
+        .map(soft_combat_manifest)
+        .find_map(|candidate| try_double_combat_setup(&candidate))
+        .expect("bounded seed reaching soft-enemy combat setup")
+}
+
+fn south_summons_far_minion_at_c1(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-tough"
+            && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("far enemy identity")
+        .to_owned()
+}
+
+fn strike_unit(session: &mut Session, attacker_id: &str, enemy_id: &str) -> Receipt {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["to"]["cell"] == "C4"
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+    }
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    let (_, mut fight) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    if state(session)["phase"] == "intercept" {
+        (_, fight) = accept_where(session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+    fight
+}
+
 fn south_summons_enemy_at_c4(session: &mut Session, card_id: &str) -> String {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -313,6 +642,24 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
     south_summons_enemy_at_c4(session, "south-tough")
 }
 
+fn south_summons_replacement_tough_at_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-tough"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| descriptor["kind"] == "draw");
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("replacement enemy identity")
+        .to_owned()
+}
+
 fn atlas_len(session: &Session, seat: &str) -> usize {
     state(session)["players"][seat]["atlas"]
         .as_array()
@@ -321,30 +668,7 @@ fn atlas_len(session: &Session, seat: &str) -> usize {
 }
 
 fn strike_minion(session: &mut Session, attacker_id: &str, enemy_id: &str) -> Receipt {
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "move-and-attack"
-            && descriptor["unitInstanceId"] == attacker_id
-            && descriptor["to"]["cell"] == "C4"
-    });
-    while state(session)["phase"] == "movement" {
-        accept_where(session, |descriptor| {
-            descriptor["kind"] == "continue-basic-movement"
-        });
-    }
-    accept_where(session, |descriptor| {
-        descriptor["kind"] == "declare-attack"
-            && descriptor["target"]["kind"] == "minion"
-            && descriptor["target"]["instanceId"] == enemy_id
-    });
-    let (_, mut fight) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
-    });
-    if state(session)["phase"] == "intercept" {
-        (_, fight) = accept_where(session, |descriptor| {
-            descriptor["kind"] == "close-intercept"
-        });
-    }
-    fight
+    strike_unit(session, attacker_id, enemy_id)
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -587,7 +911,7 @@ fn double_combat_manifest_with_north_ally(ally: &Value, seed: u32) -> String {
                 "avatar": "north-avatar",
                 "spellbook": [
                     "north-ally",
-                    "north-grant",
+                    "north-ally",
                     "north-grant",
                     "north-grant",
                     "north-grant",
@@ -651,14 +975,14 @@ fn try_double_combat_setup(encoded: &str) -> Option<DoubleCombatSetup> {
 }
 
 fn double_combat_setup(ally: &Value, start: u32) -> DoubleCombatSetup {
-    (start..start + 256)
+    (start..start + 2048)
         .map(|seed| double_combat_manifest_with_north_ally(ally, seed))
         .find_map(|candidate| try_double_combat_setup(&candidate))
         .expect("bounded seed reaching combat setup with ally and enemy on board")
 }
 
 fn double_combat_setup_with_grant(ally: &Value, start: u32) -> DoubleCombatSetup {
-    (start..start + 256)
+    (start..start + 2048)
         .map(|seed| double_combat_manifest_with_north_ally(ally, seed))
         .find_map(|candidate| {
             let setup = try_double_combat_setup(&candidate)?;
@@ -864,6 +1188,139 @@ fn rule_catalog_1648_printed_attack_outlasts_expired_grant_while_plain_ally_stri
     through_south_pass_to_north_main(&mut session);
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);
     assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1803_killed_enemy_stays_in_cemetery_after_turns_pass() {
+    let KillableCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = killable_combat_setup_with_grant(1803);
+    let (descriptor, _) = grant_double(&mut session, &ally_id);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryNextStrikeDoubleSources")
+            .is_none()
+    );
+    let _ = descriptor;
+    advance_full_round(&mut session);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice() {
+    let encoded = seed_with_two_grants_in_hand_after_setup(1804);
+    let KillableCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = try_killable_combat_setup(&encoded).expect("combat setup");
+    let (first, _) = grant_double(&mut session, &ally_id);
+    let (second, _) = grant_double(&mut session, &ally_id);
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        json!([first["cardInstanceId"], second["cardInstanceId"],])
+    );
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 4);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1805_wounding_ally_leaves_a_second_granted_ally_to_strike_at_double_power() {
+    let TwoAllyCombatSetup {
+        mut session,
+        first_ally,
+        second_ally,
+        enemy_id,
+    } = two_ally_combat_setup(1805);
+    let wound = strike_minion(&mut session, &first_ally, &enemy_id);
+    assert_eq!(
+        strike_allocated_to_target(&wound, &first_ally, &enemy_id),
+        2
+    );
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 2);
+    let (_, receipt) = grant_double(&mut session, &second_ally);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+    let kill = strike_minion(&mut session, &second_ally, &enemy_id);
+    assert_eq!(
+        strike_allocated_to_target(&kill, &second_ally, &enemy_id),
+        4
+    );
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1806_grant_double_via_avatar_anchor_while_minion_ally_stays_unmarked() {
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = soft_combat_setup(1806);
+    let (descriptor, receipt) = grant_double_via_avatar(&mut session);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+    let avatar = avatar_id(&state(&session));
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["temporaryNextStrikeDoubleSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryNextStrikeDoubleSources")
+            .is_none()
+    );
+    let fight = strike_unit(&mut session, &avatar, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &avatar, &enemy_id), 2);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1807_granted_strike_leaves_a_far_enemy_untouched() {
+    let KillableCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = killable_combat_setup_with_grant(1807);
+    let far_id = south_summons_far_minion_at_c1(&mut session);
+    grant_double(&mut session, &ally_id);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 4);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1808_second_grant_doubles_a_newly_summoned_ally_strike() {
+    let encoded = seed_for_new_ally_double_grant(1808);
+    let NewAllyDoubleGrantSetup {
+        mut session,
+        second_ally,
+        second_enemy,
+    } = try_new_ally_double_grant_prefix(&encoded).expect("new-ally double-grant prefix");
+    grant_double(&mut session, &second_ally);
+    let fight = strike_minion(&mut session, &second_ally, &second_enemy);
+    assert_eq!(
+        strike_allocated_to_target(&fight, &second_ally, &second_enemy),
+        4
+    );
+    assert!(cemetery_has(&session, "south", &second_enemy));
+    assert_eq!(unit(&state(&session), &second_ally)["location"], "C4");
     assert_exact_replay(&session);
 }
 
