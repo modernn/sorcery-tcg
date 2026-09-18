@@ -39665,8 +39665,199 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1780_one_hundred_eighty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1781",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1781_one_hundred_eighty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1782",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1782_one_hundred_ninety_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1783",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-takes-up-to-two-steps Magic leaves a stepped ally at its destination after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1783_stepped_ally_stays_at_its_destination_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1784",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ally-takes-up-to-two-steps stay cast still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1784_second_tactical_stay_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1785",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ally-takes-up-to-two-steps stay cast after a step still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1785_second_tactical_stay_after_a_step_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1786",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-takes-up-to-two-steps Magic can step via an Avatar anchor while a minion ally stays put.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1786_tactical_steps_via_avatar_anchor_while_minion_ally_stays_put"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1787",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ally-takes-up-to-two-steps Magic omits a far cell beyond two cardinal steps.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1787_tactical_omits_a_far_cell_beyond_two_steps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1788",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After an ally-takes-up-to-two-steps cast, a later cast steps a newly summoned ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "allyTakesUpToTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ally_takes_two_steps_rules.rs",
+        "testName": "rule_catalog_1788_second_tactical_steps_a_newly_summoned_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1789",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1789_one_hundred_ninety_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1790",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1790_one_hundred_ninety_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1780,
+  "rustSupportedCount": 1790,
   "typescriptSupportedCount": 0
 }

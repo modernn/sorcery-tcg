@@ -1,5 +1,5 @@
 //! Direct proofs for ally-takes-up-to-two-steps Magic (RULE-CATALOG-0561–0562,
-//! RULE-CATALOG-1049).
+//! RULE-CATALOG-1049, RULE-CATALOG-1783–1788).
 //!
 //! Ordinary Magic chooses a controlled ally and a card-effect destination
 //! within two cardinal steps. Empty cells are not destinations. Stay is a
@@ -225,14 +225,123 @@ fn tactical_destinations(session: &Session, instance_id: &str) -> Vec<String> {
     cells
 }
 
-fn seed_with(required: &[&str]) -> String {
-    (561..561 + 256)
+fn seed_with(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
         .map(tactical_manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn tactical_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-tactical")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn allies_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-ally")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_with_two_tactical_spells_in_hand_after_path(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = tactical_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 1
+                || !hand.iter().any(|card| card == "north-tactical")
+            {
+                return None;
+            }
+            let (session, _) = opening_with_path(&encoded);
+            (tactical_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Tactical spells in hand after path setup")
+}
+
+fn seed_for_second_ally_tactical_step(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = tactical_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 2
+                || !hand.iter().any(|card| card == "north-tactical")
+            {
+                return None;
+            }
+            let (session, _) = opening_with_path(&encoded);
+            let snap = state(&session);
+            (tactical_spells_in_hand(&snap) >= 2 && allies_in_hand(&snap) >= 1).then_some(encoded)
+        })
+        .expect("bounded seed with spare ally and two Tactical spells after path setup")
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn avatar_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("north avatar identity")
+        .to_owned()
+}
+
+fn cast_tactical(session: &mut Session, ally_id: &str, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tactical"
+            && descriptor["ally"]["kind"] == "minion"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["allyDestination"]["cell"] == cell
+    });
+    receipt
+}
+
+fn cast_tactical_via_avatar(session: &mut Session, cell: &str) -> Receipt {
+    let avatar = avatar_id(&state(session));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tactical"
+            && descriptor["ally"]["kind"] == "avatar"
+            && descriptor["ally"]["instanceId"] == avatar
+            && descriptor["allyDestination"]["cell"] == cell
+    });
+    receipt
+}
+
+fn summon_north_ally_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned()
 }
 
 fn south_plays_c1(session: &mut Session) {
@@ -430,7 +539,7 @@ fn assert_exact_replay(session: &Session) {
 
 #[test]
 fn rule_catalog_0561_ally_takes_up_to_two_steps_to_a_two_step_cell() {
-    let encoded = seed_with(&["north-ally", "north-tactical"]);
+    let encoded = seed_with(561, &["north-ally", "north-tactical"]);
     let (mut session, ally_id) = opening_with_path(&encoded);
     let offered = tactical_destinations(&session, &ally_id);
     assert_eq!(offered, ["C2", "C3", "C4"]);
@@ -466,7 +575,7 @@ fn rule_catalog_0561_ally_takes_up_to_two_steps_to_a_two_step_cell() {
 
 #[test]
 fn rule_catalog_0562_ally_takes_up_to_two_steps_stay_is_a_paid_noop() {
-    let encoded = seed_with(&["north-ally", "north-tactical"]);
+    let encoded = seed_with(562, &["north-ally", "north-tactical"]);
     let (mut session, ally_id) = opening_with_path(&encoded);
     assert_eq!(
         tactical_destinations(&session, &ally_id),
@@ -551,4 +660,97 @@ fn rule_catalog_1049_ally_takes_two_steps_withheld_during_pending_deathrite_orde
     assert!(types.contains(&"unit-stepped"));
     assert_eq!(unit(&state(session), &ally_id)["location"], "C2");
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1783_stepped_ally_stays_at_its_destination_after_turns_pass() {
+    let encoded = seed_with(1783, &["north-ally", "north-tactical"]);
+    let (mut session, ally_id) = opening_with_path(&encoded);
+    cast_tactical(&mut session, &ally_id, "C2");
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C2");
+    advance_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C2");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1784_second_tactical_stay_is_still_a_paid_noop() {
+    let encoded = seed_with_two_tactical_spells_in_hand_after_path(1784);
+    let (mut session, ally_id) = opening_with_path(&encoded);
+    let first = cast_tactical(&mut session, &ally_id, "C4");
+    assert_eq!(event_types(&first), ["magic-cast", "magic-resolved"]);
+    let second = cast_tactical(&mut session, &ally_id, "C4");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1785_second_tactical_stay_after_a_step_is_still_a_paid_noop() {
+    let encoded = seed_with_two_tactical_spells_in_hand_after_path(1785);
+    let (mut session, ally_id) = opening_with_path(&encoded);
+    let first = cast_tactical(&mut session, &ally_id, "C2");
+    assert!(event_types(&first).contains(&"unit-stepped"));
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C2");
+    let second = cast_tactical(&mut session, &ally_id, "C2");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C2");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1786_tactical_steps_via_avatar_anchor_while_minion_ally_stays_put() {
+    let encoded = seed_with(1786, &["north-ally", "north-tactical"]);
+    let (mut session, ally_id) = opening_with_path(&encoded);
+    let avatar = avatar_id(&state(&session));
+    let stepped = cast_tactical_via_avatar(&mut session, "C2");
+    assert!(event_types(&stepped).contains(&"unit-stepped"));
+    let step = stepped
+        .events
+        .iter()
+        .find(|event| event.event_type == "unit-stepped")
+        .expect("unit-stepped");
+    assert_eq!(step.payload["instanceId"], avatar);
+    assert_eq!(step.payload["to"]["cell"], "C2");
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert_eq!(
+        state(&session)["players"]["north"]["avatar"]["location"],
+        "C2"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1787_tactical_omits_a_far_cell_beyond_two_steps() {
+    let encoded = seed_with(1787, &["north-ally", "north-tactical"]);
+    let (session, ally_id) = opening_with_path(&encoded);
+    let offered = tactical_destinations(&session, &ally_id);
+    assert!(offered.contains(&"C2".to_owned()));
+    assert!(!offered.contains(&"C1".to_owned()));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1788_second_tactical_steps_a_newly_summoned_ally() {
+    let encoded = seed_for_second_ally_tactical_step(1788);
+    let (mut session, first_ally) = opening_with_path(&encoded);
+    cast_tactical(&mut session, &first_ally, "C2");
+    assert_eq!(unit(&state(&session), &first_ally)["location"], "C2");
+    let second_ally = summon_north_ally_at(&mut session, "C3");
+    assert_eq!(unit(&state(&session), &second_ally)["location"], "C3");
+    assert!(tactical_destinations(&session, &second_ally).contains(&"C2".to_owned()));
+    let stepped = cast_tactical(&mut session, &second_ally, "C2");
+    assert!(event_types(&stepped).contains(&"unit-stepped"));
+    assert_eq!(
+        stepped
+            .events
+            .iter()
+            .find(|event| event.event_type == "unit-stepped")
+            .expect("unit-stepped")
+            .payload["instanceId"],
+        second_ally
+    );
+    assert_eq!(unit(&state(&session), &second_ally)["location"], "C2");
+    assert_eq!(unit(&state(&session), &first_ally)["location"], "C2");
+    assert_exact_replay(&session);
 }
