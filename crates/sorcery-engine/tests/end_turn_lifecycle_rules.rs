@@ -1018,6 +1018,101 @@ fn rule_catalog_1292_drawrite_a_death_withheld_during_pending_end_turn_deathrite
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_1302_ignited_and_drawrite_b_death_withheld_during_pending_end_turn_deathrite_order()
+{
+    let manifest = manifest(
+        111,
+        &end_turn_deathrite_cards(false),
+        &["north-ignited", "north-drawrite-a", "north-drawrite-b"],
+        &["south-filler"; 3],
+        6,
+    );
+    let mut session = Session::new(&manifest).expect("valid dual end-turn withhold scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let mut ignited_id = None;
+    let mut drawrite_b_id = None;
+    for card_id in ["north-ignited", "north-drawrite-a", "north-drawrite-b"] {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cardId"] == card_id
+        });
+        if card_id == "north-ignited" {
+            ignited_id = Some(
+                summon["cardInstanceId"]
+                    .as_str()
+                    .expect("ignited identity")
+                    .to_owned(),
+            );
+        }
+        if card_id == "north-drawrite-b" {
+            drawrite_b_id = Some(
+                summon["cardInstanceId"]
+                    .as_str()
+                    .expect("drawrite-b identity")
+                    .to_owned(),
+            );
+        }
+    }
+    let ignited_id = ignited_id.expect("tracked ignited identity");
+    let drawrite_b_id = drawrite_b_id.expect("tracked drawrite-b identity");
+    let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    for withheld_id in [&ignited_id, &drawrite_b_id] {
+        assert!(
+            trigger
+                .events
+                .iter()
+                .filter(|event| event.event_type == "minion-died")
+                .all(|event| event.payload["instanceId"] != *withheld_id)
+        );
+    }
+    assert!(
+        event_types(&trigger)
+            .iter()
+            .all(|kind| *kind != "turn-ended" && *kind != "turn-started")
+    );
+    assert_checkpoint_round_trip(&session);
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+    });
+    let types = event_types(&resolved);
+    let ignited_death = resolved
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == ignited_id
+        })
+        .expect("Ignited death resumes after Deathrite order");
+    let drawrite_b_death = resolved
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == drawrite_b_id
+        })
+        .expect("drawrite-b death resumes after Deathrite order");
+    let turn_ended = types
+        .iter()
+        .position(|kind| *kind == "turn-ended")
+        .expect("turn transition resumes");
+    assert!(ignited_death < turn_ended && drawrite_b_death < turn_ended);
+    let after = state(&session);
+    let cemetery = after["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery");
+    assert!(cemetery.iter().any(|card| card["instanceId"] == ignited_id));
+    assert!(
+        cemetery
+            .iter()
+            .any(|card| card["instanceId"] == drawrite_b_id)
+    );
+    assert_exact_replay(&session);
+}
+
 fn malakhim_untap_withheld_cards() -> Value {
     let mut cards = end_turn_deathrite_cards(false);
     cards["north-filler"] = minion(json!({}));
