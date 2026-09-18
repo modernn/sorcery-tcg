@@ -798,3 +798,76 @@ fn rule_catalog_0760_terminal_end_turn_deathrite_suppresses_turn_transition() {
     assert_eq!(unit(&terminal, &survivor_id)["damage"], 2);
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_1249_ignited_death_withheld_during_pending_end_turn_deathrite_order() {
+    let manifest = manifest(
+        111,
+        &end_turn_deathrite_cards(false),
+        &["north-ignited", "north-drawrite-a", "north-drawrite-b"],
+        &["south-filler"; 3],
+        6,
+    );
+    let mut session = Session::new(&manifest).expect("valid ignited withhold scenario");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    let mut ignited_id = None;
+    for card_id in ["north-ignited", "north-drawrite-a", "north-drawrite-b"] {
+        let (summon, _) = accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cardId"] == card_id
+        });
+        if card_id == "north-ignited" {
+            ignited_id = Some(
+                summon["cardInstanceId"]
+                    .as_str()
+                    .expect("ignited identity")
+                    .to_owned(),
+            );
+        }
+    }
+    let ignited_id = ignited_id.expect("tracked ignited identity");
+    let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert!(
+        trigger
+            .events
+            .iter()
+            .filter(|event| event.event_type == "minion-died")
+            .all(|event| event.payload["instanceId"] != ignited_id)
+    );
+    assert!(
+        event_types(&trigger)
+            .iter()
+            .all(|kind| *kind != "turn-ended" && *kind != "turn-started")
+    );
+    assert_checkpoint_round_trip(&session);
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+    });
+    let types = event_types(&resolved);
+    let ignited_death = resolved
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == ignited_id
+        })
+        .expect("Ignited death resumes after Deathrite order");
+    let turn_ended = types
+        .iter()
+        .position(|kind| *kind == "turn-ended")
+        .expect("turn transition resumes");
+    assert!(ignited_death < turn_ended);
+    let after = state(&session);
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == ignited_id)
+    );
+    assert_exact_replay(&session);
+}
