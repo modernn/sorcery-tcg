@@ -10281,6 +10281,18 @@ impl Game {
         });
     }
 
+    fn overlay_covered_playable_site_cell(&self, seat: Seat, cell: Cell) -> bool {
+        self.position.sites[cell.index()]
+            .as_ref()
+            .is_some_and(|site| {
+                site.controller == seat
+                    && matches!(
+                        self.site_water_overlay(cell),
+                        SiteWaterOverlay::Flooded | SiteWaterOverlay::Drought
+                    )
+            })
+    }
+
     fn legal_site_cells(&self, seat: Seat) -> Vec<Cell> {
         let player = &self.position.players[seat_index(seat)];
         let controlled_cells: Vec<_> = self.controlled_site_cells(seat).collect();
@@ -10298,13 +10310,17 @@ impl Game {
                 })
                 .collect();
         }
-        controlled_cells
-            .into_iter()
+        let mut cells: BTreeSet<Cell> = controlled_cells
+            .iter()
             .flat_map(|cell| cell.bordering(false))
             .filter(|cell| self.position.sites[cell.index()].is_none())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
+            .collect();
+        for cell in controlled_cells {
+            if self.overlay_covered_playable_site_cell(seat, cell) {
+                cells.insert(cell);
+            }
+        }
+        cells.into_iter().collect()
     }
 
     /// Applies an engine-issued action without authoritative serialization or hashing.
@@ -14626,7 +14642,6 @@ impl Game {
         let genesis_damage_target = genesis_damage_target.clone();
         let origin_state_version = self.position.state_version;
         let player_index = seat_index(seat);
-        let player = &self.position.players[player_index];
         let extra_site_play = self
             .position
             .pending_filtered_site_play
@@ -14635,14 +14650,16 @@ impl Game {
                 self.position.phase == Phase::FilteredSitePlay && pending.seat == seat
             })
             .cloned();
-        if extra_site_play.is_none() && (self.position.phase != Phase::Main || player.avatar.tapped)
+        if extra_site_play.is_none()
+            && (self.position.phase != Phase::Main
+                || self.position.players[player_index].avatar.tapped)
         {
             return Err(GameError::IllegalAction);
         }
         if !self.legal_site_cells(seat).contains(&cell) {
             return Err(GameError::IllegalAction);
         }
-        let hand_index = player
+        let hand_index = self.position.players[player_index]
             .hand_atlas
             .iter()
             .position(|card| {
@@ -14650,9 +14667,11 @@ impl Game {
                     && self.rules.cards[usize::from(card.card_id.0)].id == card_id.as_str()
             })
             .ok_or(GameError::IllegalAction)?;
-        let played_card_id = player.hand_atlas[hand_index].card_id;
-        let definition = &self.rules.cards[usize::from(played_card_id.0)];
-        let CardFacts::Site(facts) = &definition.facts else {
+        let played_card_id = self.position.players[player_index].hand_atlas[hand_index].card_id;
+        let CardFacts::Site(facts) = self.rules.cards[usize::from(played_card_id.0)]
+            .facts
+            .clone()
+        else {
             return Err(GameError::IllegalAction);
         };
         if extra_site_play
@@ -14661,17 +14680,17 @@ impl Game {
         {
             return Err(GameError::IllegalAction);
         }
+        let avatar_card_id = self.position.players[player_index].avatar.card.card_id;
         let CardFacts::Avatar(avatar_facts) =
-            &self.rules.cards[usize::from(player.avatar.card.card_id.0)].facts
+            &self.rules.cards[usize::from(avatar_card_id.0)].facts
         else {
             return Err(GameError::IllegalAction);
         };
+        let avatar_location = self.position.players[player_index].avatar.location;
         let rubble_candidates: Vec<_> = if avatar_facts.earth_site_play_creates_adjacent_rubble
             && facts.elements.contains(Element::Earth)
         {
-            player
-                .avatar
-                .location
+            avatar_location
                 .bordering(false)
                 .filter(|candidate| {
                     *candidate != cell
@@ -14700,7 +14719,7 @@ impl Game {
                 .as_deref()
                 .ok_or(GameError::IllegalAction)?;
             if (self.fate_covers_cell(cell) && !facts.ordinary)
-                || !self.token_may_enter_played_site(seat, token_card_id, cell, facts)?
+                || !self.token_may_enter_played_site(seat, token_card_id, cell, &facts)?
             {
                 return Err(GameError::IllegalAction);
             }
@@ -14729,15 +14748,47 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let (genesis_gain_mana, genesis_spell_draw_count) =
-            self.site_genesis_gain_and_draws(seat, cell, played_card_id, facts);
+            self.site_genesis_gain_and_draws(seat, cell, played_card_id, &facts);
+        if self.overlay_covered_playable_site_cell(seat, cell) {
+            let existing_site = self.position.sites[cell.index()]
+                .as_ref()
+                .filter(|site| site.controller == seat)
+                .cloned()
+                .ok_or(GameError::IllegalAction)?;
+            let target_site_instance_id = existing_site.card.instance_id.clone();
+            let owner = existing_site.card.owner;
+            outcomes.push("site-destroyed", || {
+                json!({
+                    "cell": cell,
+                    "instanceId": target_site_instance_id,
+                    "owner": owner,
+                    "sourceInstanceId": card_instance_id,
+                })
+            });
+            let (destroyed_cards, rubble) =
+                self.destroy_sites_into_rubble(vec![(cell, existing_site)], card_instance_id)?;
+            self.settle_region_occupancy(outcomes)?;
+            for card in destroyed_cards {
+                self.position.players[seat_index(card.owner)]
+                    .cemetery
+                    .push(card);
+            }
+            for (rubble_cell, rubble_instance_id) in rubble {
+                outcomes.push("rubble-created", || {
+                    json!({
+                        "cell": rubble_cell,
+                        "instanceId": rubble_instance_id,
+                        "sourceInstanceId": card_instance_id,
+                    })
+                });
+            }
+        }
         let replacing_rubble_with_water =
             self.position.rubble[cell.index()].is_some() && facts.elements.contains(Element::Water);
-        let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
-        let card = self.position.players[player_index]
-            .hand_atlas
-            .remove(hand_index);
-        let replaced_rubble = self.position.rubble[cell.index()].take();
         let player = &mut self.position.players[player_index];
+        let ordinary_mana = player.mana.checked_add(1).ok_or(GameError::IllegalAction)?;
+        let card = player.hand_atlas.remove(hand_index);
+        let replaced_rubble = self.position.rubble[cell.index()].take();
         if extra_site_play.is_none() {
             player.avatar.tapped = true;
         }

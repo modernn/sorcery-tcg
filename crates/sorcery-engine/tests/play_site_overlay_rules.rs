@@ -5,7 +5,8 @@
 //! overlay play relayers lower-layer occupants (RULE-CATALOG-1328,
 //! RULE-CATALOG-1329), overlay conversion on occupied sites plus
 //! replacement play after destroy (RULE-CATALOG-1338–1339,
-//! RULE-CATALOG-1344–1345, RULE-CATALOG-1349–1350, RULE-CATALOG-1367–1368).
+//! RULE-CATALOG-1344–1345, RULE-CATALOG-1349–1350, RULE-CATALOG-1367–1368,
+//! RULE-CATALOG-1377–1381).
 //!
 //! Playing Water onto rubble already floods underground occupants. Overlay
 //! Auras already convert layers when they enter or leave. Playing a site onto
@@ -115,9 +116,9 @@ fn flood_manifest(seed: u32) -> String {
                 "atlas": [
                     "north-earth",
                     "north-earth",
-                    "north-water",
-                    "north-water",
                     "north-earth",
+                    "north-earth",
+                    "north-water",
                     "north-water",
                 ],
                 "avatar": "north-avatar",
@@ -752,19 +753,7 @@ fn rule_catalog_0344_playing_water_onto_drought_rubble_relayers_underground() {
 
 #[test]
 fn rule_catalog_1319_playing_earth_onto_flooded_rubble_creates_water_site() {
-    let mut session = flood_site_type_opening();
-    rubble_at_c3(&mut session, "north-earth");
-    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
-    accept_where(&mut session, |descriptor| {
-        covers_c3(descriptor, "north-flood")
-    });
-    assert!(
-        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
-        "empty flooded rubble must not accept a water-site cast before site play"
-    );
+    let mut session = flooded_earth_site_rubble_ready_for_earth_play();
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardId"] == "north-earth"
@@ -1027,6 +1016,128 @@ fn drought_occupied_water_rubble_ready_for_earth_play() -> Session {
         .expect("bounded seed with legal Earth play after drought occupied-water rubble")
 }
 
+fn flooded_earth_site_rubble_ready_for_earth_play() -> Session {
+    (1..4096)
+        .find_map(|seed| {
+            let mut session = Session::new(&flood_site_type_manifest(seed)).ok()?;
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            if !(atlas.iter().filter(|card| *card == "north-earth").count() >= 2
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-water-cast".to_owned()))
+            {
+                return None;
+            }
+            let site_instance = flooded_earth_site_at_c3(&mut session);
+            destroy_occupied_site_at_c3(&mut session, &site_instance);
+            if summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()) {
+                return None;
+            }
+            pass_turn_and_draw_spellbook(&mut session);
+            offers_play_earth_on_c3(&session).then_some(session)
+        })
+        .expect("bounded seed with legal Earth play after flooded occupied-earth rubble")
+}
+
+fn drought_occupied_water_ready_for_earth_play() -> Session {
+    (1..4096)
+        .find_map(|seed| {
+            let mut session = Session::new(&drought_site_type_manifest(seed)).ok()?;
+            drought_water_site_at_c3(&mut session);
+            if offers_play_earth_on_c3(&session) {
+                return Some(session);
+            }
+            if session.legal_actions().is_ok_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| action.descriptor["kind"] == "draw-site")
+            }) {
+                accept_where(&mut session, |descriptor| descriptor["kind"] == "draw-site");
+            }
+            offers_play_earth_on_c3(&session).then_some(session)
+        })
+        .expect("bounded seed with legal Earth play after drought occupied Water site")
+}
+
+fn flood_occupied_earth_site_type_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "play-site-overlay-flood-occupied-earth-site-type" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-play-site-overlay-flood-occupied-earth-site-type-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "north-flood": flood(),
+            "north-water-cast": water_cast(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_site(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-water-cast",
+                    "north-flood",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-destroy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_occupied_earth_ready_for_earth_play() -> Session {
+    (1..4096)
+        .find_map(|seed| {
+            let mut session = Session::new(&flood_occupied_earth_site_type_manifest(seed)).ok()?;
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            if !(atlas.iter().filter(|card| *card == "north-earth").count() >= 3
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-dualer".to_owned()))
+            {
+                return None;
+            }
+            cover_occupied_dualer_at_c3(
+                &mut session,
+                "north-earth",
+                "north-earth",
+                "underground",
+                "north-flood",
+                "underwater",
+            );
+            if offers_play_earth_on_c3(&session) {
+                return Some(session);
+            }
+            if session.legal_actions().is_ok_and(|actions| {
+                actions
+                    .iter()
+                    .any(|action| action.descriptor["kind"] == "draw-site")
+            }) {
+                accept_where(&mut session, |descriptor| descriptor["kind"] == "draw-site");
+            }
+            offers_play_earth_on_c3(&session).then_some(session)
+        })
+        .expect("bounded seed with legal Earth play after flooded occupied Earth site")
+}
+
 fn flooded_earth_site_at_c3(session: &mut Session) -> String {
     let site_instance = occupied_site_at_c3(session, "north-earth");
     pass_turn_and_draw_spellbook(session);
@@ -1054,7 +1165,7 @@ fn destroy_occupied_site_at_c3(session: &mut Session, site_instance: &str) {
     assert_eq!(state(session)["realm"]["sites"]["C3"]["rubble"], true);
 }
 
-fn cover_occupied_dualer_then_destroy_c3(
+fn cover_occupied_dualer_at_c3(
     session: &mut Session,
     setup_site_id: &str,
     site_id: &str,
@@ -1095,10 +1206,6 @@ fn cover_occupied_dualer_then_destroy_c3(
         .as_str()
         .expect("dual-region identity")
         .to_owned();
-    let site_instance = state(session)["realm"]["sites"]["C3"]["instanceId"]
-        .as_str()
-        .expect("C3 site identity")
-        .to_owned();
     pass_turn_and_draw_spellbook(session);
     pass_turn_and_draw_spellbook(session);
     accept_where(session, |descriptor| covers_c3(descriptor, aura_id));
@@ -1106,6 +1213,29 @@ fn cover_occupied_dualer_then_destroy_c3(
         realm_unit(&state(session), &dualer_id)["region"],
         relayer_region
     );
+    dualer_id
+}
+
+fn cover_occupied_dualer_then_destroy_c3(
+    session: &mut Session,
+    setup_site_id: &str,
+    site_id: &str,
+    summon_region: &str,
+    aura_id: &str,
+    relayer_region: &str,
+) -> String {
+    let dualer_id = cover_occupied_dualer_at_c3(
+        session,
+        setup_site_id,
+        site_id,
+        summon_region,
+        aura_id,
+        relayer_region,
+    );
+    let site_instance = state(session)["realm"]["sites"]["C3"]["instanceId"]
+        .as_str()
+        .expect("C3 site identity")
+        .to_owned();
     pass_turn_and_draw_spellbook(session);
     accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -1120,18 +1250,7 @@ fn cover_occupied_dualer_then_destroy_c3(
 
 #[test]
 fn rule_catalog_1338_playing_earth_onto_flooded_earth_site_creates_water_site() {
-    let mut session = flood_site_type_opening();
-    let site_instance = flooded_earth_site_at_c3(&mut session);
-    assert!(
-        summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
-        "Flood on an occupied Earth site must make that cell count as Water immediately"
-    );
-    destroy_occupied_site_at_c3(&mut session, &site_instance);
-    assert!(
-        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
-        "Flood-covered empty Rubble must not accept a water-site cast before site play"
-    );
-    pass_turn_and_draw_spellbook(&mut session);
+    let mut session = flooded_earth_site_rubble_ready_for_earth_play();
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site"
             && descriptor["cardId"] == "north-earth"
@@ -1300,5 +1419,137 @@ fn rule_catalog_1368_water_site_cast_minion_withheld_on_drought_occupied_water_s
         !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
         "Drought on an occupied Water site must make that cell count as land immediately"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1377_playing_water_onto_flooded_occupied_earth_relayers_underwater() {
+    let mut session = flood_opening_with_water_site();
+    let dualer_id = cover_occupied_dualer_at_c3(
+        &mut session,
+        "north-earth",
+        "north-earth",
+        "underground",
+        "north-flood",
+        "underwater",
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "playing Water onto a flooded occupied Earth site must relayer the dual-region unit"
+    );
+    let snapshot = state(&session);
+    let occupant = realm_unit(&snapshot, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&snapshot, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1378_playing_earth_onto_drought_occupied_water_relayers_underground() {
+    let mut session = drought_earth_play_opening();
+    let dualer_id = cover_occupied_dualer_at_c3(
+        &mut session,
+        "north-water",
+        "north-water",
+        "underwater",
+        "north-drought",
+        "underground",
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "playing Earth onto a drought occupied Water site must relayer the dual-region unit"
+    );
+    let snapshot = state(&session);
+    let occupant = realm_unit(&snapshot, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underground");
+    assert!(!cemetery_has(&snapshot, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1379_playing_water_onto_flooded_occupied_earth_creates_water_site() {
+    let mut session = flood_site_type_opening();
+    flooded_earth_site_at_c3(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "printed Water played onto a flooded occupied Earth site must become a Water site"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1380_playing_earth_onto_drought_occupied_water_creates_land() {
+    let mut session = drought_occupied_water_ready_for_earth_play();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C3"]["cardId"],
+        "north-earth"
+    );
+    assert!(
+        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "printed Earth played onto a drought occupied Water site must become land"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1381_playing_earth_onto_flooded_occupied_earth_relayers_underwater() {
+    let mut session = flood_occupied_earth_ready_for_earth_play();
+    let dualer_id = state(&session)["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["cardId"] == "north-dualer")
+        .expect("dual-region minion on flooded occupied Earth")["instanceId"]
+        .as_str()
+        .expect("dual-region identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "playing Earth onto a flooded occupied Earth site must relayer the dual-region unit"
+    );
+    let snapshot = state(&session);
+    let occupant = realm_unit(&snapshot, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(
+        occupant["region"], "underwater",
+        "same-type Earth play onto a flooded occupied Earth site must create an effective Water site"
+    );
+    assert!(!cemetery_has(&snapshot, &dualer_id));
     assert_exact_replay(&session);
 }

@@ -31425,6 +31425,251 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1372_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1373",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the pending Deathrite chain completes on a flooded occupied Earth site, play-site Earth on that cell is offered again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1373_play_earth_on_flooded_occupied_site_offered_after_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1374",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the pending Deathrite chain completes on a drought occupied Water site, play-site Water on that cell is offered again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1374_play_water_on_drought_occupied_site_offered_after_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1375",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the pending Deathrite chain completes on a flooded occupied site, play-site Water on that cell is offered again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1375_play_water_on_flooded_occupied_site_offered_after_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1376",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the pending Deathrite chain completes on a drought occupied site, play-site Earth on that cell is offered again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1376_play_earth_on_drought_occupied_site_offered_after_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1377",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto a flooded occupied Earth site relayers a Burrowing and Submerge minion underwater and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1377_playing_water_onto_flooded_occupied_earth_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1378",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Earth onto a drought occupied Water site relayers a Burrowing and Submerge minion underground and keeps it in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1378_playing_earth_onto_drought_occupied_water_relayers_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1379",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Water onto a flooded occupied Earth site creates a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1379_playing_water_onto_flooded_occupied_earth_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1380",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Earth onto a drought occupied Water site creates land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1380_playing_earth_onto_drought_occupied_water_creates_land"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1381",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Earth onto a flooded occupied Earth site relayers a Burrowing and Submerge minion underwater, keeps it in play, and creates a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1381_playing_earth_onto_flooded_occupied_earth_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1382",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering an occupied Earth site, summon-minion to that water-effective cell stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1382_water_site_cast_minion_withheld_during_pending_deathrite_order_on_flooded_occupied_earth_then_offered"
+      }
     }
   ]
 }
