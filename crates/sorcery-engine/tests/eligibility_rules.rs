@@ -3045,6 +3045,76 @@ fn rule_catalog_1480_seventy_eight_game_synthetic_batch_stays_unranked_unverifie
 }
 
 #[test]
+fn rule_catalog_1491_seventy_nine_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [
+        3118_u32, 3119, 3120, 3121, 3122, 3123, 3124, 3125, 3126, 3127, 3128, 3129, 3130, 3131,
+        3132, 3133, 3134, 3135, 3136, 3137, 3138, 3139, 3140, 3141, 3142, 3143, 3144, 3145, 3146,
+        3147, 3148, 3149, 3150, 3151, 3152, 3153, 3154, 3155, 3156, 3157, 3158, 3159, 3160, 3161,
+        3162, 3163, 3164, 3165, 3166, 3167, 3168, 3169, 3170, 3171, 3172, 3173, 3174, 3175, 3176,
+        3177, 3178, 3179, 3180, 3181, 3182, 3183, 3184, 3185, 3186, 3187, 3188, 3189, 3190, 3191,
+        3192, 3193, 3194, 3195, 3196,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 79);
+    assert_eq!(records.len(), 79);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+
+#[test]
+fn rule_catalog_1492_eighty_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [
+        3197_u32, 3198, 3199, 3200, 3201, 3202, 3203, 3204, 3205, 3206, 3207, 3208, 3209, 3210,
+        3211, 3212, 3213, 3214, 3215, 3216, 3217, 3218, 3219, 3220, 3221, 3222, 3223, 3224, 3225,
+        3226, 3227, 3228, 3229, 3230, 3231, 3232, 3233, 3234, 3235, 3236, 3237, 3238, 3239, 3240,
+        3241, 3242, 3243, 3244, 3245, 3246, 3247, 3248, 3249, 3250, 3251, 3252, 3253, 3254, 3255,
+        3256, 3257, 3258, 3259, 3260, 3261, 3262, 3263, 3264, 3265, 3266, 3267, 3268, 3269, 3270,
+        3271, 3272, 3273, 3274, 3275, 3276,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 80);
+    assert_eq!(records.len(), 80);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+
+#[test]
 fn rule_catalog_1477_seventy_five_game_synthetic_batch_stays_unranked_unverified_authority() {
     let seeds = [
         2812_u32, 2813, 2814, 2815, 2816, 2817, 2818, 2819, 2820, 2821, 2822, 2823, 2824, 2825,

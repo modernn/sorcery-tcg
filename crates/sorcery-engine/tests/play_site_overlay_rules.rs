@@ -2880,3 +2880,47 @@ fn rule_catalog_1474_playing_water_onto_drought_occupied_earth_at_c3_relayers_un
     assert!(!cemetery_has(&snapshot, &dualer_id));
     assert_exact_replay(session);
 }
+
+#[test]
+fn rule_catalog_1487_play_site_withheld_during_pending_deathrite_order_on_flooded_occupied_water_at_c3()
+ {
+    let (encoded, seed) = flooded_occupied_water_c3_earth_play_deathrite_dualer_seed_with(1487);
+    eprintln!("seed={seed}");
+    let setup =
+        try_pending_deathrite_with_flooded_occupied_water_c3_dualer_for_earth_play(&encoded)
+            .expect("complete earth-on-flooded-occupied-water Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1488_play_site_withheld_during_pending_deathrite_order_on_drought_occupied_earth_at_c3()
+ {
+    let (encoded, seed) = drought_occupied_earth_c3_water_play_deathrite_dualer_seed_with(1488);
+    eprintln!("seed={seed}");
+    let setup =
+        try_pending_deathrite_with_drought_occupied_earth_c3_dualer_for_water_play(&encoded)
+            .expect("complete water-on-drought-occupied-earth Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
