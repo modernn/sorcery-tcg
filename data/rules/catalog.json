@@ -38102,8 +38102,205 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1700_one_hundred_fifty_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1701",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1701_one_hundred_fifty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1702",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1702_one_hundred_fifty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1703",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-each-allied-minion-at-target-water-site Magic leaves allied minions Ward after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1703_baptize_ward_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1704",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ward-each-allied-minion-at-target-water-site cast on an already Ward minion emits no duplicate minion-warded event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1704_second_baptize_on_warded_ally_emits_no_duplicate_ward"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1705",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-each-allied-minion-at-target-water-site Magic Wards every allied minion co-located at the chosen Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1705_baptize_wards_every_ally_co_located_at_the_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1706",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-each-allied-minion-at-target-water-site Magic Wards only allied minions occupying the chosen Water site, not allies at other sites.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1706_baptize_at_one_water_site_leaves_allies_at_other_sites_unwarded"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1707",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A Ward granted by ward-each-allied-minion-at-target-water-site Magic absorbs enemy damage-target Magic, breaking the Ward without dealing damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite",
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded",
+        "ward-broken",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1707_baptize_ward_absorbs_enemy_zap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1708",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A later ward-each-allied-minion-at-target-water-site cast Wards newly arrived allied minions at the site while leaving already Ward allies unchanged.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardEachAlliedMinionAtTargetWaterSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_water_site_rules.rs",
+        "testName": "rule_catalog_1708_second_baptize_wards_newly_arrived_ally_at_same_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1709",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1709_one_hundred_fifty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1710",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1710_one_hundred_sixty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1700,
+  "rustSupportedCount": 1710,
   "typescriptSupportedCount": 0
 }

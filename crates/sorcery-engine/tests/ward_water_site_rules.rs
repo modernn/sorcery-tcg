@@ -1,5 +1,5 @@
 //! Direct proofs for ward-each-allied-minion-at-target-water-site Magic
-//! (RULE-CATALOG-0545–0546, RULE-CATALOG-1076).
+//! (RULE-CATALOG-0545–0546, RULE-CATALOG-1076, RULE-CATALOG-1703–1708).
 //!
 //! Ordinary Magic can target a Water site and Ward every allied minion
 //! occupying that site. Enemy minions there are not warded. Earth sites are
@@ -279,6 +279,319 @@ fn south_plays_c1(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn pass_full_round(session: &mut Session) {
+    south_plays_c1(session);
+}
+
+fn zap() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageTargetUnit": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn baptize_manifest_with_spellbook(seed: u32, spellbook: &[&str]) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "ward-water-site-proof" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-ward-water-site-proof-v1",
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-baptize": baptize(),
+            "north-second": grounded(),
+            "north-site": water_site(),
+            "south-avatar": avatar(),
+            "south-raider": raider(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-raider"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn summon_north_ally(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned()
+}
+
+fn opening_with_ally(encoded: &str) -> (Session, String) {
+    let mut session = opening_main(encoded);
+    let ally_id = summon_north_ally(&mut session);
+    (session, ally_id)
+}
+
+fn lay_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn seed_with_spellbook(required: &[&str], start: u32) -> String {
+    let spellbook = vec![
+        "north-ally",
+        "north-second",
+        "north-baptize",
+        "north-baptize",
+        "north-baptize",
+        "north-baptize",
+    ];
+    (start..start + 256)
+        .map(|seed| baptize_manifest_with_spellbook(seed, &spellbook))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required Baptize opening cards")
+}
+
+fn host_setup(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-baptize"], start);
+    opening_with_ally(&encoded)
+}
+
+fn host_setup_with_two_baptizes(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-baptize", "north-baptize"], start);
+    opening_with_ally(&encoded)
+}
+
+fn host_setup_with_two_allies_at_c4(start: u32) -> (Session, String, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-second", "north-baptize"], start);
+    let (mut session, first_id) = opening_with_ally(&encoded);
+    south_plays_c1(&mut session);
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let second_id = second["cardInstanceId"]
+        .as_str()
+        .expect("second ally identity")
+        .to_owned();
+    (session, first_id, second_id)
+}
+
+fn host_setup_with_allies_at_c4_and_c3(start: u32) -> (Session, String, String) {
+    let encoded = seed_with_spellbook(&["north-ally", "north-second", "north-baptize"], start);
+    let (mut session, home_id) = opening_with_ally(&encoded);
+    south_plays_c1(&mut session);
+    lay_site_at(&mut session, "C3");
+    let (away, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let away_id = away["cardInstanceId"]
+        .as_str()
+        .expect("away ally identity")
+        .to_owned();
+    (session, home_id, away_id)
+}
+
+fn cast_baptize(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-baptize"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn warded_ally_ids(receipt: &Receipt) -> Vec<String> {
+    receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-warded")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("warded ally identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn south_hand_has_zap(snapshot: &Value) -> bool {
+    snapshot["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "south-zap"))
+}
+
+fn baptize_zap_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "ward-water-site-zap" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-ward-water-site-zap-v1",
+        },
+        "cards": {
+            "north-ally": grounded(),
+            "north-avatar": avatar(),
+            "north-baptize": baptize(),
+            "north-site": water_site(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+            "south-zap": zap(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-baptize",
+                    "north-baptize",
+                    "north-baptize",
+                    "north-baptize",
+                    "north-baptize",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-zap"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn try_opening_with_ally(encoded: &str) -> Option<(Session, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let ally_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    Some((session, ally_id))
+}
+
+fn try_baptize_then_south_zap(encoded: &str) -> Option<(Session, String)> {
+    let (mut session, ally_id) = try_opening_with_ally(encoded)?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if baptize_cells(&session).is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-baptize"
+            && descriptor["targetLocation"]["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    south_hand_has_zap(&state(&session)).then_some((session, ally_id))
+}
+
+fn baptize_zap_setup(start: u32) -> (Session, String) {
+    (start..start + 256)
+        .map(baptize_zap_manifest)
+        .filter(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-ally")
+                && opening_spell_ids(candidate)
+                    .iter()
+                    .any(|card| card == "north-baptize")
+        })
+        .find_map(|candidate| try_baptize_then_south_zap(&candidate))
+        .expect("bounded seed reaching Baptize ward then south Zap")
+}
+
+fn host_setup_ward_then_second_ally(start: u32) -> (Session, String, String) {
+    let encoded = seed_with_spellbook(
+        &[
+            "north-ally",
+            "north-baptize",
+            "north-baptize",
+            "north-second",
+        ],
+        start,
+    );
+    let (mut session, first_id) = opening_with_ally(&encoded);
+    cast_baptize(&mut session, "C4");
+    south_plays_c1(&mut session);
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let second_id = second["cardInstanceId"]
+        .as_str()
+        .expect("second ally identity")
+        .to_owned();
+    (session, first_id, second_id)
+}
+
+fn south_zaps_ally(session: &mut Session, ally_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-zap"
+            && descriptor["target"]["instanceId"] == ally_id
+    });
+    receipt
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -567,4 +880,78 @@ fn rule_catalog_1076_ward_water_site_withheld_during_pending_deathrite_order() {
     );
     assert_eq!(unit(&state(session), &ally_id)["warded"], true);
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1703_baptize_ward_persists_after_turns_pass() {
+    let (mut session, ally_id) = host_setup(1703);
+    cast_baptize(&mut session, "C4");
+    assert_eq!(unit(&state(&session), &ally_id)["warded"], true);
+    pass_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["warded"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1704_second_baptize_on_warded_ally_emits_no_duplicate_ward() {
+    let (mut session, ally_id) = host_setup_with_two_baptizes(1704);
+    let first = cast_baptize(&mut session, "C4");
+    assert_eq!(warded_ally_ids(&first), vec![ally_id.clone()]);
+    let second = cast_baptize(&mut session, "C4");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &ally_id)["warded"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1705_baptize_wards_every_ally_co_located_at_the_water_site() {
+    let (mut session, first_id, second_id) = host_setup_with_two_allies_at_c4(1705);
+    let granted = cast_baptize(&mut session, "C4");
+    let mut warded = warded_ally_ids(&granted);
+    warded.sort_unstable();
+    let mut expected = vec![first_id.clone(), second_id.clone()];
+    expected.sort_unstable();
+    assert_eq!(warded, expected);
+    assert_eq!(unit(&state(&session), &first_id)["warded"], true);
+    assert_eq!(unit(&state(&session), &second_id)["warded"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1706_baptize_at_one_water_site_leaves_allies_at_other_sites_unwarded() {
+    let (mut session, home_id, away_id) = host_setup_with_allies_at_c4_and_c3(1706);
+    let granted = cast_baptize(&mut session, "C3");
+    assert_eq!(warded_ally_ids(&granted), vec![away_id.clone()]);
+    assert_eq!(unit(&state(&session), &away_id)["warded"], true);
+    assert_eq!(unit(&state(&session), &home_id)["warded"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1707_baptize_ward_absorbs_enemy_zap() {
+    let (mut session, ally_id) = baptize_zap_setup(1707);
+    assert_eq!(unit(&state(&session), &ally_id)["warded"], true);
+    let blocked = south_zaps_ally(&mut session, &ally_id);
+    assert!(event_types(&blocked).contains(&"ward-broken"));
+    assert!(event_types(&blocked).contains(&"magic-resolved"));
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["warded"], false);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1708_second_baptize_wards_newly_arrived_ally_at_same_site() {
+    let (mut session, first_id, second_id) = host_setup_ward_then_second_ally(1708);
+    assert_eq!(unit(&state(&session), &first_id)["warded"], true);
+    assert_eq!(unit(&state(&session), &second_id)["warded"], false);
+    let granted = cast_baptize(&mut session, "C4");
+    assert_eq!(
+        event_types(&granted),
+        ["magic-cast", "minion-warded", "magic-resolved"]
+    );
+    assert_eq!(granted.events[1].payload["instanceId"], second_id);
+    assert_eq!(unit(&state(&session), &first_id)["warded"], true);
+    assert_eq!(unit(&state(&session), &second_id)["warded"], true);
+    assert_exact_replay(&session);
 }
