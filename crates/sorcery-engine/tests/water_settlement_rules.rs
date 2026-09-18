@@ -17,7 +17,7 @@
 //! (RULE-CATALOG-1340–1341, RULE-CATALOG-1346–1347,
 //! RULE-CATALOG-1373–1376, RULE-CATALOG-1382, RULE-CATALOG-1391,
 //! RULE-CATALOG-1399–1400, RULE-CATALOG-1403–1406, RULE-CATALOG-1411,
-//! RULE-CATALOG-1414).
+//! RULE-CATALOG-1414, RULE-CATALOG-1435).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -3442,6 +3442,26 @@ fn rule_catalog_1403_play_earth_on_flooded_occupied_water_withheld_during_pendin
 }
 
 #[test]
+fn rule_catalog_1437_play_earth_on_flooded_occupied_earth_withheld_during_pending_deathrite_order()
+{
+    let encoded = flooded_earth_c3_play_site_seed_with(1437);
+    let setup = try_pending_deathrite_with_flooded_occupied_earth_c3_play_site(&encoded)
+        .expect("complete earth-on-flooded-occupied-earth Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
 fn rule_catalog_1404_play_water_on_drought_occupied_earth_withheld_during_pending_deathrite_order()
 {
     let encoded = drought_earth_c3_play_site_seed_with(1404);
@@ -3450,6 +3470,30 @@ fn rule_catalog_1404_play_water_on_drought_occupied_earth_withheld_during_pendin
     let paused = state(&setup.session);
     assert_eq!(paused["phase"], "deathrite-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1435_play_water_on_drought_occupied_water_withheld_during_pending_deathrite_order()
+{
+    let encoded = drought_water_c3_play_site_seed_with(1435);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_drought_occupied_water_c3_play_site(&encoded)
+        .expect("complete water-on-drought-occupied-water Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
     assert!(
         setup
             .session
