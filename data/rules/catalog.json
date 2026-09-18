@@ -28199,6 +28199,221 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1222_fourteen_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1223",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred mill-spells-then-lure stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1223_mill_spells_then_lure_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1224",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred mill-sites-then-lure stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1224_mill_sites_then_lure_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1225",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred lure-then-teleport stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1225_lure_then_teleport_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1226",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred mill-spells-then-life-gain stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnControllerGainsLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1226_mill_spells_then_life_gain_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1227",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred lure-then-life-loss stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnControllerLosesLife"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1227_lure_then_life_loss_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1228",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, a deferred heavy-loss-then-here-damage end-turn pulse is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_1228_end_turn_heavy_loss_then_here_damage_pulse_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1229",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, a deferred minimal-gain-then-here-damage end-turn pulse is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_1229_end_turn_minimal_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1230",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, a deferred light-loss-heavy-gain-then-here-damage end-turn pulse is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atEndOfControllerTurnControllerLosesLife",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnDamageEachOtherUnitHere"
+      ],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_stacked_pulse_rules.rs",
+        "testName": "rule_catalog_1230_end_turn_light_loss_heavy_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1231",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of fifteen synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1231_fifteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1232",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of sixteen synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1232_sixteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
