@@ -3847,6 +3847,18 @@ fn flooded_water_c3_play_water_site_seed_with(start: u32) -> String {
         )
 }
 
+fn flooded_water_c3_draw_site_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(flooded_water_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(candidate)
+                .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with draw-site withheld on flooded occupied Water",
+        )
+}
+
 fn flooded_earth_c3_play_site_seed_with(start: u32) -> String {
     (start..start + 4096)
         .map(flooded_earth_c3_play_site_manifest)
@@ -3890,6 +3902,25 @@ fn drought_earth_c3_play_earth_site_seed_with(start: u32) -> String {
         })
         .expect(
             "bounded seed that reaches pending Deathrites with Earth play on drought occupied Earth",
+        )
+}
+
+fn drought_earth_c3_draw_site_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(drought_earth_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(candidate)
+                .is_some_and(|setup| {
+                    setup.session.legal_actions().is_ok_and(|actions| {
+                        actions.iter().all(|action| {
+                            action.descriptor["kind"] != "draw-site"
+                                && action.descriptor["kind"] != "play-site"
+                        })
+                    })
+                })
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with draw-site withheld on drought occupied Earth",
         )
 }
 
@@ -4017,6 +4048,33 @@ fn rule_catalog_1453_play_water_on_flooded_occupied_water_withheld_during_pendin
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1465_draw_site_withheld_during_pending_deathrite_order_on_flooded_occupied_water_at_c3()
+ {
+    let encoded = flooded_water_c3_draw_site_seed_with(1465);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(&encoded)
+        .expect("complete draw-site-on-flooded-occupied-water Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "draw-site" && action.descriptor["kind"] != "play-site"
+            }),
+        "draw-site stays withheld during deathrite-order (mutually exclusive with play-site)"
     );
     assert_exact_replay(&setup.session);
 }
@@ -4164,6 +4222,32 @@ fn rule_catalog_1456_play_earth_on_drought_occupied_earth_offered_after_pending_
             })
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1466_draw_site_withheld_during_pending_deathrite_order_on_drought_occupied_earth_at_c3()
+ {
+    let encoded = drought_earth_c3_draw_site_seed_with(1466);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(&encoded)
+        .expect("complete draw-site on drought occupied Earth Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| {
+                action.descriptor["kind"] != "draw-site" && action.descriptor["kind"] != "play-site"
+            })
+    );
+    assert_exact_replay(&setup.session);
 }
 
 #[test]

@@ -33334,6 +33334,208 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1462_seventy_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1463",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with an occupied Earth site at C3, cast Flood aura covering that cell stays withheld until the pending Deathrite chain completes and is offered again afterward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died",
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1463_cast_flood_aura_withheld_during_pending_deathrite_order_on_occupied_earth_site_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1464",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with an occupied Water site at C3, cast Drought aura covering that cell stays withheld until the pending Deathrite chain completes and is offered again afterward.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died",
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1464_cast_drought_aura_withheld_during_pending_deathrite_order_on_occupied_water_site_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1465",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering an occupied Water site at C3, draw-site stays withheld alongside play-site until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "draw-site",
+        "play-site",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1465_draw_site_withheld_during_pending_deathrite_order_on_flooded_occupied_water_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1466",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Drought covering an occupied Earth site at C3, draw-site stays withheld alongside play-site until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "draw-site",
+        "play-site",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1466_draw_site_withheld_during_pending_deathrite_order_on_drought_occupied_earth_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1467",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A seventy-one-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1467_seventy_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1468",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A seventy-two-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1468_seventy_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1469",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A seventy-three-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1469_seventy_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1470",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A seventy-four-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1470_seventy_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1471",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a flooded occupied Water site at C3, playing Water onto that cell relayers a dual-region minion underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1471_playing_water_onto_flooded_occupied_water_at_c3_relayers_underwater_after_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1472",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a drought occupied Earth site at C3, playing Earth onto that cell relayers a dual-region minion underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1472_playing_earth_onto_drought_occupied_earth_at_c3_relayers_underground_after_deathrite_order"
+      }
     }
   ]
 }
