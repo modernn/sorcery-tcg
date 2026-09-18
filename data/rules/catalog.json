@@ -38888,8 +38888,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1740_one_hundred_seventy_two_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1741",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1741_one_hundred_seventy_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1742",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1742_one_hundred_seventy_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1743",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic leaves a tapped minion tapped through the opponent turn after silence expires.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1743_insult_tap_persists_during_the_opponent_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1744",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic does not offer an already silenced and tapped nearby minion again.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1744_second_insult_omits_an_already_silenced_and_tapped_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1745",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second silence-and-tap-nearby-minion then may-draw-spell cast without drawing still silences and taps a newly arrived nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1745_second_insult_without_draw_still_silences_and_taps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1746",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic silences and taps an enemy minion occupying the caster site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1746_insult_silences_and_taps_an_enemy_minion_at_the_caster_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1747",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Silence-and-tap-nearby-minion then may-draw-spell Magic offers only minions near the caster site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1747_insult_pulls_targets_only_from_minions_near_the_caster_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1748",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a silence-and-tap-nearby-minion then may-draw-spell cast, a later cast silences and taps a newly arrived ally at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "silenceAndTapNearbyMinionThenMayDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-silenced",
+        "minion-tapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/silence_tap_then_may_draw_rules.rs",
+        "testName": "rule_catalog_1748_second_insult_silences_a_newly_arrived_ally_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1749",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1749_one_hundred_seventy_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1750",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1750_one_hundred_seventy_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1740,
+  "rustSupportedCount": 1750,
   "typescriptSupportedCount": 0
 }

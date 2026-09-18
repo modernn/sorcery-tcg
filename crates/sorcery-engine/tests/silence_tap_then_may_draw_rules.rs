@@ -1,5 +1,5 @@
 //! Direct proofs for silence-and-tap-nearby-minion then may-draw-spell
-//! Magic (RULE-CATALOG-0553–0554, RULE-CATALOG-1024).
+//! Magic (RULE-CATALOG-0553–0554, RULE-CATALOG-1024, RULE-CATALOG-1743–1748).
 //!
 //! Ordinary Magic can Silence and tap one nearby minion, then may draw one
 //! hidden spell. Silence is this-turn ability loss, not Disable. A far
@@ -46,6 +46,17 @@ fn grounded() -> Value {
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn raider() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -122,6 +133,7 @@ fn insult_manifest(seed: u32) -> String {
             "north-site": earth_site(),
             "south-avatar": avatar(),
             "south-far": grounded(),
+            "south-raider": raider(),
             "south-site": earth_site(),
         },
         "decks": {
@@ -140,7 +152,10 @@ fn insult_manifest(seed: u32) -> String {
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-far"; 6],
+                "spellbook": vec!["south-far"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-raider", 2))
+                    .collect::<Vec<_>>(),
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -436,6 +451,199 @@ fn south_plays_c1_and_summons_far(session: &mut Session) -> String {
         .to_owned()
 }
 
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("raider identity")
+        .to_owned()
+}
+
+fn south_plays_c1_and_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("raider identity")
+        .to_owned()
+}
+
+fn insult_manifest_with_spellbook(seed: u32, spellbook: &[&str]) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-caster": caster(),
+        "north-dummy": dummy(),
+        "north-insult": insult(),
+        "north-site": earth_site(),
+        "south-avatar": avatar(),
+        "south-far": grounded(),
+        "south-raider": raider(),
+        "south-site": earth_site(),
+    });
+    if spellbook.contains(&"north-second") {
+        cards["north-second"] = grounded();
+    }
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "silence-tap-proof" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-silence-tap-proof-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-far"; 4]
+                    .into_iter()
+                    .chain(std::iter::repeat_n("south-raider", 2))
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_spellbook(required: &[&str], start: u32) -> String {
+    let spellbook = vec![
+        "north-caster",
+        "north-second",
+        "north-dummy",
+        "north-insult",
+        "north-insult",
+        "north-insult",
+    ];
+    (start..start + 256)
+        .map(|seed| insult_manifest_with_spellbook(seed, &spellbook))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required Insult opening cards")
+}
+
+fn summon_north_caster(session: &mut Session) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("caster instance identity")
+        .to_owned()
+}
+
+fn opening_with_caster(encoded: &str) -> (Session, String) {
+    let mut session = opening_main(encoded);
+    let caster_id = summon_north_caster(&mut session);
+    (session, caster_id)
+}
+
+fn host_setup(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-caster", "north-insult"], start);
+    opening_with_caster(&encoded)
+}
+
+fn host_setup_with_two_insults(start: u32) -> (Session, String) {
+    let encoded = seed_with_spellbook(&["north-caster", "north-insult", "north-insult"], start);
+    opening_with_caster(&encoded)
+}
+
+fn host_setup_insult_then_second_caster(start: u32) -> (Session, String, String) {
+    let encoded = seed_with_spellbook(
+        &[
+            "north-caster",
+            "north-insult",
+            "north-insult",
+            "north-second",
+        ],
+        start,
+    );
+    let (mut session, first_id) = opening_with_caster(&encoded);
+    cast_insult_no_draw(&mut session, &first_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-second"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let second_id = second["cardInstanceId"]
+        .as_str()
+        .expect("second ally identity")
+        .to_owned();
+    (session, first_id, second_id)
+}
+
+fn cast_insult_draw(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-insult"
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["drawZone"] == "spellbook"
+    });
+    receipt
+}
+
+fn cast_insult_no_draw(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-insult"
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["drawZone"].is_null()
+    });
+    receipt
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<_> = session
         .transcript()
@@ -681,4 +889,118 @@ fn rule_catalog_1024_silence_tap_magic_withheld_during_pending_deathrite_order()
     assert_eq!(silenced["tapped"], true);
     assert_eq!(silenced["silenced"], true);
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1743_insult_tap_persists_during_the_opponent_turn() {
+    let (mut session, caster_id) = host_setup(1743);
+    south_plays_c1_and_summons_far(&mut session);
+    cast_insult_no_draw(&mut session, &caster_id);
+    assert_eq!(unit(&state(&session), &caster_id)["tapped"], true);
+    assert_eq!(unit(&state(&session), &caster_id)["silenced"], true);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    let after_end = state(&session);
+    assert_eq!(unit(&after_end, &caster_id)["tapped"], true);
+    assert!(unit(&after_end, &caster_id)["silenced"].is_null());
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert_eq!(unit(&state(&session), &caster_id)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1744_second_insult_omits_an_already_silenced_and_tapped_minion() {
+    let (mut session, caster_id) = host_setup_with_two_insults(1744);
+    south_plays_c1_and_summons_far(&mut session);
+    let first = cast_insult_no_draw(&mut session, &caster_id);
+    assert_eq!(
+        event_types(&first),
+        [
+            "magic-cast",
+            "minion-silenced",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    assert!(!insult_target_ids(&session).contains(&caster_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1745_second_insult_without_draw_still_silences_and_taps() {
+    let (mut session, caster_id) = host_setup_with_two_insults(1745);
+    south_plays_c1_and_summons_far(&mut session);
+    cast_insult_draw(&mut session, &caster_id);
+    assert_eq!(unit(&state(&session), &caster_id)["tapped"], true);
+    let enemy_id = south_raids_c4(&mut session);
+    let granted = cast_insult_no_draw(&mut session, &enemy_id);
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-silenced",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &enemy_id)["tapped"], true);
+    assert_eq!(unit(&state(&session), &enemy_id)["silenced"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1746_insult_silences_and_taps_an_enemy_minion_at_the_caster_site() {
+    let encoded = seed_with_spellbook(&["north-caster", "north-insult"], 1746);
+    let mut session = opening_main(&encoded);
+    summon_north_caster(&mut session);
+    let enemy_id = south_plays_c1_and_raids_c4(&mut session);
+    assert!(insult_target_ids(&session).contains(&enemy_id));
+    let granted = cast_insult_no_draw(&mut session, &enemy_id);
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-silenced",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &enemy_id)["tapped"], true);
+    assert_eq!(unit(&state(&session), &enemy_id)["silenced"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1747_insult_pulls_targets_only_from_minions_near_the_caster_site() {
+    let encoded = seed_with_spellbook(&["north-caster", "north-insult"], 1747);
+    let mut session = opening_main(&encoded);
+    let caster_id = summon_north_caster(&mut session);
+    let far_id = south_plays_c1_and_summons_far(&mut session);
+    let offered = insult_target_ids(&session);
+    assert!(offered.contains(&caster_id));
+    assert!(!offered.contains(&far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1748_second_insult_silences_a_newly_arrived_ally_at_the_same_cell() {
+    let (mut session, first_id, second_id) = host_setup_insult_then_second_caster(1748);
+    assert!(unit(&state(&session), &first_id)["silenced"].is_null());
+    assert_eq!(unit(&state(&session), &second_id)["tapped"], false);
+    assert!(unit(&state(&session), &second_id)["silenced"].is_null());
+    let granted = cast_insult_no_draw(&mut session, &second_id);
+    assert_eq!(
+        event_types(&granted),
+        [
+            "magic-cast",
+            "minion-silenced",
+            "minion-tapped",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(granted.events[1].payload["instanceId"], second_id);
+    assert_eq!(unit(&state(&session), &second_id)["tapped"], true);
+    assert_eq!(unit(&state(&session), &second_id)["silenced"], true);
+    assert_exact_replay(&session);
 }
