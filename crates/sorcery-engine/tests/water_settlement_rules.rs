@@ -2685,6 +2685,26 @@ fn rule_catalog_1400_water_site_cast_minion_withheld_during_pending_deathrite_or
     assert_exact_replay(&setup.session);
 }
 
+#[test]
+fn rule_catalog_1433_water_site_cast_minion_withheld_during_pending_deathrite_order_on_drought_occupied_water()
+ {
+    let encoded = drought_occupied_water_cast_deathrite_seed_with(1433);
+    let setup = try_pending_deathrite_with_drought_occupied_water_cast_summon(&encoded)
+        .expect("complete water-site cast summon Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+    assert_exact_replay(&setup.session);
+}
+
 fn flooded_water_c3_play_site_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
