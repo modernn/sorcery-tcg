@@ -1218,3 +1218,22 @@ fn rule_catalog_1558_non_geomancer_water_first_play_omits_create_rubble_at() {
     assert!(first_play.payload.get("createRubbleAt").is_none());
     assert_exact_replay(&session);
 }
+
+#[test]
+fn rule_catalog_1563_geomancer_first_water_play_omits_create_rubble_at() {
+    let mut session = north_opening_main_from_manifest(&site_play_manifest(
+        1563,
+        geomancer_avatar(),
+        water_site(),
+    ));
+    let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    assert!(first.get("createRubbleAt").is_none());
+    let first_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .find(|event| event.event_type == "site-played")
+        .expect("first site-played event");
+    assert!(first_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}

@@ -315,6 +315,13 @@ fn through_north_pass_to_south_main(session: &mut Session) {
     });
 }
 
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
 fn south_attacks_north_ally(session: &mut Session, attacker_id: &str, defender_id: &str) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
@@ -647,6 +654,101 @@ fn rule_catalog_1557_attacking_only_printed_without_grant_strikes_first_while_at
     let ally_id = summon_north_ally(&mut session);
     let enemy_id = south_summons_visitor_at_c4(&mut session);
     strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1564_printed_first_strike_without_grant_strikes_first_while_attacking() {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1565_printed_first_strike_without_grant_strikes_first_while_defending() {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    through_north_pass_to_south_main(&mut session);
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1566_defending_only_printed_plus_grant_trades_after_grant_expires_while_attacking()
+{
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1567_attacking_only_printed_plus_grant_strikes_first_after_grant_expires_while_attacking()
+ {
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1568_printed_first_strike_plus_grant_strikes_first_after_grant_expires_while_defending()
+ {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
     let after = state(&session);
     assert_eq!(unit(&after, &ally_id)["damage"], 0);
     assert!(cemetery_has(&session, "south", &enemy_id));
