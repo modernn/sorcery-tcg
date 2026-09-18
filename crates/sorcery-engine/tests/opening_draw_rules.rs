@@ -539,6 +539,13 @@ fn north_second_main_from_manifest(encoded: &str) -> Session {
     session
 }
 
+fn north_opening_main_from_manifest(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("valid session");
+    keep(&mut session);
+    keep(&mut session);
+    session
+}
+
 fn site_play_manifest(seed: u32, avatar_card: Value, site_card: Value) -> String {
     finish_manifest(json!({
         "authority": {
@@ -1129,5 +1136,85 @@ fn rule_catalog_1544_non_geomancer_water_site_play_omits_create_rubble_at() {
         .nth(1)
         .expect("second site-played event");
     assert!(second_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1553_geomancer_water_second_main_play_omits_create_rubble_at() {
+    let mut session = north_second_main_from_manifest(&site_play_manifest(
+        1553,
+        geomancer_avatar(),
+        water_site(),
+    ));
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert!(second.get("createRubbleAt").is_none());
+    let second_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .filter(|event| event.event_type == "site-played")
+        .nth(1)
+        .expect("second site-played event");
+    assert!(second_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1554_geomancer_first_earth_play_includes_create_rubble_at() {
+    let mut session =
+        north_opening_main_from_manifest(&site_play_manifest(1554, geomancer_avatar(), site()));
+    let (first, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor.get("createRubbleAt").is_some()
+    });
+    let rubble_cell = first["createRubbleAt"]
+        .as_str()
+        .expect("adjacent rubble cell");
+    assert_eq!(
+        receipt
+            .events
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec!["site-played", "rubble-created"]
+    );
+    assert_eq!(receipt.events[1].payload["cell"], rubble_cell);
+    assert_eq!(
+        state(&session)["realm"]["sites"][rubble_cell]["rubble"],
+        true
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1555_non_geomancer_first_earth_play_omits_create_rubble_at() {
+    let mut session =
+        north_opening_main_from_manifest(&site_play_manifest(1555, avatar(false), site()));
+    let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    assert!(first.get("createRubbleAt").is_none());
+    let first_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .find(|event| event.event_type == "site-played")
+        .expect("first site-played event");
+    assert!(first_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1558_non_geomancer_water_first_play_omits_create_rubble_at() {
+    let mut session =
+        north_opening_main_from_manifest(&site_play_manifest(1558, avatar(false), water_site()));
+    let (first, _) = accept_where(&mut session, |descriptor| descriptor["kind"] == "play-site");
+    assert!(first.get("createRubbleAt").is_none());
+    let first_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .find(|event| event.event_type == "site-played")
+        .expect("first site-played event");
+    assert!(first_play.payload.get("createRubbleAt").is_none());
     assert_exact_replay(&session);
 }

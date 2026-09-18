@@ -630,6 +630,29 @@ fn rule_catalog_1548_defending_only_printed_without_grant_strikes_first_while_de
     assert_exact_replay(&session);
 }
 
+#[test]
+fn rule_catalog_1556_defending_only_printed_without_grant_trades_simultaneously_while_attacking() {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1557_attacking_only_printed_without_grant_strikes_first_while_attacking() {
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
 fn deathrite_grant_first_strike_manifest(seed: u32) -> String {
     let fixture = "grant-first-strike-deathrite-withheld";
     finish_manifest(json!({

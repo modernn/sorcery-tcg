@@ -20726,7 +20726,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "When one minion carries all three start-of-controller-turn pulses—Avatar life gain, Avatar life loss, and here-area damage—the Start Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing start-turn continuation path on a single resolve-start-turn-trigger action.",
+      "plainLanguage": "When one minion carries all three start-of-controller-turn pulses\u2014Avatar life gain, Avatar life loss, and here-area damage\u2014the Start Phase resolves them in order on that minion: gain first, then loss on the controller Avatar, then here-area damage through the existing start-turn continuation path on a single resolve-start-turn-trigger action.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atStartOfControllerTurnControllerGainsLife",
@@ -21092,7 +21092,7 @@
         "RULE-03",
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 Landbound minion disabled when Flood covers its entire footprint becomes enabled in place when a later-entered Drought Aura wins the timestamp on those same cells.",
+      "plainLanguage": "A 2\u00d72 Landbound minion disabled when Flood covers its entire footprint becomes enabled in place when a later-entered Drought Aura wins the timestamp on those same cells.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "landbound",
@@ -21235,7 +21235,7 @@
         "RULE-04",
         "RULE-05"
       ],
-      "plainLanguage": "Playing a site on a void cell that is part of a 2×2 Voidwalk footprint, but not its anchor, banishes the void occupant in the same receipt instead of surfacing it on the partial square.",
+      "plainLanguage": "Playing a site on a void cell that is part of a 2\u00d72 Voidwalk footprint, but not its anchor, banishes the void occupant in the same receipt instead of surfacing it on the partial square.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "occupiesSquareArea",
@@ -21285,7 +21285,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "A 2×2 bearer that Drops a carried Artifact leaves it on the remembered pick-up cell, not its anchor cell.",
+      "plainLanguage": "A 2\u00d72 bearer that Drops a carried Artifact leaves it on the remembered pick-up cell, not its anchor cell.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "artifact",
@@ -27677,7 +27677,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred triple-pulse stacked start-turn trigger—Avatar life gain, Avatar life loss, and here-area damage—is withheld until the pending Deathrite chain completes.",
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred triple-pulse stacked start-turn trigger\u2014Avatar life gain, Avatar life loss, and here-area damage\u2014is withheld until the pending Deathrite chain completes.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atStartOfControllerTurnControllerGainsLife",
@@ -27937,7 +27937,7 @@
       "requirementIds": [
         "RULE-04"
       ],
-      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, a deferred triple-pulse end-turn trigger—Avatar life gain, Avatar life loss, and here-area damage—is withheld until the pending Deathrite chain completes.",
+      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, a deferred triple-pulse end-turn trigger\u2014Avatar life gain, Avatar life loss, and here-area damage\u2014is withheld until the pending Deathrite chain completes.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "atEndOfControllerTurnControllerGainsLife",
@@ -35142,6 +35142,189 @@
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1550_ninety_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1551",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ninety-seven-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1551_ninety_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1552",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ninety-eight-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1552_ninety_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1553",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Geomancer Avatar playing Water sites omits createRubbleAt from ordinary play-site actions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1553_geomancer_water_second_main_play_omits_create_rubble_at"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1554",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A Geomancer Avatar's first Earth site play on turn one includes createRubbleAt on the play-site action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "earthSitePlayCreatesAdjacentRubble"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1554_geomancer_first_earth_play_includes_create_rubble_at"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1555",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A non-Geomancer Avatar's first Earth site play on turn one omits createRubbleAt from the play-site action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1555_non_geomancer_first_earth_play_omits_create_rubble_at"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1556",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A defending-only printed first-strike ally without grant-First-Strike trades simultaneously when it attacks on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1556_defending_only_printed_without_grant_trades_simultaneously_while_attacking"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1557",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "An attacking-only printed first-strike ally without grant-First-Strike still kills a 3/3 defender before taking return damage when it attacks on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1557_attacking_only_printed_without_grant_strikes_first_while_attacking"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1558",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A non-Geomancer Avatar's first Water site play on turn one omits createRubbleAt from the play-site action.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/opening_draw_rules.rs",
+        "testName": "rule_catalog_1558_non_geomancer_water_first_play_omits_create_rubble_at"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1559",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A ninety-nine-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1559_ninety_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1560",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1560_one_hundred_game_synthetic_batch_stays_unranked_unverified_authority"
       }
     }
   ]
