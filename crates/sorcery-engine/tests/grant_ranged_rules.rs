@@ -1,5 +1,5 @@
 //! Direct proofs for grant-Ranged-this-turn Magic (RULE-CATALOG-0276–0277,
-//! RULE-CATALOG-1107).
+//! RULE-CATALOG-1107, RULE-CATALOG-1583–1588).
 //!
 //! Official Magic can grant Ranged for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, and expires through
@@ -41,6 +41,28 @@ fn grounded() -> Value {
     })
 }
 
+fn printed_ranged() -> Value {
+    json!({
+        "attack": 2,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "ranged": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn visitor() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn grant() -> Value {
     json!({
         "cardType": "magic",
@@ -77,7 +99,7 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn manifest() -> String {
+fn manifest_with_north_ally(ally: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "grant-ranged" }))
@@ -86,13 +108,13 @@ fn manifest() -> String {
             "revisionId": "synthetic-grant-ranged-v1",
         },
         "cards": {
-            "north-ally": grounded(),
+            "north-ally": ally,
             "north-avatar": avatar(),
             "north-grant": grant(),
             "north-site": site(),
             "south-avatar": avatar(),
-            "south-minion": grounded(),
             "south-site": site(),
+            "south-visitor": visitor(),
         },
         "decks": {
             "north": {
@@ -103,7 +125,7 @@ fn manifest() -> String {
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["south-minion"; 6],
+                "spellbook": vec!["south-visitor"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -111,6 +133,10 @@ fn manifest() -> String {
         "schemaVersion": 1,
         "seed": 1,
     }))
+}
+
+fn manifest() -> String {
+    manifest_with_north_ally(&grounded())
 }
 
 fn try_accept_where(
@@ -180,8 +206,26 @@ fn can_shoot(session: &Session, shooter_id: &str) -> bool {
         })
 }
 
+fn cemetery_has(session: &Session, seat: &str, instance_id: &str) -> bool {
+    state(session)["players"][seat]["cemetery"]
+        .as_array()
+        .expect("cemetery")
+        .iter()
+        .any(|card| card["instanceId"] == instance_id)
+}
+
 fn opening_main() -> Session {
     let mut session = Session::new(&manifest()).expect("grant Ranged");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn opening_main_with_ally(ally: &Value) -> Session {
+    let mut session = Session::new(&manifest_with_north_ally(ally)).expect("grant Ranged");
     keep(&mut session);
     keep(&mut session);
     accept_where(&mut session, |descriptor| {
@@ -239,6 +283,62 @@ fn pass_south_turn(session: &mut Session) {
     });
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| descriptor["kind"] == "draw");
+}
+
+fn south_summons_visitor_at_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| descriptor["kind"] == "draw");
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned()
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn shoot_target(session: &mut Session, shooter_id: &str, target_id: &str) -> Receipt {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "shoot-projectile"
+            && descriptor["shooterInstanceId"] == shooter_id
+            && descriptor["hit"]["instanceId"] == target_id
+    })
+    .1
+}
+
+fn expire_grant_ranged(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "ranged-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryRangedSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -339,6 +439,134 @@ fn rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness() {
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1583_printed_ranged_without_grant_shoots_and_kills() {
+    let mut session = opening_main_with_ally(&printed_ranged());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    assert!(can_shoot(&session, &ally_id));
+    let receipt = shoot_target(&mut session, &ally_id, &enemy_id);
+    assert!(
+        receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died")
+    );
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1584_granted_ranged_shoots_and_kills_before_end_of_turn() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_ranged(&mut session, &ally_id);
+    assert!(can_shoot(&session, &ally_id));
+    let receipt = shoot_target(&mut session, &ally_id, &enemy_id);
+    assert!(
+        receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-died")
+    );
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryRangedSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1585_granted_ranged_expires_before_ally_shoots_on_later_turn() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_ranged(&mut session, &ally_id);
+    expire_grant_ranged(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(!can_shoot(&session, &ally_id));
+    assert!(!cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1586_printed_ranged_still_shoots_after_grant_expires_on_later_turn() {
+    let mut session = opening_main_with_ally(&printed_ranged());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_ranged(&mut session, &ally_id);
+    expire_grant_ranged(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(can_shoot(&session, &ally_id));
+    shoot_target(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1587_printed_and_granted_ranged_compose_while_grant_is_active() {
+    let mut session = opening_main_with_ally(&printed_ranged());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, receipt) = grant_ranged(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "ranged-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryRangedSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    shoot_target(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1588_printed_ranged_outlasts_expired_grant_while_plain_ally_cannot_shoot() {
+    let mut session = opening_main_with_ally(&printed_ranged());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_ranged(&mut session, &ally_id);
+    expire_grant_ranged(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let mut plain = opening_main();
+    let plain_ally = summon_north_ally(&mut plain);
+    let plain_enemy = south_summons_visitor_at_c4(&mut plain);
+    let (plain_descriptor, _) = grant_ranged(&mut plain, &plain_ally);
+    expire_grant_ranged(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    assert!(!can_shoot(&plain, &plain_ally));
+    assert!(!cemetery_has(&plain, "south", &plain_enemy));
+
+    through_south_pass_to_north_main(&mut session);
+    assert!(can_shoot(&session, &ally_id));
+    shoot_target(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
 }
 

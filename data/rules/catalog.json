@@ -35718,6 +35718,201 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1580_one_hundred_eight_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1581",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-nine-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1581_one_hundred_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1582",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-ten-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1582_one_hundred_ten_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1583",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Ranged ally without a grant can shoot and kill a 1/1 defender in range.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1583_printed_ranged_without_grant_shoots_and_kills"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1584",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with an active grant-Ranged can shoot and kill a 1/1 defender in range before its controller ends the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1584_granted_ranged_shoots_and_kills_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1585",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Ranged expires at its controller's End Phase, a minion without printed Ranged cannot shoot on a later turn even when a target remains in range.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "ranged-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1585_granted_ranged_expires_before_ally_shoots_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1586",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Ranged expires at its controller's End Phase, a printed Ranged ally can still shoot and kill a 1/1 defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1586_printed_ranged_still_shoots_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1587",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Ranged ally with an active grant-Ranged can shoot and kill a 1/1 defender while both sources are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1587_printed_and_granted_ranged_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1588",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Ranged expires at its controller's End Phase, a printed Ranged ally can still shoot and kill while a plain ally without printed Ranged cannot shoot in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "ranged",
+        "grantRangedToAllyThisTurn"
+      ],
+      "actionHints": [
+        "shoot-projectile"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_ranged_rules.rs",
+        "testName": "rule_catalog_1588_printed_ranged_outlasts_expired_grant_while_plain_ally_cannot_shoot"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1589",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-eleven-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1589_one_hundred_eleven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1590",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twelve-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1590_one_hundred_twelve_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
