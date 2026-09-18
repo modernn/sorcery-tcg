@@ -37508,6 +37508,206 @@
         "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
         "testName": "rule_catalog_1668_printed_airborne_outlasts_expired_grant_while_plain_ally_cannot_strike"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1671",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred forty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1671_one_hundred_forty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1672",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred forty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1672_one_hundred_forty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1679",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred forty seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1679_one_hundred_forty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1680",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred forty eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1680_one_hundred_forty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1673",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed Stealth is hidden from enemy targeted damage without grant-Stealth-then-draw Magic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1673_printed_stealth_hides_ally_from_enemy_targeted_damage_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1674",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Stealth-to-allied-minions then draw-spell Magic hides a plain ally from enemy targeted damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1674_granted_stealth_then_draw_hides_ally_before_enemy_can_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1675",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Enemy targeted damage that was legal before grant-Stealth-then-draw Magic becomes illegal after the grant resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1675_granted_stealth_then_draw_blocks_damage_that_was_legal_before_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1676",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth on an ally still hides it from enemy targeted damage after turns pass without an attack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1676_printed_stealth_still_hides_ally_after_turn_passes_without_attack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1677",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth and grant-Stealth-then-draw Magic compose while the ally stays stealthed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1677_printed_and_granted_stealth_then_draw_compose_while_stealth_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1678",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth outlasts a redundant grant while a plain ally only hides from enemy targeted damage after Vanish resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionsThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
+        "testName": "rule_catalog_1678_printed_stealth_outlasts_grant_while_plain_ally_only_hides_after_vanish"
+      }
     }
-  ]
+  ],
+  "rustSupportedCount": 1680,
+  "typescriptSupportedCount": 0
 }

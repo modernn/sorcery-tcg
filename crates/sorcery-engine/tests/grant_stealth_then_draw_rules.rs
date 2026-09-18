@@ -1,5 +1,5 @@
 //! Direct proofs for grant-Stealth-to-allied-minions then draw-spell Magic
-//! (RULE-CATALOG-0539–0540, RULE-CATALOG-1067).
+//! (RULE-CATALOG-0539–0540, RULE-CATALOG-1067, RULE-CATALOG-1673–1678).
 //!
 //! Ordinary Magic can give every allied minion Stealth and then draw one
 //! spell. The Avatar and enemy minions are not stealthed. Already-stealthed
@@ -36,6 +36,17 @@ fn grounded() -> Value {
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn tough() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -420,6 +431,325 @@ fn rule_catalog_0540_stealth_then_draw_still_draws_without_allied_minions() {
             .iter()
             .any(|card| card["instanceId"] == library_top)
     );
+    assert_exact_replay(&session);
+}
+
+fn zap() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageTargetUnit": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_stealth() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "stealth": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn stealth_combat_manifest(ally: &Value, seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-stealth-then-draw-combat" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-stealth-then-draw-combat-v1",
+        },
+        "cards": {
+            "north-ally": ally,
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-vanish": vanish(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-tough": tough(),
+            "south-zap": zap(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-vanish",
+                    "north-vanish",
+                    "north-vanish",
+                    "north-vanish",
+                    "north-vanish",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-tough",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct StealthVisibilitySetup {
+    ally_id: String,
+    session: Session,
+}
+
+fn north_hand_has_vanish(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-vanish"))
+}
+
+fn south_hand_has_zap(snapshot: &Value) -> bool {
+    snapshot["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "south-zap"))
+}
+
+fn try_stealth_combat_setup(encoded: &str) -> Option<StealthVisibilitySetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let enemy = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-tough"
+            && descriptor["cell"] == "C4"
+    })?;
+    let _enemy_id = enemy.0["cardInstanceId"].as_str()?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(StealthVisibilitySetup { ally_id, session })
+}
+
+fn stealth_combat_setup(ally: &Value, start: u32) -> StealthVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| stealth_combat_manifest(ally, seed))
+        .find_map(|candidate| try_stealth_combat_setup(&candidate))
+        .expect("bounded seed reaching stealth combat setup")
+}
+
+fn stealth_combat_setup_with_vanish(ally: &Value, start: u32) -> StealthVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| stealth_combat_manifest(ally, seed))
+        .find_map(|candidate| {
+            let setup = try_stealth_combat_setup(&candidate)?;
+            north_hand_has_vanish(&state(&setup.session)).then_some(setup)
+        })
+        .expect("bounded seed reaching stealth combat setup with Vanish in hand")
+}
+
+fn stealth_combat_setup_with_vanish_and_south_zap(
+    ally: &Value,
+    start: u32,
+) -> StealthVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| stealth_combat_manifest(ally, seed))
+        .find_map(|candidate| {
+            let setup = try_stealth_combat_setup(&candidate)?;
+            if !north_hand_has_vanish(&state(&setup.session)) {
+                return None;
+            }
+            let mut probe = setup.session.clone();
+            advance_to_south_main(&mut probe);
+            south_hand_has_zap(&state(&probe)).then_some(setup)
+        })
+        .expect("bounded seed reaching stealth combat setup with Vanish and south Zap")
+}
+
+fn south_can_zap_ally(session: &Session, ally_id: &str) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "south-zap"
+                && action.descriptor["target"]["kind"] == "minion"
+                && action.descriptor["target"]["instanceId"] == ally_id
+        })
+    })
+}
+
+fn advance_to_south_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn advance_to_south_main_with_zap(session: &mut Session) {
+    advance_to_south_main(session);
+    assert!(south_hand_has_zap(&state(session)));
+}
+
+fn cast_vanish(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-vanish"
+            && descriptor["ally"].is_null()
+            && descriptor["target"].is_null()
+    });
+    receipt
+}
+
+#[test]
+fn rule_catalog_1673_printed_stealth_hides_ally_from_enemy_targeted_damage_without_grant() {
+    let StealthVisibilitySetup {
+        session, ally_id, ..
+    } = stealth_combat_setup(&printed_stealth(), 1673);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    let mut session = session;
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1674_granted_stealth_then_draw_hides_ally_before_enemy_can_target() {
+    let StealthVisibilitySetup {
+        mut session,
+        ally_id,
+        ..
+    } = stealth_combat_setup_with_vanish(&grounded(), 1674);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], false);
+    let receipt = cast_vanish(&mut session);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-stealthed",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1675_granted_stealth_then_draw_blocks_damage_that_was_legal_before_grant() {
+    let StealthVisibilitySetup {
+        mut session,
+        ally_id,
+        ..
+    } = stealth_combat_setup_with_vanish_and_south_zap(&grounded(), 1675);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], false);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(south_can_zap_ally(&session, &ally_id));
+    advance_to_south_main(&mut session);
+    cast_vanish(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1676_printed_stealth_still_hides_ally_after_turn_passes_without_attack() {
+    let StealthVisibilitySetup {
+        mut session,
+        ally_id,
+        ..
+    } = stealth_combat_setup(&printed_stealth(), 1676);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    advance_to_south_main(&mut session);
+    advance_to_south_main_with_zap(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1677_printed_and_granted_stealth_then_draw_compose_while_stealth_is_active() {
+    let StealthVisibilitySetup {
+        mut session,
+        ally_id,
+        ..
+    } = stealth_combat_setup_with_vanish(&printed_stealth(), 1677);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    let receipt = cast_vanish(&mut session);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "spell-drawn", "magic-resolved"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-stealthed")
+    );
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1678_printed_stealth_outlasts_grant_while_plain_ally_only_hides_after_vanish() {
+    let StealthVisibilitySetup {
+        mut session,
+        ally_id,
+        ..
+    } = stealth_combat_setup_with_vanish_and_south_zap(&printed_stealth(), 1678);
+    assert_eq!(unit(&state(&session), &ally_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+    advance_to_south_main(&mut session);
+    let receipt = cast_vanish(&mut session);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "spell-drawn", "magic-resolved"]
+    );
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_ally(&session, &ally_id));
+
+    let plain_setup = stealth_combat_setup_with_vanish_and_south_zap(&grounded(), 1678);
+    let mut plain_session = plain_setup.session;
+    let plain_ally = plain_setup.ally_id;
+    advance_to_south_main_with_zap(&mut plain_session);
+    assert!(south_can_zap_ally(&plain_session, &plain_ally));
+    advance_to_south_main(&mut plain_session);
+    cast_vanish(&mut plain_session);
+    advance_to_south_main_with_zap(&mut plain_session);
+    assert!(!south_can_zap_ally(&plain_session, &plain_ally));
+
+    assert!(!south_can_zap_ally(&session, &ally_id));
     assert_exact_replay(&session);
 }
 
