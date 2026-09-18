@@ -1536,6 +1536,59 @@ fn rule_catalog_1281_twenty_two_game_synthetic_batch_stays_unranked_unverified_a
 }
 
 #[test]
+fn rule_catalog_1291_twenty_three_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [
+        290_u32, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306,
+        307, 308, 309, 310, 311, 312,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 23);
+    assert_eq!(records.len(), 23);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
+
+#[test]
 fn rule_catalog_1271_twenty_one_game_synthetic_batch_stays_unranked_unverified_authority() {
     let seeds = [
         247_u32, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263,

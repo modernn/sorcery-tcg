@@ -12,7 +12,7 @@
 //! (RULE-CATALOG-0983), and thin-library draw-sites-then-draw-spells edges
 //! (RULE-CATALOG-0995), resolve-start-turn-trigger withheld during
 //! deathrite-order (RULE-CATALOG-1163), and stacked start-turn triggers
-//! withheld during deathrite-order (RULE-CATALOG-1183–1280).
+//! withheld during deathrite-order (RULE-CATALOG-1183–1290).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -9141,5 +9141,547 @@ fn rule_catalog_1280_mana_then_life_gain_start_turn_trigger_withheld_during_pend
         .expect("bounded seed that reaches pending Deathrites during mana-life-gain start-turn");
     let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
         .expect("complete mana-life-gain start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_here_damage_mill_spells_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-here-damage-mill-spells-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-here-damage-mill-spells-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mill-card": minion(json!({})),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+                "atStartOfControllerTurnMillSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-mill-card",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1283_here_damage_then_mill_spells_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1283..1283 + 256)
+        .map(deathrite_here_damage_mill_spells_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites during here-damage-mill-spells start-turn",
+        );
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete here-damage-mill-spells start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_here_damage_mill_sites_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-here-damage-mill-sites-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-here-damage-mill-sites-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+                "atStartOfControllerTurnMillSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1284_here_damage_then_mill_sites_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1284..1284 + 256)
+        .map(deathrite_here_damage_mill_sites_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites during here-damage-mill-sites start-turn",
+        );
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete here-damage-mill-sites start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_draw_spells_mill_spells_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-spells-mill-spells-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-spells-mill-spells-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw-card": minion(json!({})),
+            "north-mill-card": minion(json!({})),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 1,
+                "atStartOfControllerTurnMillSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-draw-card",
+                    "north-mill-card",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1285_draw_spells_then_mill_spells_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1285..1285 + 256)
+        .map(deathrite_draw_spells_mill_spells_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites during draw-spells-mill-spells start-turn",
+        );
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete draw-spells-mill-spells start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_mana_mill_spells_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-mana-mill-spells-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-mana-mill-spells-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mill-card": minion(json!({})),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnControllerGainsMana": 1,
+                "atStartOfControllerTurnMillSpells": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-mill-card",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1286_mana_then_mill_spells_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1286..1286 + 256)
+        .map(deathrite_mana_mill_spells_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites during mana-mill-spells start-turn");
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete mana-mill-spells start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_mana_mill_sites_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-mana-mill-sites-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-mana-mill-sites-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnControllerGainsMana": 1,
+                "atStartOfControllerTurnMillSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1287_mana_then_mill_sites_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1287..1287 + 256)
+        .map(deathrite_mana_mill_sites_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites during mana-mill-sites start-turn");
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete mana-mill-sites start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_gain_mana_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-gain-mana-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-gain-mana-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnControllerGainsLife": 2,
+                "atStartOfControllerTurnControllerGainsMana": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1288_gain_then_mana_start_turn_trigger_withheld_during_pending_deathrite_order() {
+    let encoded = (1288..1288 + 256)
+        .map(deathrite_gain_mana_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect("bounded seed that reaches pending Deathrites during gain-mana start-turn");
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete gain-mana start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_draw_spells_draw_sites_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-spells-draw-sites-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-spells-draw-sites-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw-card": minion(json!({})),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnDrawSpells": 1,
+                "atStartOfControllerTurnDrawSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-draw-card",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1289_draw_spells_then_draw_sites_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1289..1289 + 256)
+        .map(deathrite_draw_spells_draw_sites_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites during draw-spells-draw-sites start-turn",
+        );
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete draw-spells-draw-sites start-turn Deathrite withheld setup");
+    assert_stacked_start_turn_withheld(setup);
+}
+
+fn deathrite_draw_sites_mill_sites_withheld_manifest(seed: u32) -> String {
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "start-turn-draw-sites-mill-sites-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-start-turn-draw-sites-mill-sites-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-pulser": minion(json!({
+                "atStartOfControllerTurnDamageEachOtherUnitHere": 1,
+            })),
+            "north-site": site(json!({})),
+            "north-stack": minion(json!({
+                "atStartOfControllerTurnDrawSites": 1,
+                "atStartOfControllerTurnMillSites": 1,
+            })),
+            "south-avatar": avatar(),
+            "south-deathrite": minion(json!({
+                "deathriteDrawSite": true,
+                "defense": 1,
+                "summonToAnySite": true,
+            })),
+            "south-site": site(json!({})),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                    "north-stack",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+#[test]
+fn rule_catalog_1290_draw_sites_then_mill_sites_start_turn_trigger_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1290..1290 + 256)
+        .map(deathrite_draw_sites_mill_sites_withheld_manifest)
+        .find(|candidate| try_pending_deathrite_during_draw_mill_start_turn(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites during draw-sites-mill-sites start-turn",
+        );
+    let setup = try_pending_deathrite_during_draw_mill_start_turn(&encoded)
+        .expect("complete draw-sites-mill-sites start-turn Deathrite withheld setup");
     assert_stacked_start_turn_withheld(setup);
 }
