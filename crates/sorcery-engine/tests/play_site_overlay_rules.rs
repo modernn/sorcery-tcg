@@ -5,7 +5,7 @@
 //! overlay play relayers lower-layer occupants (RULE-CATALOG-1328,
 //! RULE-CATALOG-1329), overlay conversion on occupied sites plus
 //! replacement play after destroy (RULE-CATALOG-1338–1339,
-//! RULE-CATALOG-1344–1345, RULE-CATALOG-1349–1350).
+//! RULE-CATALOG-1344–1345, RULE-CATALOG-1349–1350, RULE-CATALOG-1367–1368).
 //!
 //! Playing Water onto rubble already floods underground occupants. Overlay
 //! Auras already convert layers when they enter or leave. Playing a site onto
@@ -1277,6 +1277,28 @@ fn rule_catalog_1350_playing_earth_onto_drought_occupied_water_rubble_creates_ea
     assert!(
         !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
         "printed Earth played onto Drought-covered Rubble from a drought occupied Water site must become land"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1367_water_site_cast_minion_offered_on_flooded_occupied_earth_site() {
+    let mut session = flood_site_type_opening();
+    flooded_earth_site_at_c3(&mut session);
+    assert!(
+        summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "Flood on an occupied Earth site must make that cell count as Water immediately"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1368_water_site_cast_minion_withheld_on_drought_occupied_water_site() {
+    let mut session = drought_site_type_opening();
+    drought_water_site_at_c3(&mut session);
+    assert!(
+        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "Drought on an occupied Water site must make that cell count as land immediately"
     );
     assert_exact_replay(&session);
 }
