@@ -1,5 +1,5 @@
 //! Direct proofs for grant-double-damage-next-strike Magic (RULE-CATALOG-0565–0566,
-//! RULE-CATALOG-0979, RULE-CATALOG-1090).
+//! RULE-CATALOG-0979, RULE-CATALOG-1090, RULE-CATALOG-1643–1648).
 //!
 //! Official Magic can mark an ally so its next unit strike this turn deals
 //! double damage. The grant uses the shared ally choice, doubles only unit
@@ -531,6 +531,340 @@ fn rule_catalog_0566_next_strike_double_expires_before_a_later_strike() {
             .expect("resumed state hash"),
         session.state_hash().expect("session state hash")
     );
+}
+
+fn printed_striker() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn plain_striker() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn tough_target() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "defense": 10,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn double_combat_manifest_with_north_ally(ally: &Value, seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-next-strike-double-combat" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-next-strike-double-combat-v1",
+        },
+        "cards": {
+            "north-ally": ally,
+            "north-avatar": avatar(),
+            "north-grant": grant(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": tough_target(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-grant",
+                    "north-grant",
+                    "north-grant",
+                    "north-grant",
+                    "north-grant",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct DoubleCombatSetup {
+    ally_id: String,
+    enemy_id: String,
+    session: Session,
+}
+
+fn try_double_combat_setup(encoded: &str) -> Option<DoubleCombatSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let enemy = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == "C4"
+    })?;
+    let enemy_id = enemy.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "draw")?;
+    Some(DoubleCombatSetup {
+        ally_id,
+        enemy_id,
+        session,
+    })
+}
+
+fn double_combat_setup(ally: &Value, start: u32) -> DoubleCombatSetup {
+    (start..start + 256)
+        .map(|seed| double_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| try_double_combat_setup(&candidate))
+        .expect("bounded seed reaching combat setup with ally and enemy on board")
+}
+
+fn double_combat_setup_with_grant(ally: &Value, start: u32) -> DoubleCombatSetup {
+    (start..start + 256)
+        .map(|seed| double_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| {
+            let setup = try_double_combat_setup(&candidate)?;
+            grant_ally_ids(&setup.session)
+                .contains(&setup.ally_id)
+                .then_some(setup)
+        })
+        .expect("bounded seed reaching combat setup with grant-next-strike-double Magic in hand")
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn expire_grant_double(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "next-strike-double-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryNextStrikeDoubleSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn strike_allocated_to_target(fight: &Receipt, attacker_id: &str, enemy_id: &str) -> u8 {
+    u8::try_from(
+        fight
+            .events
+            .iter()
+            .find(|event| {
+                event.event_type == "strike-damage-allocated"
+                    && event.payload["strikerInstanceId"] == attacker_id
+                    && event.payload["targetInstanceId"] == enemy_id
+            })
+            .expect("strike allocation")
+            .payload["amount"]
+            .as_u64()
+            .expect("allocated strike power"),
+    )
+    .expect("strike power fits u8")
+}
+
+#[test]
+fn rule_catalog_1643_printed_attack_strikes_at_full_power_without_grant() {
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup(&printed_striker(), 1643);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 3);
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryNextStrikeDoubleSources")
+            .is_none()
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1644_granted_next_strike_double_strikes_at_doubled_power_before_end_of_turn() {
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup_with_grant(&striker(), 1644);
+    let (descriptor, receipt) = grant_double(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 4);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 4);
+    assert!(fight.events.iter().any(|event| {
+        event.event_type == "next-strike-double-consumed"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1645_granted_next_strike_double_expires_before_ally_strikes_at_base_power_on_later_turn()
+ {
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup_with_grant(&striker(), 1645);
+    let (descriptor, _) = grant_double(&mut session, &ally_id);
+    expire_grant_double(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 2);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 2);
+    assert!(
+        !fight
+            .events
+            .iter()
+            .any(|event| event.event_type == "next-strike-double-consumed")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1646_printed_attack_still_strikes_at_full_power_after_grant_expires_on_later_turn()
+{
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup_with_grant(&printed_striker(), 1646);
+    let (descriptor, _) = grant_double(&mut session, &ally_id);
+    expire_grant_double(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1647_printed_attack_and_granted_next_strike_double_compose_while_grant_is_active() {
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup_with_grant(&printed_striker(), 1647);
+    let (descriptor, receipt) = grant_double(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "next-strike-double-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 6);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 6);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1648_printed_attack_outlasts_expired_grant_while_plain_ally_strikes_at_base_power()
+{
+    let DoubleCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = double_combat_setup_with_grant(&printed_striker(), 1648);
+    let (descriptor, _) = grant_double(&mut session, &ally_id);
+    expire_grant_double(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let DoubleCombatSetup {
+        session: mut plain,
+        ally_id: plain_ally,
+        enemy_id: plain_enemy,
+    } = double_combat_setup_with_grant(&plain_striker(), 1648);
+    let (plain_descriptor, _) = grant_double(&mut plain, &plain_ally);
+    expire_grant_double(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    let plain_fight = strike_minion(&mut plain, &plain_ally, &plain_enemy);
+    assert_eq!(
+        strike_allocated_to_target(&plain_fight, &plain_ally, &plain_enemy),
+        1
+    );
+
+    through_south_pass_to_north_main(&mut session);
+    let fight = strike_minion(&mut session, &ally_id, &enemy_id);
+    assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
+    assert_exact_replay(&session);
 }
 
 fn deathrite_grant_double_manifest(seed: u32) -> String {

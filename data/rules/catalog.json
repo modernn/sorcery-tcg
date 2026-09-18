@@ -36896,6 +36896,212 @@
         "file": "crates/sorcery-engine/tests/grant_power_then_draw_rules.rs",
         "testName": "rule_catalog_1638_printed_power_outlasts_expired_grant_while_plain_ally_strikes_at_base_power"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1641",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1641_one_hundred_thirty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1642",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1642_one_hundred_thirty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1649",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1649_one_hundred_thirty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1650",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1650_one_hundred_thirty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1643",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed attack power strikes at its full attack value without a grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1643_printed_attack_strikes_at_full_power_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1644",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-next-strike-double Magic lets an ally strike at doubled power before End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1644_granted_next_strike_double_strikes_at_doubled_power_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1645",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-next-strike-double expires at End Phase, the ally strikes at base attack power on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1645_granted_next_strike_double_expires_before_ally_strikes_at_base_power_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1646",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-next-strike-double expires, a printed high-attack ally still strikes at full attack power on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1646_printed_attack_still_strikes_at_full_power_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1647",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed attack and grant-next-strike-double compose while the temporary grant is active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-granted",
+        "next-strike-double-consumed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1647_printed_attack_and_granted_next_strike_double_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1648",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-next-strike-double expires, printed high attack outlasts the grant while a plain ally strikes at base power.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantDoubleDamageToAllyNextStrikeThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "next-strike-double-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
+        "testName": "rule_catalog_1648_printed_attack_outlasts_expired_grant_while_plain_ally_strikes_at_base_power"
+      }
     }
   ]
 }
