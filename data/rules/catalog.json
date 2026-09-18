@@ -43445,8 +43445,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1970_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1971",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1971_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1972",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1972_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1973",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lure-enemy-minion-one-step-closer Magic leaves a lured enemy at its destination after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1973_lured_enemy_stays_at_its_destination_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1974",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two lure-enemy-minion-one-step-closer spells in hand, a second cast still resolves as a paid no-op when no nearby enemy minion qualifies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1974_second_lure_without_a_nearby_enemy_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1975",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two lure-enemy-minion-one-step-closer spells in hand, a second cast tempts a newly arrived enemy after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1975_second_lure_tempts_a_newly_arrived_enemy_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1976",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lure-enemy-minion-one-step-closer Magic offers every nearby enemy minion that can take a closer step toward the caster's ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1976_lure_offers_every_nearby_enemy_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1977",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lure-enemy-minion-one-step-closer Magic tempts a nearby enemy minion without moving a far enemy that cannot take a closer step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1977_lure_leaves_a_far_enemy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1978",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two lure-enemy-minion-one-step-closer spells in hand, a second cast tempts a newly summoned enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lureEnemyMinionOneStepCloser"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-lured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lure_rules.rs",
+        "testName": "rule_catalog_1978_second_lure_tempts_a_newly_summoned_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1979",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1979_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1980",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1980_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1970,
+  "rustSupportedCount": 1980,
   "typescriptSupportedCount": 0
 }
