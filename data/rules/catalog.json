@@ -38695,8 +38695,201 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1730_one_hundred_sixty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1731",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1731_one_hundred_sixty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1732",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1732_one_hundred_seventy_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1733",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-nearby-minion-or-site Magic leaves a warded minion marked after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1733_bless_minion_ward_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1734",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second ward-nearby-minion-or-site cast on an already warded minion emits no duplicate ward event.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1734_second_bless_on_warded_minion_emits_no_duplicate_ward"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1735",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-nearby-minion-or-site Magic leaves a warded nearby site marked after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1735_bless_site_ward_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1736",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Ward-nearby-minion-or-site Magic wards one nearby site without ward-marking another nearby site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1736_bless_at_one_nearby_site_leaves_other_nearby_site_unwarded"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1737",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A ward-nearby-minion-or-site minion Ward absorbs the next targeted damage spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded",
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1737_bless_minion_ward_absorbs_enemy_zap"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1738",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a ward-nearby-minion-or-site cast, a later cast can ward a newly arrived ally at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "wardNearbyMinionOrSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-warded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/ward_nearby_minion_or_site_rules.rs",
+        "testName": "rule_catalog_1738_second_bless_wards_newly_arrived_ally_at_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1739",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1739_one_hundred_seventy_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1740",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred seventy two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1740_one_hundred_seventy_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1730,
+  "rustSupportedCount": 1740,
   "typescriptSupportedCount": 0
 }
