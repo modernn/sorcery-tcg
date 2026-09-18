@@ -36490,6 +36490,207 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1620_one_hundred_twenty_four_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1621",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-five-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1621_one_hundred_twenty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1622",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-six-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1622_one_hundred_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1629",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-seven-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1629_one_hundred_twenty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1630",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-eight-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1630_one_hundred_twenty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1623",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed Charge can Move and Attack immediately after being summoned without a grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1623_printed_charge_moves_and_attacks_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1624",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with an active grant-charge can Move and Attack while summoning sick before its controller ends the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantChargeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "charge-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1624_granted_charge_moves_and_attacks_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1625",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-charge expires at its controller's End Phase, a freshly summoned ally without printed Charge cannot Move and Attack on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantChargeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "charge-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1625_granted_charge_expires_before_fresh_ally_moves_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1626",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-charge expires at its controller's End Phase, a freshly summoned printed-Charge ally can still Move and Attack on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge",
+        "grantChargeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1626_printed_charge_still_moves_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1627",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed-Charge minion with an active grant-charge can Move and Attack while summoning sick while both sources are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge",
+        "grantChargeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "charge-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1627_printed_and_granted_charge_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1628",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-charge expires at its controller's End Phase, a freshly summoned printed-Charge ally can Move and Attack while a plain ally cannot in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "charge",
+        "grantChargeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/charge_magic_rules.rs",
+        "testName": "rule_catalog_1628_printed_charge_outlasts_expired_grant_while_plain_ally_cannot_move"
+      }
     }
   ]
 }

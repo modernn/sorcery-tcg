@@ -1,5 +1,5 @@
 //! Direct proofs for grant-charge-to-ally-this-turn Magic
-//! (RULE-CATALOG-0597–0598, RULE-CATALOG-1033).
+//! (RULE-CATALOG-0597–0598, RULE-CATALOG-1033, RULE-CATALOG-1623–1628).
 //!
 //! Ordinary Charge Magic offers every controlled ally and grants temporary
 //! Charge through End Phase. A newly summoned minion can Move and Attack
@@ -32,6 +32,18 @@ fn ally() -> Value {
     json!({
         "attack": 1,
         "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_charger() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "charge": true,
         "defense": 2,
         "manaCost": 0,
         "summonToAnySite": true,
@@ -75,7 +87,7 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn charge_with_ally_manifest(seed: u32) -> String {
+fn charge_manifest_with_ally(seed: u32, north_ally: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "charge-ally" }))
@@ -84,7 +96,7 @@ fn charge_with_ally_manifest(seed: u32) -> String {
             "revisionId": "synthetic-charge-ally-v1",
         },
         "cards": {
-            "north-ally": ally(),
+            "north-ally": north_ally,
             "north-avatar": avatar(),
             "north-charge": charge(),
             "north-site": site(),
@@ -98,10 +110,10 @@ fn charge_with_ally_manifest(seed: u32) -> String {
                 "avatar": "north-avatar",
                 "spellbook": [
                     "north-ally",
-                    "north-charge",
+                    "north-ally",
                     "north-ally",
                     "north-charge",
-                    "north-ally",
+                    "north-charge",
                     "north-charge",
                 ],
             },
@@ -116,6 +128,10 @@ fn charge_with_ally_manifest(seed: u32) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn charge_with_ally_manifest(seed: u32) -> String {
+    charge_manifest_with_ally(seed, &ally())
 }
 
 fn charge_empty_manifest(seed: u32) -> String {
@@ -205,14 +221,26 @@ fn keep(session: &mut Session) {
     });
 }
 
-fn opening_main(encoded: &str) -> Session {
-    let mut session = Session::new(encoded).expect("valid charge session");
-    keep(&mut session);
-    keep(&mut session);
-    accept_where(&mut session, |descriptor| {
+fn try_opening_main(encoded: &str) -> Option<Session> {
+    let mut session = Session::new(encoded).ok()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
-    });
-    session
+    })?;
+    Some(session)
+}
+
+fn opening_main(encoded: &str) -> Session {
+    try_opening_main(encoded).expect("valid charge opening main")
 }
 
 fn state(session: &Session) -> Value {
@@ -236,6 +264,187 @@ fn has_move_and_attack(session: &Session, unit_id: &str) -> bool {
             action.descriptor["kind"] == "move-and-attack"
                 && action.descriptor["unitInstanceId"] == unit_id
         })
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    state(&Session::new(encoded).expect("candidate session"))["players"]["north"]["hand"]
+        ["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn summon_north_ally(session: &mut Session) -> String {
+    summon_north_ally_at(session, "C4")
+}
+
+fn summon_north_ally_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == cell
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally identity")
+        .to_owned()
+}
+
+fn grant_charge(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-charge"
+            && descriptor["ally"]["instanceId"] == ally_id
+    })
+}
+
+fn complete_pending_draws(session: &mut Session) {
+    for _ in 0..4 {
+        if try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+        .is_none()
+            && try_accept_where(session, |descriptor| descriptor["kind"] == "draw").is_none()
+        {
+            break;
+        }
+    }
+}
+
+fn try_south_passive_turn(session: &mut Session) -> Option<()> {
+    complete_pending_draws(session);
+    if session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .all(|action| action.descriptor["kind"] != "end-turn")
+    {
+        try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "south-site"
+                && descriptor["cell"] == "C1"
+        })?;
+        complete_pending_draws(session);
+    }
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    Some(())
+}
+
+fn try_through_south_pass_to_north_main(session: &mut Session) -> Option<()> {
+    try_south_passive_turn(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    complete_pending_draws(session);
+    Some(())
+}
+
+fn seed_with_ally_and_charge(north_ally: &Value, start: u32) -> String {
+    (start..start + 256)
+        .map(|seed| charge_manifest_with_ally(seed, north_ally))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-charge")
+        })
+        .expect("bounded seed with ally and Charge in the opening hand")
+}
+
+fn can_summon_north_ally_at(session: &Session, cell: &str) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "summon-minion"
+                && action.descriptor["cardId"] == "north-ally"
+                && action.descriptor["cell"] == cell
+        })
+    })
+}
+
+fn hand_has_north_ally(session: &Session) -> bool {
+    state(session)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-ally"))
+}
+
+fn prepare_fresh_summon_on_later_turn(session: &mut Session) -> bool {
+    try_through_south_pass_to_north_main(session).is_some()
+        && hand_has_north_ally(session)
+        && (can_summon_north_ally_at(session, "C3")
+            || (try_accept_where(session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+            })
+            .is_some()
+                && can_summon_north_ally_at(session, "C3")))
+}
+
+fn try_expire_grant_charge(session: &mut Session, ally_id: &str) -> Option<String> {
+    let (_, ended) = try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if !ended
+        .events
+        .iter()
+        .any(|event| event.event_type == "charge-expired" && event.payload["instanceId"] == ally_id)
+    {
+        return None;
+    }
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    Some(ally_id.to_owned())
+}
+
+fn try_setup_later_fresh_summon(encoded: &str) -> Option<(Session, String)> {
+    let mut session = try_opening_main(encoded)?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let first_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    let (descriptor, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-charge"
+            && descriptor["ally"]["instanceId"] == first_id
+    })?;
+    try_expire_grant_charge(&mut session, &first_id)?;
+    if !prepare_fresh_summon_on_later_turn(&mut session) {
+        return None;
+    }
+    let (second, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C3"
+    })?;
+    let second_id = second["cardInstanceId"].as_str()?.to_owned();
+    let _ = descriptor;
+    Some((session, second_id))
+}
+
+fn setup_later_fresh_summon(north_ally: &Value, start: u32) -> (Session, String) {
+    let encoded = (start..start + 2048)
+        .map(|seed| charge_manifest_with_ally(seed, north_ally))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally")
+                && hand.iter().any(|id| id == "north-charge")
+                && try_setup_later_fresh_summon(candidate).is_some()
+        })
+        .expect("bounded seed that can summon a fresh ally on a later north Main phase");
+    try_setup_later_fresh_summon(&encoded).expect("replay later fresh summon setup")
 }
 
 fn charge_targets(session: &Session) -> Vec<String> {
@@ -552,4 +761,79 @@ fn rule_catalog_1033_charge_magic_withheld_during_pending_deathrite_order() {
     );
     assert!(has_move_and_attack(session, &ally_id));
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1623_printed_charge_moves_and_attacks_without_grant() {
+    let encoded = seed_with_ally_and_charge(&printed_charger(), 1623);
+    let mut session = opening_main(&encoded);
+    let ally_id = summon_north_ally(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["summoningSickness"], true);
+    assert!(has_move_and_attack(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1624_granted_charge_moves_and_attacks_before_end_of_turn() {
+    let encoded = seed_with_ally_and_charge(&ally(), 1624);
+    let mut session = opening_main(&encoded);
+    let ally_id = summon_north_ally(&mut session);
+    assert!(!has_move_and_attack(&session, &ally_id));
+    let (descriptor, receipt) = grant_charge(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "charge-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryChargeSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(has_move_and_attack(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1625_granted_charge_expires_before_fresh_ally_moves_on_later_turn() {
+    let (session, second_id) = setup_later_fresh_summon(&ally(), 1625);
+    assert_eq!(
+        unit(&state(&session), &second_id)["summoningSickness"],
+        true
+    );
+    assert!(!has_move_and_attack(&session, &second_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1626_printed_charge_still_moves_after_grant_expires_on_later_turn() {
+    let (session, second_id) = setup_later_fresh_summon(&printed_charger(), 1626);
+    assert!(has_move_and_attack(&session, &second_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1627_printed_and_granted_charge_compose_while_grant_is_active() {
+    let encoded = seed_with_ally_and_charge(&printed_charger(), 1627);
+    let mut session = opening_main(&encoded);
+    let ally_id = summon_north_ally(&mut session);
+    let (descriptor, receipt) = grant_charge(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "charge-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryChargeSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(has_move_and_attack(&session, &ally_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1628_printed_charge_outlasts_expired_grant_while_plain_ally_cannot_move() {
+    let (plain, plain_second) = setup_later_fresh_summon(&ally(), 1628);
+    assert!(!has_move_and_attack(&plain, &plain_second));
+
+    let (session, second_id) = setup_later_fresh_summon(&printed_charger(), 1628);
+    assert!(has_move_and_attack(&session, &second_id));
+    assert_exact_replay(&session);
 }
