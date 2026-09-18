@@ -910,3 +910,424 @@ fn rule_catalog_1177_cemetery_summon_withheld_during_pending_deathrite_order() {
         "cemetery summon-minion must return once deathrite-order clears"
     );
 }
+
+fn victim_b() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn raise_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "raise-dead-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-raise-dead-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-raise": raise_dead(),
+            "north-site": site(),
+            "north-zap": zap(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-victim": victim(),
+            "south-victim-b": victim_b(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-zap",
+                    "north-raise",
+                    "north-zap",
+                    "north-raise",
+                    "north-zap",
+                    "north-raise",
+                    "north-zap",
+                    "north-raise",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-victim"; 6]
+                    .into_iter()
+                    .chain(vec!["south-victim-b"; 4])
+                    .collect::<Vec<_>>(),
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn try_kill_victim_prefix(encoded: &str) -> Option<()> {
+    let mut session = opening_main(encoded);
+    kill_south_minion_at_c4(&mut session, "south-victim");
+    Some(())
+}
+
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(583..583 + 2048)
+        .map(raise_supplemental_manifest)
+        .find(|candidate| {
+            required
+                .iter()
+                .all(|id| opening_spell_ids(candidate).iter().any(|card| card == id))
+                && try_kill_victim_prefix(candidate).is_some()
+        })
+        .expect("bounded seed with required opening cards")
+}
+
+fn raise_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-raise")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cemetery_instance_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .map(|cards| {
+            cards
+                .iter()
+                .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn kill_south_minion_at(session: &mut Session, card_id: &str, cell: &str) -> String {
+    end_and_draw_spellbook(session);
+    south_establishes_domain_if_required(session);
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    let minion_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned minion identity")
+        .to_owned();
+    end_and_draw_spellbook(session);
+    let (_, kill) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-zap"
+            && descriptor["target"]["instanceId"] == minion_id
+    });
+    assert!(event_types(&kill).contains(&"minion-died"));
+    assert!(cemetery_instance_ids(&state(session), "south").contains(&minion_id));
+    minion_id
+}
+
+fn kill_south_minion_at_c4(session: &mut Session, card_id: &str) -> String {
+    kill_south_minion_at(session, card_id, "C4")
+}
+
+fn cast_raise_select(session: &mut Session) -> String {
+    let (_, cast_receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-raise"
+    });
+    assert_eq!(
+        event_types(&cast_receipt),
+        ["magic-cast", "dead-minion-selected"]
+    );
+    cast_receipt.events[1].payload["instanceId"]
+        .as_str()
+        .expect("raised minion identity")
+        .to_owned()
+}
+
+fn complete_cemetery_summon(session: &mut Session, raised_id: &str, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardInstanceId"] == raised_id
+            && descriptor["cell"] == cell
+            && descriptor["manaCost"] == 0
+            && descriptor["region"].is_null()
+    });
+    assert!(event_types(&receipt).contains(&"minion-summoned"));
+    receipt
+}
+
+fn cast_raise_and_summon(session: &mut Session, cell: &str) -> String {
+    let raised_id = cast_raise_select(session);
+    complete_cemetery_summon(session, &raised_id, cell);
+    raised_id
+}
+
+fn seed_with_two_corpses(start: u32) -> String {
+    (start..start + 2048)
+        .chain(583..583 + 2048)
+        .map(raise_supplemental_manifest)
+        .find(|candidate| {
+            ["north-zap", "north-raise"]
+                .iter()
+                .all(|id| opening_spell_ids(candidate).iter().any(|card| card == id))
+                && try_two_corpses_prefix(candidate).is_some()
+        })
+        .expect("bounded seed with two cemetery corpses")
+}
+
+fn try_two_corpses_prefix(encoded: &str) -> Option<[String; 2]> {
+    let mut session = opening_main(encoded);
+    let first = kill_south_minion_at_c4(&mut session, "south-victim");
+    pass_turn_to_north_spellbook(&mut session);
+    let second = kill_south_minion_at_c4(&mut session, "south-victim-b");
+    Some([first, second])
+}
+
+fn setup_two_corpses_in_south_cemetery(session: &mut Session) -> [String; 2] {
+    let first = kill_south_minion_at_c4(session, "south-victim");
+    pass_turn_to_north_spellbook(session);
+    let second = kill_south_minion_at_c4(session, "south-victim-b");
+    [first, second]
+}
+
+fn try_second_raise_new_kill_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    kill_south_minion_at_c4(&mut session, "south-victim");
+    let raised_id = cast_raise_and_summon(&mut session, "C4");
+    pass_turn_to_north_spellbook(&mut session);
+    if raise_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let (_, first_kill) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-zap"
+            && descriptor["target"]["instanceId"] == raised_id
+    })?;
+    if !event_types(&first_kill).contains(&"minion-died") {
+        return None;
+    }
+    let new_id = kill_south_minion_at_c4(&mut session, "south-victim-b");
+    cemetery_instance_ids(&state(&session), "south")
+        .contains(&new_id)
+        .then_some((session, new_id))
+}
+
+fn seed_for_second_raise_new_kill(start: u32) -> String {
+    (start..start + 8192)
+        .chain(583..583 + 8192)
+        .find_map(|seed| {
+            let encoded = raise_supplemental_manifest(seed);
+            if !opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-raise")
+            {
+                return None;
+            }
+            try_kill_victim_prefix(&encoded)?;
+            try_second_raise_new_kill_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Raise Dead new-kill setup")
+}
+
+fn try_second_raise_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    kill_south_minion_at_c4(&mut session, "south-victim");
+    let raised_id = cast_raise_and_summon(&mut session, "C4");
+    pass_turn_to_north_spellbook(&mut session);
+    if raise_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (_, kill) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-zap"
+            && descriptor["target"]["instanceId"] == raised_id
+    })?;
+    if !event_types(&kill).contains(&"minion-died") {
+        return None;
+    }
+    cemetery_instance_ids(&state(&session), "south")
+        .contains(&raised_id)
+        .then_some((session, raised_id))
+}
+
+fn seed_for_second_raise_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(583..583 + 8192)
+        .find_map(|seed| {
+            let encoded = raise_supplemental_manifest(seed);
+            if !opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-raise")
+            {
+                return None;
+            }
+            try_kill_victim_prefix(&encoded)?;
+            try_second_raise_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Raise Dead enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_1893_raised_minion_stays_on_board_after_turns_pass() {
+    let encoded = seed_with_start(1893, &["north-zap", "north-raise"]);
+    let mut session = opening_main(&encoded);
+    kill_south_minion_at_c4(&mut session, "south-victim");
+    let raised_id = cast_raise_and_summon(&mut session, "C4");
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == raised_id && unit["location"] == "C4")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1894_second_raise_dead_without_a_cemetery_minion_is_a_paid_noop() {
+    let encoded = seed_with_start(1894, &["north-zap", "north-raise"]);
+    let mut session = opening_main(&encoded);
+    let _ = kill_south_minion_at_c4(&mut session, "south-victim");
+    let _ = cast_raise_and_summon(&mut session, "C4");
+    assert!(cemetery_instance_ids(&state(&session), "south").is_empty());
+    assert!(raise_spells_in_hand(&state(&session)) >= 1);
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-raise"
+    });
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "dead-minion-selected")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1895_second_raise_dead_summons_a_newly_killed_minion_after_enemy_arrival() {
+    let encoded = seed_for_second_raise_enemy_arrival(1895);
+    let (mut session, victim_id) = try_second_raise_enemy_arrival_prefix(&encoded)
+        .expect("second Raise Dead enemy-arrival prefix");
+    let selected = cast_raise_select(&mut session);
+    assert_eq!(selected, victim_id);
+    complete_cemetery_summon(&mut session, &victim_id, "C4");
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == victim_id && unit["location"] == "C4")
+    );
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C2"]["controller"],
+        "south"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1896_raise_dead_selects_from_a_multi_minion_cemetery_pool() {
+    let encoded = seed_with_two_corpses(1896);
+    let mut session = opening_main(&encoded);
+    let corpses = setup_two_corpses_in_south_cemetery(&mut session);
+    let selected = cast_raise_select(&mut session);
+    assert!(
+        corpses.contains(&selected),
+        "expected one of {:?}, got {selected}",
+        corpses
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1897_raise_dead_leaves_an_unselected_cemetery_minion_untouched() {
+    let encoded = seed_with_two_corpses(1897);
+    let mut session = opening_main(&encoded);
+    let corpses = setup_two_corpses_in_south_cemetery(&mut session);
+    let selected = cast_raise_select(&mut session);
+    let unselected = corpses
+        .iter()
+        .find(|id| *id != &selected)
+        .expect("unselected corpse")
+        .clone();
+    complete_cemetery_summon(&mut session, &selected, "C4");
+    let remaining = cemetery_instance_ids(&state(&session), "south");
+    assert_eq!(remaining, vec![unselected]);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1898_second_raise_dead_summons_a_newly_killed_minion() {
+    let encoded = seed_for_second_raise_new_kill(1898);
+    let (mut session, victim_id) =
+        try_second_raise_new_kill_prefix(&encoded).expect("second Raise Dead new-kill prefix");
+    let selected = cast_raise_select(&mut session);
+    assert_eq!(selected, victim_id);
+    complete_cemetery_summon(&mut session, &victim_id, "C4");
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == victim_id && unit["location"] == "C4")
+    );
+    assert_exact_replay(&session);
+}

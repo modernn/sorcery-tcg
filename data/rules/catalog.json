@@ -41836,8 +41836,207 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1890_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1891",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1891_two_hundred_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1892",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1892_two_hundred_thirty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1893",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-random-minion-from-any-cemetery Magic leaves a raised minion on the board after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1893_raised_minion_stays_on_board_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1894",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two summon-random-minion-from-any-cemetery spells in hand, a second cast with an empty cemetery pool is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1894_second_raise_dead_without_a_cemetery_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1895",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two summon-random-minion-from-any-cemetery spells in hand, a second cast raises a newly killed minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "dead-minion-selected",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1895_second_raise_dead_summons_a_newly_killed_minion_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1896",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-random-minion-from-any-cemetery Magic selects from a multi-minion cemetery pool.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "dead-minion-selected"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1896_raise_dead_selects_from_a_multi_minion_cemetery_pool"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1897",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-random-minion-from-any-cemetery Magic leaves an unselected cemetery minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "dead-minion-selected"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1897_raise_dead_leaves_an_unselected_cemetery_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1898",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a summon-random-minion-from-any-cemetery cast, a later cast raises a newly killed minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonRandomMinionFromAnyCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "dead-minion-selected",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/raise_dead_rules.rs",
+        "testName": "rule_catalog_1898_second_raise_dead_summons_a_newly_killed_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1899",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1899_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1900",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1900_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1890,
+  "rustSupportedCount": 1900,
   "typescriptSupportedCount": 0
 }
