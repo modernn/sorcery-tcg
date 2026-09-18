@@ -1,5 +1,6 @@
 //! Direct proofs that leaving Flood or Drought relayers lower-layer occupants
-//! (RULE-CATALOG-0339–0340).
+//! (RULE-CATALOG-0339–0340), and that destroy-target-aura Magic on Flood or
+//! Drought stays withheld during deathrite-order (RULE-CATALOG-1331–1332).
 //!
 //! Overlay Auras already convert underground and underwater when they enter.
 //! Destroying or returning that Aura flips the site's water-ness again, so the
@@ -382,4 +383,374 @@ fn rule_catalog_0340_destroying_drought_relayers_dual_region_minion_underwater()
     assert_eq!(occupant["region"], "underwater");
     assert!(!cemetery_has(&current, &dualer_id));
     assert_exact_replay(&session);
+}
+
+fn rain_spell() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn flood_destroy_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-destroy-flood-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-destroy-flood-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "north-flood": flood(),
+            "north-rain": rain_spell(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                    "north-flood",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_destroy_withheld_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-destroy-drought-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-destroy-drought-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-dualer": dualer(),
+            "north-rain": rain_spell(),
+            "north-water": water(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-dualer",
+                    "north-rain",
+                    "north-drought",
+                    "north-dualer",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                    "south-minion",
+                    "south-destroy",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct PendingOverlayDestroySetup {
+    aura_id: String,
+    deathrite_ids: [String; 2],
+    session: Session,
+}
+
+fn try_accept_where_overlay(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn offers_destroy_aura(session: &Session, aura_id: &str) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "south-destroy"
+                && action.descriptor["targetAuraInstanceId"] == aura_id
+        })
+    })
+}
+
+fn try_pending_deathrite_with_overlay_destroy(
+    encoded: &str,
+    site_id: &str,
+    region: &str,
+    overlay_card: &str,
+) -> Option<PendingOverlayDestroySetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == site_id
+            && descriptor["cell"] == "C4"
+    })?;
+    let (summoned, _) = try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-dualer"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"] == region
+    })?;
+    let _dualer_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where_overlay(&mut session, |descriptor| {
+        covers_c4(descriptor, overlay_card)
+    })?;
+    let overlay_id = state(&session)["realm"]["auras"][0]["instanceId"]
+        .as_str()?
+        .to_owned();
+    try_accept_where_overlay(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let first = try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where_overlay(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if !session
+        .legal_actions()
+        .ok()?
+        .iter()
+        .any(|action| action.descriptor["cardId"] == "north-rain")
+    {
+        return None;
+    }
+    try_accept_where_overlay(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingOverlayDestroySetup {
+        aura_id: overlay_id,
+        deathrite_ids,
+        session,
+    })
+}
+
+fn flood_destroy_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(flood_destroy_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_destroy(
+                candidate,
+                "north-earth",
+                "underground",
+                "north-flood",
+            )
+            .is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites with Flood destroy target")
+}
+
+fn drought_destroy_withheld_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(drought_destroy_withheld_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_destroy(
+                candidate,
+                "north-water",
+                "underwater",
+                "north-drought",
+            )
+            .is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites with Drought destroy target")
+}
+
+#[test]
+fn rule_catalog_1331_destroy_flood_aura_withheld_during_pending_deathrite_order() {
+    let encoded = flood_destroy_withheld_seed_with(1331);
+    let mut setup = try_pending_deathrite_with_overlay_destroy(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-flood",
+    )
+    .expect("complete Flood destroy Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1332_destroy_drought_aura_withheld_during_pending_deathrite_order() {
+    let encoded = drought_destroy_withheld_seed_with(1332);
+    let mut setup = try_pending_deathrite_with_overlay_destroy(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-drought",
+    )
+    .expect("complete Drought destroy Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(!offers_destroy_aura(session, &aura_id));
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    if state(session)["decisionSeat"] == "north" {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    assert_eq!(state(session)["decisionSeat"], "south");
+    assert!(offers_destroy_aura(session, &aura_id));
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died")
+    );
+    assert_exact_replay(session);
 }

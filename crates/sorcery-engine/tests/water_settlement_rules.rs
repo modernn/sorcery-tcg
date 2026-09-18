@@ -8,9 +8,11 @@
 //! deathrite-order (RULE-CATALOG-1315), playing earth onto empty rubble
 //! (RULE-CATALOG-1317), play-site earth-on-rubble withheld during
 //! deathrite-order (RULE-CATALOG-1318), play-site earth-on-flooded-rubble
-//! withheld during deathrite-order (RULE-CATALOG-1320), and play-site
+//! withheld during deathrite-order (RULE-CATALOG-1320), play-site
 //! water-on-drought-rubble withheld during deathrite-order
-//! (RULE-CATALOG-1322).
+//! (RULE-CATALOG-1322), play-site water-on-flooded-rubble withheld during
+//! deathrite-order (RULE-CATALOG-1324), and play-site earth-on-drought-rubble
+//! withheld during deathrite-order (RULE-CATALOG-1326).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -775,12 +777,6 @@ struct PendingDeathriteWaterOnRubbleSetup {
     session: Session,
 }
 
-fn north_has_water_in_atlas(snapshot: &Value) -> bool {
-    snapshot["players"]["north"]["hand"]["atlas"]
-        .as_array()
-        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-water"))
-}
-
 fn south_has_water_in_atlas(snapshot: &Value) -> bool {
     snapshot["players"]["south"]["hand"]["atlas"]
         .as_array()
@@ -1137,6 +1133,132 @@ fn flooded_rubble_deathrite_seed_with(start: u32) -> String {
         )
 }
 
+fn flooded_water_rubble_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "flooded-water-rubble-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-flooded-water-rubble-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_site(),
+            "north-flood": flood_aura(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+            "south-water": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-destroy",
+                    "north-flood",
+                    "north-rain",
+                    "north-destroy",
+                    "north-flood",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": [
+                    "south-site",
+                    "south-water",
+                    "south-water",
+                    "south-water",
+                    "south-water",
+                    "south-water",
+                ],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_earth_rubble_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drought-earth-rubble-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drought-earth-rubble-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_site(),
+            "north-drought": drought_aura(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-earth": earth_site(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-destroy",
+                    "north-drought",
+                    "north-rain",
+                    "north-destroy",
+                    "north-drought",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": [
+                    "south-site",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                ],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flooded_water_rubble_deathrite_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(flooded_water_rubble_deathrite_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_rubble_legal(candidate, "north-flood").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal Water play on flooded rubble",
+        )
+}
+
+fn drought_earth_rubble_deathrite_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(drought_earth_rubble_deathrite_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_rubble_legal(candidate, "north-drought").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal Earth play on drought rubble",
+        )
+}
+
 fn drought_rubble_deathrite_seed_with(start: u32) -> String {
     (start..start + 2048)
         .map(drought_rubble_deathrite_manifest)
@@ -1252,6 +1374,111 @@ fn rule_catalog_1322_play_water_on_drought_rubble_withheld_during_pending_deathr
             .any(|action| {
                 action.descriptor["kind"] == "play-site"
                     && action.descriptor["cardId"] == "south-water"
+                    && action.descriptor["cell"] == "C1"
+            })
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1324_play_water_on_flooded_rubble_withheld_during_pending_deathrite_order() {
+    let encoded = flooded_water_rubble_deathrite_seed_with(1324);
+    let mut setup = try_pending_deathrite_with_overlay_rubble_legal(&encoded, "north-flood")
+        .expect("complete water-on-flooded-rubble Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["realm"]["sites"]["C1"]["rubble"], true);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    accept_where(session, "north end turn after Deathrites", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(session, "south draw atlas", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    if !south_has_water_in_atlas(&state(session)) {
+        accept_where(session, "south draw-site for water", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "south-water"
+                    && action.descriptor["cell"] == "C1"
+            })
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1326_play_earth_on_drought_rubble_withheld_during_pending_deathrite_order() {
+    let encoded = drought_earth_rubble_deathrite_seed_with(1326);
+    let mut setup = try_pending_deathrite_with_overlay_rubble_legal(&encoded, "north-drought")
+        .expect("complete earth-on-drought-rubble Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C1"]["rubble"], true);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    accept_where(session, "north end turn after Deathrites", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(session, "south draw atlas", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    if !session
+        .legal_actions()
+        .expect("resumed legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "south-earth"
+                && action.descriptor["cell"] == "C1"
+        })
+    {
+        accept_where(session, "south draw-site for earth", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "south-earth"
                     && action.descriptor["cell"] == "C1"
             })
     );

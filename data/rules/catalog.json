@@ -30320,6 +30320,239 @@
         "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
         "testName": "rule_catalog_1322_play_water_on_drought_rubble_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1323",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto Flood-covered empty Rubble replaces the Rubble with that site and the cell counts as a Water site for later casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1323_playing_water_onto_flooded_rubble_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1324",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Water on Flood-covered Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1324_play_water_on_flooded_rubble_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1325",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing an Earth site onto Drought-covered empty Rubble replaces the Rubble with that Earth site and the cell counts as land for later casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1325_playing_earth_onto_drought_rubble_creates_earth_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1326",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Earth on Drought-covered Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1326_play_earth_on_drought_rubble_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1327",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of twenty-seven synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1327_twenty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1328",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Water onto Flood-covered rubble keeps that cell a Water site. A Burrowing and Submerge minion already underground there is relayered underwater and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played",
+        "rubble-replaced"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1328_playing_water_onto_flooded_rubble_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1329",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Playing printed Earth onto Drought-covered rubble keeps that cell land. A Burrowing and Submerge minion already underwater there is relayered underground and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "site-played",
+        "rubble-replaced"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1329_playing_earth_onto_drought_rubble_relayers_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1330",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, casting Drought is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1330_cast_drought_aura_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1331",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, destroy-target-aura Magic that would destroy Flood is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura",
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1331_destroy_flood_aura_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1332",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, destroy-target-aura Magic that would destroy Drought is not offered until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura",
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1332_destroy_drought_aura_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }
