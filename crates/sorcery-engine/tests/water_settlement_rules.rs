@@ -3141,6 +3141,81 @@ fn try_pending_deathrite_with_flooded_occupied_water_c3_play_site(
     })
 }
 
+fn try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(
+    encoded: &str,
+) -> Option<PendingDeathriteWaterOnRubbleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "north-water"
+                && descriptor["cell"] == "C3"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            overlay_covers_c3(descriptor, "north-flood")
+        })
+    {
+        return None;
+    }
+    if state(&session)["realm"]["sites"]["C3"]["cardId"] != "north-water" {
+        return None;
+    }
+    if !pass_turn_draw_spellbook(&mut session) {
+        return None;
+    }
+    let first = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    if !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+    {
+        return None;
+    }
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if state(&session)["phase"] != "deathrite-order"
+        && (!try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+        }) || state(&session)["phase"] != "deathrite-order")
+    {
+        return None;
+    }
+    if !north_has_water_in_atlas(&state(&session)) {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteWaterOnRubbleSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
 fn try_pending_deathrite_with_flooded_occupied_earth_c3_play_site(
     encoded: &str,
 ) -> Option<PendingDeathriteWaterOnRubbleSetup> {
@@ -3353,6 +3428,81 @@ fn try_pending_deathrite_with_drought_occupied_earth_c3_play_site(
         return None;
     }
     if !north_has_water_in_atlas(&state(&session)) {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteWaterOnRubbleSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(
+    encoded: &str,
+) -> Option<PendingDeathriteWaterOnRubbleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "north-earth"
+                && descriptor["cell"] == "C3"
+        })
+        || !pass_turn_draw_spellbook(&mut session)
+        || !pass_turn_draw_spellbook(&mut session)
+        || !try_accept_where(&mut session, |descriptor| {
+            overlay_covers_c3(descriptor, "north-drought")
+        })
+    {
+        return None;
+    }
+    if state(&session)["realm"]["sites"]["C3"]["cardId"] != "north-earth" {
+        return None;
+    }
+    if !pass_turn_draw_spellbook(&mut session) {
+        return None;
+    }
+    let first = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    if !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+    {
+        return None;
+    }
+    if !north_has_rain(&state(&session)) {
+        return None;
+    }
+    if state(&session)["phase"] != "deathrite-order"
+        && (!try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+        }) || state(&session)["phase"] != "deathrite-order")
+    {
+        return None;
+    }
+    if !north_has_earth_in_atlas(&state(&session)) {
         return None;
     }
     let mut deathrite_ids = [
@@ -3685,6 +3835,18 @@ fn flooded_water_c3_play_site_seed_with(start: u32) -> String {
         )
 }
 
+fn flooded_water_c3_play_water_site_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(flooded_water_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(candidate)
+                .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Water play on flooded occupied Water",
+        )
+}
+
 fn flooded_earth_c3_play_site_seed_with(start: u32) -> String {
     (start..start + 4096)
         .map(flooded_earth_c3_play_site_manifest)
@@ -3716,6 +3878,18 @@ fn drought_earth_c3_play_site_seed_with(start: u32) -> String {
         })
         .expect(
             "bounded seed that reaches pending Deathrites with Water play on drought occupied Earth",
+        )
+}
+
+fn drought_earth_c3_play_earth_site_seed_with(start: u32) -> String {
+    (start..start + 4096)
+        .map(drought_earth_c3_play_site_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(candidate)
+                .is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with Earth play on drought occupied Earth",
         )
 }
 
@@ -3824,6 +3998,30 @@ fn rule_catalog_1446_play_water_on_flooded_occupied_earth_withheld_during_pendin
 }
 
 #[test]
+fn rule_catalog_1453_play_water_on_flooded_occupied_water_withheld_during_pending_deathrite_order()
+{
+    let encoded = flooded_water_c3_play_water_site_seed_with(1453);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(&encoded)
+        .expect("complete water-on-flooded-occupied-water Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
 fn rule_catalog_1404_play_water_on_drought_occupied_earth_withheld_during_pending_deathrite_order()
 {
     let encoded = drought_earth_c3_play_site_seed_with(1404);
@@ -3889,6 +4087,83 @@ fn rule_catalog_1448_play_earth_on_drought_occupied_water_withheld_during_pendin
             .all(|action| action.descriptor["kind"] != "play-site")
     );
     assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1455_play_earth_on_drought_occupied_earth_withheld_during_pending_deathrite_order()
+{
+    let encoded = drought_earth_c3_play_earth_site_seed_with(1455);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(&encoded)
+        .expect("complete earth-on-drought-occupied-earth Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1456_play_earth_on_drought_occupied_earth_offered_after_pending_deathrite_order() {
+    let encoded = drought_earth_c3_play_earth_site_seed_with(1456);
+    let mut setup = try_pending_deathrite_with_drought_occupied_earth_c3_play_earth_site(&encoded)
+        .expect("complete earth-on-drought-occupied-earth Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    if !session
+        .legal_actions()
+        .expect("resumed legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "north-earth"
+                && action.descriptor["cell"] == "C3"
+        })
+    {
+        accept_where(session, "north draw-site for earth", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "north-earth"
+                    && action.descriptor["cell"] == "C3"
+            })
+    );
+    assert_exact_replay(session);
 }
 
 #[test]
@@ -4012,6 +4287,67 @@ fn rule_catalog_1447_play_water_on_flooded_occupied_earth_offered_after_pending_
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    if !session
+        .legal_actions()
+        .expect("resumed legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "north-water"
+                && action.descriptor["cell"] == "C3"
+        })
+    {
+        accept_where(session, "north draw-site for water", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "north-water"
+                    && action.descriptor["cell"] == "C3"
+            })
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1454_play_water_on_flooded_occupied_water_offered_after_pending_deathrite_order() {
+    let encoded = flooded_water_c3_play_water_site_seed_with(1454);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let mut setup = try_pending_deathrite_with_flooded_occupied_water_c3_play_water_site(&encoded)
+        .expect("complete water-on-flooded-occupied-water Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
     );
     assert!(
         session
