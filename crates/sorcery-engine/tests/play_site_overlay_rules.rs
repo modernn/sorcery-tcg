@@ -2924,3 +2924,88 @@ fn rule_catalog_1488_play_site_withheld_during_pending_deathrite_order_on_drough
     );
     assert_exact_replay(&setup.session);
 }
+
+#[test]
+fn rule_catalog_1497_play_site_earth_offered_after_pending_deathrite_order_on_flooded_occupied_water_at_c3()
+ {
+    let (encoded, seed) = flooded_occupied_water_c3_earth_play_deathrite_dualer_seed_with(1497);
+    eprintln!("seed={seed}");
+    let mut setup =
+        try_pending_deathrite_with_flooded_occupied_water_c3_dualer_for_earth_play(&encoded)
+            .expect("complete earth-on-flooded-occupied-water Deathrite offered setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    if !offers_play_earth_on_c3(session) {
+        maybe_draw_site_for_play(session);
+    }
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1498_play_site_water_offered_after_pending_deathrite_order_on_drought_occupied_earth_at_c3()
+ {
+    let (encoded, seed) = drought_occupied_earth_c3_water_play_deathrite_dualer_seed_with(1498);
+    eprintln!("seed={seed}");
+    let mut setup =
+        try_pending_deathrite_with_drought_occupied_earth_c3_dualer_for_water_play(&encoded)
+            .expect("complete water-on-drought-occupied-earth Deathrite offered setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-earth"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    if !offers_play_water_on_c3(session) {
+        maybe_draw_site_for_play(session);
+    }
+    assert!(
+        offers_play_water_on_c3(session),
+        "after Deathrites complete, play-site Water must be offered on inverse drought occupied Earth at C3"
+    );
+    assert_exact_replay(session);
+}
