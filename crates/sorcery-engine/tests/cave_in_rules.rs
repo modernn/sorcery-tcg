@@ -247,17 +247,21 @@ fn south_plays_c1(session: &mut Session) {
     });
 }
 
-fn summon_south_at_c1(session: &mut Session) -> String {
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
     let (summoned, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "south-minion"
-            && descriptor["cell"] == "C1"
+            && descriptor["cell"] == cell
             && descriptor["region"].is_null()
     });
     summoned["cardInstanceId"]
         .as_str()
         .expect("Cave-In occupant identity")
         .to_owned()
+}
+
+fn summon_south_at_c1(session: &mut Session) -> String {
+    summon_south_at(session, "C1")
 }
 
 fn north_draws_spellbook(session: &mut Session) {
@@ -608,4 +612,377 @@ fn rule_catalog_1078_cave_in_magic_withheld_during_pending_deathrite_order() {
     );
     assert_eq!(unit(&state(session), &visitor_id)["region"], "underground");
     assert_exact_replay(session);
+}
+
+fn cave_in_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cave-in-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cave-in-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-cave-in": cave_in(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": burrower(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-cave-in"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(587..587 + 2048)
+        .map(cave_in_supplemental_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-cave-in")
+                && opening_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with Cave-In and required South minions")
+}
+
+fn cave_in_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-cave-in")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn is_underground(snapshot: &Value, instance_id: &str) -> bool {
+    unit(snapshot, instance_id)["region"] == "underground"
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_cave_in_at(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-cave-in"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn setup_c1_with_minions(session: &mut Session, count: usize) -> Vec<String> {
+    south_plays_c1(session);
+    (0..count).map(|_| summon_south_at_c1(session)).collect()
+}
+
+fn try_second_cave_in_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    setup_c1_with_minions(&mut session, 1);
+    north_draws_spellbook(&mut session);
+    cast_cave_in_at(&mut session, "C1");
+    pass_turn_to_north_spellbook(&mut session);
+    if cave_in_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C2"
+            && descriptor["region"].is_null()
+    })?;
+    let minion_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    cave_in_cells(&session)
+        .contains(&"C2".to_owned())
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_cave_in_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(587..587 + 8192)
+        .find_map(|seed| {
+            let encoded = cave_in_supplemental_manifest(seed);
+            if opening_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_cave_in_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Cave-In enemy-arrival setup")
+}
+
+fn try_second_cave_in_new_site_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    setup_c1_with_minions(&mut session, 1);
+    north_draws_spellbook(&mut session);
+    cast_cave_in_at(&mut session, "C1");
+    pass_turn_to_north_spellbook(&mut session);
+    if cave_in_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let new_cell = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find_map(|action| {
+            (action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "north-site"
+                && action.descriptor["cell"] != "C4")
+                .then(|| action.descriptor["cell"].as_str().map(ToOwned::to_owned))?
+        })?;
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == new_cell
+    });
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == new_cell
+            && descriptor["region"].is_null()
+    })?;
+    let minion_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    cave_in_cells(&session)
+        .contains(&new_cell)
+        .then_some((session, minion_id, new_cell))
+}
+
+fn seed_for_second_cave_in_new_site(start: u32) -> String {
+    (start..start + 8192)
+        .chain(587..587 + 8192)
+        .find_map(|seed| {
+            let encoded = cave_in_supplemental_manifest(seed);
+            if opening_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_cave_in_new_site_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Cave-In new-site setup")
+}
+
+#[test]
+fn rule_catalog_1903_burrowed_minions_stay_underground_after_turns_pass() {
+    let encoded = seed_with_start(1903, 1);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_cave_in_at(&mut session, "C1");
+    assert!(is_underground(&state(&session), &minion_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(is_underground(&state(&session), &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1904_second_cave_in_without_surface_minions_is_a_paid_noop() {
+    let encoded = seed_with_start(1904, 1);
+    let mut session = opening_main(&encoded);
+    setup_c1_with_minions(&mut session, 1);
+    north_draws_spellbook(&mut session);
+    cast_cave_in_at(&mut session, "C1");
+    assert!(cave_in_spells_in_hand(&state(&session)) >= 1);
+    let receipt = cast_cave_in_at(&mut session, "C1");
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-burrowed")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1905_second_cave_in_burrows_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_cave_in_enemy_arrival(1905);
+    let (mut session, minion_id) = try_second_cave_in_enemy_arrival_prefix(&encoded)
+        .expect("second Cave-In enemy-arrival prefix");
+    let receipt = cast_cave_in_at(&mut session, "C2");
+    assert!(event_types(&receipt).contains(&"minion-burrowed"));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "minion-burrowed" && event.payload["instanceId"] == minion_id
+    }));
+    assert!(is_underground(&state(&session), &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1906_cave_in_burrows_every_minion_sharing_the_target_land_site() {
+    let encoded = seed_with_start(1906, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c1_with_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let receipt = cast_cave_in_at(&mut session, "C1");
+    let burrowed: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-burrowed")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("burrowed identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(burrowed.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(burrowed.contains(minion_id));
+        assert!(is_underground(&state(&session), minion_id));
+    }
+    assert_exact_replay(&session);
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, Vec<String>, String)> {
+    let mut session = opening_main(encoded);
+    let c1_ids = setup_c1_with_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let far_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (cave_in_cells(&session).contains(&"C1".to_owned())).then_some((session, c1_ids, far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(587..587 + 2048)
+        .find_map(|seed| {
+            let encoded = cave_in_supplemental_manifest(seed);
+            if opening_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching Cave-In far-minion setup")
+}
+
+#[test]
+fn rule_catalog_1907_cave_in_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(1907);
+    let (mut session, c1_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("Cave-In far-minion prefix");
+    cast_cave_in_at(&mut session, "C1");
+    for minion_id in &c1_ids {
+        assert!(is_underground(&state(&session), minion_id));
+    }
+    assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1908_second_cave_in_burrows_minions_at_a_newly_placed_land_site() {
+    let encoded = seed_for_second_cave_in_new_site(1908);
+    let (mut session, minion_id, new_cell) =
+        try_second_cave_in_new_site_prefix(&encoded).expect("second Cave-In new-site prefix");
+    let receipt = cast_cave_in_at(&mut session, &new_cell);
+    assert!(event_types(&receipt).contains(&"minion-burrowed"));
+    assert!(receipt.events.iter().any(|event| {
+        event.event_type == "minion-burrowed" && event.payload["instanceId"] == minion_id
+    }));
+    assert!(is_underground(&state(&session), &minion_id));
+    assert_exact_replay(&session);
 }
