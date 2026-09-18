@@ -41445,8 +41445,203 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1870_two_hundred_thirty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1871",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1871_two_hundred_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1872",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1872_two_hundred_thirty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1873",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-each-controlled-site-bordering-enemy-site Magic leaves summoned tokens on the board after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1873_summoned_tokens_stay_on_board_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1874",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two summon-token-to-each-controlled-site-bordering-enemy-site spells in hand, a second cast without bordering enemy sites is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1874_second_border_militia_without_bordering_sites_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1875",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two summon-token-to-each-controlled-site-bordering-enemy-site spells in hand, a second cast summons on a newly bordering site after enemy arrival.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1875_second_border_militia_summons_on_a_newly_bordering_site_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1876",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-each-controlled-site-bordering-enemy-site Magic summons on every controlled site that borders an enemy site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1876_border_militia_summons_on_every_controlled_site_bordering_an_enemy_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1877",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-each-controlled-site-bordering-enemy-site Magic leaves a non-bordering controlled site untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1877_border_militia_leaves_a_non_bordering_controlled_site_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1878",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two summon-token-to-each-controlled-site-bordering-enemy-site spells in hand, a second cast summons on a newly placed bordering site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/border_militia_rules.rs",
+        "testName": "rule_catalog_1878_second_border_militia_summons_on_a_newly_placed_bordering_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1879",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1879_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1880",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1880_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1870,
+  "rustSupportedCount": 1880,
   "typescriptSupportedCount": 0
 }

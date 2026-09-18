@@ -1,5 +1,5 @@
 //! Direct proofs for summon-token-to-each-controlled-site-bordering-enemy-site
-//! Magic (RULE-CATALOG-0579–0580, RULE-CATALOG-1079).
+//! Magic (RULE-CATALOG-0579–0580, 1079, RULE-CATALOG-1873–1878).
 //!
 //! Ordinary Magic summons one source-linked token onto each controlled site
 //! that borders an enemy-controlled site, in stable cell order. When no site
@@ -220,7 +220,7 @@ fn seed_with(required: &[&str]) -> String {
 }
 
 fn end_turn(session: &mut Session) {
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    end_turn_if_offered(session);
 }
 
 fn draw_spellbook(session: &mut Session) {
@@ -580,4 +580,386 @@ fn rule_catalog_1079_border_militia_withheld_during_pending_deathrite_order() {
     );
     assert_eq!(token_units_at(&state(session), &["C3"]).len(), 1);
     assert_exact_replay(session);
+}
+
+fn border_militia_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "border-militia-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-border-militia-supplemental-v1",
+        },
+        "cards": {
+            "foot-soldier-token": foot_soldier_token(),
+            "north-avatar": avatar(),
+            "north-militia": border_militia(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": raider(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                    "north-militia",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(579..579 + 2048)
+        .map(border_militia_supplemental_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required opening cards")
+}
+
+fn militia_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-militia")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_militia(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-militia"
+    });
+    receipt
+}
+
+fn token_cells(snapshot: &Value) -> Vec<String> {
+    snapshot["realm"]["units"]
+        .as_array()
+        .map(|units| {
+            units
+                .iter()
+                .filter(|unit| unit["cardId"] == "foot-soldier-token")
+                .map(|unit| {
+                    unit["location"]
+                        .as_str()
+                        .expect("token location")
+                        .to_owned()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_with_two_militia_spells_in_hand(start: u32) -> String {
+    (start..start + 2048)
+        .chain(579..579 + 2048)
+        .map(border_militia_supplemental_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .filter(|id| *id == "north-militia")
+                .count()
+                >= 2
+        })
+        .expect("bounded seed with two Border Militia spells in opening hand")
+}
+
+struct SecondMilitiaSummonSetup {
+    new_cell: String,
+    session: Session,
+}
+
+fn try_second_militia_summon_prefix(encoded: &str) -> Option<SecondMilitiaSummonSetup> {
+    let mut session = opening_main(encoded);
+    setup_bordering_sites(&mut session);
+    let first = cast_militia(&mut session);
+    if !event_types(&first).contains(&"minion-summoned") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if militia_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
+    })?;
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D3"
+    })?;
+    (militia_casts(&session) >= 1).then_some(SecondMilitiaSummonSetup {
+        new_cell: "D3".to_owned(),
+        session,
+    })
+}
+
+fn seed_for_second_militia_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(579..579 + 8192)
+        .find_map(|seed| {
+            let encoded = border_militia_supplemental_manifest(seed);
+            if !opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-militia")
+            {
+                return None;
+            }
+            try_second_militia_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Border Militia summon setup")
+}
+
+fn try_second_militia_enemy_arrival_prefix(encoded: &str) -> Option<Session> {
+    let mut session = opening_main(encoded);
+    setup_bordering_sites(&mut session);
+    cast_militia(&mut session);
+    pass_turn_to_north_spellbook(&mut session);
+    if militia_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D3"
+    })?;
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "D2"
+            && descriptor["region"].is_null()
+    })?;
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (militia_casts(&session) >= 1).then_some(session)
+}
+
+fn seed_for_second_militia_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(579..579 + 8192)
+        .find_map(|seed| {
+            let encoded = border_militia_supplemental_manifest(seed);
+            if !opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-militia")
+            {
+                return None;
+            }
+            try_second_militia_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Border Militia enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_1873_summoned_tokens_stay_on_board_after_turns_pass() {
+    let encoded = seed_with_start(1873, &["north-militia"]);
+    let mut session = opening_main(&encoded);
+    setup_bordering_sites(&mut session);
+    let receipt = cast_militia(&mut session);
+    let token_ids: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-summoned")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("token identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(token_ids.len(), 2);
+    pass_turn_to_north_spellbook(&mut session);
+    let after = state(&session);
+    for token_id in &token_ids {
+        assert!(
+            after["realm"]["units"]
+                .as_array()
+                .expect("realm units")
+                .iter()
+                .any(|unit| unit["instanceId"] == *token_id)
+        );
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1874_second_border_militia_without_bordering_sites_is_a_paid_noop() {
+    let encoded = seed_with_two_militia_spells_in_hand(1874);
+    let mut session = opening_main(&encoded);
+    let first = cast_militia(&mut session);
+    assert_eq!(event_types(&first), ["magic-cast", "magic-resolved"]);
+    let second = cast_militia(&mut session);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-summoned")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1875_second_border_militia_summons_on_a_newly_bordering_site_after_enemy_arrival() {
+    let encoded = seed_for_second_militia_enemy_arrival(1875);
+    let mut session = try_second_militia_enemy_arrival_prefix(&encoded)
+        .expect("second Border Militia enemy-arrival prefix");
+    let before_cells = token_cells(&state(&session));
+    let receipt = cast_militia(&mut session);
+    let summoned_cells: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-summoned")
+        .map(|event| {
+            event.payload["cell"]
+                .as_str()
+                .expect("summoned cell")
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        !summoned_cells.is_empty(),
+        "expected at least one new bordering token"
+    );
+    assert!(
+        summoned_cells
+            .iter()
+            .any(|cell| !before_cells.contains(cell)),
+        "expected at least one newly summoned bordering cell"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1876_border_militia_summons_on_every_controlled_site_bordering_an_enemy_site() {
+    let encoded = seed_with_start(1876, &["north-militia"]);
+    let mut session = opening_main(&encoded);
+    setup_bordering_sites(&mut session);
+    let receipt = cast_militia(&mut session);
+    let summoned_cells: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-summoned")
+        .map(|event| {
+            event.payload["cell"]
+                .as_str()
+                .expect("summoned cell")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(summoned_cells, vec!["B3", "C3"]);
+    assert_eq!(token_units_at(&state(&session), &["B3", "C3"]).len(), 2);
+    assert!(!token_cells(&state(&session)).contains(&"C1".to_owned()));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1877_border_militia_leaves_a_non_bordering_controlled_site_untouched() {
+    let encoded = seed_with_start(1877, &["north-militia"]);
+    let mut session = opening_main(&encoded);
+    setup_bordering_sites(&mut session);
+    cast_militia(&mut session);
+    assert!(!token_cells(&state(&session)).contains(&"C1".to_owned()));
+    assert_eq!(token_units_at(&state(&session), &["B3", "C3"]).len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1878_second_border_militia_summons_on_a_newly_placed_bordering_site() {
+    let encoded = seed_for_second_militia_summon(1878);
+    let SecondMilitiaSummonSetup {
+        mut session,
+        new_cell,
+    } = try_second_militia_summon_prefix(&encoded).expect("second Border Militia summon prefix");
+    let before = token_cells(&state(&session));
+    let receipt = cast_militia(&mut session);
+    let summoned_cells: Vec<_> = receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-summoned")
+        .map(|event| {
+            event.payload["cell"]
+                .as_str()
+                .expect("summoned cell")
+                .to_owned()
+        })
+        .collect();
+    assert!(
+        summoned_cells.contains(&new_cell),
+        "expected a token on the newly bordering site {new_cell}, got {summoned_cells:?}"
+    );
+    let after = token_cells(&state(&session));
+    assert!(after.contains(&new_cell));
+    assert!(after.len() > before.len());
+    assert_exact_replay(&session);
 }
