@@ -1,6 +1,7 @@
 //! Direct proofs that leaving Flood or Drought relayers lower-layer occupants
 //! (RULE-CATALOG-0339–0340, RULE-CATALOG-1336–1337, RULE-CATALOG-1355–1358,
-//! RULE-CATALOG-1363–1366, RULE-CATALOG-1415–1418), and that destroy-target-
+//! RULE-CATALOG-1363–1366, RULE-CATALOG-1415–1418, RULE-CATALOG-1425–1428),
+//! and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
 //! deathrite-order (RULE-CATALOG-1331–1334).
 //!
@@ -306,6 +307,124 @@ fn drought_opening() -> Session {
         .expect("bounded seed opening with Drought, Water, a dual-region minion, and destroy-Aura")
 }
 
+fn flood_water_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-leave-flood-water" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-leave-flood-water-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-flood": flood(),
+            "north-water": water(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-destroy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_earth_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-leave-drought-earth" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-leave-drought-earth-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-dualer",
+                    "north-drought",
+                    "north-dualer",
+                    "north-drought",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-destroy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_water_opening() -> Session {
+    (1..=4096)
+        .map(flood_water_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Flood water leave candidate");
+            let atlas = opening_ids(&session, "north", "atlas");
+            let spells = opening_ids(&session, "north", "spellbook");
+            let south = opening_ids(&session, "south", "spellbook");
+            (atlas.contains(&"north-water".to_owned())
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-dualer".to_owned())
+                && south.contains(&"south-destroy".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Flood, Water, a dual-region minion, and destroy-Aura")
+}
+
+fn drought_earth_opening() -> Session {
+    (1..=4096)
+        .map(drought_earth_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Drought earth leave candidate");
+            let spells = opening_ids(&session, "north", "spellbook");
+            let south = opening_ids(&session, "south", "spellbook");
+            (spells.contains(&"north-drought".to_owned())
+                && spells.contains(&"north-dualer".to_owned())
+                && south.contains(&"south-destroy".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Drought, Earth, a dual-region minion, and destroy-Aura")
+}
+
 fn flood_return_manifest(seed: u32) -> String {
     finish_manifest(json!({
         "authority": {
@@ -422,6 +541,124 @@ fn drought_return_opening() -> Session {
             .then_some(session)
         })
         .expect("bounded seed opening with Drought, Water, a dual-region minion, and return-Aura")
+}
+
+fn flood_water_return_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-leave-flood-water-return" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-leave-flood-water-return-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-flood": flood(),
+            "north-water": water(),
+            "south-avatar": avatar(),
+            "south-return": return_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-return"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_earth_return_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-leave-drought-earth-return" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-leave-drought-earth-return-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "south-avatar": avatar(),
+            "south-return": return_aura(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-dualer",
+                    "north-drought",
+                    "north-dualer",
+                    "north-drought",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-return"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_water_return_opening() -> Session {
+    (1..=4096)
+        .map(flood_water_return_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Flood water return leave candidate");
+            let atlas = opening_ids(&session, "north", "atlas");
+            let spells = opening_ids(&session, "north", "spellbook");
+            let south = opening_ids(&session, "south", "spellbook");
+            (atlas.contains(&"north-water".to_owned())
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-dualer".to_owned())
+                && south.contains(&"south-return".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Flood, Water, a dual-region minion, and return-Aura")
+}
+
+fn drought_earth_return_opening() -> Session {
+    (1..=4096)
+        .map(drought_earth_return_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Drought earth return leave candidate");
+            let spells = opening_ids(&session, "north", "spellbook");
+            let south = opening_ids(&session, "south", "spellbook");
+            (spells.contains(&"north-drought".to_owned())
+                && spells.contains(&"north-dualer".to_owned())
+                && south.contains(&"south-return".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Drought, Earth, a dual-region minion, and return-Aura")
 }
 
 fn play_overlay_then_south_ready(
@@ -2225,4 +2462,124 @@ fn rule_catalog_1418_return_drought_aura_withheld_during_pending_deathrite_order
             .all(|event| event.event_type != "minion-died")
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1425_destroying_flood_on_occupied_water_site_relayers_dual_region_minion_underwater()
+ {
+    let mut session = flood_water_opening();
+    let (dualer_id, aura_id) =
+        play_overlay_on_occupied_c3(&mut session, "north-water", "underwater", "north-flood");
+    assert_eq!(
+        realm_unit(&state(&session), &dualer_id)["region"],
+        "underwater"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "destroying Flood on occupied Water must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1426_destroying_drought_on_occupied_earth_site_relayers_dual_region_minion_underground()
+ {
+    let mut session = drought_earth_opening();
+    let (dualer_id, aura_id) =
+        play_overlay_on_occupied_c3(&mut session, "north-earth", "underground", "north-drought");
+    assert_eq!(
+        realm_unit(&state(&session), &dualer_id)["region"],
+        "underground"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "destroying Drought on occupied Earth must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underground");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1427_returning_flood_on_occupied_water_site_relayers_dual_region_minion_underwater()
+{
+    let mut session = flood_water_return_opening();
+    let (dualer_id, aura_id) =
+        play_overlay_on_occupied_c3(&mut session, "north-water", "underwater", "north-flood");
+    assert_eq!(
+        realm_unit(&state(&session), &dualer_id)["region"],
+        "underwater"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-return"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "returning Flood on occupied Water must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1428_returning_drought_on_occupied_earth_site_relayers_dual_region_minion_underground()
+ {
+    let mut session = drought_earth_return_opening();
+    let (dualer_id, aura_id) =
+        play_overlay_on_occupied_c3(&mut session, "north-earth", "underground", "north-drought");
+    assert_eq!(
+        realm_unit(&state(&session), &dualer_id)["region"],
+        "underground"
+    );
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-return"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "returning Drought on occupied Earth must relayer the dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underground");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
 }
