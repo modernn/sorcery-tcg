@@ -762,3 +762,253 @@ fn rule_catalog_1192_five_game_synthetic_batch_stays_unranked_unverified_authori
         );
     }
 }
+
+#[test]
+fn rule_catalog_1198_six_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [52_u32, 53, 54, 55, 56, 57];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 6);
+    assert_eq!(records.len(), 6);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
+
+#[test]
+fn rule_catalog_1199_seven_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [58_u32, 59, 60, 61, 62, 63, 64];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 7);
+    assert_eq!(records.len(), 7);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
+
+#[test]
+fn rule_catalog_1200_eight_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [65_u32, 66, 67, 68, 69, 70, 71, 72];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 8);
+    assert_eq!(records.len(), 8);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
+
+#[test]
+fn rule_catalog_1201_nine_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [73_u32, 74, 75, 76, 77, 78, 79, 80, 81];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 9);
+    assert_eq!(records.len(), 9);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
+
+#[test]
+fn rule_catalog_1202_ten_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds = [82_u32, 83, 84, 85, 86, 87, 88, 89, 90, 91];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+
+    assert_eq!(manifests.len(), 10);
+    assert_eq!(records.len(), 10);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            record.eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+
+    for record in &records {
+        let batch_eligibility =
+            evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!batch_eligibility.ranked);
+        assert_eq!(
+            batch_eligibility.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+        assert_eq!(
+            batch_eligibility.reasons,
+            [EligibilityReason::UnverifiedAuthority]
+        );
+    }
+}
