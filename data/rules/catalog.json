@@ -39472,8 +39472,201 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1770_one_hundred_eighty_four_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1771",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1771_one_hundred_eighty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1772",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1772_one_hundred_eighty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1773",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-adjacent-minion Magic leaves a burrowed minion underground after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1773_burrowed_minion_stays_underground_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1774",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second burrow-target-adjacent-minion cast omits an already burrowed adjacent minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1774_second_bury_omits_an_already_burrowed_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1775",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second Water-site burrow-target-adjacent-minion cast on the same adjacent minion still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1775_second_water_bury_on_the_same_adjacent_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1776",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-adjacent-minion Magic can bury an enemy minion adjacent to the caster.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1776_bury_burrows_an_enemy_minion_adjacent_to_the_caster"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1777",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-adjacent-minion Magic leaves a far minion on the surface.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1777_bury_leaves_a_far_minion_on_the_surface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1778",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a burrow-target-adjacent-minion cast, a later cast burrows a newly arrived adjacent minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetAdjacentMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_adjacent_rules.rs",
+        "testName": "rule_catalog_1778_second_bury_burrows_a_newly_arrived_adjacent_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1779",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1779_one_hundred_eighty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1780",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred eighty eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1780_one_hundred_eighty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1770,
+  "rustSupportedCount": 1780,
   "typescriptSupportedCount": 0
 }

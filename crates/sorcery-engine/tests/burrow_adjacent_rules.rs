@@ -1,5 +1,5 @@
 //! Direct proofs for burrow-target-adjacent-minion Magic
-//! (RULE-CATALOG-0559–0560, RULE-CATALOG-1055).
+//! (RULE-CATALOG-0559–0560, RULE-CATALOG-1055, RULE-CATALOG-1773–1778).
 //!
 //! Ordinary Magic burrows one minion that borders the caster. Same-cell
 //! and far minions are not offered. A Water site is a paid no-op. While
@@ -49,6 +49,7 @@ fn burrower() -> Value {
 fn raider() -> Value {
     json!({
         "attack": 1,
+        "burrowing": true,
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
@@ -239,39 +240,130 @@ fn bury_target_ids(session: &Session) -> Vec<String> {
         .collect()
 }
 
-fn seed_with(water: bool, start: u32) -> String {
-    (start..start + 256)
+fn seed_with(water: bool, start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
         .map(|seed| bury_manifest(seed, water))
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
-            hand.iter().filter(|card| *card == "north-ally").count() >= 2
-                && hand.iter().any(|card| card == "north-bury")
+            required.iter().all(|id| hand.iter().any(|card| card == id))
         })
-        .expect("bounded seed with two allies and bury")
+        .expect("bounded seed with required opening cards")
 }
 
-fn south_plays_c1_and_raids_far(session: &mut Session) -> String {
+fn seed_for_adjacent_setup(water: bool, start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = bury_manifest(seed, water);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 2
+                || !hand.iter().any(|card| card == "north-bury")
+            {
+                return None;
+            }
+            try_setup_adjacent_board(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed that completes adjacent bury setup")
+}
+
+fn bury_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-bury")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_with_two_bury_spells_in_hand_after_setup(water: bool, start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = bury_manifest(seed, water);
+            let (session, _, _, _) = try_setup_adjacent_board(&encoded)?;
+            (bury_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Bury spells in hand after adjacent setup")
+}
+
+fn seed_for_second_adjacent_bury(water: bool, start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = bury_manifest(seed, water);
+            try_second_adjacent_bury_setup(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed that reaches a second adjacent bury target")
+}
+
+fn seed_with_bury_only(water: bool, start: u32) -> String {
+    seed_with(water, start, &["north-bury"])
+}
+
+fn advance_full_round(session: &mut Session) {
+    start_north_main(session);
+}
+
+fn start_north_main(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_bury(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn lay_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+    });
+}
+
+fn setup_enemy_adjacent_board(encoded: &str) -> (Session, String) {
+    let mut session = opening_main(encoded);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
-    let (far, _) = accept_where(session, |descriptor| {
-        descriptor["kind"] == "summon-minion"
-            && descriptor["cardId"] == "south-raider"
-            && descriptor["cell"] == "C1"
-            && descriptor["region"].is_null()
-    });
-    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
-    accept_where(session, |descriptor| {
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
-    far["cardInstanceId"]
+    lay_site_at(&mut session, "C3");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (enemy, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let enemy_id = enemy["cardInstanceId"]
         .as_str()
-        .expect("far enemy identity")
-        .to_owned()
+        .expect("adjacent enemy identity")
+        .to_owned();
+    assert!(bury_target_ids(&session).contains(&enemy_id));
+    (session, enemy_id)
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -289,37 +381,95 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn setup_adjacent_board(encoded: &str) -> (Session, String, String, String) {
+fn try_setup_adjacent_board(encoded: &str) -> Option<(Session, String, String, String)> {
     let mut session = opening_main(encoded);
-    let (here, _) = accept_where(&mut session, |descriptor| {
+    let (here, _) = try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-ally"
             && descriptor["cell"] == "C4"
             && descriptor["region"].is_null()
-    });
-    let here_id = here["cardInstanceId"]
-        .as_str()
-        .expect("same-cell ally identity")
-        .to_owned();
-    let far_id = south_plays_c1_and_raids_far(&mut session);
-    accept_where(&mut session, |descriptor| {
+    })?;
+    let here_id = here["cardInstanceId"].as_str()?.to_owned();
+    let far_id = try_south_plays_c1_and_raids_far(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
-    });
-    let (adjacent, _) = accept_where(&mut session, |descriptor| {
+    })?;
+    let (adjacent, _) = try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-ally"
             && descriptor["cell"] == "C3"
             && descriptor["region"].is_null()
-    });
-    let adjacent_id = adjacent["cardInstanceId"]
-        .as_str()
-        .expect("adjacent ally identity")
-        .to_owned();
+    })?;
+    let adjacent_id = adjacent["cardInstanceId"].as_str()?.to_owned();
     let offered = bury_target_ids(&session);
-    assert!(offered.contains(&adjacent_id));
-    assert!(!offered.contains(&here_id));
-    assert!(!offered.contains(&far_id));
-    (session, adjacent_id, here_id, far_id)
+    if !offered.contains(&adjacent_id) || offered.contains(&here_id) || offered.contains(&far_id) {
+        return None;
+    }
+    Some((session, adjacent_id, here_id, far_id))
+}
+
+fn setup_adjacent_board(encoded: &str) -> (Session, String, String, String) {
+    try_setup_adjacent_board(encoded).expect("complete adjacent bury setup")
+}
+
+fn try_south_plays_c1_and_raids_far(session: &mut Session) -> Option<String> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let (far, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(
+        far["cardInstanceId"]
+            .as_str()
+            .expect("far enemy identity")
+            .to_owned(),
+    )
+}
+
+fn try_cast_bury(session: &mut Session, target_id: &str) -> Option<Receipt> {
+    let (_, receipt) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    })?;
+    Some(receipt)
+}
+
+fn try_second_adjacent_bury_setup(encoded: &str) -> Option<(Session, String, String)> {
+    let (mut session, first_adjacent, _, _) = try_setup_adjacent_board(encoded)?;
+    if bury_spells_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    try_cast_bury(&mut session, &first_adjacent)?;
+    start_north_main(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D4"
+    })?;
+    let (second, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "D4"
+            && descriptor["region"].is_null()
+    })?;
+    let second_adjacent = second["cardInstanceId"].as_str()?.to_owned();
+    let offered = bury_target_ids(&session);
+    if !offered.contains(&second_adjacent) || offered.contains(&first_adjacent) {
+        return None;
+    }
+    Some((session, first_adjacent, second_adjacent))
 }
 
 fn deathrite_burrow_adjacent_manifest(seed: u32) -> String {
@@ -466,7 +616,7 @@ fn deathrite_burrow_adjacent_seed_with(start: u32) -> String {
 
 #[test]
 fn rule_catalog_0559_burrow_targets_an_adjacent_minion_on_earth() {
-    let encoded = seed_with(false, 559);
+    let encoded = seed_with(false, 559, &["north-ally", "north-ally", "north-bury"]);
     let (mut session, adjacent_id, here_id, far_id) = setup_adjacent_board(&encoded);
     assert_eq!(unit(&state(&session), &adjacent_id)["region"], "surface");
 
@@ -498,7 +648,7 @@ fn rule_catalog_0559_burrow_targets_an_adjacent_minion_on_earth() {
 
 #[test]
 fn rule_catalog_0560_burrow_adjacent_is_a_paid_noop_on_water() {
-    let encoded = seed_with(true, 560);
+    let encoded = seed_with(true, 560, &["north-ally", "north-ally", "north-bury"]);
     let (mut session, adjacent_id, here_id, far_id) = setup_adjacent_board(&encoded);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
@@ -586,4 +736,109 @@ fn rule_catalog_1055_burrow_adjacent_magic_withheld_during_pending_deathrite_ord
     );
     assert_eq!(unit(&state(session), &adjacent_id)["region"], "underground");
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1773_burrowed_minion_stays_underground_after_turns_pass() {
+    let encoded = seed_with(false, 1773, &["north-ally", "north-ally", "north-bury"]);
+    let (mut session, adjacent_id, here_id, far_id) = setup_adjacent_board(&encoded);
+    cast_bury(&mut session, &adjacent_id);
+    assert_eq!(
+        unit(&state(&session), &adjacent_id)["region"],
+        "underground"
+    );
+    advance_full_round(&mut session);
+    assert_eq!(
+        unit(&state(&session), &adjacent_id)["region"],
+        "underground"
+    );
+    assert_eq!(unit(&state(&session), &here_id)["region"], "surface");
+    assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1774_second_bury_omits_an_already_burrowed_minion() {
+    let encoded = seed_with(false, 1774, &["north-ally", "north-ally", "north-bury"]);
+    let (mut session, adjacent_id, _, _) = setup_adjacent_board(&encoded);
+    let first = cast_bury(&mut session, &adjacent_id);
+    assert_eq!(
+        event_types(&first),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert!(!bury_target_ids(&session).contains(&adjacent_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1775_second_water_bury_on_the_same_adjacent_is_still_a_paid_noop() {
+    let encoded = seed_with_two_bury_spells_in_hand_after_setup(true, 1775);
+    let (mut session, adjacent_id, here_id, far_id) = setup_adjacent_board(&encoded);
+    let first = cast_bury(&mut session, &adjacent_id);
+    assert_eq!(event_types(&first), ["magic-cast", "magic-resolved"]);
+    let second = cast_bury(&mut session, &adjacent_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert_eq!(unit(&state(&session), &adjacent_id)["region"], "surface");
+    assert_eq!(unit(&state(&session), &here_id)["region"], "surface");
+    assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1776_bury_burrows_an_enemy_minion_adjacent_to_the_caster() {
+    let encoded = seed_with_bury_only(false, 1776);
+    let (mut session, enemy_id) = setup_enemy_adjacent_board(&encoded);
+    let burrowed = cast_bury(&mut session, &enemy_id);
+    assert_eq!(
+        event_types(&burrowed),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert_eq!(burrowed.events[1].payload["instanceId"], enemy_id);
+    assert_eq!(unit(&state(&session), &enemy_id)["region"], "underground");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1777_bury_leaves_a_far_minion_on_the_surface() {
+    let encoded = seed_for_adjacent_setup(false, 1777);
+    let (mut session, adjacent_id, _, far_id) = setup_adjacent_board(&encoded);
+    cast_bury(&mut session, &adjacent_id);
+    assert_eq!(
+        unit(&state(&session), &adjacent_id)["region"],
+        "underground"
+    );
+    assert_eq!(unit(&state(&session), &far_id)["region"], "surface");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1778_second_bury_burrows_a_newly_arrived_adjacent_minion() {
+    let encoded = seed_for_second_adjacent_bury(false, 1778);
+    let (mut session, first_adjacent, second_adjacent) =
+        try_second_adjacent_bury_setup(&encoded).expect("second adjacent bury setup");
+    assert_eq!(
+        unit(&state(&session), &first_adjacent)["region"],
+        "underground"
+    );
+    assert_eq!(
+        unit(&state(&session), &second_adjacent)["region"],
+        "surface"
+    );
+    assert!(bury_target_ids(&session).contains(&second_adjacent));
+    assert!(!bury_target_ids(&session).contains(&first_adjacent));
+    let burrowed = cast_bury(&mut session, &second_adjacent);
+    assert_eq!(
+        event_types(&burrowed),
+        ["magic-cast", "minion-burrowed", "magic-resolved"]
+    );
+    assert_eq!(burrowed.events[1].payload["instanceId"], second_adjacent);
+    assert_eq!(
+        unit(&state(&session), &second_adjacent)["region"],
+        "underground"
+    );
+    assert_eq!(
+        unit(&state(&session), &first_adjacent)["region"],
+        "underground"
+    );
+    assert_exact_replay(&session);
 }
