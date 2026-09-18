@@ -2816,7 +2816,14 @@ fn flooded_earth_c3_play_site_manifest(seed: u32) -> String {
         },
         "decks": {
             "north": {
-                "atlas": vec!["north-earth"; 6],
+                "atlas": [
+                    "north-earth",
+                    "north-water",
+                    "north-water",
+                    "north-earth",
+                    "north-water",
+                    "north-earth",
+                ],
                 "avatar": "north-avatar",
                 "spellbook": [
                     "north-flood",
@@ -2839,7 +2846,6 @@ fn flooded_earth_c3_play_site_manifest(seed: u32) -> String {
         "seed": seed,
     }))
 }
-
 
 fn drought_earth_c3_play_site_manifest(seed: u32) -> String {
     finish_manifest(json!({
