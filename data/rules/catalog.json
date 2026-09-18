@@ -37102,6 +37102,212 @@
         "file": "crates/sorcery-engine/tests/grant_next_strike_double_rules.rs",
         "testName": "rule_catalog_1648_printed_attack_outlasts_expired_grant_while_plain_ally_strikes_at_base_power"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1651",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1651_one_hundred_thirty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1652",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1652_one_hundred_thirty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1659",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1659_one_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1660",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1660_one_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1653",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed Lethal strikes and kills without a grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1653_printed_lethal_strikes_and_kills_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1654",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Lethal-this-turn then draw-spell Magic lets an ally kill a tougher minion before End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1654_granted_lethal_then_draw_kills_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1655",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal then draw expires at End Phase, the ally only wounds on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1655_granted_lethal_then_draw_expires_before_ally_strikes_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1656",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal then draw expires, a printed Lethal ally still kills on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1656_printed_lethal_still_strikes_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1657",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Lethal and grant-Lethal then draw compose while the temporary grant is active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lethal-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1657_printed_and_granted_lethal_then_draw_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1658",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal then draw expires, printed Lethal outlasts the grant while a plain ally cannot kill.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "close-defend",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
+        "testName": "rule_catalog_1658_printed_lethal_outlasts_expired_grant_while_plain_ally_cannot_kill"
+      }
     }
   ]
 }

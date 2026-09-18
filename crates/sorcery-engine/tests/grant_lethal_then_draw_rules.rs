@@ -1,4 +1,5 @@
-//! Direct proofs for grant-Lethal-this-turn then draw-spell Magic (RULE-CATALOG-0531–0532).
+//! Direct proofs for grant-Lethal-this-turn then draw-spell Magic (RULE-CATALOG-0531–0532,
+//! RULE-CATALOG-1653–1658).
 //!
 //! Ordinary Magic can give an allied minion Lethal this turn and then draw
 //! one spell. Avatars and enemy minions are not offered. The Lethal mark uses
@@ -438,6 +439,303 @@ fn rule_catalog_0532_granted_lethal_then_draw_kills_a_tougher_minion() {
             .iter()
             .any(|unit| unit["instanceId"] == enemy_id)
     );
+    assert_exact_replay(&session);
+}
+
+fn printed_lethal_striker() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "lethal": true,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn lethal_combat_manifest_with_north_ally(ally: &Value, seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-lethal-then-draw-combat" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-lethal-then-draw-combat-v1",
+        },
+        "cards": {
+            "north-ally": ally,
+            "north-avatar": avatar(),
+            "north-gift": gift(),
+            "north-rain": rain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-tough": tough(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-gift",
+                    "north-gift",
+                    "north-rain",
+                    "north-rain",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-tough"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct LethalCombatSetup {
+    ally_id: String,
+    enemy_id: String,
+    session: Session,
+}
+
+fn try_lethal_combat_setup(encoded: &str) -> Option<LethalCombatSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = ally.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let enemy = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-tough"
+            && descriptor["cell"] == "C4"
+    })?;
+    let enemy_id = enemy.0["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(LethalCombatSetup {
+        ally_id,
+        enemy_id,
+        session,
+    })
+}
+
+fn lethal_combat_setup(ally: &Value, start: u32) -> LethalCombatSetup {
+    (start..start + 256)
+        .map(|seed| lethal_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| try_lethal_combat_setup(&candidate))
+        .expect("bounded seed reaching combat setup with ally and enemy on board")
+}
+
+fn lethal_combat_setup_with_gift(ally: &Value, start: u32) -> LethalCombatSetup {
+    (start..start + 256)
+        .map(|seed| lethal_combat_manifest_with_north_ally(ally, seed))
+        .find_map(|candidate| {
+            let setup = try_lethal_combat_setup(&candidate)?;
+            gift_ally_ids(&setup.session)
+                .contains(&setup.ally_id)
+                .then_some(setup)
+        })
+        .expect("bounded seed reaching combat setup with grant-lethal-then-draw Magic in hand")
+}
+
+fn grant_gift(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    })
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn expire_grant_lethal(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "lethal-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryLethalSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+#[test]
+fn rule_catalog_1653_printed_lethal_strikes_and_kills_without_grant() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup(&printed_lethal_striker(), 1653);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryLethalSources")
+            .is_none()
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1654_granted_lethal_then_draw_kills_before_end_of_turn() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup_with_gift(&ally(), 1654);
+    let (descriptor, receipt) = grant_gift(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "lethal-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryLethalSources"][0],
+        descriptor["cardInstanceId"]
+    );
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1655_granted_lethal_then_draw_expires_before_ally_strikes_on_later_turn() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup_with_gift(&ally(), 1655);
+    let (descriptor, _) = grant_gift(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(!cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1656_printed_lethal_still_strikes_after_grant_expires_on_later_turn() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup_with_gift(&printed_lethal_striker(), 1656);
+    let (descriptor, _) = grant_gift(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1657_printed_and_granted_lethal_then_draw_compose_while_grant_is_active() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup_with_gift(&printed_lethal_striker(), 1657);
+    let (descriptor, receipt) = grant_gift(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "lethal-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryLethalSources"][0],
+        descriptor["cardInstanceId"]
+    );
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1658_printed_lethal_outlasts_expired_grant_while_plain_ally_cannot_kill() {
+    let LethalCombatSetup {
+        mut session,
+        ally_id,
+        enemy_id,
+    } = lethal_combat_setup_with_gift(&printed_lethal_striker(), 1658);
+    let (descriptor, _) = grant_gift(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let LethalCombatSetup {
+        session: mut plain,
+        ally_id: plain_ally,
+        enemy_id: plain_enemy,
+    } = lethal_combat_setup_with_gift(&ally(), 1658);
+    let (plain_descriptor, _) = grant_gift(&mut plain, &plain_ally);
+    expire_grant_lethal(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    strike_minion(&mut plain, &plain_ally, &plain_enemy);
+    assert!(!cemetery_has(&plain, "south", &plain_enemy));
+    assert_eq!(unit(&state(&plain), &plain_enemy)["damage"], 1);
+
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
 }
 
