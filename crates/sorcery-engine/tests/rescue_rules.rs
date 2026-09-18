@@ -1,5 +1,5 @@
 //! Direct proofs for return-minion-from-own-cemetery Magic
-//! (RULE-CATALOG-0593–0594, 0681–0682, 1051).
+//! (RULE-CATALOG-0593–0594, 0681–0682, 1051, RULE-CATALOG-1943–1948).
 //!
 //! Ordinary Rescue Magic offers only minions in the caster's own cemetery and
 //! returns the chosen instance to the hidden Spellbook hand. An empty own
@@ -810,4 +810,406 @@ fn rule_catalog_1051_rescue_magic_withheld_during_pending_deathrite_order() {
             .any(|card| card["instanceId"] == cemetery_minion_id)
     );
     assert_exact_replay(session);
+}
+
+fn rescue_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "rescue-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-rescue-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-kill": kill(),
+            "north-minion": minion(),
+            "north-rescue": rescue(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-filler": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec![
+                    "north-minion",
+                    "north-kill",
+                    "north-rescue",
+                    "north-rescue",
+                    "north-minion",
+                    "north-kill",
+                    "north-minion",
+                    "north-rescue",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-filler"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(593..593 + 2048)
+        .map(rescue_supplemental_manifest)
+        .find(|candidate| {
+            required.iter().all(|id| {
+                opening_hand_spell_ids(candidate)
+                    .iter()
+                    .any(|card| card == *id)
+            })
+        })
+        .expect("bounded seed with Rescue supplemental opening cards")
+}
+
+fn rescue_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-rescue")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cemetery_instance_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    cemetery_minions(snapshot, seat)
+        .into_iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("cemetery minion identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn hand_has_instance(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn kill_own_minion(session: &mut Session, card_id: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let minion_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("summoned minion identity")
+        .to_owned();
+    let (_, killed) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-kill"
+            && descriptor["target"]["instanceId"] == minion_id
+    });
+    assert!(event_types(&killed).contains(&"minion-killed"));
+    assert!(cemetery_instance_ids(&state(session), "north").contains(&minion_id));
+    minion_id
+}
+
+fn cast_rescue_target(session: &mut Session, minion_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == minion_id
+    });
+    receipt
+}
+
+fn try_kill_own_minion(session: &mut Session, card_id: &str) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let minion_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    let (_, killed) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-kill"
+            && descriptor["target"]["instanceId"] == minion_id
+    })?;
+    event_types(&killed)
+        .contains(&"minion-killed")
+        .then_some(minion_id)
+}
+
+fn advance_north_spellbook_draws(session: &mut Session, draws: usize) {
+    for _ in 0..draws {
+        pass_turn_to_north_spellbook(session);
+    }
+}
+
+fn try_two_corpses_on_session(session: &mut Session) -> Option<[String; 2]> {
+    let first = try_kill_own_minion(session, "north-minion")?;
+    advance_north_spellbook_draws(session, 3);
+    let second = try_kill_own_minion(session, "north-minion")?;
+    (cemetery_instance_ids(&state(session), "north").len() == 2).then_some([first, second])
+}
+
+fn try_two_corpses_prefix(encoded: &str) -> Option<[String; 2]> {
+    let mut session = opening_main(encoded);
+    try_two_corpses_on_session(&mut session)
+}
+
+fn prepare_two_corpses(encoded: &str) -> (Session, [String; 2]) {
+    let mut session = opening_main(encoded);
+    let corpses = try_two_corpses_on_session(&mut session).expect("two own cemetery minions");
+    (session, corpses)
+}
+
+fn seed_with_two_corpses(start: u32) -> String {
+    (start..start + 512)
+        .chain(593..593 + 512)
+        .find_map(|seed| {
+            let encoded = rescue_supplemental_manifest(seed);
+            if !["north-minion", "north-kill", "north-rescue"]
+                .iter()
+                .all(|id| {
+                    opening_hand_spell_ids(&encoded)
+                        .iter()
+                        .any(|card| card == *id)
+                })
+            {
+                return None;
+            }
+            try_two_corpses_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed with two own cemetery minions")
+}
+
+fn try_second_rescue_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = try_kill_own_minion(&mut session, "north-minion")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == first_id
+    })?;
+    pass_turn_to_north_spellbook(&mut session);
+    if rescue_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    advance_north_spellbook_draws(&mut session, 2);
+    let second_id = try_kill_own_minion(&mut session, "north-minion")?;
+    (rescue_spells_in_hand(&state(&session)) >= 1
+        && rescue_cemetery_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_rescue_enemy_arrival(start: u32) -> String {
+    (start..start + 512)
+        .chain(593..593 + 512)
+        .find_map(|seed| {
+            let encoded = rescue_supplemental_manifest(seed);
+            if !opening_hand_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-rescue")
+            {
+                return None;
+            }
+            try_second_rescue_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Rescue enemy-arrival setup")
+}
+
+fn try_second_rescue_new_kill_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = try_kill_own_minion(&mut session, "north-minion")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == first_id
+    })?;
+    pass_turn_to_north_spellbook(&mut session);
+    if rescue_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    advance_north_spellbook_draws(&mut session, 2);
+    let second_id = try_kill_own_minion(&mut session, "north-minion")?;
+    (rescue_spells_in_hand(&state(&session)) >= 1
+        && rescue_cemetery_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_rescue_new_kill(start: u32) -> String {
+    (start..start + 512)
+        .chain(593..593 + 512)
+        .find_map(|seed| {
+            let encoded = rescue_supplemental_manifest(seed);
+            if !opening_hand_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-rescue")
+            {
+                return None;
+            }
+            try_second_rescue_new_kill_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Rescue new-kill setup")
+}
+
+#[test]
+fn rule_catalog_1943_rescued_minion_stays_in_hand_after_turns_pass() {
+    let encoded = seed_with_start(1943, &["north-minion", "north-kill", "north-rescue"]);
+    let mut session = opening_main(&encoded);
+    let minion_id = kill_own_minion(&mut session, "north-minion");
+    cast_rescue_target(&mut session, &minion_id);
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert!(cemetery_instance_ids(&state(&session), "north").is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1944_second_rescue_without_a_cemetery_minion_is_a_paid_noop() {
+    let encoded = seed_with_start(1944, &["north-minion", "north-kill", "north-rescue"]);
+    let mut session = opening_main(&encoded);
+    let minion_id = kill_own_minion(&mut session, "north-minion");
+    cast_rescue_target(&mut session, &minion_id);
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(rescue_spells_in_hand(&state(&session)) >= 1);
+    assert!(rescue_cemetery_ids(&session).is_empty());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rescue"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1945_second_rescue_returns_a_newly_killed_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_rescue_enemy_arrival(1945);
+    let (mut session, minion_id) = try_second_rescue_enemy_arrival_prefix(&encoded)
+        .expect("second Rescue enemy-arrival prefix");
+    let receipt = cast_rescue_target(&mut session, &minion_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1946_rescue_offers_every_own_cemetery_minion() {
+    let encoded = seed_with_two_corpses(1946);
+    let (session, minion_ids) = prepare_two_corpses(&encoded);
+    let mut offered = rescue_cemetery_ids(&session);
+    offered.sort();
+    offered.dedup();
+    assert_eq!(offered.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1947_rescue_leaves_an_unselected_cemetery_minion_in_place() {
+    let encoded = seed_with_two_corpses(1947);
+    let (mut session, minion_ids) = prepare_two_corpses(&encoded);
+    let rescued_id = &minion_ids[0];
+    cast_rescue_target(&mut session, rescued_id);
+    assert!(hand_has_instance(&state(&session), "north", rescued_id));
+    let remaining = cemetery_instance_ids(&state(&session), "north");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0], minion_ids[1]);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1948_second_rescue_returns_a_newly_killed_minion() {
+    let encoded = seed_for_second_rescue_new_kill(1948);
+    let (mut session, minion_id) =
+        try_second_rescue_new_kill_prefix(&encoded).expect("second Rescue new-kill prefix");
+    let receipt = cast_rescue_target(&mut session, &minion_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert_exact_replay(&session);
 }

@@ -42843,8 +42843,203 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1940_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1941",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1941_two_hundred_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1942",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1942_two_hundred_thirty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1943",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic leaves a rescued minion in the hidden Spellbook hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1943_rescued_minion_stays_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1944",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast with an empty own cemetery still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1944_second_rescue_without_a_cemetery_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1945",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast returns a newly killed minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1945_second_rescue_returns_a_newly_killed_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1946",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic offers every own cemetery minion when multiple are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1946_rescue_offers_every_own_cemetery_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1947",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic leaves an unselected own cemetery minion in the cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1947_rescue_leaves_an_unselected_cemetery_minion_in_place"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1948",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast returns a newly killed minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_1948_second_rescue_returns_a_newly_killed_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1949",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1949_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1950",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1950_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1940,
+  "rustSupportedCount": 1950,
   "typescriptSupportedCount": 0
 }
