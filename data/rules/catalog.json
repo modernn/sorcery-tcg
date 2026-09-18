@@ -30226,6 +30226,100 @@
         "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
         "testName": "rule_catalog_1318_play_earth_on_rubble_withheld_during_pending_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1319",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing an Earth site onto Flood-covered empty Rubble replaces the Rubble with that site and the cell counts as a Water site for later casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1319_playing_earth_onto_flooded_rubble_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1320",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Earth on Flood-covered Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1320_play_earth_on_flooded_rubble_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1321",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing a Water site onto Drought-covered empty Rubble replaces the Rubble with that site and the cell counts as land for later casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1321_playing_water_onto_drought_rubble_creates_earth_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1322",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase, play-site Water on Drought-covered Rubble stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1322_play_water_on_drought_rubble_withheld_during_pending_deathrite_order"
+      }
     }
   ]
 }

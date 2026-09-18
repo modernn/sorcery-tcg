@@ -6,8 +6,11 @@
 //! flood (RULE-CATALOG-0909), playing Water onto empty rubble
 //! (RULE-CATALOG-1314), play-site water-on-rubble withheld during
 //! deathrite-order (RULE-CATALOG-1315), playing earth onto empty rubble
-//! (RULE-CATALOG-1317), and play-site earth-on-rubble withheld during
-//! deathrite-order (RULE-CATALOG-1318).
+//! (RULE-CATALOG-1317), play-site earth-on-rubble withheld during
+//! deathrite-order (RULE-CATALOG-1318), play-site earth-on-flooded-rubble
+//! withheld during deathrite-order (RULE-CATALOG-1320), and play-site
+//! water-on-drought-rubble withheld during deathrite-order
+//! (RULE-CATALOG-1322).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -84,6 +87,24 @@ fn rain_spell() -> Value {
     json!({
         "cardType": "magic",
         "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn flood_aura() -> Value {
+    json!({
+        "affectedSitesAreFlooded": true,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn drought_aura() -> Value {
+    json!({
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold": true,
+        "cardType": "aura",
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -898,6 +919,331 @@ fn rule_catalog_1315_play_water_on_rubble_withheld_during_pending_deathrite_orde
         });
     }
     assert!(south_has_water_in_atlas(&state(session)));
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "south-water"
+                    && action.descriptor["cell"] == "C1"
+            })
+    );
+    assert_exact_replay(session);
+}
+
+fn overlay_covers_c1(descriptor: &Value, card_id: &str) -> bool {
+    descriptor["kind"] == "cast-aura"
+        && descriptor["cardId"] == card_id
+        && descriptor["cells"]
+            .as_array()
+            .is_some_and(|cells| cells.iter().any(|value| value == "C1"))
+}
+
+fn try_pending_deathrite_with_overlay_rubble_legal(
+    encoded: &str,
+    overlay_card: &str,
+) -> Option<PendingDeathriteWaterOnRubbleSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    }) || !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+        })
+    {
+        return None;
+    }
+    let first = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let second = try_accept_where_pair(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    if !try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")
+        || !try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })
+    {
+        return None;
+    }
+    let snapshot = state(&session);
+    if !north_has_destroy_and_rain(&snapshot) {
+        return None;
+    }
+    let c1_site_id = snapshot["realm"]["sites"]["C1"]["instanceId"].as_str()?;
+    let destroy_id = snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()?
+        .iter()
+        .find(|card| card["cardId"] == "north-destroy")?
+        .get("instanceId")?
+        .as_str()?;
+    if !try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardInstanceId"] == destroy_id
+            && descriptor["targetLocation"]["cell"] == "C1"
+            && descriptor["targetSiteInstanceId"] == c1_site_id
+    }) || state(&session)["realm"]["sites"]["C1"]["rubble"] != true
+    {
+        return None;
+    }
+    if !try_accept_where(&mut session, |descriptor| {
+        overlay_covers_c1(descriptor, overlay_card)
+    }) {
+        return None;
+    }
+    if state(&session)["phase"] != "deathrite-order"
+        && (!try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+        }) || state(&session)["phase"] != "deathrite-order")
+    {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first.0["cardInstanceId"].as_str()?.to_owned(),
+        second.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingDeathriteWaterOnRubbleSetup {
+        deathrite_ids,
+        session,
+    })
+}
+
+fn flooded_rubble_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "flooded-rubble-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-flooded-rubble-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_site(),
+            "north-flood": flood_aura(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-earth": earth_site(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-destroy",
+                    "north-flood",
+                    "north-rain",
+                    "north-destroy",
+                    "north-flood",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": [
+                    "south-site",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                    "south-earth",
+                ],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_rubble_deathrite_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drought-rubble-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drought-rubble-deathrite-withheld-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_site(),
+            "north-drought": drought_aura(),
+            "north-rain": rain_spell(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": earth_site(),
+            "south-water": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-destroy",
+                    "north-drought",
+                    "north-rain",
+                    "north-destroy",
+                    "north-drought",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": [
+                    "south-site",
+                    "south-water",
+                    "south-water",
+                    "south-site",
+                    "south-site",
+                    "south-site",
+                ],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flooded_rubble_deathrite_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(flooded_rubble_deathrite_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_rubble_legal(candidate, "north-flood").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal Earth play on flooded rubble",
+        )
+}
+
+fn drought_rubble_deathrite_seed_with(start: u32) -> String {
+    (start..start + 2048)
+        .map(drought_rubble_deathrite_manifest)
+        .find(|candidate| {
+            try_pending_deathrite_with_overlay_rubble_legal(candidate, "north-drought").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites with legal Water play on drought rubble",
+        )
+}
+
+#[test]
+fn rule_catalog_1320_play_earth_on_flooded_rubble_withheld_during_pending_deathrite_order() {
+    let encoded = flooded_rubble_deathrite_seed_with(1320);
+    let mut setup = try_pending_deathrite_with_overlay_rubble_legal(&encoded, "north-flood")
+        .expect("complete earth-on-flooded-rubble Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C1"]["rubble"], true);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+    accept_where(session, "north end turn after Deathrites", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(session, "south draw atlas", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    if !session
+        .legal_actions()
+        .expect("resumed legal actions")
+        .iter()
+        .any(|action| {
+            action.descriptor["kind"] == "play-site"
+                && action.descriptor["cardId"] == "south-earth"
+                && action.descriptor["cell"] == "C1"
+        })
+    {
+        accept_where(session, "south draw-site for earth", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "play-site"
+                    && action.descriptor["cardId"] == "south-earth"
+                    && action.descriptor["cell"] == "C1"
+            })
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1322_play_water_on_drought_rubble_withheld_during_pending_deathrite_order() {
+    let encoded = drought_rubble_deathrite_seed_with(1322);
+    let mut setup = try_pending_deathrite_with_overlay_rubble_legal(&encoded, "north-drought")
+        .expect("complete water-on-drought-rubble Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    let paused = state(session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert_eq!(paused["realm"]["sites"]["C1"]["rubble"], true);
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "play-site")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+
+    accept_where(session, "north end turn after Deathrites", |descriptor| {
+        descriptor["kind"] == "end-turn"
+    });
+    accept_where(session, "south draw atlas", |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    if !south_has_water_in_atlas(&state(session)) {
+        accept_where(session, "south draw-site for water", |descriptor| {
+            descriptor["kind"] == "draw-site"
+        });
+    }
     assert!(
         session
             .legal_actions()

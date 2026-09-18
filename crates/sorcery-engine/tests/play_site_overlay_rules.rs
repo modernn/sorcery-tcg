@@ -1,5 +1,7 @@
 //! Direct proofs that playing a site onto overlay-covered rubble relayers
-//! lower-layer occupants (RULE-CATALOG-0343–0344).
+//! lower-layer occupants (RULE-CATALOG-0343–0344), and that Flood/Drought
+//! conversion creates the expected effective site type (RULE-CATALOG-1319,
+//! RULE-CATALOG-1321).
 //!
 //! Playing Water onto rubble already floods underground occupants. Overlay
 //! Auras already convert layers when they enter or leave. Playing a site onto
@@ -65,6 +67,18 @@ fn dualer() -> Value {
         "defense": 1,
         "manaCost": 0,
         "submerge": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn water_cast() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "mustBeCastToWaterSite": true,
+        "summonToAnySite": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -247,6 +261,177 @@ fn cemetery_has(current: &Value, instance_id: &str) -> bool {
     })
 }
 
+fn summon_cells(session: &Session, card_id: &str) -> Vec<String> {
+    let mut cells = session
+        .legal_actions()
+        .expect("legal actions")
+        .iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "summon-minion" && action.descriptor["cardId"] == card_id
+        })
+        .filter_map(|action| action.descriptor["cell"].as_str().map(ToOwned::to_owned))
+        .collect::<Vec<_>>();
+    cells.sort();
+    cells.dedup();
+    cells
+}
+
+fn flood_site_type_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "play-site-overlay-flood-site-type" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-play-site-overlay-flood-site-type-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-earth": earth(),
+            "north-flood": flood(),
+            "north-water-cast": water_cast(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_site(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-water-cast",
+                    "north-flood",
+                    "north-water-cast",
+                    "north-flood",
+                    "north-water-cast",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-destroy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn drought_site_type_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "play-site-overlay-drought-site-type" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-play-site-overlay-drought-site-type-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-drought": drought(),
+            "north-water": water(),
+            "north-water-cast": water_cast(),
+            "south-avatar": avatar(),
+            "south-destroy": destroy_site(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-water"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-drought",
+                    "north-water-cast",
+                    "north-drought",
+                    "north-water-cast",
+                    "north-drought",
+                    "north-water-cast",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-destroy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_site_type_opening() -> Session {
+    (1..=4096)
+        .map(flood_site_type_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Flood site-type candidate");
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            (atlas.iter().any(|card| card == "north-earth")
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-water-cast".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Flood, earth site, and water-site cast")
+}
+
+fn drought_site_type_opening() -> Session {
+    (1..=4096)
+        .map(drought_site_type_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Drought site-type candidate");
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            (atlas.iter().any(|card| card == "north-water")
+                && spells.contains(&"north-drought".to_owned())
+                && spells.contains(&"north-water-cast".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Drought, Water site, and water-site cast")
+}
+
+fn rubble_at_c3(session: &mut Session, setup_site_id: &str) -> String {
+    keep(session);
+    keep(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == setup_site_id
+            && descriptor["cell"] == "C3"
+    });
+    let site_instance = state(session)["realm"]["sites"]["C3"]["instanceId"]
+        .as_str()
+        .expect("C3 site identity")
+        .to_owned();
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "south-destroy"
+            && descriptor["targetLocation"]["cell"] == "C3"
+            && descriptor["targetSiteInstanceId"] == site_instance
+    });
+    assert_eq!(state(session)["realm"]["sites"]["C3"]["rubble"], true);
+    site_instance
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<_> = session
         .transcript()
@@ -400,5 +585,59 @@ fn rule_catalog_0344_playing_water_onto_drought_rubble_relayers_underground() {
     assert_eq!(occupant["location"], "C3");
     assert_eq!(occupant["region"], "underground");
     assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1319_playing_earth_onto_flooded_rubble_creates_water_site() {
+    let mut session = flood_site_type_opening();
+    rubble_at_c3(&mut session, "north-earth");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        covers_c3(descriptor, "north-flood")
+    });
+    assert!(
+        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "empty flooded rubble must not accept a water-site cast before site play"
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    assert!(
+        summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "printed earth played onto Flood-covered rubble must become a Water site"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1321_playing_water_onto_drought_rubble_creates_earth_site() {
+    let mut session = drought_site_type_opening();
+    rubble_at_c3(&mut session, "north-water");
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        covers_c3(descriptor, "north-drought")
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C3"
+    });
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
+    );
+    assert!(
+        !summon_cells(&session, "north-water-cast").contains(&"C3".to_owned()),
+        "printed Water played onto Drought-covered rubble must become land"
+    );
     assert_exact_replay(&session);
 }
