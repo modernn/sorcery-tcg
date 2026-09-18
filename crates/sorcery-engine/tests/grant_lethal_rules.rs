@@ -1,5 +1,5 @@
 //! Direct proofs for grant-Lethal-this-turn Magic (RULE-CATALOG-0278–0279,
-//! RULE-CATALOG-1106).
+//! RULE-CATALOG-1106, RULE-CATALOG-1593–1598).
 //!
 //! Official Magic can grant Lethal for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, and expires through
@@ -35,6 +35,17 @@ fn striker() -> Value {
         "attack": 1,
         "cardType": "minion",
         "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_lethal_striker() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "lethal": true,
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
@@ -87,7 +98,7 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn manifest() -> String {
+fn manifest_with_north_ally(ally: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "grant-lethal" }))
@@ -96,7 +107,7 @@ fn manifest() -> String {
             "revisionId": "synthetic-grant-lethal-v1",
         },
         "cards": {
-            "north-ally": striker(),
+            "north-ally": ally,
             "north-avatar": avatar(),
             "north-grant": grant(),
             "north-site": site(),
@@ -121,6 +132,10 @@ fn manifest() -> String {
         "schemaVersion": 1,
         "seed": 1,
     }))
+}
+
+fn manifest() -> String {
+    manifest_with_north_ally(&striker())
 }
 
 fn try_accept_where(
@@ -197,6 +212,16 @@ fn opening_main() -> Session {
     session
 }
 
+fn opening_main_with_ally(ally: &Value) -> Session {
+    let mut session = Session::new(&manifest_with_north_ally(ally)).expect("grant Lethal");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
 fn summon_north_ally(session: &mut Session) -> String {
     let (descriptor, _) = accept_where(session, |descriptor| {
         descriptor["kind"] == "summon-minion"
@@ -255,6 +280,30 @@ fn south_summons_tough_at_c4(session: &mut Session) -> String {
         .as_str()
         .expect("enemy identity")
         .to_owned()
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn expire_grant_lethal(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "lethal-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryLethalSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
 }
 
 fn strike_minion(session: &mut Session, attacker_id: &str, enemy_id: &str) {
@@ -386,6 +435,120 @@ fn rule_catalog_0279_granted_lethal_is_required_to_kill_a_tougher_minion() {
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1593_printed_lethal_without_grant_strikes_and_kills() {
+    let mut session = opening_main_with_ally(&printed_lethal_striker());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1594_granted_lethal_strikes_and_kills_before_end_of_turn() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    let (descriptor, _) = grant_lethal(&mut session, &ally_id);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryLethalSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1595_granted_lethal_expires_before_ally_strikes_on_later_turn() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    let (descriptor, _) = grant_lethal(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(!cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1596_printed_lethal_still_strikes_after_grant_expires_on_later_turn() {
+    let mut session = opening_main_with_ally(&printed_lethal_striker());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    let (descriptor, _) = grant_lethal(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1597_printed_and_granted_lethal_compose_while_grant_is_active() {
+    let mut session = opening_main_with_ally(&printed_lethal_striker());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    let (descriptor, receipt) = grant_lethal(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "lethal-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryLethalSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1598_printed_lethal_outlasts_expired_grant_while_plain_ally_cannot_kill() {
+    let mut session = opening_main_with_ally(&printed_lethal_striker());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_tough_at_c4(&mut session);
+    let (descriptor, _) = grant_lethal(&mut session, &ally_id);
+    expire_grant_lethal(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let mut plain = opening_main();
+    let plain_ally = summon_north_ally(&mut plain);
+    let plain_enemy = south_summons_tough_at_c4(&mut plain);
+    let (plain_descriptor, _) = grant_lethal(&mut plain, &plain_ally);
+    expire_grant_lethal(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    strike_minion(&mut plain, &plain_ally, &plain_enemy);
+    assert!(!cemetery_has(&plain, "south", &plain_enemy));
+    assert_eq!(unit(&state(&plain), &plain_enemy)["damage"], 1);
+
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
 }
 

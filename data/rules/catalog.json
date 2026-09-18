@@ -35913,6 +35913,207 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1590_one_hundred_twelve_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1591",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-thirteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1591_one_hundred_thirteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1592",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-fourteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1592_one_hundred_fourteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1593",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Lethal ally without a grant can strike and kill a 0/2 defender.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1593_printed_lethal_without_grant_strikes_and_kills"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1594",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with an active grant-Lethal can strike and kill a 0/2 defender before its controller ends the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1594_granted_lethal_strikes_and_kills_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1595",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal expires at its controller's End Phase, a minion without printed Lethal only wounds a 0/2 defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "lethal-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1595_granted_lethal_expires_before_ally_strikes_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1596",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal expires at its controller's End Phase, a printed Lethal ally can still strike and kill a 0/2 defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal",
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1596_printed_lethal_still_strikes_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1597",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Lethal ally with an active grant-Lethal can strike and kill a 0/2 defender while both sources are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal",
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1597_printed_and_granted_lethal_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1598",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Lethal expires at its controller's End Phase, a printed Lethal ally can still strike and kill while a plain ally without printed Lethal only wounds in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "lethal",
+        "grantLethalToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_lethal_rules.rs",
+        "testName": "rule_catalog_1598_printed_lethal_outlasts_expired_grant_while_plain_ally_cannot_kill"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1599",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-fifteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1599_one_hundred_fifteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1600",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-sixteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1600_one_hundred_sixteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
