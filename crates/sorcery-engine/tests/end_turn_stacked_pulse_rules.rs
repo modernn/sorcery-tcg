@@ -1,6 +1,8 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
-//! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935).
+//! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935), and deferred
+//! end-turn here-area pulses withheld during deathrite-order
+//! (RULE-CATALOG-1208–1210).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1090,4 +1092,306 @@ fn rule_catalog_0396_disabled_triple_pulse_minion_skips_all_end_turn_effects() {
     assert_eq!(after["phase"], "draw");
     assert_eq!(after["activeSeat"], "south");
     assert_exact_replay(&session);
+}
+
+fn end_turn_here_pulser() -> Value {
+    json!({
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn deathrite_minion() -> Value {
+    json!({
+        "attack": 0,
+        "cardType": "minion",
+        "deathriteDrawSite": true,
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn dual_end_turn_pulse_withheld_manifest(
+    seed: u32,
+    second_card: &str,
+    second_minion: Value,
+) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(20),
+        "north-pulser-a": end_turn_here_pulser(),
+        "north-site": site(),
+        "south-avatar": avatar(20),
+        "south-deathrite": deathrite_minion(),
+        "south-site": site(),
+    });
+    cards[second_card] = second_minion;
+    let mut value = json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "end-turn-dual-pulse-deathrite-withheld" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-end-turn-dual-pulse-deathrite-withheld-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-pulser-a",
+                    second_card,
+                    "north-pulser-a",
+                    second_card,
+                    "north-pulser-a",
+                    second_card,
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 12],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-deathrite"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    });
+    value["manifestId"] = json!(identity_hash(&value).expect("manifest identity"));
+    sorcery_engine::canonical::canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+struct PendingEndTurnPulseSetup {
+    deathrite_ids: [String; 2],
+    deferred_pulser_id: String,
+    first_pulser_id: String,
+    session: Session,
+}
+
+fn try_pending_deathrite_during_dual_end_turn_pulse(
+    encoded: &str,
+    second_card: &str,
+) -> Option<PendingEndTurnPulseSetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let first_deathrite = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let second_deathrite = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-deathrite"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let first = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-pulser-a"
+            && descriptor["cell"] == "C4"
+    })?;
+    let second = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == second_card
+            && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    let first_pulser_id = first.0["cardInstanceId"].as_str()?.to_owned();
+    let second_pulser_id = second.0["cardInstanceId"].as_str()?.to_owned();
+    let snapshot = state(&session);
+    let remaining = snapshot["pendingDeathrites"]["continuation"]["remainingHereDamageInstanceIds"]
+        .as_array()?;
+    let resolved_source = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .find(|event| event.event_type == "end-turn-damage-allocated")?
+        .payload["sourceInstanceId"]
+        .as_str()?;
+    if resolved_source != first_pulser_id && resolved_source != second_pulser_id {
+        return None;
+    }
+    let deferred_pulser_id = if resolved_source == first_pulser_id {
+        second_pulser_id.clone()
+    } else {
+        first_pulser_id.clone()
+    };
+    let first_pulser_id = resolved_source.to_owned();
+    if !remaining
+        .iter()
+        .any(|id| id.as_str() == Some(deferred_pulser_id.as_str()))
+    {
+        return None;
+    }
+    let mut resolved_sources = std::collections::BTreeSet::new();
+    for event in session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .filter(|event| event.event_type == "end-turn-damage-allocated")
+    {
+        if let Some(source) = event.payload["sourceInstanceId"].as_str() {
+            resolved_sources.insert(source.to_owned());
+        }
+    }
+    if resolved_sources.len() != 1 || !resolved_sources.contains(&first_pulser_id) {
+        return None;
+    }
+    let mut deathrite_ids = [
+        first_deathrite.0["cardInstanceId"].as_str()?.to_owned(),
+        second_deathrite.0["cardInstanceId"].as_str()?.to_owned(),
+    ];
+    deathrite_ids.sort_unstable();
+    Some(PendingEndTurnPulseSetup {
+        deathrite_ids,
+        deferred_pulser_id,
+        first_pulser_id,
+        session,
+    })
+}
+
+fn assert_end_turn_pulse_withheld(setup: PendingEndTurnPulseSetup) {
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let deferred_pulser_id = setup.deferred_pulser_id.clone();
+    let first_pulser_id = setup.first_pulser_id.clone();
+    let mut session = setup.session;
+    let paused = state(&session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["decisionSeat"], "south");
+    assert!(
+        session
+            .transcript()
+            .iter()
+            .flat_map(|receipt| receipt.events.iter())
+            .any(|event| {
+                event.event_type == "end-turn-damage-allocated"
+                    && event.payload["sourceInstanceId"] == first_pulser_id
+            }),
+        "first end-turn here-damage pulse must resolve before deathrite-order"
+    );
+    assert!(
+        session
+            .transcript()
+            .iter()
+            .flat_map(|receipt| receipt.events.iter())
+            .all(|event| {
+                event.event_type != "end-turn-damage-allocated"
+                    || event.payload["sourceInstanceId"] != deferred_pulser_id
+            }),
+        "deferred end-turn here-damage pulse must not resolve during deathrite-order"
+    );
+
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    assert!(
+        session
+            .transcript()
+            .iter()
+            .flat_map(|receipt| receipt.events.iter())
+            .any(|event| {
+                event.event_type == "end-turn-damage-allocated"
+                    && event.payload["sourceInstanceId"] == deferred_pulser_id
+            }),
+        "deferred end-turn here-damage pulse must resume after deathrite-order clears"
+    );
+    assert_eq!(state(&session)["phase"], "draw");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1208_end_turn_loss_then_here_damage_pulse_withheld_during_pending_deathrite_order()
+{
+    let encoded = (1208..1208 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(seed, "north-stack", stacked_loss_here_damage())
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites during loss-here end-turn withhold");
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete loss-here end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+#[test]
+fn rule_catalog_1209_end_turn_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order()
+{
+    let encoded = (1209..1209 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(seed, "north-stack", stacked_gain_here_damage())
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites during gain-here end-turn withhold");
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete gain-here end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+#[test]
+fn rule_catalog_1210_end_turn_triple_pulse_here_damage_withheld_during_pending_deathrite_order() {
+    let encoded = (1210..1210 + 2048)
+        .map(|seed| dual_end_turn_pulse_withheld_manifest(seed, "north-stack", stacked_triple()))
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect("bounded seed that reaches pending Deathrites during triple end-turn withhold");
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete triple end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
 }
