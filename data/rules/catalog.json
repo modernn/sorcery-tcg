@@ -37904,8 +37904,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1690_one_hundred_fifty_two_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1691",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1691_one_hundred_fifty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1692",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1692_one_hundred_fifty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1693",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-allied-minion then draw-spell Magic places the summoned token on the chosen host ally's surface cell at cast time.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1693_summoned_token_co_locates_with_host_ally_at_cast"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1694",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Each summon-token-to-allied-minion then draw-spell Magic cast on the same host summons a distinct token on that host cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1694_second_gift_summons_a_second_token_at_the_host_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1695",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A token summoned by summon-token-to-allied-minion then draw-spell Magic has summoning sickness and cannot move on the cast turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1695_summoned_token_has_summoning_sickness_and_cannot_move"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1696",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A token summoned onto a host ally by summon-token-to-allied-minion then draw-spell Magic stays co-located with that host after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1696_summoned_token_stays_at_host_cell_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1697",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-allied-minion then draw-spell Magic summons the token onto the host ally's current cell after the host moves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1697_gift_summons_token_at_host_new_cell_after_ally_moves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1698",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summon-token-to-allied-minion then draw-spell Magic places the token only on the chosen host ally's cell when multiple allied minions occupy different cells.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "summonTokenToAlliedMinionThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/summon_token_then_draw_rules.rs",
+        "testName": "rule_catalog_1698_gift_places_token_only_on_the_chosen_host_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1699",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1699_one_hundred_fifty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1700",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1700_one_hundred_fifty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1690,
+  "rustSupportedCount": 1700,
   "typescriptSupportedCount": 0
 }
