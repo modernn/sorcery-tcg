@@ -6201,6 +6201,166 @@ fn rule_catalog_1720_one_hundred_sixty_four_game_synthetic_batch_stays_unranked_
     assert!(!batch_policy.authority_verified);
 }
 #[test]
+fn rule_catalog_1721_one_hundred_sixty_five_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds = [
+        13567_u32, 13568, 13569, 13570, 13571, 13572, 13573, 13574, 13575, 13576, 13577, 13578,
+        13579, 13580, 13581, 13582, 13583, 13584, 13585, 13586, 13587, 13588, 13589, 13590, 13591,
+        13592, 13593, 13594, 13595, 13596, 13597, 13598, 13599, 13600, 13601, 13602, 13603, 13604,
+        13605, 13606, 13607, 13608, 13609, 13610, 13611, 13612, 13613, 13614, 13615, 13616, 13617,
+        13618, 13619, 13620, 13621, 13622, 13623, 13624, 13625, 13626, 13627, 13628, 13629, 13630,
+        13631, 13632, 13633, 13634, 13635, 13636, 13637, 13638, 13639, 13640, 13641, 13642, 13643,
+        13644, 13645, 13646, 13647, 13648, 13649, 13650, 13651, 13652, 13653, 13654, 13655, 13656,
+        13657, 13658, 13659, 13660, 13661, 13662, 13663, 13664, 13665, 13666, 13667, 13668, 13669,
+        13670, 13671, 13672, 13673, 13674, 13675, 13676, 13677, 13678, 13679, 13680, 13681, 13682,
+        13683, 13684, 13685, 13686, 13687, 13688, 13689, 13690, 13691, 13692, 13693, 13694, 13695,
+        13696, 13697, 13698, 13699, 13700, 13701, 13702, 13703, 13704, 13705, 13706, 13707, 13708,
+        13709, 13710, 13711, 13712, 13713, 13714, 13715, 13716, 13717, 13718, 13719, 13720, 13721,
+        13722, 13723, 13724, 13725, 13726, 13727, 13728, 13729, 13730, 13731,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), 165);
+    assert_eq!(records.len(), 165);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+#[test]
+fn rule_catalog_1722_one_hundred_sixty_six_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds = [
+        13732_u32, 13733, 13734, 13735, 13736, 13737, 13738, 13739, 13740, 13741, 13742, 13743,
+        13744, 13745, 13746, 13747, 13748, 13749, 13750, 13751, 13752, 13753, 13754, 13755, 13756,
+        13757, 13758, 13759, 13760, 13761, 13762, 13763, 13764, 13765, 13766, 13767, 13768, 13769,
+        13770, 13771, 13772, 13773, 13774, 13775, 13776, 13777, 13778, 13779, 13780, 13781, 13782,
+        13783, 13784, 13785, 13786, 13787, 13788, 13789, 13790, 13791, 13792, 13793, 13794, 13795,
+        13796, 13797, 13798, 13799, 13800, 13801, 13802, 13803, 13804, 13805, 13806, 13807, 13808,
+        13809, 13810, 13811, 13812, 13813, 13814, 13815, 13816, 13817, 13818, 13819, 13820, 13821,
+        13822, 13823, 13824, 13825, 13826, 13827, 13828, 13829, 13830, 13831, 13832, 13833, 13834,
+        13835, 13836, 13837, 13838, 13839, 13840, 13841, 13842, 13843, 13844, 13845, 13846, 13847,
+        13848, 13849, 13850, 13851, 13852, 13853, 13854, 13855, 13856, 13857, 13858, 13859, 13860,
+        13861, 13862, 13863, 13864, 13865, 13866, 13867, 13868, 13869, 13870, 13871, 13872, 13873,
+        13874, 13875, 13876, 13877, 13878, 13879, 13880, 13881, 13882, 13883, 13884, 13885, 13886,
+        13887, 13888, 13889, 13890, 13891, 13892, 13893, 13894, 13895, 13896, 13897,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), 166);
+    assert_eq!(records.len(), 166);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+#[test]
+fn rule_catalog_1729_one_hundred_sixty_seven_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds = [
+        13898_u32, 13899, 13900, 13901, 13902, 13903, 13904, 13905, 13906, 13907, 13908, 13909,
+        13910, 13911, 13912, 13913, 13914, 13915, 13916, 13917, 13918, 13919, 13920, 13921, 13922,
+        13923, 13924, 13925, 13926, 13927, 13928, 13929, 13930, 13931, 13932, 13933, 13934, 13935,
+        13936, 13937, 13938, 13939, 13940, 13941, 13942, 13943, 13944, 13945, 13946, 13947, 13948,
+        13949, 13950, 13951, 13952, 13953, 13954, 13955, 13956, 13957, 13958, 13959, 13960, 13961,
+        13962, 13963, 13964, 13965, 13966, 13967, 13968, 13969, 13970, 13971, 13972, 13973, 13974,
+        13975, 13976, 13977, 13978, 13979, 13980, 13981, 13982, 13983, 13984, 13985, 13986, 13987,
+        13988, 13989, 13990, 13991, 13992, 13993, 13994, 13995, 13996, 13997, 13998, 13999, 14000,
+        14001, 14002, 14003, 14004, 14005, 14006, 14007, 14008, 14009, 14010, 14011, 14012, 14013,
+        14014, 14015, 14016, 14017, 14018, 14019, 14020, 14021, 14022, 14023, 14024, 14025, 14026,
+        14027, 14028, 14029, 14030, 14031, 14032, 14033, 14034, 14035, 14036, 14037, 14038, 14039,
+        14040, 14041, 14042, 14043, 14044, 14045, 14046, 14047, 14048, 14049, 14050, 14051, 14052,
+        14053, 14054, 14055, 14056, 14057, 14058, 14059, 14060, 14061, 14062, 14063, 14064,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), 167);
+    assert_eq!(records.len(), 167);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+#[test]
+fn rule_catalog_1730_one_hundred_sixty_eight_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds = [
+        14065_u32, 14066, 14067, 14068, 14069, 14070, 14071, 14072, 14073, 14074, 14075, 14076,
+        14077, 14078, 14079, 14080, 14081, 14082, 14083, 14084, 14085, 14086, 14087, 14088, 14089,
+        14090, 14091, 14092, 14093, 14094, 14095, 14096, 14097, 14098, 14099, 14100, 14101, 14102,
+        14103, 14104, 14105, 14106, 14107, 14108, 14109, 14110, 14111, 14112, 14113, 14114, 14115,
+        14116, 14117, 14118, 14119, 14120, 14121, 14122, 14123, 14124, 14125, 14126, 14127, 14128,
+        14129, 14130, 14131, 14132, 14133, 14134, 14135, 14136, 14137, 14138, 14139, 14140, 14141,
+        14142, 14143, 14144, 14145, 14146, 14147, 14148, 14149, 14150, 14151, 14152, 14153, 14154,
+        14155, 14156, 14157, 14158, 14159, 14160, 14161, 14162, 14163, 14164, 14165, 14166, 14167,
+        14168, 14169, 14170, 14171, 14172, 14173, 14174, 14175, 14176, 14177, 14178, 14179, 14180,
+        14181, 14182, 14183, 14184, 14185, 14186, 14187, 14188, 14189, 14190, 14191, 14192, 14193,
+        14194, 14195, 14196, 14197, 14198, 14199, 14200, 14201, 14202, 14203, 14204, 14205, 14206,
+        14207, 14208, 14209, 14210, 14211, 14212, 14213, 14214, 14215, 14216, 14217, 14218, 14219,
+        14220, 14221, 14222, 14223, 14224, 14225, 14226, 14227, 14228, 14229, 14230, 14231, 14232,
+    ];
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), 168);
+    assert_eq!(records.len(), 168);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+#[test]
 fn rule_catalog_1511_eighty_three_game_synthetic_batch_stays_unranked_unverified_authority() {
     let seeds = [
         3440_u32, 3441, 3442, 3443, 3444, 3445, 3446, 3447, 3448, 3449, 3450, 3451, 3452, 3453,

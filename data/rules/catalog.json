@@ -38497,8 +38497,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1720_one_hundred_sixty_four_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1721",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1721_one_hundred_sixty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1722",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1722_one_hundred_sixty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1723",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic leaves a returned spell at the Spellbook bottom after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1723_returned_spell_stays_at_deck_bottom_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1724",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A second return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell cast without a cemetery selection still draws a spell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1724_second_nature_without_cemetery_selection_still_draws"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1725",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic returns two cemetery cards in one cast.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1725_nature_returns_two_cemetery_cards_in_one_cast"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1726",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic routes a returned site to the Atlas bottom and a returned spell to the Spellbook bottom in one cast.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1726_nature_routes_site_and_spell_returns_to_matching_deck_bottoms"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1727",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell Magic emits multiple return events in instance-id order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1727_nature_returns_multiple_cards_in_instance_id_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1728",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a return-up-to-three-cemetery-cards-to-deck-bottom then draw-spell cast, a later cast returns a newly arrived cemetery card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnUpToThreeCemeteryCardsToDeckBottomThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-returned-to-deck-bottom",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_bottom_then_draw_rules.rs",
+        "testName": "rule_catalog_1728_second_nature_returns_a_newly_arrived_cemetery_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1729",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1729_one_hundred_sixty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1730",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred sixty eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1730_one_hundred_sixty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1720,
+  "rustSupportedCount": 1730,
   "typescriptSupportedCount": 0
 }

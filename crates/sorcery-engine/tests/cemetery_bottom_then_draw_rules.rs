@@ -1,6 +1,6 @@
 //! Direct proofs for return-up-to-three-cemetery-cards-to-deck-bottom
 //! then draw-spell Magic (RULE-CATALOG-0549–0550, RULE-CATALOG-1005,
-//! RULE-CATALOG-1070).
+//! RULE-CATALOG-1070, RULE-CATALOG-1723–1728).
 //!
 //! Ordinary Magic can return up to three cards from the caster's cemetery
 //! to the bottoms of their owners' matching decks and then draw one spell.
@@ -278,6 +278,166 @@ fn south_plays_c1(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn nature_manifest_with_spellbook(seed: u32, spellbook: &[&str]) -> String {
+    let mut cards = json!({
+        "north-avatar": avatar(),
+        "north-nature": nature(),
+        "north-site": site(),
+        "south-avatar": avatar(),
+        "south-site": site(),
+    });
+    if spellbook.contains(&"north-destroy") {
+        cards["north-destroy"] = destroy_site();
+    }
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cemetery-bottom-proof" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cemetery-bottom-proof-v1",
+        },
+        "cards": cards,
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": spellbook,
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["north-nature"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_with_spellbook(required_count: usize, start: u32) -> String {
+    let spellbook = vec![
+        "north-nature",
+        "north-nature",
+        "north-nature",
+        "north-nature",
+        "north-nature",
+        "north-nature",
+    ];
+    (start..start + 256)
+        .map(|seed| nature_manifest_with_spellbook(seed, &spellbook))
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .filter(|card| *card == "north-nature")
+                .count()
+                >= required_count
+        })
+        .expect("bounded seed with required Return to Nature opening cards")
+}
+
+fn seed_for_bottom_persistence(start: u32) -> String {
+    let spellbook = vec!["north-nature"; 12];
+    (start..start + 256)
+        .find_map(|seed| {
+            let encoded = nature_manifest_with_spellbook(seed, &spellbook);
+            if opening_spell_ids(&encoded)
+                .iter()
+                .filter(|card| *card == "north-nature")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let first_id = cast_nature_empty(&mut session);
+            south_plays_c1(&mut session);
+            cast_nature_return(&mut session, std::slice::from_ref(&first_id));
+            if spellbook_bottom_id(&state(&session)) != first_id {
+                return None;
+            }
+            advance_full_round(&mut session);
+            (spellbook_bottom_id(&state(&session)) == first_id).then_some(encoded)
+        })
+        .expect("bounded seed with Return to Nature bottom persistence")
+}
+
+fn seed_with_nature_and_destroy(start: u32) -> String {
+    let spellbook = vec![
+        "north-nature",
+        "north-nature",
+        "north-destroy",
+        "north-nature",
+        "north-nature",
+        "north-nature",
+    ];
+    (start..start + 256)
+        .map(|seed| nature_manifest_with_spellbook(seed, &spellbook))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().filter(|card| *card == "north-nature").count() >= 2
+                && hand.iter().any(|card| card == "north-destroy")
+        })
+        .expect("bounded seed with Nature and destroy-site opening cards")
+}
+
+fn cast_nature_empty(session: &mut Session) -> String {
+    let (cast, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-nature"
+            && descriptor["cemeteryCardInstanceIds"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+    });
+    cast["cardInstanceId"]
+        .as_str()
+        .expect("cast identity")
+        .to_owned()
+}
+
+fn cast_nature_return(session: &mut Session, ids: &[String]) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-nature"
+            && descriptor["cemeteryCardInstanceIds"] == json!(ids)
+    });
+    receipt
+}
+
+fn spellbook_bottom_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .last()
+        .expect("bottom card")["instanceId"]
+        .as_str()
+        .expect("bottom identity")
+        .to_owned()
+}
+
+fn atlas_bottom_id(snapshot: &Value) -> String {
+    snapshot["players"]["north"]["atlas"]
+        .as_array()
+        .expect("north Atlas")
+        .last()
+        .expect("bottom card")["instanceId"]
+        .as_str()
+        .expect("bottom identity")
+        .to_owned()
 }
 
 fn assert_exact_replay(session: &Session) {
@@ -730,4 +890,133 @@ fn rule_catalog_1070_cemetery_bottom_then_draw_withheld_during_pending_deathrite
             .any(|card| card["instanceId"] == library_top)
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1723_returned_spell_stays_at_deck_bottom_after_turns_pass() {
+    let encoded = seed_for_bottom_persistence(1723);
+    let mut session = opening_main(&encoded);
+    let first_id = cast_nature_empty(&mut session);
+    south_plays_c1(&mut session);
+    cast_nature_return(&mut session, std::slice::from_ref(&first_id));
+    assert_eq!(spellbook_bottom_id(&state(&session)), first_id);
+    advance_full_round(&mut session);
+    assert_eq!(spellbook_bottom_id(&state(&session)), first_id);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1724_second_nature_without_cemetery_selection_still_draws() {
+    let encoded = seed_with_spellbook(2, 1724);
+    let mut session = opening_main(&encoded);
+    let first = cast_nature_empty(&mut session);
+    let second = cast_nature_empty(&mut session);
+    assert_ne!(first, second);
+    assert_eq!(cemetery_ids(&state(&session), "north").len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1725_nature_returns_two_cemetery_cards_in_one_cast() {
+    let encoded = seed_with_spellbook(3, 1725);
+    let mut session = opening_main(&encoded);
+    let first_id = cast_nature_empty(&mut session);
+    south_plays_c1(&mut session);
+    let second_id = cast_nature_empty(&mut session);
+    let mut returned = vec![first_id.clone(), second_id.clone()];
+    returned.sort_unstable();
+    let granted = cast_nature_return(&mut session, &returned);
+    assert_eq!(
+        granted
+            .events
+            .iter()
+            .filter(|event| event.event_type == "card-returned-to-deck-bottom")
+            .count(),
+        2
+    );
+    let after = state(&session);
+    assert!(!cemetery_ids(&after, "north").contains(&first_id));
+    assert!(!cemetery_ids(&after, "north").contains(&second_id));
+    assert_eq!(spellbook_bottom_id(&after), returned[1]);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1726_nature_routes_site_and_spell_returns_to_matching_deck_bottoms() {
+    let encoded = seed_with_nature_and_destroy(1726);
+    let mut session = opening_main(&encoded);
+    let magic_id = cast_nature_empty(&mut session);
+    let site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("C4 site identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C4"
+            && descriptor["targetSiteInstanceId"] == site_id
+    });
+    let mut returned = vec![magic_id.clone(), site_id.clone()];
+    returned.sort_unstable();
+    let granted = cast_nature_return(&mut session, &returned);
+    assert_eq!(
+        granted
+            .events
+            .iter()
+            .filter(|event| event.event_type == "card-returned-to-deck-bottom")
+            .count(),
+        2
+    );
+    let after = state(&session);
+    assert_eq!(atlas_bottom_id(&after), site_id);
+    assert_eq!(spellbook_bottom_id(&after), magic_id);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1727_nature_returns_multiple_cards_in_instance_id_order() {
+    let encoded = seed_with_spellbook(3, 1727);
+    let mut session = opening_main(&encoded);
+    let first_id = cast_nature_empty(&mut session);
+    south_plays_c1(&mut session);
+    let second_id = cast_nature_empty(&mut session);
+    let mut sorted = vec![first_id, second_id];
+    sorted.sort_unstable();
+    let granted = cast_nature_return(&mut session, &sorted);
+    let returned: Vec<_> = granted
+        .events
+        .iter()
+        .filter(|event| event.event_type == "card-returned-to-deck-bottom")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("returned identity")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(returned, sorted);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1728_second_nature_returns_a_newly_arrived_cemetery_card() {
+    let encoded = seed_with_nature_and_destroy(1728);
+    let mut session = opening_main(&encoded);
+    cast_nature_empty(&mut session);
+    south_plays_c1(&mut session);
+    let site_id = state(&session)["realm"]["sites"]["C4"]["instanceId"]
+        .as_str()
+        .expect("C4 site identity")
+        .to_owned();
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == "C4"
+            && descriptor["targetSiteInstanceId"] == site_id
+    });
+    assert!(cemetery_ids(&state(&session), "north").contains(&site_id));
+    let granted = cast_nature_return(&mut session, std::slice::from_ref(&site_id));
+    assert_eq!(granted.events[1].payload["zone"], "atlas");
+    assert_eq!(atlas_bottom_id(&state(&session)), site_id);
+    assert_exact_replay(&session);
 }
