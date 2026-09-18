@@ -2,7 +2,7 @@
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
 //! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935), and deferred
 //! end-turn here-area pulses withheld during deathrite-order
-//! (RULE-CATALOG-1208–1230).
+//! (RULE-CATALOG-1208–1230, RULE-CATALOG-1272).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -1505,6 +1505,18 @@ fn stacked_light_loss_heavy_gain_here_damage() -> Value {
     })
 }
 
+fn stacked_heavy_gain_here_damage() -> Value {
+    json!({
+        "atEndOfControllerTurnControllerGainsLife": 4,
+        "atEndOfControllerTurnDamageEachOtherUnitHere": 1,
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 #[test]
 fn rule_catalog_1228_end_turn_heavy_loss_then_here_damage_pulse_withheld_during_pending_deathrite_order()
  {
@@ -1568,5 +1580,27 @@ fn rule_catalog_1230_end_turn_light_loss_heavy_gain_then_here_damage_pulse_withh
         );
     let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
         .expect("complete light-loss-heavy-gain-here end-turn Deathrite withheld setup");
+    assert_end_turn_pulse_withheld(setup);
+}
+
+#[test]
+fn rule_catalog_1272_end_turn_heavy_gain_then_here_damage_pulse_withheld_during_pending_deathrite_order()
+ {
+    let encoded = (1272..1272 + 2048)
+        .map(|seed| {
+            dual_end_turn_pulse_withheld_manifest(
+                seed,
+                "north-stack",
+                stacked_heavy_gain_here_damage(),
+            )
+        })
+        .find(|candidate| {
+            try_pending_deathrite_during_dual_end_turn_pulse(candidate, "north-stack").is_some()
+        })
+        .expect(
+            "bounded seed that reaches pending Deathrites during heavy-gain-here end-turn withhold",
+        );
+    let setup = try_pending_deathrite_during_dual_end_turn_pulse(&encoded, "north-stack")
+        .expect("complete heavy-gain-here end-turn Deathrite withheld setup");
     assert_end_turn_pulse_withheld(setup);
 }
