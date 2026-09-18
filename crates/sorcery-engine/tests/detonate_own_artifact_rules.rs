@@ -1,5 +1,5 @@
 //! Direct proofs for destroy-own-artifact-at-location-for-area-damage Magic
-//! (RULE-CATALOG-0577–0578, 1040, 1100).
+//! (RULE-CATALOG-0577–0578, 1040, 1100, RULE-CATALOG-1863–1868).
 //!
 //! 1040 covers detonate killing a Deathrite minion: the controller draws a site
 //! and magic-resolved only appears after deathrite settlement.
@@ -182,6 +182,58 @@ fn detonate_deathrite_manifest(seed: u32) -> String {
                     "south-deathrite",
                     "south-deathrite",
                 ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn detonate_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "detonate-own-artifact-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-detonate-own-artifact-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-beast": {
+                "attack": 2,
+                "cardType": "minion",
+                "defense": 4,
+                "manaCost": 0,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
+            "north-detonate": detonate(),
+            "north-relic": relic(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-raider": raider(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-detonate",
+                    "north-detonate",
+                    "north-detonate",
+                    "north-detonate",
+                    "north-relic",
+                    "north-relic",
+                    "north-relic",
+                    "north-beast",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-raider"; 6],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -508,6 +560,295 @@ fn deathrite_detonate_seed_with(start: u32) -> String {
         .expect("bounded seed that reaches pending Deathrites with Detonate Magic in hand")
 }
 
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(577..577 + 2048)
+        .map(detonate_supplemental_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required opening cards")
+}
+
+fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .expect("cemetery")
+        .iter()
+        .any(|card| card["instanceId"] == instance_id)
+}
+
+fn detonate_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-detonate")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn relics_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-relic")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_relic_at(session: &mut Session, cell: &str) -> String {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == cell
+    });
+    artifact_at(session, "north-relic", cell)
+}
+
+fn cast_detonate(session: &mut Session, relic_id: &str, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-detonate"
+            && descriptor["targetArtifactInstanceId"] == relic_id
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn setup_relic_and_enemy_at_c3(session: &mut Session) -> (String, String) {
+    south_ends_after_c1(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let relic_id = cast_relic_at(session, "C3");
+    end_and_draw(session);
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let enemy_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy instance identity")
+        .to_owned();
+    end_and_draw(session);
+    (relic_id, enemy_id)
+}
+
+fn south_raids_c3(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn seed_with_two_detonate_spells_in_hand_after_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = detonate_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-detonate").count() < 2
+                || !hand.iter().any(|card| card == "north-relic")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = setup_relic_and_enemy_at_c3(&mut session);
+            (detonate_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Detonate spells in hand after setup")
+}
+
+fn try_cast_relic_at(session: &mut Session, cell: &str) -> Option<String> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == cell
+    })?;
+    Some(artifact_at(session, "north-relic", cell))
+}
+
+fn try_second_detonate_damage_prefix(encoded: &str) -> Option<Session> {
+    let mut session = opening_main(encoded);
+    let (first_relic, _) = setup_relic_and_enemy_at_c3(&mut session);
+    cast_detonate(&mut session, &first_relic, "C3");
+    if !cemetery_has(&state(&session), "north", &first_relic) {
+        return None;
+    }
+    let snap = state(&session);
+    if detonate_spells_in_hand(&snap) < 1 || relics_in_hand(&snap) < 1 {
+        return None;
+    }
+    let second_relic = try_cast_relic_at(&mut session, "C3")?;
+    if !detonate_casts(&session).iter().any(|cast| {
+        cast["targetArtifactInstanceId"] == second_relic && cast["targetLocation"]["cell"] == "C3"
+    }) {
+        return None;
+    }
+    let _ = south_raids_c3(&mut session);
+    if detonate_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    detonate_casts(&session)
+        .iter()
+        .any(|cast| {
+            cast["targetArtifactInstanceId"] == second_relic
+                && cast["targetLocation"]["cell"] == "C3"
+        })
+        .then_some(session)
+}
+
+fn seed_for_second_detonate_damage(start: u32) -> String {
+    (start..start + 8192)
+        .chain(577..577 + 8192)
+        .find_map(|seed| {
+            let encoded = detonate_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-detonate")
+                || !hand.iter().any(|card| card == "north-relic")
+            {
+                return None;
+            }
+            try_second_detonate_damage_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Detonate damage setup")
+}
+
+struct SecondDetonateSetup {
+    second_relic: String,
+    session: Session,
+}
+
+fn try_second_detonate_prefix(encoded: &str) -> Option<SecondDetonateSetup> {
+    let mut session = opening_main(encoded);
+    let (first_relic, _) = setup_relic_and_enemy_at_c3(&mut session);
+    cast_detonate(&mut session, &first_relic, "C3");
+    if !cemetery_has(&state(&session), "north", &first_relic) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    let snap = state(&session);
+    if detonate_spells_in_hand(&snap) < 1 || relics_in_hand(&snap) < 1 {
+        return None;
+    }
+    let second_relic = cast_relic_at(&mut session, "C3");
+    if !detonate_casts(&session).iter().any(|cast| {
+        cast["targetArtifactInstanceId"] == second_relic && cast["targetLocation"]["cell"] == "C3"
+    }) {
+        return None;
+    }
+    Some(SecondDetonateSetup {
+        second_relic,
+        session,
+    })
+}
+
+fn seed_for_second_detonate(start: u32) -> String {
+    (start..start + 8192)
+        .chain(577..577 + 8192)
+        .find_map(|seed| {
+            let encoded = detonate_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-detonate")
+                || !hand.iter().any(|card| card == "north-relic")
+            {
+                return None;
+            }
+            try_second_detonate_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Detonate setup")
+}
+
+fn seed_with_ally_and_enemy_at_c3(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = detonate_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-detonate")
+                || !hand.iter().any(|card| card == "north-relic")
+                || !hand.iter().any(|card| card == "north-beast")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            south_ends_after_c1(&mut session);
+            accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+            });
+            let _ = cast_relic_at(&mut session, "C3");
+            let _ = accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-beast"
+                    && descriptor["cell"] == "C3"
+                    && descriptor["region"].is_null()
+            });
+            end_and_draw(&mut session);
+            try_accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "south-raider"
+                    && descriptor["cell"] == "C3"
+                    && descriptor["region"].is_null()
+            })?;
+            Some(encoded)
+        })
+        .expect("bounded seed reaching ally and enemy at C3")
+}
+
 #[test]
 fn rule_catalog_0577_detonate_destroys_own_relic_and_deals_three_to_an_enemy() {
     let encoded = seed_with(&["north-detonate", "north-relic"]);
@@ -805,4 +1146,152 @@ fn rule_catalog_1100_detonate_withheld_during_pending_deathrite_order() {
     );
     assert!(realm_artifact(&state(session), &relic_id).is_none());
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1863_destroyed_relic_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_start(1863, &["north-detonate", "north-relic"]);
+    let mut session = opening_main(&encoded);
+    let (relic_id, _) = setup_relic_and_enemy_at_c3(&mut session);
+    cast_detonate(&mut session, &relic_id, "C3");
+    assert!(cemetery_has(&state(&session), "north", &relic_id));
+    advance_full_round(&mut session);
+    assert!(cemetery_has(&state(&session), "north", &relic_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1864_second_detonate_without_an_own_artifact_stays_unoffered() {
+    let encoded = seed_with_two_detonate_spells_in_hand_after_setup(1864);
+    let mut session = opening_main(&encoded);
+    let (relic_id, _) = setup_relic_and_enemy_at_c3(&mut session);
+    cast_detonate(&mut session, &relic_id, "C3");
+    assert!(cemetery_has(&state(&session), "north", &relic_id));
+    assert!(detonate_spells_in_hand(&state(&session)) >= 1);
+    assert!(detonate_casts(&session).is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1865_second_detonate_damages_a_newly_arrived_enemy_at_the_same_cell() {
+    let encoded = seed_for_second_detonate_damage(1865);
+    let mut session = opening_main(&encoded);
+    let (relic_id, _) = setup_relic_and_enemy_at_c3(&mut session);
+    cast_detonate(&mut session, &relic_id, "C3");
+    assert!(cemetery_has(&state(&session), "north", &relic_id));
+    let second_relic = cast_relic_at(&mut session, "C3");
+    let nearby_id = south_raids_c3(&mut session);
+    let detonated = cast_detonate(&mut session, &second_relic, "C3");
+    let types = event_types(&detonated);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(types.contains(&"artifact-destroyed"));
+    assert!(types.contains(&"magic-damage-allocated"));
+    assert!(types.contains(&"damage-dealt"));
+    assert!(detonated.events.iter().any(|event| {
+        event.event_type == "magic-damage-allocated"
+            && event.payload["targetInstanceId"] == nearby_id
+    }));
+    assert_eq!(unit(&state(&session), &nearby_id)["damage"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1866_detonate_damages_every_other_unit_sharing_the_target_cell() {
+    let encoded = seed_with_ally_and_enemy_at_c3(1866);
+    let mut session = opening_main(&encoded);
+    south_ends_after_c1(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let relic_id = cast_relic_at(&mut session, "C3");
+    let (ally, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-beast"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = ally["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    end_and_draw(&mut session);
+    let (enemy, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"].is_null()
+    });
+    let enemy_id = enemy["cardInstanceId"]
+        .as_str()
+        .expect("enemy instance identity")
+        .to_owned();
+    end_and_draw(&mut session);
+    let detonated = cast_detonate(&mut session, &relic_id, "C3");
+    let damaged: Vec<_> = detonated
+        .events
+        .iter()
+        .filter(|event| event.event_type == "damage-dealt")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("damaged unit")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(damaged.len(), 2);
+    assert!(damaged.contains(&ally_id));
+    assert!(damaged.contains(&enemy_id));
+    assert_eq!(unit(&state(&session), &ally_id)["damage"], 3);
+    assert_eq!(unit(&state(&session), &enemy_id)["damage"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1867_detonate_leaves_a_far_enemy_untouched() {
+    let encoded = seed_with_start(1867, &["north-detonate", "north-relic"]);
+    let mut session = opening_main(&encoded);
+    let (relic_id, near_id) = setup_relic_and_enemy_at_c3(&mut session);
+    end_and_draw(&mut session);
+    let (far, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-raider"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    let far_id = far["cardInstanceId"]
+        .as_str()
+        .expect("far enemy identity")
+        .to_owned();
+    end_and_draw(&mut session);
+    cast_detonate(&mut session, &relic_id, "C3");
+    assert!(cemetery_has(&state(&session), "north", &relic_id));
+    assert_eq!(unit(&state(&session), &near_id)["damage"], 3);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1868_second_detonate_destroys_a_newly_placed_relic() {
+    let encoded = seed_for_second_detonate(1868);
+    let SecondDetonateSetup {
+        mut session,
+        second_relic,
+    } = try_second_detonate_prefix(&encoded).expect("second Detonate prefix");
+    let detonated = cast_detonate(&mut session, &second_relic, "C3");
+    let types = event_types(&detonated);
+    assert_eq!(types.first(), Some(&"magic-cast"));
+    assert_eq!(types.last(), Some(&"magic-resolved"));
+    assert!(types.contains(&"artifact-destroyed"));
+    assert_eq!(
+        detonated
+            .events
+            .iter()
+            .find(|event| event.event_type == "artifact-destroyed")
+            .expect("artifact-destroyed")
+            .payload["instanceId"],
+        second_relic
+    );
+    assert!(cemetery_has(&state(&session), "north", &second_relic));
+    assert_exact_replay(&session);
 }

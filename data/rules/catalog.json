@@ -41246,8 +41246,207 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1860_two_hundred_twenty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1861",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1861_two_hundred_twenty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1862",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1862_two_hundred_twenty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1863",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-own-artifact-at-location-for-area-damage Magic leaves a destroyed relic in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1863_destroyed_relic_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1864",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-own-artifact-at-location-for-area-damage spells in hand, a second cast without a controlled Artifact stays unoffered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1864_second_detonate_without_an_own_artifact_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1865",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-own-artifact-at-location-for-area-damage spells in hand, a second cast destroys a newly placed relic and damages a newly arrived enemy at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "artifact-destroyed",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1865_second_detonate_damages_a_newly_arrived_enemy_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1866",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-own-artifact-at-location-for-area-damage Magic deals 3 damage to every other Unit sharing the target cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1866_detonate_damages_every_other_unit_sharing_the_target_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1867",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-own-artifact-at-location-for-area-damage Magic leaves a far enemy untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "artifact-destroyed",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1867_detonate_leaves_a_far_enemy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1868",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a destroy-own-artifact-at-location-for-area-damage cast, a later cast destroys a newly placed relic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyOwnArtifactAtLocationForAreaDamage"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/detonate_own_artifact_rules.rs",
+        "testName": "rule_catalog_1868_second_detonate_destroys_a_newly_placed_relic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1869",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1869_two_hundred_twenty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1870",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1870_two_hundred_thirty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1860,
+  "rustSupportedCount": 1870,
   "typescriptSupportedCount": 0
 }

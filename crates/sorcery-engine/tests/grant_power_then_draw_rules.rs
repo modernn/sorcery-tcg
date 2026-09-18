@@ -977,7 +977,8 @@ fn rule_catalog_1635_granted_power_expires_before_ally_strikes_at_base_power_on_
 }
 
 #[test]
-fn rule_catalog_1636_printed_power_still_strikes_at_full_attack_after_grant_expires_on_later_turn() {
+fn rule_catalog_1636_printed_power_still_strikes_at_full_attack_after_grant_expires_on_later_turn()
+{
     let PowerCombatSetup {
         mut session,
         ally_id,
