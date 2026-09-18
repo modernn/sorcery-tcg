@@ -31891,6 +31891,210 @@
         "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
         "testName": "rule_catalog_1392_playing_water_onto_drought_occupied_earth_relayers_underground"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1393",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-four-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1393_forty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1394",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-five-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1394_forty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1395",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-six-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1395_forty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1396",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A forty-seven-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1396_forty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1397",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing printed Earth onto a flooded occupied Water site creates a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1397_playing_earth_onto_flooded_occupied_water_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1398",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing printed Water onto a drought occupied Earth site creates land.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1398_playing_water_onto_drought_occupied_earth_creates_land"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1399",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After the game completes a pending Deathrite chain with Flood covering an occupied Water site, summon-minion to that water-effective cell is offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1399_water_site_cast_minion_offered_after_pending_deathrite_order_on_flooded_occupied_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1400",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering an occupied Water site, summon-minion to that water-effective cell stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1400_water_site_cast_minion_withheld_during_pending_deathrite_order_on_flooded_occupied_water"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1401",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Flood on an occupied Water site makes that cell a current Water site for casting. A water-site-only minion may be summoned there.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1401_water_site_cast_minion_offered_on_flooded_occupied_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1402",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Drought on an occupied Earth site makes that cell not a Water site for casting. A water-site-only minion may not be summoned there.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "mustBeCastToWaterSite"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "summon"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1402_water_site_cast_minion_withheld_on_drought_occupied_earth_site"
+      }
     }
   ]
 }
