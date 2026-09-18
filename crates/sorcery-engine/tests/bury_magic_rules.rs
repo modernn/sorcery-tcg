@@ -594,3 +594,400 @@ fn rule_catalog_1036_bury_magic_withheld_during_pending_deathrite_order() {
     );
     assert_exact_replay(session);
 }
+
+fn roaming_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn bury_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "bury-magic-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-bury-magic-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bury": bury(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": roaming_minion(),
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-bury"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(655..655 + 2048)
+        .map(bury_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-bury")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with Bury and required South minions")
+}
+
+fn bury_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-bury")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_plays_c1(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("Bury target identity")
+        .to_owned()
+}
+
+fn setup_c1_with_minions(session: &mut Session, count: usize) -> Vec<String> {
+    south_plays_c1(session);
+    (0..count).map(|_| summon_south_at(session, "C1")).collect()
+}
+
+fn cast_bury_target(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, Vec<String>, String)> {
+    let mut session = opening_main(encoded);
+    let c1_ids = setup_c1_with_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    })?;
+    let far_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (!bury_targets(&session).is_empty()).then_some((session, c1_ids, far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(655..655 + 2048)
+        .find_map(|seed| {
+            let encoded = bury_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching Bury far-minion setup")
+}
+
+fn try_second_bury_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if bury_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C2"
+            && descriptor["region"].is_null()
+    })?;
+    let minion_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    bury_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_bury_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(655..655 + 8192)
+        .find_map(|seed| {
+            let encoded = bury_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_bury_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Bury enemy-arrival setup")
+}
+
+fn try_second_bury_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if bury_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let minion_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    bury_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_bury_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(655..655 + 8192)
+        .find_map(|seed| {
+            let encoded = bury_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_bury_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Bury new-summon setup")
+}
+
+#[test]
+fn rule_catalog_1913_buried_minion_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_start(1913, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &target_id);
+    assert!(cemetery_has(&state(&session), "south", &target_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(cemetery_has(&state(&session), "south", &target_id));
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1914_second_bury_without_a_surface_target_stays_unoffered() {
+    let encoded = seed_with_start(1914, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &target_id);
+    assert!(bury_spells_in_hand(&state(&session)) >= 1);
+    assert!(bury_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| descriptor["kind"]
+        == "cast-magic"
+        && descriptor["cardId"] == "north-bury"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1915_second_bury_kills_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_bury_enemy_arrival(1915);
+    let (mut session, minion_id) =
+        try_second_bury_enemy_arrival_prefix(&encoded).expect("second Bury enemy-arrival prefix");
+    let receipt = cast_bury_target(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(cemetery_has(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1916_bury_offers_every_surface_minion_at_the_target_land_site() {
+    let encoded = seed_with_start(1916, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c1_with_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = bury_targets(&session);
+    assert_eq!(offered.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1917_bury_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(1917);
+    let (mut session, c1_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("Bury far-minion prefix");
+    let buried_id = &c1_ids[0];
+    cast_bury_target(&mut session, buried_id);
+    assert!(cemetery_has(&state(&session), "south", buried_id));
+    assert!(realm_unit(&state(&session), &far_id).is_some());
+    assert_eq!(
+        realm_unit(&state(&session), &far_id).expect("far minion")["location"],
+        "C4"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1918_second_bury_kills_a_newly_summoned_minion() {
+    let encoded = seed_for_second_bury_new_summon(1918);
+    let (mut session, minion_id) =
+        try_second_bury_new_summon_prefix(&encoded).expect("second Bury new-summon prefix");
+    let receipt = cast_bury_target(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(cemetery_has(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
+}
