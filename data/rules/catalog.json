@@ -40646,8 +40646,200 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1830_two_hundred_sixteen_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1831",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred seventeen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1831_two_hundred_seventeen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1832",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred eighteen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1832_two_hundred_eighteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1833",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic leaves a killed minion in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1833_killed_minion_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1834",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-minions-at-water-site-within-two-steps spells in hand, a second cast at an empty water site is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1834_second_boil_without_a_minion_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1835",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After destroy-minions-at-water-site-within-two-steps clears a water site, a later cast kills a newly arrived minion at that same site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1835_second_boil_kills_a_newly_arrived_mortal_at_the_same_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1836",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic kills every minion sharing the target water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1836_boil_kills_every_minion_sharing_the_target_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1837",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-minions-at-water-site-within-two-steps Magic kills a nearby minion while a far minion stays untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1837_boil_leaves_a_far_mortal_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1838",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a destroy-minions-at-water-site-within-two-steps cast, a later cast kills a newly summoned minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyMinionsAtWaterSiteWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "summon-minion",
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_water_site_minions_rules.rs",
+        "testName": "rule_catalog_1838_second_boil_kills_a_newly_summoned_mortal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1839",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1839_two_hundred_twenty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1840",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1840_two_hundred_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1830,
+  "rustSupportedCount": 1840,
   "typescriptSupportedCount": 0
 }

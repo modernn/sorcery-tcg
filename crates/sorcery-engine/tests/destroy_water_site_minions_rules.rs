@@ -1,5 +1,5 @@
 //! Direct proofs for destroy-minions-at-water-site-within-two-steps Magic
-//! (RULE-CATALOG-0571–0572, 1028, 1092).
+//! (RULE-CATALOG-0571–0572, 1028, 1092, RULE-CATALOG-1833–1838).
 //!
 //! 1028 covers boil killing a Deathrite minion: the controller draws a site
 //! and magic-resolved only appears after deathrite settlement. 1092 covers
@@ -132,7 +132,15 @@ fn boil_manifest_with_minion(seed: u32, north_minion: &Value) -> String {
             "north-mortal": north_minion.clone(),
             "north-water": water_site(),
             "south-avatar": avatar(),
-            "south-mortal": mortal(),
+            "south-mortal": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "mortal": true,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+            },
             "south-site": earth_site(),
         },
         "decks": {
@@ -286,7 +294,11 @@ fn boil_locations(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required_spells: &[&str], require_earth: bool) -> String {
-    (571..571 + 256)
+    seed_with_start(571, required_spells, require_earth)
+}
+
+fn seed_with_start(start: u32, required_spells: &[&str], require_earth: bool) -> String {
+    (start..start + 256)
         .map(boil_manifest)
         .find(|candidate| {
             let spells = opening_spell_ids(candidate);
@@ -298,6 +310,172 @@ fn seed_with(required_spells: &[&str], require_earth: bool) -> String {
                 && (!require_earth || atlas.iter().any(|card| card == "north-earth"))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn boil_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-boil")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn allies_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mortal")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_boil(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-boil"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-mortal"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn seed_with_two_boil_spells_in_hand_after_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = boil_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-mortal").count() < 1
+                || !hand.iter().any(|card| card == "north-boil")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-mortal", "C4");
+            (boil_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Boil spells in hand after setup")
+}
+
+struct SecondBoilKillSetup {
+    second_mortal: String,
+    session: Session,
+}
+
+fn try_second_boil_kill_prefix(encoded: &str) -> Option<SecondBoilKillSetup> {
+    let mut session = opening_main(encoded);
+    let first_mortal = summon_at(&mut session, "north-mortal", "C4");
+    cast_boil(&mut session, "C4");
+    if !cemetery_has(&state(&session), "north", &first_mortal) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    let snap = state(&session);
+    if boil_spells_in_hand(&snap) < 1 || allies_in_hand(&snap) < 1 {
+        return None;
+    }
+    let second_mortal = summon_at(&mut session, "north-mortal", "C4");
+    boil_locations(&session)
+        .contains(&"C4".to_owned())
+        .then_some(SecondBoilKillSetup {
+            second_mortal,
+            session,
+        })
+}
+
+fn seed_for_second_boil_kill(start: u32) -> String {
+    (start..start + 8192)
+        .find_map(|seed| {
+            let encoded = boil_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-mortal")
+                || !hand.iter().any(|card| card == "north-boil")
+            {
+                return None;
+            }
+            try_second_boil_kill_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Boil kill setup")
+}
+
+fn seed_with_two_mortals_at_c4(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = boil_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-mortal").count() < 2
+                || !hand.iter().any(|card| card == "north-boil")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-mortal", "C4");
+            try_accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-mortal"
+                    && descriptor["cell"] == "C4"
+                    && descriptor["region"].is_null()
+            })?;
+            Some(encoded)
+        })
+        .expect("bounded seed reaching two Mortals at C4")
 }
 
 fn summon_at(session: &mut Session, card_id: &str, cell: &str) -> String {
@@ -765,4 +943,119 @@ fn rule_catalog_1092_destroy_water_site_minions_withheld_during_pending_deathrit
     let after = state(session);
     assert!(cemetery_has(&after, "north", &occupant_id));
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1833_killed_minion_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_start(1833, &["north-mortal", "north-boil"], false);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    cast_boil(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    advance_full_round(&mut session);
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1834_second_boil_without_a_minion_is_still_a_paid_noop() {
+    let encoded = seed_with_two_boil_spells_in_hand_after_setup(1834);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    let first = cast_boil(&mut session, "C4");
+    assert!(event_types(&first).contains(&"minion-killed"));
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    let second = cast_boil(&mut session, "C4");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-killed" || event.event_type == "minion-died")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1835_second_boil_kills_a_newly_arrived_mortal_at_the_same_water_site() {
+    let encoded = seed_with_two_boil_spells_in_hand_after_setup(1835);
+    let mut session = opening_main(&encoded);
+    let mortal_id = summon_at(&mut session, "north-mortal", "C4");
+    cast_boil(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &mortal_id));
+    let nearby_id = south_raids_c4(&mut session);
+    let killed = cast_boil(&mut session, "C4");
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["instanceId"], nearby_id);
+    assert!(cemetery_has(&state(&session), "south", &nearby_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1836_boil_kills_every_minion_sharing_the_target_water_site() {
+    let encoded = seed_with_two_mortals_at_c4(1836);
+    let mut session = opening_main(&encoded);
+    let first_mortal = summon_at(&mut session, "north-mortal", "C4");
+    let second_mortal = summon_at(&mut session, "north-mortal", "C4");
+    let killed = cast_boil(&mut session, "C4");
+    let killed_ids: Vec<_> = killed
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-killed")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("killed minion")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(killed_ids.len(), 2);
+    assert!(killed_ids.contains(&first_mortal));
+    assert!(killed_ids.contains(&second_mortal));
+    assert!(cemetery_has(&state(&session), "north", &first_mortal));
+    assert!(cemetery_has(&state(&session), "north", &second_mortal));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1837_boil_leaves_a_far_mortal_untouched() {
+    let encoded = seed_with_start(1837, &["north-mortal", "north-boil"], false);
+    let mut session = opening_main(&encoded);
+    let far_id = south_plays_c1_and_summons(&mut session);
+    let near_id = summon_at(&mut session, "north-mortal", "C4");
+    cast_boil(&mut session, "C4");
+    assert!(cemetery_has(&state(&session), "north", &near_id));
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
+    assert!(!cemetery_has(&state(&session), "south", &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1838_second_boil_kills_a_newly_summoned_mortal() {
+    let encoded = seed_for_second_boil_kill(1838);
+    let SecondBoilKillSetup {
+        mut session,
+        second_mortal,
+    } = try_second_boil_kill_prefix(&encoded).expect("second Boil kill prefix");
+    let killed = cast_boil(&mut session, "C4");
+    assert_eq!(
+        event_types(&killed),
+        [
+            "magic-cast",
+            "minion-killed",
+            "minion-died",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(killed.events[1].payload["instanceId"], second_mortal);
+    assert!(cemetery_has(&state(&session), "north", &second_mortal));
+    assert_exact_replay(&session);
 }
