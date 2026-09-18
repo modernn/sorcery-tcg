@@ -37706,8 +37706,206 @@
         "file": "crates/sorcery-engine/tests/grant_stealth_then_draw_rules.rs",
         "testName": "rule_catalog_1678_printed_stealth_outlasts_grant_while_plain_ally_only_hides_after_vanish"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1681",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred forty nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1681_one_hundred_forty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1682",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1682_one_hundred_fifty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1683",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A raider with printed Stealth on an enemy site is hidden from enemy targeted damage without Fade Magic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1683_printed_stealth_on_enemy_site_hides_raid_from_enemy_targeted_damage_without_fade"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1684",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Fade Magic on an allied raider occupying an enemy site hides it from enemy targeted damage.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1684_fade_on_enemy_site_hides_raid_before_enemy_can_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1685",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Enemy targeted damage that was legal before Fade resolves on an enemy-site raider becomes illegal after the grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1685_fade_on_enemy_site_blocks_damage_that_was_legal_before_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1686",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth on an enemy-site raider still hides it from enemy targeted damage after turns pass without an attack.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1686_printed_stealth_on_enemy_site_still_hides_raid_after_turn_passes_without_attack"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1687",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth and Fade Magic on an enemy-site raider compose while the raider stays stealthed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1687_printed_and_fade_on_enemy_site_compose_while_stealth_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1688",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Stealth on an enemy-site raider outlasts a redundant Fade while a plain raider only hides after Fade resolves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToAlliedMinionOccupyingEnemySiteThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_enemy_site_then_draw_rules.rs",
+        "testName": "rule_catalog_1688_printed_stealth_on_enemy_site_outlasts_fade_while_plain_raid_only_hides_after_fade"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1689",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1689_one_hundred_fifty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1690",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred fifty two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1690_one_hundred_fifty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1680,
+  "rustSupportedCount": 1690,
   "typescriptSupportedCount": 0
 }

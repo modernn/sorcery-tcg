@@ -1,5 +1,6 @@
 //! Direct proofs for grant-Stealth-to-an-allied-minion occupying an enemy
-//! site then draw-spell Magic (RULE-CATALOG-0541–0542, RULE-CATALOG-1074).
+//! site then draw-spell Magic (RULE-CATALOG-0541–0542, RULE-CATALOG-1074,
+//! RULE-CATALOG-1683–1688).
 //!
 //! Ordinary Magic can give Stealth to one allied minion that occupies an
 //! enemy-controlled site and then draw one spell. Allies on friendly sites,
@@ -409,6 +410,318 @@ fn rule_catalog_0542_fade_still_draws_when_no_ally_occupies_an_enemy_site() {
             .iter()
             .any(|card| card["instanceId"] == library_top)
     );
+    assert_exact_replay(&session);
+}
+
+fn zap() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageTargetUnit": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_stealth_raider() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "stealth": true,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn enemy_site_visibility_manifest(raider: &Value, seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "grant-stealth-enemy-site-visibility" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-grant-stealth-enemy-site-visibility-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-fade": fade(),
+            "north-raider": raider,
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+            "south-zap": zap(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-raider",
+                    "north-fade",
+                    "north-fade",
+                    "north-fade",
+                    "north-fade",
+                    "north-fade",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                    "south-zap",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+struct EnemySiteVisibilitySetup {
+    raid_id: String,
+    session: Session,
+}
+
+fn north_hand_has_fade(snapshot: &Value) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "north-fade"))
+}
+
+fn south_hand_has_zap(snapshot: &Value) -> bool {
+    snapshot["players"]["south"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["cardId"] == "south-zap"))
+}
+
+fn try_enemy_site_visibility_setup(encoded: &str) -> Option<EnemySiteVisibilitySetup> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let raid = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-raider"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let raid_id = raid.0["cardInstanceId"].as_str()?.to_owned();
+    Some(EnemySiteVisibilitySetup { raid_id, session })
+}
+
+fn enemy_site_visibility_setup(raider: &Value, start: u32) -> EnemySiteVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| enemy_site_visibility_manifest(raider, seed))
+        .find_map(|candidate| try_enemy_site_visibility_setup(&candidate))
+        .expect("bounded seed reaching enemy-site stealth visibility setup")
+}
+
+fn enemy_site_visibility_setup_with_fade(raider: &Value, start: u32) -> EnemySiteVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| enemy_site_visibility_manifest(raider, seed))
+        .find_map(|candidate| {
+            let setup = try_enemy_site_visibility_setup(&candidate)?;
+            north_hand_has_fade(&state(&setup.session)).then_some(setup)
+        })
+        .expect("bounded seed reaching enemy-site stealth visibility setup with Fade in hand")
+}
+
+fn enemy_site_visibility_setup_with_fade_and_south_zap(
+    raider: &Value,
+    start: u32,
+) -> EnemySiteVisibilitySetup {
+    (start..start + 256)
+        .map(|seed| enemy_site_visibility_manifest(raider, seed))
+        .find_map(|candidate| {
+            let setup = try_enemy_site_visibility_setup(&candidate)?;
+            if !north_hand_has_fade(&state(&setup.session)) {
+                return None;
+            }
+            let mut probe = setup.session.clone();
+            advance_to_south_main(&mut probe);
+            south_hand_has_zap(&state(&probe)).then_some(setup)
+        })
+        .expect("bounded seed reaching enemy-site stealth visibility setup with Fade and south Zap")
+}
+
+fn south_can_zap_raid(session: &Session, raid_id: &str) -> bool {
+    session.legal_actions().is_ok_and(|actions| {
+        actions.iter().any(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "south-zap"
+                && action.descriptor["target"]["kind"] == "minion"
+                && action.descriptor["target"]["instanceId"] == raid_id
+        })
+    })
+}
+
+fn advance_to_south_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn advance_to_south_main_with_zap(session: &mut Session) {
+    advance_to_south_main(session);
+    assert!(south_hand_has_zap(&state(session)));
+}
+
+fn cast_fade(session: &mut Session, raid_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-fade"
+            && descriptor["ally"]["instanceId"] == raid_id
+    });
+    receipt
+}
+
+#[test]
+fn rule_catalog_1683_printed_stealth_on_enemy_site_hides_raid_from_enemy_targeted_damage_without_fade()
+ {
+    let EnemySiteVisibilitySetup {
+        session, raid_id, ..
+    } = enemy_site_visibility_setup(&printed_stealth_raider(), 1683);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    let mut session = session;
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1684_fade_on_enemy_site_hides_raid_before_enemy_can_target() {
+    let EnemySiteVisibilitySetup {
+        mut session,
+        raid_id,
+        ..
+    } = enemy_site_visibility_setup_with_fade(&raider(), 1684);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], false);
+    let receipt = cast_fade(&mut session, &raid_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "minion-stealthed",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1685_fade_on_enemy_site_blocks_damage_that_was_legal_before_grant() {
+    let EnemySiteVisibilitySetup {
+        mut session,
+        raid_id,
+        ..
+    } = enemy_site_visibility_setup_with_fade_and_south_zap(&raider(), 1685);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], false);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(south_can_zap_raid(&session, &raid_id));
+    advance_to_south_main(&mut session);
+    cast_fade(&mut session, &raid_id);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1686_printed_stealth_on_enemy_site_still_hides_raid_after_turn_passes_without_attack()
+ {
+    let EnemySiteVisibilitySetup {
+        mut session,
+        raid_id,
+        ..
+    } = enemy_site_visibility_setup(&printed_stealth_raider(), 1686);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    advance_to_south_main(&mut session);
+    advance_to_south_main_with_zap(&mut session);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1687_printed_and_fade_on_enemy_site_compose_while_stealth_is_active() {
+    let EnemySiteVisibilitySetup {
+        mut session,
+        raid_id,
+        ..
+    } = enemy_site_visibility_setup_with_fade(&printed_stealth_raider(), 1687);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    let receipt = cast_fade(&mut session, &raid_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "spell-drawn", "magic-resolved"]
+    );
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-stealthed")
+    );
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1688_printed_stealth_on_enemy_site_outlasts_fade_while_plain_raid_only_hides_after_fade()
+ {
+    let EnemySiteVisibilitySetup {
+        mut session,
+        raid_id,
+        ..
+    } = enemy_site_visibility_setup_with_fade_and_south_zap(&printed_stealth_raider(), 1688);
+    assert_eq!(unit(&state(&session), &raid_id)["stealthed"], true);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+    advance_to_south_main(&mut session);
+    advance_to_south_main_with_zap(&mut session);
+    assert!(!south_can_zap_raid(&session, &raid_id));
+
+    let EnemySiteVisibilitySetup {
+        session: plain_session,
+        raid_id: plain_raid,
+        ..
+    } = enemy_site_visibility_setup_with_fade_and_south_zap(&raider(), 1688);
+    let mut plain_session = plain_session;
+    advance_to_south_main_with_zap(&mut plain_session);
+    assert!(south_can_zap_raid(&plain_session, &plain_raid));
+    advance_to_south_main(&mut plain_session);
+    cast_fade(&mut plain_session, &plain_raid);
+    advance_to_south_main_with_zap(&mut plain_session);
+    assert!(!south_can_zap_raid(&plain_session, &plain_raid));
+
+    assert!(!south_can_zap_raid(&session, &raid_id));
     assert_exact_replay(&session);
 }
 
