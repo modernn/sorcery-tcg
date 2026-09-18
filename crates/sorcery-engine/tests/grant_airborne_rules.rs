@@ -1,5 +1,5 @@
 //! Direct proofs for grant-Airborne-this-turn Magic (RULE-CATALOG-0274–0275,
-//! RULE-CATALOG-0665–0666, RULE-CATALOG-1026).
+//! RULE-CATALOG-0665–0666, RULE-CATALOG-1026, RULE-CATALOG-1603–1608).
 //!
 //! Official Magic can grant Airborne for the current turn. The grant uses the
 //! same ally choice as Charge, persists only on minions, is lost while the
@@ -307,6 +307,61 @@ fn summon_north_ally(session: &mut Session) -> String {
         .as_str()
         .expect("ally identity")
         .to_owned()
+}
+
+fn grant_airborne(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-grant"
+            && descriptor["ally"]["instanceId"] == ally_id
+    })
+}
+
+fn south_summons_airborne_at_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-airborne"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| descriptor["kind"] == "draw");
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("enemy identity")
+        .to_owned()
+}
+
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn expire_grant_airborne(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "airborne-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryAirborneSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
 }
 
 fn grant_airborne_targets(session: &Session) -> Vec<(String, String)> {
@@ -666,6 +721,119 @@ fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
         public_airborne(&session, &ally_id),
         "printed Airborne remains after the temporary grant expires"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1603_printed_airborne_without_grant_strikes_airborne_enemy() {
+    let mut session = opening_with(&printed_airborne(), "south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    assert!(public_airborne(&session, &ally_id));
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryAirborneSources")
+            .is_none()
+    );
+    assert!(can_strike_minion(&session, &ally_id, &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1604_granted_airborne_strikes_airborne_enemy_before_end_of_turn() {
+    let mut session = opening_main("south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    let (descriptor, _) = grant_airborne(&mut session, &ally_id);
+    assert!(public_airborne(&session, &ally_id));
+    assert!(can_strike_minion(&session, &ally_id, &enemy_id));
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1605_granted_airborne_expires_before_ally_strikes_on_later_turn() {
+    let mut session = opening_main("south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    let (descriptor, _) = grant_airborne(&mut session, &ally_id);
+    expire_grant_airborne(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(!public_airborne(&session, &ally_id));
+    assert!(!can_strike_minion(&session, &ally_id, &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1606_printed_airborne_still_strikes_after_grant_expires_on_later_turn() {
+    let mut session = opening_with(&printed_airborne(), "south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    let (descriptor, _) = grant_airborne(&mut session, &ally_id);
+    expire_grant_airborne(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(public_airborne(&session, &ally_id));
+    assert!(can_strike_minion(&session, &ally_id, &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1607_printed_and_granted_airborne_compose_while_grant_is_active() {
+    let mut session = opening_with(&printed_airborne(), "south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    let (descriptor, receipt) = grant_airborne(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "airborne-granted", "magic-resolved"]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(can_strike_minion(&session, &ally_id, &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1608_printed_airborne_outlasts_expired_grant_while_plain_ally_cannot_strike() {
+    let mut session = opening_with(&printed_airborne(), "south-airborne");
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_airborne_at_c4(&mut session);
+    let (descriptor, _) = grant_airborne(&mut session, &ally_id);
+    expire_grant_airborne(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let mut plain = opening_main("south-airborne");
+    let plain_ally = summon_north_ally(&mut plain);
+    let plain_enemy = south_summons_airborne_at_c4(&mut plain);
+    let (plain_descriptor, _) = grant_airborne(&mut plain, &plain_ally);
+    expire_grant_airborne(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    assert!(!can_strike_minion(&plain, &plain_ally, &plain_enemy));
+
+    through_south_pass_to_north_main(&mut session);
+    assert!(can_strike_minion(&session, &ally_id, &enemy_id));
     assert_exact_replay(&session);
 }
 

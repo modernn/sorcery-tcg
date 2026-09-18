@@ -36114,6 +36114,197 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1600_one_hundred_sixteen_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1601",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-seventeen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1601_one_hundred_seventeen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1602",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-eighteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1602_one_hundred_eighteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1603",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Airborne ally without a grant can strike an Airborne defender.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1603_printed_airborne_without_grant_strikes_airborne_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1604",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with an active grant-Airborne can strike an Airborne defender before its controller ends the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1604_granted_airborne_strikes_airborne_enemy_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1605",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne expires at its controller's End Phase, a minion without printed Airborne cannot strike an Airborne defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1605_granted_airborne_expires_before_ally_strikes_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1606",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne expires at its controller's End Phase, a printed Airborne ally can still strike an Airborne defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1606_printed_airborne_still_strikes_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1607",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed Airborne ally with an active grant-Airborne can strike an Airborne defender while both sources are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1607_printed_and_granted_airborne_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1608",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne expires at its controller's End Phase, a printed Airborne ally can still strike while a plain ally without printed Airborne cannot strike in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "airborne",
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "move-and-attack",
+        "declare-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_rules.rs",
+        "testName": "rule_catalog_1608_printed_airborne_outlasts_expired_grant_while_plain_ally_cannot_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1609",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-nineteen-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1609_one_hundred_nineteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1610",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1610_one_hundred_twenty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
