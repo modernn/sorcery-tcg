@@ -1,5 +1,5 @@
 //! Direct proofs for grant-+1-movement-this-turn then draw-spell Magic (RULE-CATALOG-0535–0536,
-//! RULE-CATALOG-1066).
+//! RULE-CATALOG-1066, RULE-CATALOG-1613–1618).
 //!
 //! Ordinary Magic can give an ally +1 movement this turn and then draw one
 //! spell. Enemy units are not offered. The movement mark uses a shared
@@ -35,6 +35,17 @@ fn grounded() -> Value {
         "cardType": "minion",
         "defense": 2,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_mover() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 2,
+        "manaCost": 0,
+        "movementBonus": 1,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -75,7 +86,7 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn gift_manifest(seed: u32) -> String {
+fn gift_manifest_with_ally(seed: u32, north_ally: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "grant-movement-then-draw" }))
@@ -84,7 +95,7 @@ fn gift_manifest(seed: u32) -> String {
             "revisionId": "synthetic-grant-movement-then-draw-v1",
         },
         "cards": {
-            "north-ally": grounded(),
+            "north-ally": north_ally,
             "north-avatar": avatar(),
             "north-gift": gift(),
             "north-site": site(),
@@ -116,6 +127,10 @@ fn gift_manifest(seed: u32) -> String {
         "schemaVersion": 1,
         "seed": seed,
     }))
+}
+
+fn gift_manifest(seed: u32) -> String {
+    gift_manifest_with_ally(seed, &grounded())
 }
 
 fn try_accept_where(
@@ -300,6 +315,56 @@ fn lay_two_step_sites(session: &mut Session) {
     });
 }
 
+fn through_south_pass_to_north_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn grant_movement(session: &mut Session, ally_id: &str) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-gift"
+            && descriptor["ally"]["instanceId"] == ally_id
+    })
+}
+
+fn expire_grant_movement(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "movement-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryMovementSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn seed_with_ally_card(north_ally: &Value, start: u32) -> String {
+    (start..start + 256)
+        .map(|seed| gift_manifest_with_ally(seed, north_ally))
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().any(|id| id == "north-ally") && hand.iter().any(|id| id == "north-gift")
+        })
+        .expect("bounded seed with ally and gift Magic in the opening hand")
+}
+
+fn two_step_reach_setup(north_ally: &Value, start: u32) -> (Session, String) {
+    let encoded = seed_with_ally_card(north_ally, start);
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    let _enemy_id = south_summons_at_c1(&mut session);
+    lay_two_step_sites(&mut session);
+    (session, ally_id)
+}
+
 fn assert_exact_replay(session: &Session) {
     let action_ids: Vec<_> = session
         .transcript()
@@ -409,6 +474,116 @@ fn rule_catalog_0536_granted_movement_then_draw_reaches_a_two_step_cell() {
         can_move_to(&session, &ally_id, "C2"),
         "granted +1 movement lets the minion reach a cell two steps away"
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1613_printed_movement_bonus_reaches_two_step_cell_without_grant() {
+    let (session, ally_id) = two_step_reach_setup(&printed_mover(), 1613);
+    assert_eq!(unit(&state(&session), &ally_id)["summoningSickness"], false);
+    assert!(can_move_to(&session, &ally_id, "C3"));
+    assert!(
+        can_move_to(&session, &ally_id, "C2"),
+        "printed +1 movement reaches a cell two steps away"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1614_granted_movement_reaches_two_step_cell_before_end_of_turn() {
+    let (mut session, ally_id) = two_step_reach_setup(&grounded(), 1614);
+    assert!(!can_move_to(&session, &ally_id, "C2"));
+    let (descriptor, receipt) = grant_movement(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "movement-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryMovementSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(can_move_to(&session, &ally_id, "C2"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1615_granted_movement_expires_before_ally_reaches_two_step_cell_on_later_turn() {
+    let (mut session, ally_id) = two_step_reach_setup(&grounded(), 1615);
+    let (descriptor, _) = grant_movement(&mut session, &ally_id);
+    expire_grant_movement(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(!can_move_to(&session, &ally_id, "C2"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1616_printed_movement_bonus_still_reaches_after_grant_expires_on_later_turn() {
+    let (mut session, ally_id) = two_step_reach_setup(&printed_mover(), 1616);
+    let (descriptor, _) = grant_movement(&mut session, &ally_id);
+    expire_grant_movement(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    assert!(can_move_to(&session, &ally_id, "C2"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1617_printed_and_granted_movement_compose_while_grant_is_active() {
+    let (mut session, ally_id) = two_step_reach_setup(&printed_mover(), 1617);
+    let (descriptor, receipt) = grant_movement(&mut session, &ally_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "movement-granted",
+            "spell-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(
+        unit(&state(&session), &ally_id)["temporaryMovementSources"],
+        json!([descriptor["cardInstanceId"]])
+    );
+    assert!(can_move_to(&session, &ally_id, "C2"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1618_printed_movement_bonus_outlasts_expired_grant_while_plain_ally_cannot_reach() {
+    let (mut session, ally_id) = two_step_reach_setup(&printed_mover(), 1618);
+    let (descriptor, _) = grant_movement(&mut session, &ally_id);
+    expire_grant_movement(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let (mut plain, plain_ally) = two_step_reach_setup(&grounded(), 1618);
+    let (plain_descriptor, _) = grant_movement(&mut plain, &plain_ally);
+    expire_grant_movement(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut plain);
+    assert!(!can_move_to(&plain, &plain_ally, "C2"));
+
+    through_south_pass_to_north_main(&mut session);
+    assert!(can_move_to(&session, &ally_id, "C2"));
     assert_exact_replay(&session);
 }
 

@@ -36305,6 +36305,191 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1610_one_hundred_twenty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1611",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-one-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1611_one_hundred_twenty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1612",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-two-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1612_one_hundred_twenty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1613",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed +1 movement can reach a cell two steps away without a grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movementBonus"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1613_printed_movement_bonus_reaches_two_step_cell_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1614",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with an active grant-movement can reach a cell two steps away before its controller ends the turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1614_granted_movement_reaches_two_step_cell_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1615",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-movement expires at its controller's End Phase, a minion without printed movement bonus cannot reach a cell two steps away on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "movement-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1615_granted_movement_expires_before_ally_reaches_two_step_cell_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1616",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-movement expires at its controller's End Phase, a printed +1 movement minion can still reach a cell two steps away on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movementBonus",
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1616_printed_movement_bonus_still_reaches_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1617",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed +1 movement minion with an active grant-movement can reach a cell two steps away while both sources are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movementBonus",
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1617_printed_and_granted_movement_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1618",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-movement expires at its controller's End Phase, a printed +1 movement minion can still reach a cell two steps away while a plain ally cannot reach it in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "movementBonus",
+        "grantMovementOneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_movement_then_draw_rules.rs",
+        "testName": "rule_catalog_1618_printed_movement_bonus_outlasts_expired_grant_while_plain_ally_cannot_reach"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1619",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-three-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1619_one_hundred_twenty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1620",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-twenty-four-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1620_one_hundred_twenty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
