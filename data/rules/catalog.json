@@ -42439,8 +42439,212 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1920_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1921",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1921_two_hundred_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1922",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1922_two_hundred_thirty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1923",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic leaves a surviving minion at the target location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1923_damaged_minion_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1924",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-unit-at-location-within-two-steps spells in hand, a second cast at an empty measured location is a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1924_second_explosion_at_an_empty_location_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1925",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-unit-at-location-within-two-steps spells in hand, a second cast damages a newly arrived minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1925_second_explosion_damages_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1926",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic damages every unit sharing the target location.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1926_explosion_damages_every_unit_at_the_target_location"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1927",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-unit-at-location-within-two-steps Magic leaves a far minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1927_explosion_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1928",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-unit-at-location-within-two-steps spells in hand, a second cast kills a newly summoned minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachUnitAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/minor_explosion_rules.rs",
+        "testName": "rule_catalog_1928_second_explosion_damages_a_newly_summoned_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1929",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1929_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1930",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1930_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1920,
+  "rustSupportedCount": 1930,
   "typescriptSupportedCount": 0
 }

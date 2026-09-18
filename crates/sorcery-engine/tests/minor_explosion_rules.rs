@@ -818,3 +818,392 @@ fn rule_catalog_1099_minor_explosion_withheld_during_pending_deathrite_order() {
     assert_eq!(after["players"]["north"]["avatar"]["life"], 17);
     assert_exact_replay(session);
 }
+
+fn supplemental_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn fragile_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn explosion_supplemental_manifest(seed: u32, fragile: bool) -> String {
+    let south_minion = if fragile {
+        fragile_minion()
+    } else {
+        supplemental_minion()
+    };
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "minor-explosion-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-minor-explosion-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-explosion": explosion(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-minion": south_minion,
+            "south-site": earth_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-explosion"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn seed_with_start(start: u32, required_south: usize, fragile: bool) -> String {
+    (start..start + 2048)
+        .chain(589..589 + 2048)
+        .map(|seed| explosion_supplemental_manifest(seed, fragile))
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-explosion")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with minor explosion and required South minions")
+}
+
+fn explosion_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-explosion")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    summon_at(session, "south-minion", cell)
+}
+
+fn setup_c3_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    south_ends_after_c1(session);
+    play_c3(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (0..count).map(|_| summon_south_at(session, "C3")).collect()
+}
+
+fn cast_explosion_at(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-explosion"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, Vec<String>, String)> {
+    let mut session = opening_main(encoded);
+    let c3_ids = setup_c3_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    explosion_locations(&session)
+        .contains(&"C3".to_owned())
+        .then_some((session, c3_ids, far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(589..589 + 2048)
+        .find_map(|seed| {
+            let encoded = explosion_supplemental_manifest(seed, false);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching minor explosion far-minion setup")
+}
+
+fn try_second_explosion_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    setup_c3_with_south_minions(&mut session, 1);
+    north_draws_spellbook(&mut session);
+    cast_explosion_at(&mut session, "C3");
+    pass_turn_to_north_spellbook(&mut session);
+    if explosion_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    explosion_locations(&session)
+        .contains(&"C2".to_owned())
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_explosion_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(589..589 + 8192)
+        .find_map(|seed| {
+            let encoded = explosion_supplemental_manifest(seed, false);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_explosion_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second minor explosion enemy-arrival setup")
+}
+
+fn try_second_explosion_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c3_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_explosion_at(&mut session, "C3");
+    if realm_unit(&state(&session), &first_id).is_some() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if explosion_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    explosion_locations(&session)
+        .contains(&"C3".to_owned())
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_explosion_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(589..589 + 8192)
+        .find_map(|seed| {
+            let encoded = explosion_supplemental_manifest(seed, true);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_explosion_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second minor explosion new-summon setup")
+}
+
+#[test]
+fn rule_catalog_1923_damaged_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = seed_with_start(1923, 1, false);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c3_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_explosion_at(&mut session, "C3");
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 3);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C3");
+    assert!(realm_unit(&state(&session), &minion_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1924_second_explosion_at_an_empty_location_is_a_paid_noop() {
+    let encoded = seed_with_start(1924, 1, true);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c3_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_explosion_at(&mut session, "C3");
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(explosion_spells_in_hand(&state(&session)) >= 1);
+    let receipt = cast_explosion_at(&mut session, "C3");
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "magic-damage-allocated")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1925_second_explosion_damages_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_explosion_enemy_arrival(1925);
+    let (mut session, minion_id) = try_second_explosion_enemy_arrival_prefix(&encoded)
+        .expect("second minor explosion enemy-arrival prefix");
+    let receipt = cast_explosion_at(&mut session, "C2");
+    assert_eq!(damage_dealt_amount(&receipt, &minion_id), 3);
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1926_explosion_damages_every_unit_at_the_target_location() {
+    let encoded = seed_with_start(1926, 2, false);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c3_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let receipt = cast_explosion_at(&mut session, "C3");
+    let mut expected: Vec<_> = minion_ids.iter().map(|id| (id.clone(), 3)).collect();
+    expected.sort();
+    assert_eq!(allocated_targets(&receipt), expected);
+    for minion_id in &minion_ids {
+        assert_eq!(unit(&state(&session), minion_id)["damage"], 3);
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1927_explosion_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(1927);
+    let (mut session, c3_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("minor explosion far-minion prefix");
+    let receipt = cast_explosion_at(&mut session, "C3");
+    assert_eq!(damage_dealt_amount(&receipt, &c3_ids[0]), 3);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1928_second_explosion_damages_a_newly_summoned_minion() {
+    let encoded = seed_for_second_explosion_new_summon(1928);
+    let (mut session, minion_id) = try_second_explosion_new_summon_prefix(&encoded)
+        .expect("second minor explosion new-summon prefix");
+    let receipt = cast_explosion_at(&mut session, "C3");
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert_eq!(damage_dealt_amount(&receipt, &minion_id), 3);
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == minion_id))
+    );
+    assert_exact_replay(&session);
+}
