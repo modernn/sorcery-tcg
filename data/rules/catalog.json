@@ -31006,6 +31006,225 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1352_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1353",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Drought in hand targeting an occupied Water site, cast-aura stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died",
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1353_cast_drought_aura_withheld_during_pending_deathrite_order_on_occupied_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1354",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Drought on an occupied Water site relayers a dual-region minion from underwater to underground instead of killing it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-relayered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_layer_rules.rs",
+        "testName": "rule_catalog_1354_drought_relayers_submerged_dual_region_minion_underground_on_occupied_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1355",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroying Flood on an occupied Earth site flips the site back to land. A Burrowing and Submerge minion Flood had relayered underwater is relayered underground and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "destroyTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1355_destroying_flood_on_occupied_earth_site_relayers_dual_region_minion_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1356",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroying Drought on an occupied Water site makes the site water again. A Burrowing and Submerge minion Drought had relayered underground is relayered underwater and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "destroyTargetAura",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1356_destroying_drought_on_occupied_water_site_relayers_dual_region_minion_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1357",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Returning Flood on an occupied Earth site flips the site back to land. A Burrowing and Submerge minion Flood had relayered underwater is relayered underground and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded",
+        "returnTargetAuraToOwnerHand",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1357_returning_flood_on_occupied_earth_site_relayers_dual_region_minion_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1358",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Returning Drought on an occupied Water site makes the site water again. A Burrowing and Submerge minion Drought had relayered underground is relayered underwater and stays in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold",
+        "returnTargetAuraToOwnerHand",
+        "burrowing",
+        "submerge"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "aura-returned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1358_returning_drought_on_occupied_water_site_relayers_dual_region_minion_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1359",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty-two synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1359_thirty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1360",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty-three synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1360_thirty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1361",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty-four synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1361_thirty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1362",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty-five synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1362_thirty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }

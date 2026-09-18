@@ -1,5 +1,5 @@
 //! Direct proofs that Flood, Drought, and Fate relayer lower-layer occupants
-//! (RULE-CATALOG-0337–0338, RULE-CATALOG-1343).
+//! (RULE-CATALOG-0337–0338, RULE-CATALOG-1343–1344, RULE-CATALOG-1354).
 //!
 //! Playing Water onto rubble already floods underground occupants. Destroying a
 //! current Water site already returns underwater occupants underground. Overlay
@@ -291,6 +291,14 @@ fn flood_covers_c3(descriptor: &Value) -> bool {
             .is_some_and(|cells| cells.iter().any(|value| value == "C3"))
 }
 
+fn drought_covers_c3(descriptor: &Value) -> bool {
+    descriptor["kind"] == "cast-aura"
+        && descriptor["cardId"] == "north-drought"
+        && descriptor["cells"]
+            .as_array()
+            .is_some_and(|cells| cells.iter().any(|value| value == "C3"))
+}
+
 fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay")["state"].clone()
 }
@@ -508,6 +516,59 @@ fn rule_catalog_1343_flood_relayers_burrowed_dual_region_minion_underwater() {
     let occupant = realm_unit(&current, &dualer_id);
     assert_eq!(occupant["location"], "C3");
     assert_eq!(occupant["region"], "underwater");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1354_drought_relayers_submerged_dual_region_minion_underground_on_occupied_water_site()
+ {
+    let mut session = drought_opening();
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-water"
+            && descriptor["cell"] == "C3"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-dualer"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underwater"
+    });
+    let dualer_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("dual-region identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, drought_covers_c3);
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "Drought must relayer the submerged dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underground");
     assert!(!cemetery_has(&current, &dualer_id));
     assert_exact_replay(&session);
 }
