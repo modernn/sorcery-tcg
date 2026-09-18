@@ -2739,8 +2739,21 @@ fn rule_catalog_1434_water_site_cast_minion_offered_after_pending_deathrite_orde
             .any(|action| {
                 action.descriptor["kind"] == "summon-minion"
                     && action.descriptor["cardId"] == "north-water-cast"
+                    && action.descriptor["cell"] == "C4"
+            }),
+        "after Deathrites complete, water-site cast must resume on unaffected Water sites"
+    );
+    assert!(
+        !session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "summon-minion"
+                    && action.descriptor["cardId"] == "north-water-cast"
                     && action.descriptor["cell"] == "C3"
-            })
+            }),
+        "Drought on occupied Water at C3 must keep that cell unavailable for water-site cast"
     );
     assert_exact_replay(session);
 }
@@ -3142,7 +3155,6 @@ fn try_pending_deathrite_with_flooded_occupied_earth_c3_play_site(
         session,
     })
 }
-
 
 fn try_pending_deathrite_with_drought_occupied_earth_c3_play_site(
     encoded: &str,
@@ -3572,7 +3584,10 @@ fn rule_catalog_1438_play_earth_on_flooded_occupied_earth_offered_after_pending_
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     assert_eq!(state(session)["phase"], "deathrite-order");
-    assert_eq!(state(session)["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-earth"
+    );
     assert!(
         session
             .legal_actions()
