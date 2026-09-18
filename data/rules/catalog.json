@@ -40838,8 +40838,212 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1840_two_hundred_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1841",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred seventeen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1841_two_hundred_seventeen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1842",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred eighteen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1842_two_hundred_eighteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1843",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic leaves a banished Demon absent from the realm and cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1843_banished_demon_stays_absent_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1844",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two banish-demon-and-undead-minions-at-location-within-two-steps spells in hand, a second cast at an empty Demon or Undead set is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1844_second_exorcism_without_a_demon_or_undead_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1845",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two banish-demon-and-undead-minions-at-location-within-two-steps spells in hand, a second cast banishes a newly arrived Undead at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1845_second_exorcism_banishes_a_newly_arrived_undead_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1846",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic banishes every Demon and Undead sharing the target cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1846_exorcism_banishes_every_demon_and_undead_sharing_the_target_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1847",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Banish-demon-and-undead-minions-at-location-within-two-steps Magic leaves a far Undead untouched while banishing a nearby Demon.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1847_exorcism_leaves_a_far_undead_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1848",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a banish-demon-and-undead-minions-at-location-within-two-steps cast, a later cast banishes a newly summoned Demon.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",
+        "demon",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-banished"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/banish_demon_undead_here_rules.rs",
+        "testName": "rule_catalog_1848_second_exorcism_banishes_a_newly_summoned_demon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1849",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1849_two_hundred_twenty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1850",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1850_two_hundred_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1840,
+  "rustSupportedCount": 1850,
   "typescriptSupportedCount": 0
 }

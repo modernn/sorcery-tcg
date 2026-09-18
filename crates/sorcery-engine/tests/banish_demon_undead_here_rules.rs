@@ -1,5 +1,5 @@
 //! Direct proofs for banish-demon-and-undead-minions-at-location-within-two-steps
-//! Magic (RULE-CATALOG-0573–0574, 1029, 1097).
+//! Magic (RULE-CATALOG-0573–0574, 1029, 1097, RULE-CATALOG-1843–1848).
 //!
 //! 1029 covers exorcism banishing a Deathrite undead minion: the controller
 //! draws a site and magic-resolved only appears after deathrite settlement.
@@ -142,6 +142,112 @@ fn exorcism_manifest(seed: u32) -> String {
                     "north-exorcism",
                     "north-demon",
                     "north-beast",
+                    "north-exorcism",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-undead"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn exorcism_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "banish-demon-undead-here-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-banish-demon-undead-here-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-beast": beast(),
+            "north-demon": demon(),
+            "north-exorcism": exorcism(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+            "south-undead": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                "undead": true,
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-demon",
+                    "north-beast",
+                    "north-exorcism",
+                    "north-exorcism",
+                    "north-demon",
+                    "north-beast",
+                    "north-exorcism",
+                    "north-exorcism",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-undead"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn exorcism_multi_target_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "banish-demon-undead-here-multi-target" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-banish-demon-undead-here-multi-target-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-demon": demon(),
+            "north-exorcism": exorcism(),
+            "north-site": earth_site(),
+            "north-undead": undead(),
+            "south-avatar": avatar(),
+            "south-site": earth_site(),
+            "south-undead": {
+                "attack": 1,
+                "cardType": "minion",
+                "defense": 3,
+                "manaCost": 0,
+                "summonToAnySite": true,
+                "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                "undead": true,
+            },
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-demon",
+                    "north-undead",
+                    "north-exorcism",
+                    "north-demon",
+                    "north-undead",
                     "north-exorcism",
                 ],
             },
@@ -304,21 +410,206 @@ fn exorcism_locations(session: &Session) -> Vec<String> {
 }
 
 fn seed_with(required: &[&str]) -> String {
-    seed_with_manifest(required, exorcism_manifest)
+    seed_with_manifest(573, required, exorcism_manifest)
+}
+
+fn seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(573..573 + 2048)
+        .map(exorcism_supplemental_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            required.iter().all(|id| hand.iter().any(|card| card == id))
+        })
+        .expect("bounded seed with required opening cards")
 }
 
 fn seed_with_deathrite(required: &[&str]) -> String {
-    seed_with_manifest(required, exorcism_deathrite_manifest)
+    seed_with_manifest(573, required, exorcism_deathrite_manifest)
 }
 
-fn seed_with_manifest(required: &[&str], manifest: impl Fn(u32) -> String) -> String {
-    (573..573 + 256)
+fn seed_with_manifest(start: u32, required: &[&str], manifest: impl Fn(u32) -> String) -> String {
+    (start..start + 256)
         .map(manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn exorcism_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-exorcism")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn demons_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-demon")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_exorcism(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-exorcism"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_raids_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    });
+    let (nearby, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-undead"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    nearby["cardInstanceId"]
+        .as_str()
+        .expect("nearby enemy identity")
+        .to_owned()
+}
+
+fn seed_with_two_exorcism_spells_in_hand_after_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = exorcism_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-demon").count() < 1
+                || !hand.iter().any(|card| card == "north-exorcism")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-demon", "C4");
+            (exorcism_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Exorcism spells in hand after setup")
+}
+
+struct SecondExorcismBanishSetup {
+    second_demon: String,
+    session: Session,
+}
+
+fn try_second_exorcism_banish_prefix(encoded: &str) -> Option<SecondExorcismBanishSetup> {
+    let mut session = opening_main(encoded);
+    let first_demon = summon_at(&mut session, "north-demon", "C4");
+    cast_exorcism(&mut session, "C4");
+    if state(&session)["realm"]["units"]
+        .as_array()
+        .is_some_and(|units| units.iter().any(|unit| unit["instanceId"] == first_demon))
+    {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    let snap = state(&session);
+    if exorcism_spells_in_hand(&snap) < 1 || demons_in_hand(&snap) < 1 {
+        return None;
+    }
+    let second_demon = summon_at(&mut session, "north-demon", "C4");
+    Some(SecondExorcismBanishSetup {
+        second_demon,
+        session,
+    })
+}
+
+fn seed_for_second_exorcism_banish(start: u32) -> String {
+    (start..start + 8192)
+        .find_map(|seed| {
+            let encoded = exorcism_supplemental_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-demon")
+                || !hand.iter().any(|card| card == "north-exorcism")
+            {
+                return None;
+            }
+            try_second_exorcism_banish_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Exorcism banish setup")
+}
+
+fn seed_with_demon_and_undead_at_c4(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = exorcism_multi_target_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if !hand.iter().any(|card| card == "north-demon")
+                || !hand.iter().any(|card| card == "north-undead")
+                || !hand.iter().any(|card| card == "north-exorcism")
+            {
+                return None;
+            }
+            let mut session = opening_main(&encoded);
+            let _ = summon_at(&mut session, "north-demon", "C4");
+            try_accept_where(&mut session, |descriptor| {
+                descriptor["kind"] == "summon-minion"
+                    && descriptor["cardId"] == "north-undead"
+                    && descriptor["cell"] == "C4"
+                    && descriptor["region"].is_null()
+            })?;
+            Some(encoded)
+        })
+        .expect("bounded seed reaching Demon and Undead at C4")
+}
+
+fn unit_absent(snapshot: &Value, instance_id: &str) -> bool {
+    snapshot["realm"]["units"]
+        .as_array()
+        .is_none_or(|units| units.iter().all(|unit| unit["instanceId"] != instance_id))
 }
 
 fn atlas_len(snapshot: &Value, seat: &str) -> usize {
@@ -598,6 +889,121 @@ fn rule_catalog_0574_location_with_only_a_beast_is_a_paid_noop() {
     assert_eq!(unit(&after, &beast_id)["location"], "C4");
     assert_eq!(unit(&after, &beast_id)["damage"], 0);
     assert!(!cemetery_has(&after, "north", &beast_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1843_banished_demon_stays_absent_after_turns_pass() {
+    let encoded = seed_with_start(1843, &["north-demon", "north-exorcism"]);
+    let mut session = opening_main(&encoded);
+    let demon_id = summon_at(&mut session, "north-demon", "C4");
+    cast_exorcism(&mut session, "C4");
+    assert!(unit_absent(&state(&session), &demon_id));
+    assert!(!cemetery_has(&state(&session), "north", &demon_id));
+    advance_full_round(&mut session);
+    assert!(unit_absent(&state(&session), &demon_id));
+    assert!(!cemetery_has(&state(&session), "north", &demon_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1844_second_exorcism_without_a_demon_or_undead_is_still_a_paid_noop() {
+    let encoded = seed_with_two_exorcism_spells_in_hand_after_setup(1844);
+    let mut session = opening_main(&encoded);
+    let demon_id = summon_at(&mut session, "north-demon", "C4");
+    let first = cast_exorcism(&mut session, "C4");
+    assert!(event_types(&first).contains(&"minion-banished"));
+    assert!(unit_absent(&state(&session), &demon_id));
+    assert!(!cemetery_has(&state(&session), "north", &demon_id));
+    let second = cast_exorcism(&mut session, "C4");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !second
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-banished")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1845_second_exorcism_banishes_a_newly_arrived_undead_at_the_same_cell() {
+    let encoded = seed_with_two_exorcism_spells_in_hand_after_setup(1845);
+    let mut session = opening_main(&encoded);
+    let demon_id = summon_at(&mut session, "north-demon", "C4");
+    cast_exorcism(&mut session, "C4");
+    assert!(unit_absent(&state(&session), &demon_id));
+    let nearby_id = south_raids_c4(&mut session);
+    let banished = cast_exorcism(&mut session, "C4");
+    assert_eq!(
+        event_types(&banished),
+        ["magic-cast", "minion-banished", "magic-resolved"]
+    );
+    assert_eq!(banished.events[1].payload["instanceId"], nearby_id);
+    assert!(unit_absent(&state(&session), &nearby_id));
+    assert!(!cemetery_has(&state(&session), "south", &nearby_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1846_exorcism_banishes_every_demon_and_undead_sharing_the_target_cell() {
+    let encoded = seed_with_demon_and_undead_at_c4(1846);
+    let mut session = opening_main(&encoded);
+    let demon_id = summon_at(&mut session, "north-demon", "C4");
+    let undead_id = summon_at(&mut session, "north-undead", "C4");
+    let banished = cast_exorcism(&mut session, "C4");
+    let banishes: Vec<_> = banished
+        .events
+        .iter()
+        .filter(|event| event.event_type == "minion-banished")
+        .map(|event| {
+            event.payload["instanceId"]
+                .as_str()
+                .expect("banished minion")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(banishes.len(), 2);
+    assert!(banishes.contains(&demon_id));
+    assert!(banishes.contains(&undead_id));
+    assert!(unit_absent(&state(&session), &demon_id));
+    assert!(unit_absent(&state(&session), &undead_id));
+    assert!(!cemetery_has(&state(&session), "north", &demon_id));
+    assert!(!cemetery_has(&state(&session), "north", &undead_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1847_exorcism_leaves_a_far_undead_untouched() {
+    let encoded = seed_with_start(1847, &["north-demon", "north-beast", "north-exorcism"]);
+    let mut session = opening_main(&encoded);
+    let demon_id = summon_at(&mut session, "north-demon", "C4");
+    let beast_id = summon_at(&mut session, "north-beast", "C4");
+    let far_id = south_plays_c1_and_summons_undead(&mut session);
+    cast_exorcism(&mut session, "C4");
+    assert!(unit_absent(&state(&session), &demon_id));
+    assert!(!cemetery_has(&state(&session), "north", &demon_id));
+    assert_eq!(unit(&state(&session), &beast_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert!(!cemetery_has(&state(&session), "south", &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1848_second_exorcism_banishes_a_newly_summoned_demon() {
+    let encoded = seed_for_second_exorcism_banish(1848);
+    let SecondExorcismBanishSetup {
+        mut session,
+        second_demon,
+    } = try_second_exorcism_banish_prefix(&encoded).expect("second Exorcism banish prefix");
+    let banished = cast_exorcism(&mut session, "C4");
+    assert_eq!(
+        event_types(&banished),
+        ["magic-cast", "minion-banished", "magic-resolved"]
+    );
+    assert_eq!(banished.events[1].payload["instanceId"], second_demon);
+    assert!(unit_absent(&state(&session), &second_demon));
+    assert!(!cemetery_has(&state(&session), "north", &second_demon));
     assert_exact_replay(&session);
 }
 
