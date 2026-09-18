@@ -1,5 +1,5 @@
 //! Direct proofs for teleport-target-one-diagonal Magic (RULE-CATALOG-0563–0564,
-//! RULE-CATALOG-1032).
+//! RULE-CATALOG-1032, RULE-CATALOG-1793–1798).
 //!
 //! Ordinary Magic targets a minion, Artifact, or Aura and teleports it one
 //! diagonal step onto an existing location. Cardinal cells and stay are not
@@ -99,7 +99,9 @@ fn displace_manifest(seed: u32) -> String {
             "north-displace": displace(),
             "north-site": earth_site(),
             "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
             "south-site": earth_site(),
+            "south-visitor": visitor(),
         },
         "decks": {
             "north": {
@@ -117,7 +119,14 @@ fn displace_manifest(seed: u32) -> String {
             "south": {
                 "atlas": vec!["south-site"; 6],
                 "avatar": "south-avatar",
-                "spellbook": vec!["north-ally"; 6],
+                "spellbook": [
+                    "south-minion",
+                    "south-minion",
+                    "south-visitor",
+                    "south-visitor",
+                    "south-minion",
+                    "south-minion",
+                ],
             },
         },
         "engineVersion": "sorcery-core-v1",
@@ -241,14 +250,126 @@ fn displace_casts(session: &Session) -> usize {
         .count()
 }
 
-fn seed_with(required: &[&str]) -> String {
-    (563..563 + 256)
+fn seed_with(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
         .map(displace_manifest)
         .find(|candidate| {
             let hand = opening_spell_ids(candidate);
             required.iter().all(|id| hand.iter().any(|card| card == id))
         })
         .expect("bounded seed with required opening cards")
+}
+
+fn displace_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-displace")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_with_two_displace_spells_in_hand_after_cardinal_setup(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = displace_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 1
+                || !hand.iter().any(|card| card == "north-displace")
+            {
+                return None;
+            }
+            let (mut session, _) = opening_with_ally(&encoded);
+            lay_cardinal_site(&mut session);
+            (displace_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two Displace spells in hand after cardinal setup")
+}
+
+fn allies_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-ally")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_for_second_ally_displace(start: u32) -> String {
+    (start..start + 2048)
+        .find_map(|seed| {
+            let encoded = displace_manifest(seed);
+            let hand = opening_spell_ids(&encoded);
+            if hand.iter().filter(|card| *card == "north-ally").count() < 2
+                || !hand.iter().any(|card| card == "north-displace")
+            {
+                return None;
+            }
+            let (session, _) = opening_with_ally(&encoded);
+            let snap = state(&session);
+            (displace_spells_in_hand(&snap) >= 2 && allies_in_hand(&snap) >= 1).then_some(encoded)
+        })
+        .expect("bounded seed with spare ally and two Displace spells after path setup")
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_displace(session: &mut Session, target_id: &str, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-displace"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn summon_north_ally_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned()
+}
+
+fn south_summons_visitor_at_c4(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-visitor"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("visitor instance identity")
+        .to_owned()
 }
 
 fn south_plays_c1(session: &mut Session) {
@@ -263,6 +384,54 @@ fn south_plays_c1(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn south_plays_c1_and_summons_minion(session: &mut Session) -> String {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("minion instance identity")
+        .to_owned()
+}
+
+fn opening_with_diagonal_board(encoded: &str) -> Session {
+    let mut session = opening_main(encoded);
+    south_plays_c1(&mut session);
+    lay_diagonal_site(&mut session);
+    session
+}
+
+fn opening_with_ally_and_far_minion(encoded: &str) -> (Session, String, String) {
+    let mut session = opening_main(encoded);
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == "C4"
+            && descriptor["region"].is_null()
+    });
+    let ally_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("ally instance identity")
+        .to_owned();
+    let far_id = south_plays_c1_and_summons_minion(&mut session);
+    lay_diagonal_site(&mut session);
+    (session, ally_id, far_id)
 }
 
 fn opening_with_ally(encoded: &str) -> (Session, String) {
@@ -478,7 +647,7 @@ fn deathrite_displace_seed_with(start: u32) -> String {
 
 #[test]
 fn rule_catalog_0563_teleport_targets_a_minion_one_diagonal() {
-    let encoded = seed_with(&["north-ally", "north-displace"]);
+    let encoded = seed_with(563, &["north-ally", "north-displace"]);
     let (mut session, ally_id) = opening_with_ally(&encoded);
     lay_diagonal_site(&mut session);
     assert_eq!(displace_destinations(&session, &ally_id), ["D3"]);
@@ -514,7 +683,7 @@ fn rule_catalog_0563_teleport_targets_a_minion_one_diagonal() {
 
 #[test]
 fn rule_catalog_0564_teleport_one_diagonal_is_unoffered_without_a_diagonal_site() {
-    let encoded = seed_with(&["north-ally", "north-displace"]);
+    let encoded = seed_with(564, &["north-ally", "north-displace"]);
     let (mut session, ally_id) = opening_with_ally(&encoded);
     lay_cardinal_site(&mut session);
     assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
@@ -591,4 +760,88 @@ fn rule_catalog_1032_teleport_one_diagonal_withheld_during_pending_deathrite_ord
     assert!(types.contains(&"unit-teleported"));
     assert_eq!(unit(&state(session), &visitor_id)["location"], "D3");
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1793_teleported_minion_stays_at_its_destination_after_turns_pass() {
+    let encoded = seed_with(1793, &["north-ally", "north-displace"]);
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    lay_diagonal_site(&mut session);
+    cast_displace(&mut session, &ally_id, "D3");
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "D3");
+    advance_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "D3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1794_second_displace_still_has_zero_casts_with_only_a_cardinal_site() {
+    let encoded = seed_with_two_displace_spells_in_hand_after_cardinal_setup(1794);
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    lay_cardinal_site(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "C4");
+    assert!(displace_destinations(&session, &ally_id).is_empty());
+    assert_eq!(displace_casts(&session), 0);
+    assert!(displace_spells_in_hand(&state(&session)) >= 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1795_displace_teleports_an_enemy_minion_one_diagonal() {
+    let encoded = seed_with(1795, &["north-displace"]);
+    let mut session = opening_with_diagonal_board(&encoded);
+    let visitor_id = south_summons_visitor_at_c4(&mut session);
+    assert_eq!(unit(&state(&session), &visitor_id)["location"], "C4");
+    assert_eq!(displace_destinations(&session, &visitor_id), ["D3"]);
+    let teleported = cast_displace(&mut session, &visitor_id, "D3");
+    assert!(event_types(&teleported).contains(&"unit-teleported"));
+    assert_eq!(unit(&state(&session), &visitor_id)["location"], "D3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1796_displace_leaves_a_far_minion_at_its_cell() {
+    let encoded = seed_with(1796, &["north-ally", "north-displace"]);
+    let (mut session, ally_id, far_id) = opening_with_ally_and_far_minion(&encoded);
+    cast_displace(&mut session, &ally_id, "D3");
+    assert_eq!(unit(&state(&session), &ally_id)["location"], "D3");
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1797_displace_omits_a_far_cell_beyond_one_diagonal() {
+    let encoded = seed_with(1797, &["north-ally", "north-displace"]);
+    let (mut session, ally_id) = opening_with_ally(&encoded);
+    lay_diagonal_site(&mut session);
+    let offered = displace_destinations(&session, &ally_id);
+    assert!(offered.contains(&"D3".to_owned()));
+    assert!(!offered.contains(&"C1".to_owned()));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1798_second_displace_teleports_a_newly_summoned_ally() {
+    let encoded = seed_for_second_ally_displace(1798);
+    let (mut session, first_ally) = opening_with_ally(&encoded);
+    lay_diagonal_site(&mut session);
+    cast_displace(&mut session, &first_ally, "D3");
+    assert_eq!(unit(&state(&session), &first_ally)["location"], "D3");
+    let second_ally = summon_north_ally_at(&mut session, "C4");
+    assert_eq!(unit(&state(&session), &second_ally)["location"], "C4");
+    assert!(displace_destinations(&session, &second_ally).contains(&"D3".to_owned()));
+    let teleported = cast_displace(&mut session, &second_ally, "D3");
+    assert!(event_types(&teleported).contains(&"unit-teleported"));
+    assert_eq!(
+        teleported
+            .events
+            .iter()
+            .find(|event| event.event_type == "unit-teleported")
+            .expect("unit-teleported")
+            .payload["targetInstanceId"],
+        second_ally
+    );
+    assert_eq!(unit(&state(&session), &second_ally)["location"], "D3");
+    assert_eq!(unit(&state(&session), &first_ally)["location"], "D3");
+    assert_exact_replay(&session);
 }

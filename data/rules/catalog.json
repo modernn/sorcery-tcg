@@ -39856,8 +39856,197 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1790_one_hundred_ninety_two_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1791",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1791_one_hundred_ninety_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1792",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1792_one_hundred_ninety_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1793",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Teleport-target-one-diagonal Magic leaves a teleported minion at its destination after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1793_teleported_minion_stays_at_its_destination_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1794",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two teleport-target-one-diagonal spells in hand, a cardinal-only board still offers zero casts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1794_second_displace_still_has_zero_casts_with_only_a_cardinal_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1795",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Teleport-target-one-diagonal Magic can teleport an enemy minion one diagonal step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1795_displace_teleports_an_enemy_minion_one_diagonal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1796",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Teleport-target-one-diagonal Magic leaves a far minion at its cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1796_displace_leaves_a_far_minion_at_its_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1797",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Teleport-target-one-diagonal Magic omits a far cell beyond one diagonal step.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1797_displace_omits_a_far_cell_beyond_one_diagonal"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1798",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a teleport-target-one-diagonal cast, a later cast teleports a newly summoned ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportTargetMinionArtifactOrAuraOneDiagonal"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/teleport_one_diagonal_rules.rs",
+        "testName": "rule_catalog_1798_second_displace_teleports_a_newly_summoned_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1799",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety five game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1799_one_hundred_ninety_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1800",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one hundred ninety six game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1800_one_hundred_ninety_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1790,
+  "rustSupportedCount": 1800,
   "typescriptSupportedCount": 0
 }
