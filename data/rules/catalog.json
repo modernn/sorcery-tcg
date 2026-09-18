@@ -37308,6 +37308,206 @@
         "file": "crates/sorcery-engine/tests/grant_lethal_then_draw_rules.rs",
         "testName": "rule_catalog_1658_printed_lethal_outlasts_expired_grant_while_plain_ally_cannot_kill"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1661",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1661_one_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1662",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1662_one_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1669",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-forty-three game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1669_one_hundred_forty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1670",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-forty-four game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1670_one_hundred_forty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1663",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A minion with printed Airborne strikes an Airborne enemy without a grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "move-and-attack"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1663_printed_airborne_strikes_airborne_enemy_without_grant"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1664",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Airborne-this-turn then draw-spell Magic lets a grounded ally strike an Airborne enemy before End Phase.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1664_granted_airborne_then_draw_strikes_airborne_enemy_before_end_of_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1665",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne then draw expires at End Phase, the grounded ally cannot strike on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1665_granted_airborne_then_draw_expires_before_ally_strikes_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1666",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne then draw expires, a printed Airborne ally still strikes on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1666_printed_airborne_still_strikes_after_grant_expires_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1667",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Printed Airborne and grant-Airborne then draw compose while the temporary grant is active.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1667_printed_and_granted_airborne_then_draw_compose_while_grant_is_active"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1668",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-Airborne then draw expires, printed Airborne outlasts the grant while a plain ally cannot strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurnThenDrawSpell"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "end-turn",
+        "move-and-attack"
+      ],
+      "eventHints": [
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_airborne_then_draw_rules.rs",
+        "testName": "rule_catalog_1668_printed_airborne_outlasts_expired_grant_while_plain_ally_cannot_strike"
+      }
     }
   ]
 }
