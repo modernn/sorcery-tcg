@@ -41042,8 +41042,212 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1850_two_hundred_twenty_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1851",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred nineteen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1851_two_hundred_nineteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1852",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1852_two_hundred_twenty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1853",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic leaves a killed Undead in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1853_killed_undead_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1854",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-undead-minions-and-artifacts-at-location-within-two-steps spells in hand, a second cast at an empty Undead or Artifact set is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1854_second_unravel_without_an_undead_or_artifact_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1855",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-undead-minions-and-artifacts-at-location-within-two-steps spells in hand, a second cast kills a newly arrived Undead at the same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1855_second_unravel_kills_a_newly_arrived_undead_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1856",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic kills every Undead and destroys every Artifact sharing the target cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1856_unravel_kills_every_undead_and_destroys_every_artifact_sharing_the_target_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1857",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-undead-minions-and-artifacts-at-location-within-two-steps Magic leaves a far Undead untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1857_unravel_leaves_a_far_undead_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1858",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a destroy-undead-minions-and-artifacts-at-location-within-two-steps cast, a later cast kills a newly summoned Undead.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps",
+        "undead"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_undead_relics_here_rules.rs",
+        "testName": "rule_catalog_1858_second_unravel_kills_a_newly_summoned_undead"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1859",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1859_two_hundred_twenty_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1860",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred twenty eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1860_two_hundred_twenty_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1850,
+  "rustSupportedCount": 1860,
   "typescriptSupportedCount": 0
 }
