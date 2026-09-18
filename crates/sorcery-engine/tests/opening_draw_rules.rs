@@ -1000,3 +1000,20 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
     );
     assert_exact_replay(session);
 }
+
+#[test]
+fn rule_catalog_1536_non_geomancer_earth_site_play_omits_create_rubble_at() {
+    let mut session = north_second_main(23, false);
+    let (second, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    assert!(second.get("createRubbleAt").is_none());
+    let first_play = session
+        .transcript()
+        .iter()
+        .flat_map(|receipt| receipt.events.iter())
+        .find(|event| event.event_type == "site-played")
+        .expect("first site-played event");
+    assert!(first_play.payload.get("createRubbleAt").is_none());
+    assert_exact_replay(&session);
+}

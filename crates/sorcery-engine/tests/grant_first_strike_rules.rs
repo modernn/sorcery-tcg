@@ -1,5 +1,5 @@
 //! Direct proofs for grant-First-Strike-this-turn Magic (RULE-CATALOG-0282–0283,
-//! RULE-CATALOG-1108).
+//! RULE-CATALOG-1108, RULE-CATALOG-1533–1535, RULE-CATALOG-1537, RULE-CATALOG-1539).
 //!
 //! Official Magic can grant First Strike for the current turn. The grant uses
 //! the same ally choice as Charge, persists only on minions, and expires
@@ -38,6 +38,18 @@ fn fighter() -> Value {
         "cardType": "minion",
         "defense": 3,
         "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn printed_first_strike_fighter() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "strikesFirstWhileAttacking": true,
+        "strikesFirstWhileDefending": true,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
     })
 }
@@ -89,7 +101,7 @@ fn finish_manifest(mut value: Value) -> String {
     canonical_json(&value).expect("canonical synthetic manifest")
 }
 
-fn manifest() -> String {
+fn manifest_with_north_ally(ally: &Value) -> String {
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "grant-first-strike" }))
@@ -98,7 +110,7 @@ fn manifest() -> String {
             "revisionId": "synthetic-grant-first-strike-v1",
         },
         "cards": {
-            "north-ally": fighter(),
+            "north-ally": ally,
             "north-avatar": avatar(),
             "north-grant": grant(),
             "north-site": site(),
@@ -123,6 +135,31 @@ fn manifest() -> String {
         "schemaVersion": 1,
         "seed": 1,
     }))
+}
+
+fn manifest() -> String {
+    manifest_with_north_ally(&fighter())
+}
+
+fn opening_main_with_ally(ally: &Value) -> Session {
+    let mut session = Session::new(&manifest_with_north_ally(ally)).expect("grant First Strike");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn defending_only_fighter() -> Value {
+    json!({
+        "attack": 3,
+        "cardType": "minion",
+        "defense": 3,
+        "manaCost": 0,
+        "strikesFirstWhileDefending": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
 }
 
 fn try_accept_where(
@@ -259,6 +296,39 @@ fn south_summons_visitor_at_c4(session: &mut Session) -> String {
         .to_owned()
 }
 
+fn through_north_pass_to_south_main(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+fn south_attacks_north_ally(session: &mut Session, attacker_id: &str, defender_id: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == attacker_id
+            && descriptor["to"]["cell"] == "C4"
+    });
+    while state(session)["phase"] == "movement" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "continue-basic-movement"
+        });
+    }
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "declare-attack"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == defender_id
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "close-defend" && descriptor["originalTargetParticipates"] == true
+    });
+    if state(session)["phase"] == "intercept" {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "close-intercept"
+        });
+    }
+}
+
 fn strike_minion(session: &mut Session, attacker_id: &str, enemy_id: &str) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "move-and-attack"
@@ -380,6 +450,111 @@ fn rule_catalog_0283_granted_first_strike_kills_before_return_damage() {
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1533_granted_first_strike_kills_before_attacker_strikes_while_defending() {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    through_north_pass_to_south_main(&mut session);
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert!(
+        unit(&after, &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1534_printed_and_granted_first_strike_compose_while_attacking() {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    assert!(
+        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+            .as_array()
+            .is_some_and(|sources| sources.len() == 1)
+    );
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_eq!(
+        &descriptor["cardInstanceId"],
+        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+            .as_array()
+            .and_then(|sources| sources.first())
+            .expect("grant source")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1535_printed_and_granted_first_strike_compose_while_defending() {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    assert_eq!(
+        &descriptor["cardInstanceId"],
+        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+            .as_array()
+            .and_then(|sources| sources.first())
+            .expect("grant source")
+    );
+    through_north_pass_to_south_main(&mut session);
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1537_defending_only_printed_plus_grant_strikes_first_while_attacking() {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+
+    let mut simultaneous = session.clone();
+    strike_minion(&mut simultaneous, &ally_id, &enemy_id);
+    assert!(cemetery_has(&simultaneous, "north", &ally_id));
+    assert!(cemetery_has(&simultaneous, "south", &enemy_id));
+
+    grant_first_strike(&mut session, &ally_id);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1539_granted_first_strike_expires_before_opponent_turn_combat() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    grant_first_strike(&mut session, &ally_id);
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        unit(&state(&session), &ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
 }
 
