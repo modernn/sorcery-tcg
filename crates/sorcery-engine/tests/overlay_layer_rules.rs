@@ -1,5 +1,5 @@
 //! Direct proofs that Flood, Drought, and Fate relayer lower-layer occupants
-//! (RULE-CATALOG-0337–0338).
+//! (RULE-CATALOG-0337–0338, RULE-CATALOG-1343).
 //!
 //! Playing Water onto rubble already floods underground occupants. Destroying a
 //! current Water site already returns underwater occupants underground. Overlay
@@ -45,6 +45,15 @@ fn fate() -> Value {
 fn drought() -> Value {
     json!({
         "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold": true,
+        "cardType": "aura",
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn flood() -> Value {
+    json!({
+        "affectedSitesAreFlooded": true,
         "cardType": "aura",
         "manaCost": 0,
         "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
@@ -105,6 +114,49 @@ fn fate_manifest(seed: u32) -> String {
                     "north-fate",
                     "north-dualer",
                     "north-fate",
+                    "north-dualer",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 6],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-dummy"; 6],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn flood_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "overlay-layer-flood" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-overlay-layer-flood-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-dualer": dualer(),
+            "north-earth": earth(),
+            "north-flood": flood(),
+            "south-avatar": avatar(),
+            "south-dummy": dummy(),
+            "south-site": earth(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-earth"; 6],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
+                    "north-dualer",
+                    "north-flood",
                     "north-dualer",
                 ],
             },
@@ -231,6 +283,14 @@ fn drought_covers_c4(descriptor: &Value) -> bool {
             .is_some_and(|cells| cells.iter().any(|value| value == "C4"))
 }
 
+fn flood_covers_c3(descriptor: &Value) -> bool {
+    descriptor["kind"] == "cast-aura"
+        && descriptor["cardId"] == "north-flood"
+        && descriptor["cells"]
+            .as_array()
+            .is_some_and(|cells| cells.iter().any(|value| value == "C3"))
+}
+
 fn state(session: &Session) -> Value {
     session.replay_value().expect("authoritative replay")["state"].clone()
 }
@@ -295,6 +355,21 @@ fn drought_opening() -> Session {
             .then_some(session)
         })
         .expect("bounded seed opening with Drought, Water, and a dual-region minion")
+}
+
+fn flood_opening() -> Session {
+    (1..=4096)
+        .map(flood_manifest)
+        .find_map(|candidate| {
+            let session = Session::new(&candidate).expect("Flood overlay-layer candidate");
+            let atlas = opening_ids(&session, "atlas");
+            let spells = opening_ids(&session, "spellbook");
+            (atlas.contains(&"north-earth".to_owned())
+                && spells.contains(&"north-flood".to_owned())
+                && spells.contains(&"north-dualer".to_owned()))
+            .then_some(session)
+        })
+        .expect("bounded seed opening with Flood, Earth, and a dual-region minion")
 }
 
 #[test]
@@ -381,6 +456,58 @@ fn rule_catalog_0338_drought_relayers_submerged_dual_region_minion_underground()
     let occupant = realm_unit(&current, &dualer_id);
     assert_eq!(occupant["location"], "C4");
     assert_eq!(occupant["region"], "underground");
+    assert!(!cemetery_has(&current, &dualer_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1343_flood_relayers_burrowed_dual_region_minion_underwater() {
+    let mut session = flood_opening();
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C4"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-earth"
+            && descriptor["cell"] == "C3"
+    });
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-dualer"
+            && descriptor["cell"] == "C3"
+            && descriptor["region"] == "underground"
+    });
+    let dualer_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("dual-region identity")
+        .to_owned();
+    let (_, receipt) = accept_where(&mut session, flood_covers_c3);
+    assert!(
+        receipt
+            .events
+            .iter()
+            .all(|event| event.event_type != "minion-died"),
+        "Flood must relayer the burrowed dual-region unit instead of killing it"
+    );
+    let current = state(&session);
+    let occupant = realm_unit(&current, &dualer_id);
+    assert_eq!(occupant["location"], "C3");
+    assert_eq!(occupant["region"], "underwater");
     assert!(!cemetery_has(&current, &dualer_id));
     assert_exact_replay(&session);
 }

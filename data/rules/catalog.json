@@ -30783,6 +30783,229 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1342_twenty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1343",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Flood on an occupied Earth site relayers a dual-region minion from underground to underwater instead of killing it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-relayered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_layer_rules.rs",
+        "testName": "rule_catalog_1343_flood_relayers_burrowed_dual_region_minion_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1344",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Water onto Flood-covered Rubble from a flooded occupied Earth site relayers a dual-region minion underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "minion-relayered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1344_playing_water_onto_flooded_occupied_earth_rubble_relayers_underwater"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1345",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Earth onto Drought-covered Rubble from a drought occupied Water site relayers a dual-region minion underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played",
+        "minion-relayered"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1345_playing_earth_onto_drought_occupied_water_rubble_relayers_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1346",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering an occupied Earth site, play-site Water stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1346_play_water_on_flooded_occupied_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1347",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Drought covering an occupied site, play-site Earth stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "order-deathrites",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "minion-died",
+        "rubble-created"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1347_play_earth_on_drought_occupied_site_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1348",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood in hand targeting an occupied Earth site, cast-aura stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "cast-aura",
+        "order-deathrites",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died",
+        "aura-conjured"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/aura_magic_rules.rs",
+        "testName": "rule_catalog_1348_cast_flood_aura_withheld_during_pending_deathrite_order_on_occupied_earth_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1349",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Water onto Flood-covered Rubble from a flooded occupied Earth site creates a Water site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreFlooded"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1349_playing_water_onto_flooded_occupied_earth_rubble_creates_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1350",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Playing Earth onto Drought-covered Rubble from a drought occupied Water site creates a land site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "play-site",
+        "cast-aura",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "rubble-replaced",
+        "site-played"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/play_site_overlay_rules.rs",
+        "testName": "rule_catalog_1350_playing_earth_onto_drought_occupied_water_rubble_creates_earth_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1351",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1351_thirty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1352",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of thirty-one synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1352_thirty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
