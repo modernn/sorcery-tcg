@@ -35520,6 +35520,204 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1570_one_hundred_four_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1571",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-five-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1571_one_hundred_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1572",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-six-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1572_one_hundred_six_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1573",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-First-Strike expires at its controller's End Phase, a defending-only printed ally still kills a 3/3 attacker before taking return damage when south attacks on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending",
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1573_defending_only_printed_plus_grant_strikes_first_after_grant_expires_while_defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1574",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-First-Strike expires at its controller's End Phase, a printed first-strike ally still kills a 3/3 defender before taking return damage when it attacks on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending",
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1574_printed_first_strike_plus_grant_strikes_first_after_grant_expires_while_attacking"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1575",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-First-Strike expires at its controller's End Phase, a minion without printed first strike trades simultaneously when it attacks a 3/3 defender on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1575_granted_first_strike_expires_before_ally_attacks_on_later_turn"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1576",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-First-Strike expires at its controller's End Phase, an attacking-only printed ally keeps its attacking keyword but trades simultaneously when south attacks on a later turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1576_attacking_only_printed_plus_grant_trades_after_grant_expires_while_defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1577",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After grant-First-Strike expires at its controller's End Phase, a defending-only printed ally still kills a 3/3 attacker before taking return damage when south attacks on a later turn even though a plain ally without printed first strike trades in the same setup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileDefending",
+        "grantFirstStrikeToAllyThisTurn"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1577_defending_only_printed_persists_after_grant_expires_while_defending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1578",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "A printed first-strike ally without a grant kills a 3/3 opponent before taking return damage while attacking and while defending.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "strikesFirstWhileAttacking",
+        "strikesFirstWhileDefending"
+      ],
+      "actionHints": [
+        "declare-attack"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_first_strike_rules.rs",
+        "testName": "rule_catalog_1578_printed_first_strike_without_grant_strikes_first_in_both_roles"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1579",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-seven-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1579_one_hundred_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1580",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A one-hundred-eight-game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1580_one_hundred_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }

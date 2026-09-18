@@ -1,6 +1,6 @@
 //! Direct proofs for grant-First-Strike-this-turn Magic (RULE-CATALOG-0282–0283,
 //! RULE-CATALOG-1108, RULE-CATALOG-1533–1535, RULE-CATALOG-1537, RULE-CATALOG-1539,
-//! RULE-CATALOG-1545–1548).
+//! RULE-CATALOG-1545–1548, RULE-CATALOG-1564–1568, RULE-CATALOG-1573–1578).
 //!
 //! Official Magic can grant First Strike for the current turn. The grant uses
 //! the same ally choice as Charge, persists only on minions, and expires
@@ -753,6 +753,163 @@ fn rule_catalog_1568_printed_first_strike_plus_grant_strikes_first_after_grant_e
     assert_eq!(unit(&after, &ally_id)["damage"], 0);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert_exact_replay(&session);
+}
+
+fn expire_grant_first_strike(session: &mut Session, ally_id: &str, grant_source: &str) {
+    let (_, ended) = accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(ended.events.iter().any(|event| {
+        event.event_type == "first-strike-expired"
+            && event.payload["instanceId"] == ally_id
+            && event.payload["sourceInstanceId"] == grant_source
+    }));
+    assert!(
+        unit(&state(session), ally_id)
+            .get("temporaryFirstStrikeSources")
+            .is_none()
+    );
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+}
+
+#[test]
+fn rule_catalog_1573_defending_only_printed_plus_grant_strikes_first_after_grant_expires_while_defending()
+ {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    expire_grant_first_strike(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1574_printed_first_strike_plus_grant_strikes_first_after_grant_expires_while_attacking()
+ {
+    let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    expire_grant_first_strike(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1575_granted_first_strike_expires_before_ally_attacks_on_later_turn() {
+    let mut session = opening_main();
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    expire_grant_first_strike(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    through_south_pass_to_north_main(&mut session);
+    strike_minion(&mut session, &ally_id, &enemy_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1576_attacking_only_printed_plus_grant_trades_after_grant_expires_while_defending()
+{
+    let mut session = opening_main_with_ally(&attacking_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    expire_grant_first_strike(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    assert!(cemetery_has(&session, "north", &ally_id));
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1577_defending_only_printed_persists_after_grant_expires_while_defending() {
+    let mut session = opening_main_with_ally(&defending_only_fighter());
+    let ally_id = summon_north_ally(&mut session);
+    let enemy_id = south_summons_visitor_at_c4(&mut session);
+    let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
+    expire_grant_first_strike(
+        &mut session,
+        &ally_id,
+        descriptor["cardInstanceId"].as_str().expect("grant source"),
+    );
+
+    let mut plain = opening_main();
+    let plain_ally = summon_north_ally(&mut plain);
+    let plain_enemy = south_summons_visitor_at_c4(&mut plain);
+    let (plain_descriptor, plain_grant) = grant_first_strike(&mut plain, &plain_ally);
+    expire_grant_first_strike(
+        &mut plain,
+        &plain_ally,
+        plain_descriptor["cardInstanceId"]
+            .as_str()
+            .expect("grant source"),
+    );
+    south_attacks_north_ally(&mut plain, &plain_enemy, &plain_ally);
+    assert!(cemetery_has(&plain, "north", &plain_ally));
+    assert!(cemetery_has(&plain, "south", &plain_enemy));
+    assert!(
+        plain_grant
+            .events
+            .iter()
+            .any(|event| event.event_type == "first-strike-granted")
+    );
+
+    south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+    let after = state(&session);
+    assert_eq!(unit(&after, &ally_id)["damage"], 0);
+    assert!(cemetery_has(&session, "south", &enemy_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1578_printed_first_strike_without_grant_strikes_first_in_both_roles() {
+    {
+        let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+        let ally_id = summon_north_ally(&mut session);
+        let enemy_id = south_summons_visitor_at_c4(&mut session);
+        strike_minion(&mut session, &ally_id, &enemy_id);
+        let after = state(&session);
+        assert_eq!(unit(&after, &ally_id)["damage"], 0);
+        assert!(cemetery_has(&session, "south", &enemy_id));
+        assert_exact_replay(&session);
+    }
+    {
+        let mut session = opening_main_with_ally(&printed_first_strike_fighter());
+        let ally_id = summon_north_ally(&mut session);
+        let enemy_id = south_summons_visitor_at_c4(&mut session);
+        through_north_pass_to_south_main(&mut session);
+        south_attacks_north_ally(&mut session, &enemy_id, &ally_id);
+        let after = state(&session);
+        assert_eq!(unit(&after, &ally_id)["damage"], 0);
+        assert!(cemetery_has(&session, "south", &enemy_id));
+        assert_exact_replay(&session);
+    }
 }
 
 fn deathrite_grant_first_strike_manifest(seed: u32) -> String {
