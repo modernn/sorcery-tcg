@@ -34154,6 +34154,214 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1502_eighty_two_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1503",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering a flooded occupied Water site at C3, return Flood aura stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1503_return_flood_aura_withheld_during_pending_deathrite_order_on_flooded_occupied_water_site_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1504",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Drought covering a drought occupied Earth site at C3, return Drought aura stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1504_return_drought_aura_withheld_during_pending_deathrite_order_on_drought_occupied_earth_site_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1505",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a flooded occupied Water site at C3, returning Flood onto that same-type host relayers a dual-region minion underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1505_returning_flood_on_flooded_occupied_water_at_c3_relayers_underwater_after_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1506",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a drought occupied Earth site at C3, returning Drought onto that same-type host relayers a dual-region minion underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1506_returning_drought_on_drought_occupied_earth_at_c3_relayers_underground_after_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1507",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a flooded occupied Water site at C3, destroying Flood relayers a dual-region minion underwater instead of killing it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1507_destroying_flood_on_flooded_occupied_water_at_c3_relayers_underwater_after_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1508",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a drought occupied Earth site at C3, destroying Drought relayers a dual-region minion underground instead of killing it.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreNotWaterSitesAndProvideNoWaterThreshold"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/overlay_leave_rules.rs",
+        "testName": "rule_catalog_1508_destroying_drought_on_drought_occupied_earth_at_c3_relayers_underground_after_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1509",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase with Flood covering a flooded occupied Earth site at C3, water-site cast minion stays withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1509_water_site_cast_withheld_during_pending_deathrite_order_on_flooded_occupied_earth_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1510",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After deathrite-order completes on a flooded occupied Earth site at C3, water-site cast minion is offered again on that cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "affectedSitesAreWaterSitesAndProvideWaterThreshold"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/water_settlement_rules.rs",
+        "testName": "rule_catalog_1510_water_site_cast_offered_after_pending_deathrite_order_on_flooded_occupied_earth_at_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1511",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "An eighty-three-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1511_eighty_three_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1512",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "An eighty-four-game synthetic batch with unverified authority stays unranked while replay and eligibility gates pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1512_eighty_four_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ]
 }
