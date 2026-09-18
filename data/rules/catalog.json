@@ -40451,8 +40451,203 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1820_two_hundred_six_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1821",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred seven game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1821_two_hundred_seven_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1822",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred eight game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1822_two_hundred_eight_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1823",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifacts-and-auras-at-location-within-two-steps Magic leaves a destroyed Artifact in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1823_destroyed_relic_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1824",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-artifacts-and-auras-at-location-within-two-steps spells in hand, a second cast at an empty location is still a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1824_second_unmake_without_a_relic_is_still_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1825",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After destroy-artifacts-and-auras-at-location-within-two-steps clears a cell, a later cast destroys a newly arrived Artifact at that same cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1825_second_unmake_destroys_a_newly_arrived_relic_at_the_same_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1826",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifacts-and-auras-at-location-within-two-steps Magic destroys every Artifact and Aura sharing the target cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "artifact-destroyed",
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1826_unmake_destroys_every_artifact_and_aura_sharing_the_target_cell"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1827",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifacts-and-auras-at-location-within-two-steps Magic destroys a nearby Artifact while a far Artifact stays untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1827_unmake_leaves_a_far_relic_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1828",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a destroy-artifacts-and-auras-at-location-within-two-steps cast, a later cast destroys a newly placed Artifact.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyArtifactsAndAurasAtLocationWithinTwoSteps"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_relics_here_rules.rs",
+        "testName": "rule_catalog_1828_second_unmake_destroys_a_newly_placed_relic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1829",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred fifteen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1829_two_hundred_fifteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1830",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred sixteen game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1830_two_hundred_sixteen_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1820,
+  "rustSupportedCount": 1830,
   "typescriptSupportedCount": 0
 }
