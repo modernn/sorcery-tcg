@@ -29896,6 +29896,217 @@
         "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
         "testName": "rule_catalog_1302_ignited_and_drawrite_b_death_withheld_during_pending_end_turn_deathrite_order"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1303",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred mill-spells-then-draw-sites stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1303_mill_spells_then_draw_sites_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1304",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred mill-sites-then-draw-spells stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnMillSites",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1304_mill_sites_then_draw_spells_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1305",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred lure-then-draw-spells stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1305_lure_then_draw_spells_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1306",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred lure-then-draw-sites stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1306_lure_then_draw_sites_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1307",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred here-damage-then-draw-spells stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-damaged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1307_here_damage_then_draw_spells_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1308",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred here-damage-then-draw-sites stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnDamageEachOtherUnitHere",
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-damaged"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1308_here_damage_then_draw_sites_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1309",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred teleport-then-draw-spells stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1309_teleport_then_draw_spells_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1310",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the Start Phase, a deferred teleport-then-draw-sites stacked start-turn trigger is withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSites"
+      ],
+      "actionHints": [
+        "resolve-start-turn-trigger",
+        "order-deathrites"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/start_turn_rules.rs",
+        "testName": "rule_catalog_1310_teleport_then_draw_sites_start_turn_trigger_withheld_during_pending_deathrite_order"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1311",
+      "requirementIds": [
+        "TEST-04"
+      ],
+      "plainLanguage": "A batch of twenty-five synthetic-only finished games with passing gates classifies every game as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1311_twenty_five_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1312",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "While the game is in deathrite-order phase during the End Phase, deferred Malakhim untap and Ignited end-turn death are withheld until the pending Deathrite chain completes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "diesAtEndOfControllerTurn",
+        "untapsAtEndOfControllerTurn"
+      ],
+      "actionHints": [
+        "end-turn",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "minion-died",
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/end_turn_lifecycle_rules.rs",
+        "testName": "rule_catalog_1312_malakhim_untap_and_ignited_death_withheld_during_pending_end_turn_deathrite_order"
+      }
     }
   ]
 }

@@ -1222,6 +1222,111 @@ fn try_malakhim_untap_withheld(encoded: &str) -> Option<(Session, String)> {
     Some((session, malakhim_id))
 }
 
+fn try_malakhim_ignited_withheld(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let (malakhim_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion" && descriptor["cardId"] == "north-malakhim"
+    })?;
+    let malakhim_id = malakhim_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-filler"
+            && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == malakhim_id
+            && descriptor["from"]["cell"] == "C4"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "decline-attack"
+    })?;
+    let mut ignited_id = None;
+    for card_id in ["north-ignited", "north-drawrite-a", "north-drawrite-b"] {
+        let (summon, _) = try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion" && descriptor["cardId"] == card_id
+        })?;
+        if card_id == "north-ignited" {
+            ignited_id = Some(
+                summon["cardInstanceId"]
+                    .as_str()
+                    .expect("ignited identity")
+                    .to_owned(),
+            );
+        }
+    }
+    let ignited_id = ignited_id?;
+    let (_, trigger) =
+        try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    if state(&session)["phase"] != "deathrite-order" {
+        return None;
+    }
+    if unit(&state(&session), &malakhim_id)["tapped"] != true {
+        return None;
+    }
+    if trigger.events.iter().any(|event| {
+        event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
+    }) {
+        return None;
+    }
+    if trigger
+        .events
+        .iter()
+        .any(|event| event.event_type == "minion-died" && event.payload["instanceId"] == ignited_id)
+    {
+        return None;
+    }
+    Some((session, malakhim_id, ignited_id))
+}
+
+#[test]
+fn rule_catalog_1312_malakhim_untap_and_ignited_death_withheld_during_pending_end_turn_deathrite_order()
+ {
+    let encoded = (1312..1312 + 2048)
+        .map(malakhim_untap_withheld_manifest)
+        .find(|candidate| try_malakhim_ignited_withheld(candidate).is_some())
+        .expect(
+            "bounded seed that reaches pending Deathrites before Malakhim untap and Ignited death",
+        );
+    let (mut session, malakhim_id, ignited_id) =
+        try_malakhim_ignited_withheld(&encoded).expect("complete Malakhim/Ignited withhold setup");
+    assert_eq!(state(&session)["phase"], "deathrite-order");
+    let (_, resolved) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+    });
+    assert!(
+        resolved.events.iter().any(|event| {
+            event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
+        }),
+        "Malakhim untap must resume after deathrite-order clears"
+    );
+    assert!(
+        resolved.events.iter().any(|event| {
+            event.event_type == "minion-died" && event.payload["instanceId"] == ignited_id
+        }),
+        "Ignited death must resume after deathrite-order clears"
+    );
+    assert_exact_replay(&session);
+}
+
 #[test]
 fn rule_catalog_1282_malakhim_untap_withheld_during_pending_end_turn_deathrite_order() {
     let encoded = (1282..1282 + 2048)
