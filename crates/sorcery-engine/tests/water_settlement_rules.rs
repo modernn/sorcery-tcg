@@ -19,7 +19,8 @@
 //! RULE-CATALOG-1399–1400, RULE-CATALOG-1403–1406, RULE-CATALOG-1411,
 //! RULE-CATALOG-1414, RULE-CATALOG-1435, RULE-CATALOG-1445,
 //! RULE-CATALOG-1476, RULE-CATALOG-1489–1490, RULE-CATALOG-1499–1500,
-//! RULE-CATALOG-1509–1510, RULE-CATALOG-1515–1518, RULE-CATALOG-1520).
+//! RULE-CATALOG-1509–1510, RULE-CATALOG-1515–1518, RULE-CATALOG-1520,
+//! RULE-CATALOG-1529–1530).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -5504,6 +5505,79 @@ fn rule_catalog_1520_water_site_cast_offered_after_pending_deathrite_order_on_fl
         serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
     );
     let mut setup = try_pending_deathrite_with_flooded_occupied_water_cast_summon(&encoded)
+        .expect("complete water-site cast summon Deathrite withheld setup");
+    let deathrite_ids = setup.deathrite_ids.clone();
+    let session = &mut setup.session;
+    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(
+        state(session)["realm"]["sites"]["C3"]["cardId"],
+        "north-water"
+    );
+    assert!(
+        session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+
+    accept_where(session, "order first Deathrite", |descriptor| {
+        descriptor["kind"] == "order-deathrites"
+            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+    });
+
+    let resumed = state(session);
+    assert_eq!(resumed["phase"], "main");
+    assert_eq!(resumed["decisionSeat"], "north");
+    assert!(resumed["pendingDeathrites"].is_null());
+    assert!(
+        session
+            .legal_actions()
+            .expect("resumed legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "summon-minion"
+                    && action.descriptor["cardId"] == "north-water-cast"
+                    && action.descriptor["cell"] == "C4"
+            }),
+        "after Deathrites complete, water-site cast must resume on unaffected Water sites"
+    );
+    assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1529_water_site_cast_withheld_during_pending_deathrite_order_on_drought_occupied_water_at_c3()
+ {
+    let encoded = drought_occupied_water_cast_deathrite_seed_with(1529);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let setup = try_pending_deathrite_with_drought_occupied_water_cast_summon(&encoded)
+        .expect("complete water-site cast summon Deathrite withheld setup");
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    assert!(
+        setup
+            .session
+            .legal_actions()
+            .expect("paused legal actions")
+            .iter()
+            .all(|action| action.descriptor["kind"] != "summon-minion")
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1530_water_site_cast_offered_after_pending_deathrite_order_on_drought_occupied_water_at_c3()
+ {
+    let encoded = drought_occupied_water_cast_deathrite_seed_with(1530);
+    eprintln!(
+        "seed={}",
+        serde_json::from_str::<Value>(&encoded).expect("manifest json")["seed"]
+    );
+    let mut setup = try_pending_deathrite_with_drought_occupied_water_cast_summon(&encoded)
         .expect("complete water-site cast summon Deathrite withheld setup");
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;

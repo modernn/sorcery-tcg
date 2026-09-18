@@ -5,7 +5,8 @@
 //! and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
 //! deathrite-order (RULE-CATALOG-1331–1334, RULE-CATALOG-1485–1486,
-//! RULE-CATALOG-1494–1496, RULE-CATALOG-1503–1504, RULE-CATALOG-1519).
+//! RULE-CATALOG-1494–1496, RULE-CATALOG-1503–1504, RULE-CATALOG-1519,
+//! RULE-CATALOG-1525–1528).
 //!
 //! Overlay Auras already convert underground and underwater when they enter.
 //! Destroying or returning that Aura flips the site's water-ness again, so the
@@ -3711,6 +3712,138 @@ fn rule_catalog_1519_return_flood_aura_withheld_during_pending_deathrite_order_o
     let paused = state(&setup.session);
     assert_eq!(paused["phase"], "deathrite-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    let paused_actions = setup.session.legal_actions().expect("paused legal actions");
+    assert!(
+        paused_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(
+        !offers_return_aura(&setup.session, &aura_id),
+        "return-target-aura Magic on Flood stays withheld during deathrite-order"
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1525_return_drought_aura_withheld_during_pending_deathrite_order_on_drought_occupied_earth_site_at_c3()
+ {
+    let encoded = drought_earth_occupied_return_withheld_seed_with(1525);
+    let seed = serde_json::from_str::<Value>(&encoded).expect("encoded withheld manifest")["seed"]
+        .as_u64()
+        .expect("numeric seed");
+    eprintln!("seed={seed}");
+    let setup = try_pending_deathrite_with_overlay_occupied_return(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-drought",
+    )
+    .expect(
+        "complete Drought return on drought occupied Earth site at C3 Deathrite withheld setup",
+    );
+    let aura_id = setup.aura_id.clone();
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    let paused_actions = setup.session.legal_actions().expect("paused legal actions");
+    assert!(
+        paused_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(
+        !offers_return_aura(&setup.session, &aura_id),
+        "return-target-aura Magic on Drought stays withheld during deathrite-order"
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1526_destroy_flood_aura_withheld_during_pending_deathrite_order_on_flooded_occupied_water_site_at_c3()
+ {
+    let encoded = flood_water_occupied_destroy_withheld_seed_with(1526);
+    let seed = serde_json::from_str::<Value>(&encoded).expect("encoded withheld manifest")["seed"]
+        .as_u64()
+        .expect("numeric seed");
+    eprintln!("seed={seed}");
+    let setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-flood",
+    )
+    .expect("complete Flood destroy on flooded occupied Water site at C3 Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    let paused_actions = setup.session.legal_actions().expect("paused legal actions");
+    assert!(
+        paused_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(
+        !offers_destroy_aura(&setup.session, &aura_id),
+        "destroy-target-aura Magic on Flood stays withheld during deathrite-order"
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1527_destroy_drought_aura_withheld_during_pending_deathrite_order_on_drought_occupied_earth_site_at_c3()
+ {
+    let encoded = drought_earth_occupied_destroy_withheld_seed_with(1527);
+    let seed = serde_json::from_str::<Value>(&encoded).expect("encoded withheld manifest")["seed"]
+        .as_u64()
+        .expect("numeric seed");
+    eprintln!("seed={seed}");
+    let setup = try_pending_deathrite_with_overlay_occupied_destroy(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-drought",
+    )
+    .expect(
+        "complete Drought destroy on drought occupied Earth site at C3 Deathrite withheld setup",
+    );
+    let aura_id = setup.aura_id.clone();
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
+    let paused_actions = setup.session.legal_actions().expect("paused legal actions");
+    assert!(
+        paused_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(
+        !offers_destroy_aura(&setup.session, &aura_id),
+        "destroy-target-aura Magic on Drought stays withheld during deathrite-order"
+    );
+    assert_exact_replay(&setup.session);
+}
+
+#[test]
+fn rule_catalog_1528_return_flood_aura_withheld_during_pending_deathrite_order_on_flooded_occupied_earth_site_at_c3()
+ {
+    let encoded = flood_occupied_return_withheld_seed_with(1528);
+    let seed = serde_json::from_str::<Value>(&encoded).expect("encoded withheld manifest")["seed"]
+        .as_u64()
+        .expect("numeric seed");
+    eprintln!("seed={seed}");
+    let setup = try_pending_deathrite_with_overlay_occupied_return(
+        &encoded,
+        "north-earth",
+        "underground",
+        "north-flood",
+    )
+    .expect("complete Flood return on flooded occupied Earth site at C3 Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
         paused_actions
