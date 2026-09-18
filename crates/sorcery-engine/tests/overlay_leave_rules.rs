@@ -5,7 +5,7 @@
 //! and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
 //! deathrite-order (RULE-CATALOG-1331–1334, RULE-CATALOG-1485–1486,
-//! RULE-CATALOG-1494–1496, RULE-CATALOG-1503–1504).
+//! RULE-CATALOG-1494–1496, RULE-CATALOG-1503–1504, RULE-CATALOG-1519).
 //!
 //! Overlay Auras already convert underground and underwater when they enter.
 //! Destroying or returning that Aura flips the site's water-ness again, so the
@@ -3690,4 +3690,36 @@ fn rule_catalog_1508_destroying_drought_on_drought_occupied_earth_at_c3_relayers
     assert_eq!(occupant["region"], "underground");
     assert!(!cemetery_has(&current, &dualer_id));
     assert_exact_replay(session);
+}
+
+#[test]
+fn rule_catalog_1519_return_flood_aura_withheld_during_pending_deathrite_order_on_flooded_occupied_water_site_at_c3()
+ {
+    let encoded = flood_water_occupied_c3_return_withheld_seed_with(1519);
+    let seed = serde_json::from_str::<Value>(&encoded).expect("encoded withheld manifest")["seed"]
+        .as_u64()
+        .expect("numeric seed");
+    eprintln!("seed={seed}");
+    let setup = try_pending_deathrite_with_overlay_occupied_return(
+        &encoded,
+        "north-water",
+        "underwater",
+        "north-flood",
+    )
+    .expect("complete Flood return on flooded occupied Water site at C3 Deathrite withheld setup");
+    let aura_id = setup.aura_id.clone();
+    let paused = state(&setup.session);
+    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
+    let paused_actions = setup.session.legal_actions().expect("paused legal actions");
+    assert!(
+        paused_actions
+            .iter()
+            .all(|action| action.descriptor["kind"] != "cast-magic")
+    );
+    assert!(
+        !offers_return_aura(&setup.session, &aura_id),
+        "return-target-aura Magic on Flood stays withheld during deathrite-order"
+    );
+    assert_exact_replay(&setup.session);
 }
