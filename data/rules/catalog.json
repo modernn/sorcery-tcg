@@ -52771,8 +52771,218 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2440_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2441",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2441_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2442",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2442_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2443",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic that pauses in deathrite-order, then resumes its strike, leaves the leaped ally at its destination after later turns pass. Distinct from 0695, which finishes on the same turn, and from 1963, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "unit-stepped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2443_leaped_ally_stays_at_its_destination_after_deathrite_resume_and_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2444",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast after Deathrite resume killed the enemy at the destination still resolves as a paid no-op. Distinct from 0695, which only completes the first strike, and from 1964, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2444_second_leap_after_deathrite_resume_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2445",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast after Deathrite resume strikes a newly arrived enemy after enemy site placement. Distinct from 0695, which only strikes the first enemy, and from 1965, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "unit-stepped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2445_second_leap_after_deathrite_resume_strikes_a_newly_arrived_enemy_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2446",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic on the movement-Deathrite board offers every controlled ally, including the power source and both wounded Deathrite allies. Distinct from 0695, which then steps only the source, and from 1966, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2446_leap_offers_every_controlled_ally_on_the_deathrite_resume_board"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2447",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Leap-attack-ally Magic that pauses in deathrite-order, then resumes its strike at C2, kills the enemy there without affecting a far enemy at C1. Distinct from 0695, which has no far enemy, and from 1967, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite",
+        "otherNearbyAlliesPowerBonus"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites"
+      ],
+      "eventHints": [
+        "strike-damage-allocated",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2447_leap_deathrite_resume_leaves_a_far_enemy_unstruck"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2448",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two leap-attack-ally spells in hand, a second cast after Deathrite resume strikes a newly summoned enemy at the destination. Distinct from 0695, which only strikes the first enemy, and from 1968, which never defers the strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "leapAttackAlly",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "order-deathrites",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/leap_attack_deathrite_rules.rs",
+        "testName": "rule_catalog_2448_second_leap_after_deathrite_resume_strikes_a_newly_summoned_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2449",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2449_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2450",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2450_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2440,
+  "rustSupportedCount": 2450,
   "typescriptSupportedCount": 0
 }
