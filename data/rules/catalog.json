@@ -49741,8 +49741,203 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2301",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2301_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2302",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2302_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2303",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-aura Magic leaves a realm Aura covering its site after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2303_aura_stays_covering_the_site_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2304",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-aura spells in hand, a second cast offers no targets after the only realm Aura is destroyed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2304_second_destroy_offers_no_targets_after_destroying_the_only_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2305",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-aura spells in hand, a second cast destroys a newly arrived enemy Aura after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2305_second_destroy_destroys_a_newly_arrived_aura_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2306",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-aura Magic offers every realm Aura.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2306_destroy_aura_offers_every_aura_in_the_realm"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2307",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-aura Magic at one Aura leaves a far Aura untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2307_destroy_aura_leaves_a_far_aura_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2308",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-aura spells in hand, a second cast destroys a newly placed enemy Aura.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetAura"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-aura"
+      ],
+      "eventHints": [
+        "aura-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_target_aura_rules.rs",
+        "testName": "rule_catalog_2308_second_destroy_destroys_a_newly_placed_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2309",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2309_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2310",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2310_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }
