@@ -43847,8 +43847,209 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_1990_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1991",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1991_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1992",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1992_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1993",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-aboveground-minion Magic leaves surviving minions on the board at their locations after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1993_rain_survivors_stay_on_the_board_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1994",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-aboveground-minion spells in hand, a second cast still resolves as a paid no-op when no aboveground minion qualifies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1994_second_rain_without_aboveground_minions_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1995",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-aboveground-minion spells in hand, a second cast damages a newly arrived enemy after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1995_second_rain_damages_a_newly_arrived_enemy_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1996",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-aboveground-minion Magic damages every aboveground minion on the board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1996_rain_damages_every_aboveground_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1997",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-each-aboveground-minion Magic damages surface minions without affecting an underground minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1997_rain_leaves_an_underground_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1998",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two damage-each-aboveground-minion spells in hand, a second cast kills a newly summoned aboveground enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rain_of_arrows_rules.rs",
+        "testName": "rule_catalog_1998_second_rain_kills_a_newly_summoned_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-1999",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_1999_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2000",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2000_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 1990,
+  "rustSupportedCount": 2000,
   "typescriptSupportedCount": 0
 }
