@@ -48338,8 +48338,199 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2220_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2221",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2221_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2222",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2222_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2223",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-gain Magic leaves the healed Avatar at its restored life after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2223_healed_life_stays_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2224",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-gain spells in hand, a second cast is a paid no-op after the chosen Avatar is already at its printed life cap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2224_second_life_gain_at_the_printed_cap_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2225",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-gain spells in hand, a second cast heals newly lost life after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2225_second_life_gain_heals_newly_lost_life_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2226",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-gain Magic offers both Avatars.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2226_target_player_life_gain_offers_both_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2227",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-gain Magic against one Avatar leaves the other Avatar's life untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2227_target_player_life_gain_leaves_the_other_avatar_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2228",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-gain spells in hand, a second cast heals remaining life after stacked genesis loss.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerGainsLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_gain_rules.rs",
+        "testName": "rule_catalog_2228_second_life_gain_heals_remaining_life_after_stacked_genesis"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2229",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2229_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2230",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2230_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2220,
+  "rustSupportedCount": 2230,
   "typescriptSupportedCount": 0
 }
