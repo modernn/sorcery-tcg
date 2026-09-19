@@ -1,5 +1,5 @@
 //! Direct proofs for Drown occupancy of a non-Submerge minion and targetless
-//! controller healing (RULE-CATALOG-0045–0046, 0693–0694, 1104).
+//! controller healing (RULE-CATALOG-0045–0046, 0693–0694, 1104, 2433–2438).
 //!
 //! 0591–0592 already cover a Submerge minion surviving underwater and the
 //! earth-only paid no-op. Drown also submerges a minion without Submerge, and
@@ -7,6 +7,11 @@
 //! Avatar through the printed-life cap and cannot leave Death's Door, unlike
 //! 0651–0652 which offer a chosen Avatar. While Deathrites wait for ordering,
 //! healController Magic stays withheld until the chain drains.
+//!
+//! Supplemental 2433–2438 bind cemetery persistence, empty-repeat, enemy-arrival,
+//! multi-minion, far-minion, and a newly summoned lander. Distinct from 0693,
+//! which kills the first C1 lander on the same turn, and from 1933–1938, which
+//! keep a Submerge minion in play.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -631,4 +636,421 @@ fn rule_catalog_1104_heal_controller_withheld_during_pending_deathrite_order() {
     assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
     assert_eq!(state(session)["players"]["north"]["avatar"]["life"], 20);
     assert_exact_replay(session);
+}
+
+fn drown_legacy_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "drown-heal-legacy-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-drown-heal-legacy-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-drown": drown(),
+            "north-site": earth_site(),
+            "south-avatar": avatar(20),
+            "south-minion": lander(),
+            "south-site": water_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-drown"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(693..693 + 2048)
+        .map(drown_legacy_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-drown")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with Drown and required South landers")
+}
+
+fn drown_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-drown")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn drown_targets(session: &Session) -> Vec<String> {
+    let mut targets: Vec<_> = session
+        .legal_actions()
+        .expect("drown actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-drown"
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(ToOwned::to_owned)
+        })
+        .collect();
+    targets.sort_unstable();
+    targets.dedup();
+    targets
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn in_cemetery(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .is_some_and(|cemetery| {
+            cemetery
+                .iter()
+                .any(|card| card["instanceId"] == instance_id)
+        })
+}
+
+fn drown_kill_events() -> [&'static str; 4] {
+    [
+        "magic-cast",
+        "minion-submerged",
+        "minion-died",
+        "magic-resolved",
+    ]
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn south_plays_c1(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("Drown target identity")
+        .to_owned()
+}
+
+fn setup_c1_with_landers(session: &mut Session, count: usize) -> Vec<String> {
+    south_plays_c1(session);
+    (0..count).map(|_| summon_south_at(session, "C1")).collect()
+}
+
+fn cast_drown_target(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-drown"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, Vec<String>, String)> {
+    let mut session = opening_main(encoded);
+    let c1_ids = setup_c1_with_landers(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (!drown_targets(&session).is_empty()).then_some((session, c1_ids, far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(693..693 + 2048)
+        .find_map(|seed| {
+            let encoded = drown_legacy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching Drown far-minion setup")
+}
+
+fn try_second_drown_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_landers(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_drown_target(&mut session, &first_id);
+    if event_types(&first) != drown_kill_events() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if drown_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    drown_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_drown_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(693..693 + 8192)
+        .find_map(|seed| {
+            let encoded = drown_legacy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_drown_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Drown enemy-arrival setup")
+}
+
+fn try_second_drown_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_landers(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_drown_target(&mut session, &first_id);
+    if event_types(&first) != drown_kill_events() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if drown_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C1");
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    drown_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_drown_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(693..693 + 8192)
+        .find_map(|seed| {
+            let encoded = drown_legacy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_drown_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Drown new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2433_drowned_non_submerge_minion_stays_dead_after_turns_pass() {
+    let encoded = seed_with_start(2433, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_landers(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let receipt = cast_drown_target(&mut session, &target_id);
+    assert_eq!(event_types(&receipt), drown_kill_events());
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert!(in_cemetery(&state(&session), "south", &target_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert!(in_cemetery(&state(&session), "south", &target_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2434_second_drown_without_a_surface_target_stays_unoffered() {
+    let encoded = seed_with_start(2434, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_landers(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let receipt = cast_drown_target(&mut session, &target_id);
+    assert_eq!(event_types(&receipt), drown_kill_events());
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert!(drown_spells_in_hand(&state(&session)) >= 1);
+    assert!(drown_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-drown"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2435_second_drown_kills_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_drown_enemy_arrival(2435);
+    let (mut session, minion_id) =
+        try_second_drown_enemy_arrival_prefix(&encoded).expect("second Drown enemy-arrival prefix");
+    let receipt = cast_drown_target(&mut session, &minion_id);
+    assert_eq!(event_types(&receipt), drown_kill_events());
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(in_cemetery(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2436_drown_offers_every_surface_non_submerge_minion_at_the_target_water_site() {
+    let encoded = seed_with_start(2436, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c1_with_landers(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = drown_targets(&session);
+    assert_eq!(offered.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2437_drown_leaves_a_far_minion_on_the_surface() {
+    let encoded = seed_for_far_minion(2437);
+    let (mut session, c1_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("Drown far-minion prefix");
+    let drowned_id = &c1_ids[0];
+    let receipt = cast_drown_target(&mut session, drowned_id);
+    assert_eq!(event_types(&receipt), drown_kill_events());
+    assert!(realm_unit(&state(&session), drowned_id).is_none());
+    assert_eq!(
+        realm_unit(&state(&session), &far_id).expect("far minion")["region"],
+        "surface"
+    );
+    assert_eq!(
+        realm_unit(&state(&session), &far_id).expect("far minion")["location"],
+        "C4"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2438_second_drown_kills_a_newly_summoned_minion() {
+    let encoded = seed_for_second_drown_new_summon(2438);
+    let (mut session, minion_id) =
+        try_second_drown_new_summon_prefix(&encoded).expect("second Drown new-summon prefix");
+    let receipt = cast_drown_target(&mut session, &minion_id);
+    assert_eq!(event_types(&receipt), drown_kill_events());
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(in_cemetery(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
 }
