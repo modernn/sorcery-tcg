@@ -1,11 +1,13 @@
 //! Direct proofs for cemetery Aura return Magic (RULE-CATALOG-0641–0642,
-//! RULE-CATALOG-1073).
+//! RULE-CATALOG-1073, RULE-CATALOG-2173–2178).
 //!
 //! Cemetery Aura return offers only Auras in the caster's own cemetery and
 //! restores the chosen instance to the hidden Spellbook hand. A cemetery that
 //! holds only Magic is still a paid no-choice resolution. While Deathrites
 //! wait for ordering, cemetery Aura return Magic stays withheld until the
-//! chain drains.
+//! chain drains. Supplemental 2173–2178 bind persistence, empty-cemetery
+//! repeat, enemy-arrival, multi-aura offer, unselected remainder, and a
+//! newly destroyed Aura.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -657,4 +659,415 @@ fn rule_catalog_1073_cemetery_aura_return_withheld_during_pending_deathrite_orde
     );
     assert!(!cemetery_has_card(&state(session), "north", &aura_id));
     assert_exact_replay(session);
+}
+
+fn cemetery_aura_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cemetery-aura-return-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cemetery-aura-return-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_spell(),
+            "north-flood": flood(),
+            "north-return": return_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-flood",
+                    "north-destroy",
+                    "north-return",
+                    "north-return",
+                    "north-flood",
+                    "north-destroy",
+                    "north-flood",
+                    "north-return",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    north_hand_ids(&state(&preview))
+}
+
+fn supplemental_seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(641..641 + 2048)
+        .map(cemetery_aura_supplemental_manifest)
+        .find(|candidate| {
+            required.iter().all(|id| {
+                opening_hand_spell_ids(candidate)
+                    .iter()
+                    .any(|card| card == *id)
+            })
+        })
+        .expect("bounded seed with cemetery Aura return supplemental opening cards")
+}
+
+fn return_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-return")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cemetery_aura_instance_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .map(|cemetery| {
+            cemetery
+                .iter()
+                .filter(|card| card["cardId"] == "north-flood")
+                .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn hand_has_instance(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn try_opening_main(encoded: &str) -> Option<Session> {
+    let mut session = Session::new(encoded).ok()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    Some(session)
+}
+
+fn try_end_turn_if_offered(session: &mut Session) -> Option<()> {
+    decline_attack_if_needed(session);
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    Some(())
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    try_end_turn_if_offered(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    try_end_turn_if_offered(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    try_pass_turn_to_north_spellbook(session).expect("north Spellbook draw");
+}
+
+fn try_advance_north_spellbook_draws(session: &mut Session, draws: usize) -> Option<()> {
+    for _ in 0..draws {
+        try_pass_turn_to_north_spellbook(session)?;
+    }
+    Some(())
+}
+
+fn try_destroy_own_aura(session: &mut Session, avoid: &[String]) -> Option<String> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "north-flood"
+            && cells_include(descriptor, "C4")
+            && !avoid.iter().any(|id| descriptor["cardInstanceId"] == *id)
+    })?;
+    let aura_id = state(session)["realm"]["auras"]
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|aura| aura["cardId"] == "north-flood")?["instanceId"]
+        .as_str()?
+        .to_owned();
+    let (_, destroyed) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    })?;
+    event_types(&destroyed)
+        .contains(&"aura-destroyed")
+        .then_some(aura_id)
+}
+
+fn destroy_own_aura(session: &mut Session) -> String {
+    try_destroy_own_aura(session, &[]).expect("own cemetery Aura")
+}
+
+fn try_cast_return_target(session: &mut Session, aura_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == aura_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn cast_return_target(session: &mut Session, aura_id: &str) -> Receipt {
+    try_cast_return_target(session, aura_id).expect("cemetery Aura return")
+}
+
+fn try_two_cemetery_auras_on_session(session: &mut Session) -> Option<[String; 2]> {
+    let first = try_destroy_own_aura(session, &[])?;
+    let mut second = None;
+    for _ in 0..4 {
+        if let Some(id) = try_destroy_own_aura(session, &[first.clone()]) {
+            second = Some(id);
+            break;
+        }
+        try_pass_turn_to_north_spellbook(session)?;
+    }
+    let second = second?;
+    (cemetery_aura_instance_ids(&state(session), "north").len() == 2).then_some([first, second])
+}
+
+fn seed_with_two_cemetery_auras(start: u32) -> String {
+    (start..start + 8192)
+        .chain(641..641 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_aura_supplemental_manifest(seed);
+            if !["north-flood", "north-destroy", "north-return"]
+                .iter()
+                .all(|id| {
+                    opening_hand_spell_ids(&encoded)
+                        .iter()
+                        .any(|card| card == *id)
+                })
+            {
+                return None;
+            }
+            let mut session = try_opening_main(&encoded)?;
+            try_two_cemetery_auras_on_session(&mut session).map(|_| encoded)
+        })
+        .expect("bounded seed with two own cemetery Auras")
+}
+
+fn prepare_two_cemetery_auras(encoded: &str) -> (Session, [String; 2]) {
+    let mut session = try_opening_main(encoded).expect("opening main");
+    let auras = try_two_cemetery_auras_on_session(&mut session).expect("two own cemetery Auras");
+    (session, auras)
+}
+
+fn try_second_return_empty_prefix(encoded: &str) -> Option<Session> {
+    let mut session = try_opening_main(encoded)?;
+    let aura_id = try_destroy_own_aura(&mut session, &[])?;
+    try_cast_return_target(&mut session, &aura_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_aura_instance_ids(&state(&session), "north").is_empty())
+    .then_some(session)
+}
+
+fn seed_for_second_return_empty(start: u32) -> String {
+    (start..start + 8192)
+        .chain(641..641 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_aura_supplemental_manifest(seed);
+            try_second_return_empty_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Aura return empty-cemetery setup")
+}
+
+fn try_second_return_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = try_opening_main(encoded)?;
+    let first_id = try_destroy_own_aura(&mut session, &[])?;
+    try_cast_return_target(&mut session, &first_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    try_end_turn_if_offered(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_advance_north_spellbook_draws(&mut session, 2)?;
+    let second_id = try_destroy_own_aura(&mut session, &[first_id])?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_aura_cast_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_return_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(641..641 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_aura_supplemental_manifest(seed);
+            try_second_return_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Aura return enemy-arrival setup")
+}
+
+fn try_second_return_new_destroy_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = try_opening_main(encoded)?;
+    let first_id = try_destroy_own_aura(&mut session, &[])?;
+    try_cast_return_target(&mut session, &first_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_advance_north_spellbook_draws(&mut session, 2)?;
+    let second_id = try_destroy_own_aura(&mut session, &[first_id])?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_aura_cast_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_return_new_destroy(start: u32) -> String {
+    (start..start + 8192)
+        .chain(641..641 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_aura_supplemental_manifest(seed);
+            try_second_return_new_destroy_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Aura return new-destroy setup")
+}
+
+#[test]
+fn rule_catalog_2173_returned_aura_stays_in_hand_after_turns_pass() {
+    let encoded =
+        supplemental_seed_with_start(2173, &["north-flood", "north-destroy", "north-return"]);
+    let mut session = opening_main(&encoded);
+    let aura_id = destroy_own_aura(&mut session);
+    cast_return_target(&mut session, &aura_id);
+    assert!(hand_has_instance(&state(&session), "north", &aura_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), "north", &aura_id));
+    assert!(cemetery_aura_instance_ids(&state(&session), "north").is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2174_second_return_without_a_cemetery_aura_is_a_paid_noop() {
+    let encoded = seed_for_second_return_empty(2174);
+    let mut session =
+        try_second_return_empty_prefix(&encoded).expect("second cemetery Aura return empty prefix");
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "aura-returned-to-hand")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2175_second_return_restores_a_newly_destroyed_aura_after_enemy_site_placement() {
+    let encoded = seed_for_second_return_enemy_arrival(2175);
+    let (mut session, aura_id) = try_second_return_enemy_arrival_prefix(&encoded)
+        .expect("second cemetery Aura return enemy-arrival prefix");
+    let receipt = cast_return_target(&mut session, &aura_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "aura-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &aura_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2176_cemetery_aura_return_offers_every_own_cemetery_aura() {
+    let encoded = seed_with_two_cemetery_auras(2176);
+    let (session, aura_ids) = prepare_two_cemetery_auras(&encoded);
+    let mut offered = cemetery_aura_cast_ids(&session);
+    offered.sort();
+    offered.dedup();
+    assert_eq!(offered.len(), 2);
+    for aura_id in &aura_ids {
+        assert!(offered.contains(aura_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2177_cemetery_aura_return_leaves_an_unselected_cemetery_aura_in_place() {
+    let encoded = seed_with_two_cemetery_auras(2177);
+    let (mut session, aura_ids) = prepare_two_cemetery_auras(&encoded);
+    let returned_id = &aura_ids[0];
+    cast_return_target(&mut session, returned_id);
+    assert!(hand_has_instance(&state(&session), "north", returned_id));
+    let remaining = cemetery_aura_instance_ids(&state(&session), "north");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0], aura_ids[1]);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2178_second_return_restores_a_newly_destroyed_aura() {
+    let encoded = seed_for_second_return_new_destroy(2178);
+    let (mut session, aura_id) = try_second_return_new_destroy_prefix(&encoded)
+        .expect("second cemetery Aura return new-destroy prefix");
+    let receipt = cast_return_target(&mut session, &aura_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "aura-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &aura_id));
+    assert_exact_replay(&session);
 }
