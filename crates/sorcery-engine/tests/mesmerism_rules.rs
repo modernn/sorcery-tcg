@@ -1,5 +1,5 @@
 //! Direct proofs for nearby-control Magic range (RULE-CATALOG-0146,
-//! RULE-CATALOG-0683–0684, RULE-CATALOG-1042).
+//! RULE-CATALOG-0683–0684, RULE-CATALOG-1042, RULE-CATALOG-2383–2388).
 //!
 //! After the caster Avatar steps from C4 to C3, `gainControlOfTargetNearbyMinion`
 //! offers the adjacent C2 minion and not the two-step C1 minion. Stealing the
@@ -7,6 +7,9 @@
 //! controller. Distinct from 0659–0660, which prove same-cell nearby and a
 //! far-only board three steps from an unmoved caster. While Deathrites wait for
 //! ordering, Mesmerism Magic stays withheld until the chain drains.
+//! Supplemental 2383–2388 keep persistence, paid-noop-repeat, enemy-arrival,
+//! multi-minion, far-minion, and new-summon proofs on that same moved-caster
+//! range board.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -784,4 +787,404 @@ fn rule_catalog_1042_mesmerism_magic_withheld_during_pending_deathrite_order() {
         "north"
     );
     assert_exact_replay(session);
+}
+
+fn range_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "mesmerism-range-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-mesmerism-range-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mesmerism": mesmerism(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": deathrite_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-mesmerism"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(683..683 + 2048)
+        .map(range_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-mesmerism")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with Mesmerism and required South minions")
+}
+
+fn mesmerism_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mesmerism")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn try_summon_south_at(session: &mut Session, cell: &str) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    })?;
+    Some(summoned["cardInstanceId"].as_str()?.to_owned())
+}
+
+fn cast_mesmerism_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mesmerism"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_move_north_avatar_to_c3(session: &mut Session) -> Option<()> {
+    let avatar_id = state(session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()?
+        .to_owned();
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == avatar_id.as_str()
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    })?;
+    let _ = try_accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    Some(())
+}
+
+/// Caster at C3, adjacent minions at C2, two-step minion at C1.
+fn try_range_opening(session: &mut Session, near_count: usize) -> Option<(String, Vec<String>)> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let far_id = try_summon_south_at(session, "C1")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let near_ids: Vec<String> = (0..near_count)
+        .map(|_| try_summon_south_at(session, "C2"))
+        .collect::<Option<_>>()?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_move_north_avatar_to_c3(session)?;
+    Some((far_id, near_ids))
+}
+
+fn range_opening(session: &mut Session, near_count: usize) -> (String, Vec<String>) {
+    try_range_opening(session, near_count).expect("moved-caster nearby-range opening")
+}
+
+fn try_second_steal_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let (_, near_ids) = try_range_opening(&mut session, 1)?;
+    let first = cast_mesmerism_on(&mut session, &near_ids[0]);
+    if !event_types(&first).contains(&"minion-control-changed") {
+        return None;
+    }
+    if mesmerism_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && (descriptor["cell"] == "D2" || descriptor["cell"] == "B2")
+    })?;
+    let minion_id = try_summon_south_at(&mut session, "C4")?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    mesmerism_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_steal_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(683..683 + 8192)
+        .find_map(|seed| {
+            let encoded = range_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_second_steal_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second nearby-range enemy-arrival setup")
+}
+
+fn try_second_steal_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let (_, near_ids) = try_range_opening(&mut session, 1)?;
+    let first = cast_mesmerism_on(&mut session, &near_ids[0]);
+    if !event_types(&first).contains(&"minion-control-changed") {
+        return None;
+    }
+    if unit(&state(&session), &near_ids[0])["controller"] != "north" {
+        return None;
+    }
+    if mesmerism_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = try_summon_south_at(&mut session, "C2")?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    mesmerism_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_steal_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(683..683 + 8192)
+        .find_map(|seed| {
+            let encoded = range_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_steal_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second nearby-range new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2383_stolen_adjacent_minion_stays_with_the_new_controller_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2383, 2);
+    let mut session = opening_main(&encoded);
+    let (far_id, near_ids) = range_opening(&mut session, 1);
+    let near_id = &near_ids[0];
+    assert_range_targets(&session, &far_id, near_id);
+    let receipt = cast_mesmerism_on(&mut session, near_id);
+    assert!(event_types(&receipt).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), near_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C2");
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), near_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C2");
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2384_second_mesmerism_on_the_stolen_adjacent_minion_is_a_paid_noop() {
+    let encoded = (2384..2384 + 8192)
+        .chain(683..683 + 8192)
+        .find_map(|seed| {
+            let candidate = range_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let (_, near_ids) = try_range_opening(&mut session, 1)?;
+            let first = cast_mesmerism_on(&mut session, &near_ids[0]);
+            if !event_types(&first).contains(&"minion-control-changed") {
+                return None;
+            }
+            if unit(&state(&session), &near_ids[0])["controller"] != "north" {
+                return None;
+            }
+            (mesmerism_spells_in_hand(&state(&session)) >= 1
+                && mesmerism_targets(&session).contains(&near_ids[0]))
+            .then_some(candidate)
+        })
+        .expect("bounded seed with two Mesmerism casts after stealing the adjacent minion");
+    let mut session = opening_main(&encoded);
+    let (far_id, near_ids) = range_opening(&mut session, 1);
+    let near_id = &near_ids[0];
+    let first = cast_mesmerism_on(&mut session, near_id);
+    assert!(event_types(&first).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), near_id)["controller"], "north");
+    assert!(mesmerism_spells_in_hand(&state(&session)) >= 1);
+    assert!(mesmerism_targets(&session).contains(near_id));
+    let second = cast_mesmerism_on(&mut session, near_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), near_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2385_second_mesmerism_steals_a_newly_arrived_adjacent_minion_after_enemy_site_placement()
+ {
+    let encoded = seed_for_second_steal_enemy_arrival(2385);
+    let (mut session, minion_id) = try_second_steal_enemy_arrival_prefix(&encoded)
+        .expect("second nearby-range enemy-arrival prefix");
+    let receipt = cast_mesmerism_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), &minion_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &minion_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2386_mesmerism_offers_every_adjacent_minion_after_the_caster_moves() {
+    let encoded = supplemental_seed_with_start(2386, 3);
+    let mut session = opening_main(&encoded);
+    let (far_id, near_ids) = range_opening(&mut session, 2);
+    let offered = mesmerism_targets(&session);
+    for minion_id in &near_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert!(!offered.contains(&far_id));
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2387_mesmerism_leaves_a_two_step_minion_untouched() {
+    let encoded = supplemental_seed_with_start(2387, 2);
+    let mut session = opening_main(&encoded);
+    let (far_id, near_ids) = range_opening(&mut session, 1);
+    let near_id = &near_ids[0];
+    assert_range_targets(&session, &far_id, near_id);
+    let receipt = cast_mesmerism_on(&mut session, near_id);
+    assert!(event_types(&receipt).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), near_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "south");
+    assert_eq!(unit(&state(&session), &far_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
+    assert!(!mesmerism_targets(&session).contains(&far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2388_second_mesmerism_steals_a_newly_summoned_adjacent_minion() {
+    let encoded = seed_for_second_steal_new_summon(2388);
+    let (mut session, minion_id) = try_second_steal_new_summon_prefix(&encoded)
+        .expect("second nearby-range new-summon prefix");
+    let receipt = cast_mesmerism_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-control-changed"));
+    assert_eq!(unit(&state(&session), &minion_id)["controller"], "north");
+    assert_eq!(unit(&state(&session), &minion_id)["owner"], "south");
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert_exact_replay(&session);
 }

@@ -51523,8 +51523,207 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2380_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2381",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2381_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2382",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2382_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2383",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic, after the caster Avatar steps from C4 to C3, leaves the stolen adjacent C2 minion with the new controller after later turns pass. Distinct from 0683, which then kills that minion on the same turn, and from 2263, which proves persistence on a same-cell nearby board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2383_stolen_adjacent_minion_stays_with_the_new_controller_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2384",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand after the caster Avatar steps from C4 to C3, a second cast on the already-stolen adjacent C2 minion is a paid no-op. Distinct from 0683, which then kills that minion, and from 2264, which proves the no-op on a same-cell nearby board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2384_second_mesmerism_on_the_stolen_adjacent_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2385",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand after the caster Avatar steps from C4 to C3, a second cast steals a newly arrived adjacent Deathrite minion at C4 after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2385_second_mesmerism_steals_a_newly_arrived_adjacent_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2386",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic, after the caster Avatar steps from C4 to C3, offers every adjacent C2 minion and not the two-step C1 minion. Distinct from 0683, which places only one adjacent minion, and from 2266, which offers every same-cell nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2386_mesmerism_offers_every_adjacent_minion_after_the_caster_moves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2387",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic, after the caster Avatar steps from C4 to C3, steals the adjacent C2 minion and leaves the two-step C1 minion with its original controller. Distinct from 0684, which kills that far minion without stealing, and from 2267, which leaves a far minion on a same-cell nearby board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2387_mesmerism_leaves_a_two_step_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2388",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand after the caster Avatar steps from C4 to C3, a second cast steals a newly summoned adjacent Deathrite minion at C2.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mesmerism_rules.rs",
+        "testName": "rule_catalog_2388_second_mesmerism_steals_a_newly_summoned_adjacent_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2389",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2389_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2390",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2380,
+  "rustSupportedCount": 2390,
   "typescriptSupportedCount": 0
 }
