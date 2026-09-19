@@ -59,6 +59,15 @@ fn lash() -> Value {
     })
 }
 
+fn rain() -> Value {
+    json!({
+        "cardType": "magic",
+        "damageEachAbovegroundMinion": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
 fn bury() -> Value {
     json!({
         "burrowTargetMinionOrArtifact": true,
@@ -130,7 +139,7 @@ fn fatality_region_supplemental_manifest(seed: u32) -> String {
             "north-avatar": avatar(),
             "north-bury": bury(),
             "north-fatality": fatality(),
-            "north-lash": lash(),
+            "north-rain": rain(),
             "north-site": site(),
             "south-avatar": avatar(),
             "south-minion": burrower(),
@@ -140,7 +149,7 @@ fn fatality_region_supplemental_manifest(seed: u32) -> String {
             "north": {
                 "atlas": vec!["north-site"; 24],
                 "avatar": "north-avatar",
-                "spellbook": std::iter::repeat_n("north-lash", 8)
+                "spellbook": std::iter::repeat_n("north-rain", 8)
                     .chain(std::iter::repeat_n("north-bury", 4))
                     .chain(std::iter::repeat_n("north-fatality", 8))
                     .collect::<Vec<_>>(),
@@ -303,17 +312,58 @@ fn seed_with_start(start: u32, need_second_lash: bool) -> String {
 fn seed_with_two_fatalities(start: u32) -> String {
     (start..start + 8192)
         .chain(673..673 + 8192)
-        .map(fatality_region_supplemental_manifest)
-        .find(|candidate| {
-            let (hand, library) = opening_card_ids(candidate);
-            let lash_count = hand.iter().filter(|id| *id == "north-lash").count();
-            hand.iter().filter(|id| *id == "north-fatality").count() >= 2
-                && hand.iter().any(|id| id == "north-bury")
-                && lash_count >= 1
-                && (lash_count >= 2 || library.first().map(String::as_str) == Some("north-lash"))
-                && opening_south_minions(candidate) >= 2
+        .find_map(|seed| {
+            let encoded = fatality_region_supplemental_manifest(seed);
+            try_second_fatality_empty_prefix(&encoded).map(|_| encoded)
         })
-        .expect("bounded seed with two Fatality spells and enough Lash copies")
+        .expect("bounded seed with two Fatality spells after Rain and Bury")
+}
+
+fn try_rain(session: &mut Session) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn try_bury_minion(session: &mut Session, instance_id: &str) -> Option<()> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == instance_id
+    })
+    .map(|_| ())
+}
+
+fn try_cast_fatality_on(session: &mut Session, instance_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-fatality"
+            && descriptor["target"]["instanceId"] == instance_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn try_second_fatality_empty_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    if opening_south_minions(encoded) < 2 {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let enemy_ids = stage_enemies(&mut session, 2);
+    let surface_id = enemy_ids[0].clone();
+    let buried_id = enemy_ids[1].clone();
+    try_rain(&mut session)?;
+    try_bury_minion(&mut session, &buried_id)?;
+    let first = try_cast_fatality_on(&mut session, &surface_id)?;
+    if !event_types(&first).contains(&"minion-died") {
+        return None;
+    }
+    if realm_unit(&state(&session), &surface_id).is_some() {
+        return None;
+    }
+    (fatality_spells_in_hand(&state(&session)) >= 1 && fatality_targets(&session).is_empty())
+        .then_some((session, surface_id, buried_id))
 }
 
 fn seed_with_region_spells(need_second_lash: bool) -> String {
@@ -657,15 +707,8 @@ fn rule_catalog_2333_wounded_underground_minion_stays_underground_after_turns_pa
 #[test]
 fn rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wounded_remains() {
     let encoded = seed_with_two_fatalities(2334);
-    let mut session = opening_main(&encoded);
-    let enemy_ids = stage_enemies(&mut session, 2);
-    let surface_id = enemy_ids[0].clone();
-    let buried_id = enemy_ids[1].clone();
-    lash_minion(&mut session, &surface_id);
-    lash_minion(&mut session, &buried_id);
-    bury_minion(&mut session, &buried_id);
-    let first = cast_fatality_on(&mut session, &surface_id);
-    assert!(event_types(&first).contains(&"minion-died"));
+    let (mut session, surface_id, buried_id) =
+        try_second_fatality_empty_prefix(&encoded).expect("Fatality region empty-repeat prefix");
     assert!(realm_unit(&state(&session), &surface_id).is_none());
     assert_eq!(unit(&state(&session), &buried_id)["region"], "underground");
     assert!(fatality_spells_in_hand(&state(&session)) >= 1);
@@ -693,7 +736,7 @@ fn rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_
 fn try_setup_two_surface_and_one_buried(
     encoded: &str,
 ) -> Option<(Session, String, String, String)> {
-    if !seed_has_region_spells(encoded, true) || opening_south_minions(encoded) < 3 {
+    if opening_south_minions(encoded) < 3 {
         return None;
     }
     let mut session = opening_main(encoded);
@@ -714,9 +757,7 @@ fn try_setup_two_surface_and_one_buried(
         descriptor["kind"] == "draw"
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
     })?;
-    try_lash_minion(&mut session, &first_id)?;
-    try_lash_minion(&mut session, &second_id)?;
-    try_lash_minion(&mut session, &buried_id)?;
+    try_rain(&mut session)?;
     Some((session, first_id, second_id, buried_id))
 }
 
