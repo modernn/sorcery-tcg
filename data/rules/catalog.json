@@ -45622,8 +45622,203 @@
         "file": "crates/sorcery-engine/tests/bounce_rules.rs",
         "testName": "rule_catalog_2078_second_bounce_returns_a_newly_summoned_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2131",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2131_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2132",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2132_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2133",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifact Magic leaves an Artifact at its location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2133_artifact_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2134",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-artifact spells in hand, a second cast offers no targets after the only Artifact is destroyed.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2134_second_destroy_offers_no_targets_after_destroying_the_only_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2135",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-artifact spells in hand, a second cast destroys a newly arrived enemy Artifact after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2135_second_destroy_destroys_a_newly_arrived_artifact_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2136",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifact Magic offers every Artifact in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2136_destroy_artifact_offers_every_artifact_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2137",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Destroy-artifact Magic at one Artifact leaves a far Artifact untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2137_destroy_artifact_leaves_a_far_artifact_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2138",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two destroy-artifact spells in hand, a second cast destroys a newly placed enemy Artifact.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "destroyTargetArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-destroyed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/destroy_artifact_rules.rs",
+        "testName": "rule_catalog_2138_second_destroy_destroys_a_newly_placed_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2139",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2139_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2140",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2140_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2080,
+  "rustSupportedCount": 2140,
   "typescriptSupportedCount": 0
 }
