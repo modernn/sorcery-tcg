@@ -461,11 +461,13 @@ fn rule_catalog_2574_second_grant_stays_unoffered_after_south_rain_kills_the_onl
     let ally_id = summon_north_ally_at(&mut session, "C4");
     let rain = south_plays_c1_then_casts_rain(&mut session);
     assert!(event_types(&rain).contains(&"minion-died"));
-    assert!(state(&session)["realm"]["units"]
-        .as_array()
-        .expect("realm units")
-        .iter()
-        .all(|unit| unit["instanceId"] != ally_id));
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .all(|unit| unit["instanceId"] != ally_id)
+    );
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"

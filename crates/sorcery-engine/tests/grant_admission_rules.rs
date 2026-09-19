@@ -5,7 +5,7 @@
 //! multi-minion, far-enemy, and new-summon proofs on grant-Airborne-to-ally
 //! Magic from the 0734 matrix.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -439,10 +439,12 @@ fn rule_catalog_0941_airborne_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -503,10 +505,12 @@ fn rule_catalog_0949_lethal_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -567,10 +571,12 @@ fn rule_catalog_0956_movement_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -648,10 +654,12 @@ fn rule_catalog_0957_stealth_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -707,10 +715,12 @@ fn rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -787,10 +797,12 @@ fn rule_catalog_0987_stealth_enemy_site_grant_then_empty_spellbook_is_a_deck_out
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -846,10 +858,12 @@ fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
             "game-ended"
         ]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
     let ended = granted
         .events
         .iter()
@@ -908,14 +922,18 @@ fn rule_catalog_0989_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out() 
         event_types(&granted),
         ["magic-cast", "magic-resolved", "game-ended"]
     );
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "spell-drawn"));
-    assert!(!granted
-        .events
-        .iter()
-        .any(|event| event.event_type == "card-returned-to-deck-bottom"));
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "spell-drawn")
+    );
+    assert!(
+        !granted
+            .events
+            .iter()
+            .any(|event| event.event_type == "card-returned-to-deck-bottom")
+    );
     let ended = granted
         .events
         .iter()
@@ -925,11 +943,13 @@ fn rule_catalog_0989_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out() 
     assert_eq!(ended.payload["loser"], "north");
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
-    assert!(after["players"]["north"]["cemetery"]
-        .as_array()
-        .expect("north cemetery")
-        .iter()
-        .any(|card| card["instanceId"] == cast["cardInstanceId"]));
+    assert!(
+        after["players"]["north"]["cemetery"]
+            .as_array()
+            .expect("north cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == cast["cardInstanceId"])
+    );
     assert_eq!(after["terminal"]["status"], "finished");
     assert_eq!(after["terminal"]["reason"], "deck_empty");
     assert_exact_replay(&session);

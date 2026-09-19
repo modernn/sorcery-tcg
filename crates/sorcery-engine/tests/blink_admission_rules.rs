@@ -584,8 +584,8 @@ fn rule_catalog_2567_blink_leaves_a_two_step_ally_untouched() {
 #[test]
 fn rule_catalog_2568_second_blink_teleports_a_newly_summoned_adjacent_ally() {
     let encoded = seed_for_second_blink_new_summon(2568);
-    let (mut session, ally_id) = try_second_blink_new_summon_prefix(&encoded)
-        .expect("second nearby-ally new-summon prefix");
+    let (mut session, ally_id) =
+        try_second_blink_new_summon_prefix(&encoded).expect("second nearby-ally new-summon prefix");
     let receipt = cast_blink_on(&mut session, &ally_id, "C3", "spellbook");
     assert!(event_types(&receipt).contains(&"unit-teleported"));
     assert_eq!(unit(&state(&session), &ally_id)["location"], "C3");

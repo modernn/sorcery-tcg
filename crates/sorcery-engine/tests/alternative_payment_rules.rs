@@ -209,7 +209,7 @@ fn payment_supplemental_manifest(seed: u32) -> String {
     let mut aramos = minion(3, &thresholds(Some("earth"), 1));
     aramos["discardRandomCardInsteadOfMana"] = json!(true);
     let mut water_site = site("water");
-    water_site["genesisGainMana"] = json!(6);
+    water_site["genesisGainMana"] = json!(10);
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "alternative-payment-supplemental" }))
@@ -317,18 +317,6 @@ fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
                 .to_owned()
         })
         .collect()
-}
-
-fn hand_card_count(snapshot: &Value, seat: &str) -> usize {
-    let hand = &snapshot["players"][seat]["hand"];
-    hand["atlas"]
-        .as_array()
-        .map(|cards| cards.len())
-        .unwrap_or_default()
-        + hand["spellbook"]
-            .as_array()
-            .map(|cards| cards.len())
-            .unwrap_or_default()
 }
 
 fn supplemental_seed_sacrifice(start: u32, min_gnarled: usize, min_helper: usize) -> String {
