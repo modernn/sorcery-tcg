@@ -1,5 +1,5 @@
 //! Direct proofs for target-player life-gain Magic (RULE-CATALOG-0651–0652,
-//! RULE-CATALOG-1058).
+//! RULE-CATALOG-1058, RULE-CATALOG-2223–2228).
 //!
 //! Target-player life-gain Magic pays, offers only both Avatars, never offers
 //! a minion, and heals the chosen Avatar through the shared printed-life cap.
@@ -638,4 +638,306 @@ fn rule_catalog_1058_target_player_life_gain_withheld_during_pending_deathrite_o
     );
     assert_eq!(state(session)["players"]["south"]["avatar"]["life"], 20);
     assert_exact_replay(session);
+}
+
+fn life_gain_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "target-player-life-gain-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-target-player-life-gain-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(20),
+            "north-life-gain": life_gain_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(20),
+            "south-loss": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-life-gain"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-loss"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn life_gain_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-life-gain")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn seed_for_one_genesis(start: u32, required_gains: usize) -> String {
+    (start..start + 8192)
+        .chain(651..651 + 8192)
+        .find_map(|seed| {
+            let encoded = life_gain_supplemental_manifest(seed);
+            let session = try_south_genesis_then_north_main(&encoded, 1)?;
+            (life_gain_spells_in_hand(&state(&session)) >= required_gains).then_some(encoded)
+        })
+        .expect("bounded seed reaching target-player life-gain after south genesis")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn try_end_turn_if_offered(session: &mut Session) -> Option<()> {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        try_accept_where(session, |descriptor| descriptor["kind"] == "decline-attack")?;
+    }
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    Some(())
+}
+
+fn try_draw_any(session: &mut Session) -> Option<(Value, Receipt)> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })
+}
+
+fn try_south_genesis_then_north_main(encoded: &str, summons: usize) -> Option<Session> {
+    let mut session = opening_main(encoded);
+    if life_gain_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_draw_any(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    for _ in 0..summons {
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-loss"
+                && descriptor["cell"] == "C1"
+                && descriptor["region"].is_null()
+        })?;
+    }
+    let expected_life = 20 - i64::try_from(summons).ok()? * 2;
+    if state(&session)["players"]["south"]["avatar"]["life"] != expected_life {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_draw_any(&mut session)?;
+    Some(session)
+}
+
+fn cast_life_gain_on(session: &mut Session, seat: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-gain"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == seat
+    });
+    receipt
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    });
+}
+
+fn try_second_life_gain_enemy_arrival_prefix(encoded: &str) -> Option<Session> {
+    let mut session = try_south_genesis_then_north_main(encoded, 1)?;
+    if life_gain_spells_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    let first = cast_life_gain_on(&mut session, "south");
+    if !event_types(&first).contains(&"avatar-healed") {
+        return None;
+    }
+    if state(&session)["players"]["south"]["avatar"]["life"] != 20 {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_draw_any(&mut session)?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-loss"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    if state(&session)["players"]["south"]["avatar"]["life"] != 18 {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_draw_any(&mut session)?;
+    (life_gain_spells_in_hand(&state(&session)) >= 1).then_some(session)
+}
+
+fn seed_for_second_life_gain_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(651..651 + 8192)
+        .find_map(|seed| {
+            let encoded = life_gain_supplemental_manifest(seed);
+            try_second_life_gain_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second target-player life-gain enemy-arrival setup")
+}
+
+fn seed_for_two_genesis_heals(start: u32) -> String {
+    (start..start + 8192)
+        .chain(651..651 + 8192)
+        .find_map(|seed| {
+            let encoded = life_gain_supplemental_manifest(seed);
+            let session = try_south_genesis_then_north_main(&encoded, 2)?;
+            (life_gain_spells_in_hand(&state(&session)) >= 2).then_some(encoded)
+        })
+        .expect("bounded seed with two target-player life-gain casts after stacked genesis loss")
+}
+
+#[test]
+fn rule_catalog_2223_healed_life_stays_after_turns_pass() {
+    let encoded = seed_for_one_genesis(2223, 1);
+    let mut session = try_south_genesis_then_north_main(&encoded, 1)
+        .expect("target-player life-gain persistence setup");
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    let receipt = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&receipt).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2224_second_life_gain_at_the_printed_cap_is_a_paid_noop() {
+    let encoded = seed_for_one_genesis(2224, 2);
+    let mut session = try_south_genesis_then_north_main(&encoded, 1)
+        .expect("target-player life-gain cap-repeat setup");
+    assert!(life_gain_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&first).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert!(life_gain_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_life_gain_on(&mut session, "south");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2225_second_life_gain_heals_newly_lost_life_after_enemy_site_placement() {
+    let encoded = seed_for_second_life_gain_enemy_arrival(2225);
+    let mut session = try_second_life_gain_enemy_arrival_prefix(&encoded)
+        .expect("second target-player life-gain enemy-arrival prefix");
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    let receipt = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&receipt).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2226_target_player_life_gain_offers_both_avatars() {
+    let encoded = seed_for_one_genesis(2226, 1);
+    let mut session = try_south_genesis_then_north_main(&encoded, 1)
+        .expect("target-player life-gain dual-avatar setup");
+    assert_eq!(
+        life_gain_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    let receipt = cast_life_gain_on(&mut session, "south");
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "avatar-healed", "magic-resolved"]
+    );
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2227_target_player_life_gain_leaves_the_other_avatar_untouched() {
+    let encoded = seed_for_one_genesis(2227, 1);
+    let mut session = try_south_genesis_then_north_main(&encoded, 1)
+        .expect("target-player life-gain other-avatar setup");
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    let receipt = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&receipt).contains(&"avatar-healed"));
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "avatar-healed" && event.payload["seat"] == "north")
+    );
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2228_second_life_gain_heals_remaining_life_after_stacked_genesis() {
+    let encoded = seed_for_two_genesis_heals(2228);
+    let mut session = try_south_genesis_then_north_main(&encoded, 2)
+        .expect("target-player life-gain stacked-genesis setup");
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 16);
+    assert!(life_gain_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&first).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 18);
+    let second = cast_life_gain_on(&mut session, "south");
+    assert!(event_types(&second).contains(&"avatar-healed"));
+    assert_eq!(state(&session)["players"]["south"]["avatar"]["life"], 20);
+    assert_eq!(state(&session)["players"]["north"]["avatar"]["life"], 20);
+    assert_exact_replay(&session);
 }
