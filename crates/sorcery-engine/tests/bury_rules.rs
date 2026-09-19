@@ -1,5 +1,5 @@
 //! Direct proofs for burrow-target-minion-or-artifact Magic
-//! (RULE-CATALOG-0585–0586, RULE-CATALOG-0730).
+//! (RULE-CATALOG-0585–0586, RULE-CATALOG-0730, RULE-CATALOG-2533–2538).
 //!
 //! Ordinary Magic burrows a chosen minion on Earth. A Burrowing minion
 //! survives underground. A Water site is still offered, then resolves as a
@@ -293,4 +293,34 @@ fn rule_catalog_0586_bury_on_water_is_a_paid_noop() {
 #[test]
 fn rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards();
+}
+
+#[test]
+fn rule_catalog_2533_burrow_magic_admits_ordinary_and_movement_keyword_minions() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2533_burrow_magic_admits_ordinary_and_movement_keyword_minions();
+}
+
+#[test]
+fn rule_catalog_2534_burrow_magic_admits_start_turn_trigger_minion_slices() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2534_burrow_magic_admits_start_turn_trigger_minion_slices();
+}
+
+#[test]
+fn rule_catalog_2535_burrow_magic_admits_deathrite_library_minion_slices() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2535_burrow_magic_admits_deathrite_library_minion_slices();
+}
+
+#[test]
+fn rule_catalog_2536_burrow_magic_admits_end_turn_and_forced_attack_minion_slices() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2536_burrow_magic_admits_end_turn_and_forced_attack_minion_slices();
+}
+
+#[test]
+fn rule_catalog_2537_burrow_magic_admits_common_artifact_bearer_modifiers() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2537_burrow_magic_admits_common_artifact_bearer_modifiers();
+}
+
+#[test]
+fn rule_catalog_2538_burrow_magic_admits_cave_in_area_burrow_slices() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2538_burrow_magic_admits_cave_in_area_burrow_slices();
 }

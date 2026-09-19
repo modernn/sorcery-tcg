@@ -29157,162 +29157,127 @@ pub mod catalog_proofs {
         assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one admission matrix keeps every burrow slice and fail-closed case visible"
-    )]
-    pub fn rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards() {
-        let bury_manifest = |extra: &[(&str, Value)]| {
-            let extra = extra.to_vec();
-            selfplay_manifest_with(31, move |manifest| {
-                for ordinal in 1..=50 {
-                    manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                        "burrowTargetMinionOrArtifact": true,
-                        "cardType": "magic",
-                        "manaCost": 0,
-                        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-                    });
-                }
-                for (field, value) in &extra {
-                    manifest["cards"]["south-spell-1"][*field] = value.clone();
-                }
-            })
-        };
-        Game::from_manifest_json(&bury_manifest(&[]))
-            .expect("valid Bury manifest")
-            .ensure_selfplay_supported()
-            .expect("ordinary minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("burrowing", json!(true))]))
-            .expect("valid Burrowing manifest")
-            .ensure_selfplay_supported()
-            .expect("Burrowing minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("submerge", json!(true))]))
-            .expect("valid Submerge manifest")
-            .ensure_selfplay_supported()
-            .expect("Submerge minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("waterbound", json!(true))]))
-            .expect("valid Waterbound manifest")
-            .ensure_selfplay_supported()
-            .expect("Waterbound minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("landbound", json!(true))]))
-            .expect("valid Landbound manifest")
-            .ensure_selfplay_supported()
-            .expect("Landbound minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("voidwalk", json!(true))]))
-            .expect("valid Voidwalk manifest")
-            .ensure_selfplay_supported()
-            .expect("Voidwalk minion Bury is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[
-            (
-                "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
-                json!(true),
-            ),
-            ("voidwalk", json!(true)),
-        ]))
-        .expect("valid random teleport manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn random teleport is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atStartOfControllerTurnDrawSpells",
-            json!(1),
-        )]))
-        .expect("valid start-turn draw manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn draw spells is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atStartOfControllerTurnDrawSites",
-            json!(1),
-        )]))
-        .expect("valid start-turn Atlas draw manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn draw sites is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atStartOfControllerTurnLureNearbyEnemyMinion",
-            json!(true),
-        )]))
-        .expect("valid start-turn lure manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn lure is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atStartOfControllerTurnMillSpells",
-            json!(1),
-        )]))
-        .expect("valid start-turn mill manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn mill spells is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atStartOfControllerTurnMillSites",
-            json!(1),
-        )]))
-        .expect("valid start-turn Atlas mill manifest")
-        .ensure_selfplay_supported()
-        .expect("start-turn mill sites is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("deathriteDrawSpells", json!(true))]))
-            .expect("valid Deathrite spell-draw manifest")
-            .ensure_selfplay_supported()
-            .expect("Deathrite spell draw is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSpells", json!(true))]))
-            .expect("valid Deathrite spell-mill manifest")
-            .ensure_selfplay_supported()
-            .expect("Deathrite spell mill is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("deathriteMillSites", json!(true))]))
-            .expect("valid Deathrite site-mill manifest")
-            .ensure_selfplay_supported()
-            .expect("Deathrite site mill is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atEndOfControllerTurnControllerGainsLife",
-            json!(2),
-        )]))
-        .expect("valid end-turn life-gain manifest")
-        .ensure_selfplay_supported()
-        .expect("end-turn controller life gain is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "atEndOfControllerTurnControllerLosesLife",
-            json!(2),
-        )]))
-        .expect("valid end-turn life-loss manifest")
-        .ensure_selfplay_supported()
-        .expect("end-turn controller life loss is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "doesNotUntapDuringControllersStartPhase",
-            json!(true),
-        )]))
-        .expect("valid does-not-untap manifest")
-        .ensure_selfplay_supported()
-        .expect("does not untap during Start Phase is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[("mustAttackAUnitIfAble", json!(true))]))
-            .expect("valid must-attack manifest")
-            .ensure_selfplay_supported()
-            .expect("must attack a unit if able is self-play safe");
-        Game::from_manifest_json(&bury_manifest(&[(
-            "enemiesMustAttackThisIfAble",
-            json!(true),
-        )]))
-        .expect("valid forced-attack source manifest")
-        .ensure_selfplay_supported()
-        .expect("enemies must attack this if able is self-play safe");
-
-        let cave_in = selfplay_manifest_with(31, |manifest| {
+    fn burrow_target_bury_manifest(extra: &[(&str, Value)]) -> String {
+        let extra = extra.to_vec();
+        selfplay_manifest_with(31, move |manifest| {
             for ordinal in 1..=50 {
                 manifest["cards"][format!("north-spell-{ordinal}")] = json!({
-                    "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                    "burrowTargetMinionOrArtifact": true,
                     "cardType": "magic",
                     "manaCost": 0,
                     "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
                 });
             }
-        });
-        Game::from_manifest_json(&cave_in)
-            .expect("valid Cave-In manifest")
-            .ensure_selfplay_supported()
-            .expect("artifact-free Cave-In is self-play safe");
+            for (field, value) in &extra {
+                manifest["cards"]["south-spell-1"][*field] = value.clone();
+            }
+        })
+    }
 
-        let power_artifact = json!({
-            "cardType": "artifact",
-            "grantsBearerPower": 2,
-            "manaCost": 0,
-            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
-        });
+    fn assert_burrow_target_manifest_admits(extra: &[(&str, Value)], label: &str) {
+        Game::from_manifest_json(&burrow_target_bury_manifest(extra))
+            .unwrap_or_else(|_| panic!("valid {label} manifest"))
+            .ensure_selfplay_supported()
+            .unwrap_or_else(|_| panic!("{label} is self-play safe"));
+    }
+
+    pub fn rule_catalog_2533_burrow_magic_admits_ordinary_and_movement_keyword_minions() {
+        for (extra, label) in [
+            (&[] as &[(&str, Value)], "ordinary minion Bury"),
+            (&[("burrowing", json!(true))], "Burrowing minion Bury"),
+            (&[("submerge", json!(true))], "Submerge minion Bury"),
+            (&[("waterbound", json!(true))], "Waterbound minion Bury"),
+            (&[("landbound", json!(true))], "Landbound minion Bury"),
+            (&[("voidwalk", json!(true))], "Voidwalk minion Bury"),
+        ] {
+            assert_burrow_target_manifest_admits(extra, label);
+        }
+    }
+
+    pub fn rule_catalog_2534_burrow_magic_admits_start_turn_trigger_minion_slices() {
+        for (extra, label) in [
+            (
+                &[
+                    (
+                        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+                        json!(true),
+                    ),
+                    ("voidwalk", json!(true)),
+                ] as &[(&str, Value)],
+                "start-turn random teleport",
+            ),
+            (
+                &[("atStartOfControllerTurnDrawSpells", json!(1))],
+                "start-turn draw spells",
+            ),
+            (
+                &[("atStartOfControllerTurnDrawSites", json!(1))],
+                "start-turn draw sites",
+            ),
+            (
+                &[("atStartOfControllerTurnLureNearbyEnemyMinion", json!(true))],
+                "start-turn lure",
+            ),
+            (
+                &[("atStartOfControllerTurnMillSpells", json!(1))],
+                "start-turn mill spells",
+            ),
+            (
+                &[("atStartOfControllerTurnMillSites", json!(1))],
+                "start-turn mill sites",
+            ),
+        ] {
+            assert_burrow_target_manifest_admits(extra, label);
+        }
+    }
+
+    pub fn rule_catalog_2535_burrow_magic_admits_deathrite_library_minion_slices() {
+        for (extra, label) in [
+            (
+                &[("deathriteDrawSpells", json!(true))] as &[(&str, Value)],
+                "Deathrite spell draw",
+            ),
+            (
+                &[("deathriteMillSpells", json!(true))],
+                "Deathrite spell mill",
+            ),
+            (
+                &[("deathriteMillSites", json!(true))],
+                "Deathrite site mill",
+            ),
+        ] {
+            assert_burrow_target_manifest_admits(extra, label);
+        }
+    }
+
+    pub fn rule_catalog_2536_burrow_magic_admits_end_turn_and_forced_attack_minion_slices() {
+        for (extra, label) in [
+            (
+                &[("atEndOfControllerTurnControllerGainsLife", json!(2))] as &[(&str, Value)],
+                "end-turn controller life gain",
+            ),
+            (
+                &[("atEndOfControllerTurnControllerLosesLife", json!(2))],
+                "end-turn controller life loss",
+            ),
+            (
+                &[("doesNotUntapDuringControllersStartPhase", json!(true))],
+                "does not untap during Start Phase",
+            ),
+            (
+                &[("mustAttackAUnitIfAble", json!(true))],
+                "must attack a unit if able",
+            ),
+            (
+                &[("enemiesMustAttackThisIfAble", json!(true))],
+                "enemies must attack this if able",
+            ),
+        ] {
+            assert_burrow_target_manifest_admits(extra, label);
+        }
+    }
+
+    pub fn rule_catalog_2537_burrow_magic_admits_common_artifact_bearer_modifiers() {
         let artifact_manifest = |artifact: &Value, burrows: bool| {
             selfplay_manifest_with(31, |manifest| {
                 manifest["cards"]["south-spell-1"] = artifact.clone();
@@ -29328,6 +29293,12 @@ pub mod catalog_proofs {
                 }
             })
         };
+        let power_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
         Game::from_manifest_json(&artifact_manifest(&power_artifact, false))
             .expect("valid power Artifact manifest")
             .ensure_selfplay_supported()
@@ -29383,7 +29354,30 @@ pub mod catalog_proofs {
             .expect("valid composed Mask Artifact manifest")
             .ensure_selfplay_supported()
             .expect("composed nearby-must-attack and double-strike Artifacts are self-play safe");
+    }
 
+    pub fn rule_catalog_2538_burrow_magic_admits_cave_in_area_burrow_slices() {
+        let cave_in = selfplay_manifest_with(31, |manifest| {
+            for ordinal in 1..=50 {
+                manifest["cards"][format!("north-spell-{ordinal}")] = json!({
+                    "burrowAllMinionsAndArtifactsAtTargetLandSite": true,
+                    "cardType": "magic",
+                    "manaCost": 0,
+                    "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+                });
+            }
+        });
+        Game::from_manifest_json(&cave_in)
+            .expect("valid Cave-In manifest")
+            .ensure_selfplay_supported()
+            .expect("artifact-free Cave-In is self-play safe");
+
+        let power_artifact = json!({
+            "cardType": "artifact",
+            "grantsBearerPower": 2,
+            "manaCost": 0,
+            "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+        });
         let cave_in_with_artifact = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {
                 manifest["cards"][format!("north-spell-{ordinal}")] = json!({
@@ -29399,6 +29393,15 @@ pub mod catalog_proofs {
             .expect("valid Cave-In plus Artifact manifest")
             .ensure_selfplay_supported()
             .expect("Cave-In with power Artifacts is self-play safe");
+    }
+
+    pub fn rule_catalog_0730_burrow_magic_admits_minion_slices_and_rejects_unmodeled_cards() {
+        rule_catalog_2533_burrow_magic_admits_ordinary_and_movement_keyword_minions();
+        rule_catalog_2534_burrow_magic_admits_start_turn_trigger_minion_slices();
+        rule_catalog_2535_burrow_magic_admits_deathrite_library_minion_slices();
+        rule_catalog_2536_burrow_magic_admits_end_turn_and_forced_attack_minion_slices();
+        rule_catalog_2537_burrow_magic_admits_common_artifact_bearer_modifiers();
+        rule_catalog_2538_burrow_magic_admits_cave_in_area_burrow_slices();
     }
 
     #[expect(
@@ -29966,19 +29969,138 @@ pub mod catalog_proofs {
     }
 
     pub fn rule_catalog_0732_ordered_terminal_cleanup_should_omit_resolved_chain_magic() {
+        let mut game = chain_cleanup_terminal_game();
+        chain_cleanup_run_terminal_cleanup(&mut game);
+
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+        assert_eq!(game.position.phase, Phase::Terminal);
+    }
+
+    fn chain_cleanup_terminal_game() -> Game {
         let manifest = selfplay_manifest_with(31, |_| {});
-        let mut game = Game::from_manifest_json(&manifest).expect("valid game");
+        Game::from_manifest_json(&manifest).expect("valid chain cleanup game")
+    }
+
+    fn chain_cleanup_terminal_win() -> TerminalResult {
+        TerminalResult::Win {
+            loser: Seat::South,
+            reason: WinReason::AvatarDefeated,
+            winner: Seat::North,
+        }
+    }
+
+    fn chain_cleanup_run_terminal_cleanup(game: &mut Game) {
         game.position.pending_chain_magic = PendingField::Resolved;
         game.position.phase = Phase::DeathriteOrder;
+        game.position.terminal = Some(chain_cleanup_terminal_win());
         game.clear_ordered_terminal_continuations();
+    }
 
+    fn chain_cleanup_assert_pending_chain_magic_omitted(game: &Game) {
         assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
         assert!(
             game.authoritative_state()
                 .get("pendingChainMagic")
-                .is_none()
+                .is_none(),
+            "authoritative state must omit pendingChainMagic instead of serializing null"
         );
-        assert_eq!(game.position.phase, Phase::Terminal);
+    }
+
+    pub fn rule_catalog_2553_resolved_chain_magic_stays_omitted_after_terminal_state_reserializes()
+    {
+        let mut game = chain_cleanup_terminal_game();
+        chain_cleanup_run_terminal_cleanup(&mut game);
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+        game.position.state_version += 3;
+        game.position.turn_number += 2;
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+    }
+
+    pub fn rule_catalog_2554_terminal_cleanup_without_resolved_chain_magic_keeps_pending_chain_magic_absent()
+     {
+        let mut game = chain_cleanup_terminal_game();
+        assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
+        game.position.phase = Phase::DeathriteOrder;
+        game.position.terminal = Some(chain_cleanup_terminal_win());
+        game.clear_ordered_terminal_continuations();
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+    }
+
+    pub fn rule_catalog_2555_terminal_cleanup_omits_resolved_chain_magic_alongside_other_resolved_continuations()
+     {
+        let mut game = chain_cleanup_terminal_game();
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.position.pending_basic_movement = PendingField::Resolved;
+        game.position.pending_ranged_step = PendingField::Resolved;
+        game.position.phase = Phase::DeathriteOrder;
+        game.position.terminal = Some(chain_cleanup_terminal_win());
+        game.clear_ordered_terminal_continuations();
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+        let snapshot = game.authoritative_state();
+        assert!(snapshot.get("pendingBasicMovement").is_none());
+        assert!(snapshot.get("pendingRangedStep").is_none());
+    }
+
+    pub fn rule_catalog_2556_terminal_cleanup_omits_resolved_chain_magic_after_multi_hop_staging() {
+        let mut game = chain_cleanup_terminal_game();
+        let first = identity_hash(&json!({ "fixture": "chain-cleanup-first-hop" }))
+            .expect("first hop identity");
+        let second = identity_hash(&json!({ "fixture": "chain-cleanup-second-hop" }))
+            .expect("second hop identity");
+        game.position.pending_chain_magic = PendingField::Pending(PendingChainMagic {
+            card_id: CardId(0),
+            card_instance_id: identity_hash(&json!({ "fixture": "chain-cleanup-spell" }))
+                .expect("chain spell identity"),
+            caster_instance_id: identity_hash(&json!({ "fixture": "chain-cleanup-caster" }))
+                .expect("caster identity"),
+            discard_card_instance_id: None,
+            seat: Seat::North,
+            targets: vec![
+                UnitTarget::Minion {
+                    seat: Seat::South,
+                    instance_id: first.clone(),
+                },
+                UnitTarget::Minion {
+                    seat: Seat::South,
+                    instance_id: second,
+                },
+            ],
+        });
+        game.position.pending_chain_magic = PendingField::Resolved;
+        chain_cleanup_run_terminal_cleanup(&mut game);
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+    }
+
+    pub fn rule_catalog_2557_terminal_cleanup_omits_resolved_chain_magic_while_other_continuations_stay_pending()
+     {
+        let mut game = chain_cleanup_terminal_game();
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.position.pending_basic_movement = PendingField::Pending(PendingBasicMovement {
+            path: vec![Location {
+                cell: Cell::parse("C4").expect("C4"),
+                region: Region::Surface,
+            }],
+            path_index: 0,
+            purpose: BasicMovementPurpose::MoveAndAttack,
+            ranged_strike_used: false,
+            seat: Seat::North,
+            source_instance_id: identity_hash(&json!({ "fixture": "chain-cleanup-mover" }))
+                .expect("mover identity"),
+        });
+        game.position.phase = Phase::DeathriteOrder;
+        game.position.terminal = Some(chain_cleanup_terminal_win());
+        game.clear_ordered_terminal_continuations();
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+        assert_eq!(game.position.pending_basic_movement, PendingField::Absent);
+    }
+
+    pub fn rule_catalog_2558_second_terminal_cleanup_still_omits_newly_resolved_chain_magic() {
+        let mut game = chain_cleanup_terminal_game();
+        chain_cleanup_run_terminal_cleanup(&mut game);
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
+        game.position.pending_chain_magic = PendingField::Resolved;
+        game.clear_ordered_terminal_continuations();
+        chain_cleanup_assert_pending_chain_magic_omitted(&game);
     }
 
     #[expect(
