@@ -8,7 +8,7 @@
 //! enemy-arrival, multi-wounded, underground, and a newly summoned surface
 //! minion. Seed search starts at the catalog id and falls back to 673.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
 use sorcery_engine::session::{Session, StepResult};
@@ -645,11 +645,13 @@ fn rule_catalog_0673_fatality_kills_a_wounded_minion_in_the_caster_region_not_un
     let survivor = unit(&finished, &buried_id);
     assert_eq!(survivor["region"], "underground");
     assert_eq!(survivor["damage"], 1);
-    assert!(finished["players"]["south"]["cemetery"]
-        .as_array()
-        .expect("South cemetery")
-        .iter()
-        .any(|card| card["instanceId"] == surface_id.as_str()));
+    assert!(
+        finished["players"]["south"]["cemetery"]
+            .as_array()
+            .expect("South cemetery")
+            .iter()
+            .any(|card| card["instanceId"] == surface_id.as_str())
+    );
     assert_exact_replay(&session);
 }
 
@@ -720,8 +722,8 @@ fn rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wo
 }
 
 #[test]
-fn rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_enemy_site_placement(
-) {
+fn rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_enemy_site_placement()
+ {
     let encoded = seed_for_second_fatality_enemy_arrival(2335);
     let (mut session, visitor_id, buried_id) = try_second_fatality_enemy_arrival_prefix(&encoded)
         .expect("Fatality region enemy-arrival prefix");
@@ -819,8 +821,10 @@ fn rule_catalog_2338_second_fatality_kills_a_newly_summoned_surface_wounded_mini
     assert!(event_types(&receipt).contains(&"minion-died"));
     assert!(realm_unit(&state(&session), &new_id).is_none());
     assert_eq!(unit(&state(&session), &buried_id)["region"], "underground");
-    assert!(state(&session)["players"]["south"]["cemetery"]
-        .as_array()
-        .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == new_id)));
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == new_id))
+    );
     assert_exact_replay(&session);
 }
