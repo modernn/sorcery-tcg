@@ -49741,8 +49741,211 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2361",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2361_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2362",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2362_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2363",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic leaves a buried Artifact underground after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2363_buried_artifact_stays_underground_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2364",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast stays unoffered when no surface Artifact remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "artifact-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2364_second_bury_without_a_surface_artifact_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2365",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast burrows a newly arrived Artifact after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2365_second_bury_burrows_a_newly_arrived_artifact_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2366",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic offers every surface Artifact in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "cast-artifact"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2366_bury_offers_every_surface_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2367",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic at one Artifact leaves a far Artifact untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2367_bury_leaves_a_far_artifact_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2368",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast burrows a newly placed Artifact.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "cast-artifact"
+      ],
+      "eventHints": [
+        "artifact-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_legacy_rules.rs",
+        "testName": "rule_catalog_2368_second_bury_burrows_a_newly_placed_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2369",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2369_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2370",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2370_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }
