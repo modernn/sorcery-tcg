@@ -1,10 +1,12 @@
 //! Direct proofs for return-target-aura-to-owner-hand Magic
-//! (RULE-CATALOG-0669–0670, RULE-CATALOG-1084).
+//! (RULE-CATALOG-0669–0670, RULE-CATALOG-1084, RULE-CATALOG-2313–2318).
 //!
 //! Targeted realm Aura bounce returns a Flood in play to its owner's hidden
 //! Spellbook hand. It is not cemetery Aura return: a minion in play is not a
 //! target, and an empty realm offers no cast. While Deathrites wait for
 //! ordering, return-aura Magic stays withheld until the chain drains.
+//! Supplemental 2313–2318 bind persistence, no-target repeat, enemy-arrival,
+//! multi-aura offer, unselected remainder, and a newly placed Aura.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -639,4 +641,405 @@ fn rule_catalog_1084_return_target_aura_withheld_during_pending_deathrite_order(
     );
     assert!(!realm_has_aura(&state(session), &aura_id));
     assert_exact_replay(session);
+}
+
+fn return_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "return-target-aura-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-return-target-aura-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-return": return_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-flood": flood(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-return"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-flood"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(669..669 + 2048)
+        .map(return_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-return")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-flood")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with return-aura Magic and required South Floods")
+}
+
+fn return_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-return")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn realm_aura_ids(snapshot: &Value) -> Vec<String> {
+    snapshot["realm"]
+        .get("auras")
+        .and_then(Value::as_array)
+        .map(|auras| {
+            auras
+                .iter()
+                .filter_map(|aura| aura["instanceId"].as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn hand_has_instance(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn setup_south_floods(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let mut ids = Vec::new();
+    for _ in 0..count {
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "cast-aura"
+                && descriptor["cardId"] == "south-flood"
+                && cells_include(descriptor, "C1")
+        });
+        let id = realm_aura_ids(&state(session))
+            .into_iter()
+            .find(|id| !ids.contains(id))
+            .expect("new Flood identity");
+        ids.push(id);
+    }
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    ids
+}
+
+fn cast_return_on(session: &mut Session, aura_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    receipt
+}
+
+fn try_second_return_enemy_aura_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_south_floods(&mut session, 1).into_iter().next()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["targetAuraInstanceId"] == first_id
+    })?;
+    pass_turn_to_north_spellbook(&mut session);
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C2"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "south-flood"
+            && cells_include(descriptor, "C2")
+    })?;
+    let aura_id = realm_aura_ids(&state(&session)).into_iter().next()?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    return_aura_targets(&session)
+        .contains(&aura_id)
+        .then_some((session, aura_id))
+}
+
+fn seed_for_second_return_enemy_aura(start: u32) -> String {
+    (start..start + 8192)
+        .chain(669..669 + 8192)
+        .find_map(|seed| {
+            let encoded = return_supplemental_manifest(seed);
+            if !opening_hand_spell_ids(&encoded, "north")
+                .iter()
+                .any(|card| card == "north-return")
+                || opening_hand_spell_ids(&encoded, "south")
+                    .iter()
+                    .filter(|card| *card == "south-flood")
+                    .count()
+                    < 1
+            {
+                return None;
+            }
+            try_second_return_enemy_aura_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second return-aura enemy-arrival setup")
+}
+
+fn try_second_return_new_aura_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_south_floods(&mut session, 1).into_iter().next()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["targetAuraInstanceId"] == first_id
+    })?;
+    if realm_has_aura(&state(&session), &first_id) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "south-flood"
+            && cells_include(descriptor, "C1")
+    })?;
+    let aura_id = realm_aura_ids(&state(&session)).into_iter().next()?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    return_aura_targets(&session)
+        .contains(&aura_id)
+        .then_some((session, aura_id))
+}
+
+fn seed_for_second_return_new_aura(start: u32) -> String {
+    (start..start + 8192)
+        .chain(669..669 + 8192)
+        .find_map(|seed| {
+            let encoded = return_supplemental_manifest(seed);
+            if !opening_hand_spell_ids(&encoded, "north")
+                .iter()
+                .any(|card| card == "north-return")
+                || opening_hand_spell_ids(&encoded, "south")
+                    .iter()
+                    .filter(|card| *card == "south-flood")
+                    .count()
+                    < 1
+            {
+                return None;
+            }
+            try_second_return_new_aura_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second return-aura new-placement setup")
+}
+
+#[test]
+fn rule_catalog_2313_returned_aura_stays_in_hand_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2313, 1);
+    let mut session = opening_main(&encoded);
+    let aura_id = setup_south_floods(&mut session, 1)
+        .into_iter()
+        .next()
+        .expect("Flood identity");
+    let receipt = cast_return_on(&mut session, &aura_id);
+    assert!(event_types(&receipt).contains(&"aura-returned-to-hand"));
+    assert!(hand_has_instance(&state(&session), "south", &aura_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), "south", &aura_id));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2314_second_return_offers_no_targets_after_returning_the_only_aura() {
+    let encoded = (2314..2314 + 8192)
+        .chain(669..669 + 8192)
+        .find_map(|seed| {
+            let candidate = return_supplemental_manifest(seed);
+            if !opening_hand_spell_ids(&candidate, "north")
+                .iter()
+                .any(|card| card == "north-return")
+                || opening_hand_spell_ids(&candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-flood")
+                    .count()
+                    < 1
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            let aura_id = setup_south_floods(&mut session, 1).into_iter().next()?;
+            let first = cast_return_on(&mut session, &aura_id);
+            if !event_types(&first).contains(&"aura-returned-to-hand") {
+                return None;
+            }
+            if realm_has_aura(&state(&session), &aura_id) {
+                return None;
+            }
+            if return_spells_in_hand(&state(&session)) < 1 {
+                pass_turn_to_north_spellbook(&mut session);
+            }
+            (return_spells_in_hand(&state(&session)) >= 1
+                && return_aura_targets(&session).is_empty())
+            .then_some(candidate)
+        })
+        .expect("bounded seed with two return-aura casts after returning the only Aura");
+    let mut session = opening_main(&encoded);
+    let aura_id = setup_south_floods(&mut session, 1)
+        .into_iter()
+        .next()
+        .expect("Flood identity");
+    let first = cast_return_on(&mut session, &aura_id);
+    assert!(event_types(&first).contains(&"aura-returned-to-hand"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    if return_spells_in_hand(&state(&session)) < 1 {
+        pass_turn_to_north_spellbook(&mut session);
+    }
+    assert!(return_spells_in_hand(&state(&session)) >= 1);
+    assert_eq!(return_aura_targets(&session), Vec::<String>::new());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2315_second_return_returns_a_newly_arrived_aura_after_enemy_site_placement() {
+    let encoded = seed_for_second_return_enemy_aura(2315);
+    let (mut session, aura_id) = try_second_return_enemy_aura_prefix(&encoded)
+        .expect("second return-aura enemy-arrival prefix");
+    let receipt = cast_return_on(&mut session, &aura_id);
+    assert!(event_types(&receipt).contains(&"aura-returned-to-hand"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2316_return_target_aura_offers_every_realm_aura() {
+    let encoded = supplemental_seed_with_start(2316, 2);
+    let mut session = opening_main(&encoded);
+    let aura_ids = setup_south_floods(&mut session, 2);
+    let offered = return_aura_targets(&session);
+    for aura_id in &aura_ids {
+        assert!(offered.contains(aura_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2317_return_target_aura_leaves_a_far_aura_untouched() {
+    let encoded = supplemental_seed_with_start(2317, 2);
+    let mut session = opening_main(&encoded);
+    let aura_ids = setup_south_floods(&mut session, 2);
+    let far_id = aura_ids[0].clone();
+    let near_id = aura_ids[1].clone();
+    let receipt = cast_return_on(&mut session, &near_id);
+    assert!(event_types(&receipt).contains(&"aura-returned-to-hand"));
+    assert!(!realm_has_aura(&state(&session), &near_id));
+    assert!(realm_has_aura(&state(&session), &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2318_second_return_returns_a_newly_placed_aura() {
+    let encoded = seed_for_second_return_new_aura(2318);
+    let (mut session, aura_id) = try_second_return_new_aura_prefix(&encoded)
+        .expect("second return-aura new-placement prefix");
+    let receipt = cast_return_on(&mut session, &aura_id);
+    assert!(event_types(&receipt).contains(&"aura-returned-to-hand"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert!(hand_has_instance(&state(&session), "south", &aura_id));
+    assert_exact_replay(&session);
 }

@@ -49741,8 +49741,201 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2311",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2311_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2312",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2312_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2313",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-target-aura Magic leaves a restored Flood in its owner's hidden Spellbook hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2313_returned_aura_stays_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2314",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-target-aura spells in hand, a second cast stays unoffered after the only realm Aura returns to its owner's hand.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2314_second_return_offers_no_targets_after_returning_the_only_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2315",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-target-aura spells in hand, a second cast returns a newly arrived Flood after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2315_second_return_returns_a_newly_arrived_aura_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2316",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-target-aura Magic offers every realm Aura when multiple Floods occupy the realm.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2316_return_target_aura_offers_every_realm_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2317",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-target-aura Magic leaves an unselected realm Aura in place.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2317_return_target_aura_leaves_a_far_aura_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2318",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-target-aura spells in hand, a second cast returns a newly placed Flood.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetAuraToOwnerHand"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "aura-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/return_target_aura_rules.rs",
+        "testName": "rule_catalog_2318_second_return_returns_a_newly_placed_aura"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2319",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2319_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2320",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2320_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }
