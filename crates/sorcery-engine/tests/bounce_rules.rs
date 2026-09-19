@@ -1,5 +1,5 @@
 //! Direct proofs for return-target-minion-to-owner-hand Magic (RULE-CATALOG-0621–0622,
-//! RULE-CATALOG-1025).
+//! RULE-CATALOG-1025, RULE-CATALOG-2073–2078).
 //!
 //! Bounce Magic returns a healthy same-region minion to its owner's hand.
 //! Enemy Ward absorbs the return without moving the minion. While Deathrites
@@ -567,4 +567,415 @@ fn rule_catalog_1025_bounce_magic_withheld_during_pending_deathrite_order() {
     );
     assert!(realm_unit(&state(session), &visitor_id).is_none());
     assert_exact_replay(session);
+}
+
+fn supplemental_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn bounce_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "bounce-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-bounce-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bounce": bounce_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": supplemental_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-bounce"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(621..621 + 2048)
+        .map(bounce_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-bounce")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with bounce Magic and required South minions")
+}
+
+fn bounce_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-bounce")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("bounce supplemental identity")
+        .to_owned()
+}
+
+fn setup_c2_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    (0..count).map(|_| summon_south_at(session, "C2")).collect()
+}
+
+fn cast_bounce_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bounce"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let c2_ids = setup_c2_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (bounce_spells_in_hand(&state(&session)) >= 1).then_some((session, c2_ids[0].clone(), far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(621..621 + 2048)
+        .find_map(|seed| {
+            let encoded = bounce_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching bounce far-minion setup")
+}
+
+fn try_second_kill_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bounce_on(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if bounce_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    bounce_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_kill_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(621..621 + 8192)
+        .find_map(|seed| {
+            let encoded = bounce_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_kill_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second bounce enemy-arrival setup")
+}
+
+fn try_second_kill_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bounce_on(&mut session, &first_id);
+    if realm_unit(&state(&session), &first_id).is_some() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if bounce_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    bounce_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_kill_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(621..621 + 8192)
+        .find_map(|seed| {
+            let encoded = bounce_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_kill_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second bounce new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2073_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2073, 1);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert!(realm_unit(&state(&session), &minion_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2074_second_bounce_offers_no_targets_after_returning_the_only_minion() {
+    let encoded = (2074..2074 + 8192)
+        .chain(621..621 + 8192)
+        .find_map(|seed| {
+            let candidate = bounce_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = cast_bounce_on(&mut session, &minion_id);
+            if !event_types(&first).contains(&"minion-returned-to-hand") {
+                return None;
+            }
+            if realm_unit(&state(&session), &minion_id).is_some() {
+                return None;
+            }
+            (bounce_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two bounce casts after returning minions");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_bounce_on(&mut session, &minion_id);
+    assert!(event_types(&first).contains(&"minion-returned-to-hand"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(bounce_spells_in_hand(&state(&session)) >= 1);
+    assert!(bounce_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-bounce"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2075_second_bounce_returns_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_kill_enemy_arrival(2075);
+    let (mut session, minion_id) =
+        try_second_kill_enemy_arrival_prefix(&encoded).expect("second bounce enemy-arrival prefix");
+    let receipt = cast_bounce_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-returned-to-hand"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2076_bounce_offers_every_same_region_minion_in_the_caster_region() {
+    let encoded = supplemental_seed_with_start(2076, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c2_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = bounce_targets(&session);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2077_bounce_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(2077);
+    let (mut session, returned_id, far_id) =
+        try_far_minion_prefix(&encoded).expect("bounce far-minion prefix");
+    let receipt = cast_bounce_on(&mut session, &returned_id);
+    assert!(event_types(&receipt).contains(&"minion-returned-to-hand"));
+    assert!(realm_unit(&state(&session), &returned_id).is_none());
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2078_second_bounce_returns_a_newly_summoned_minion() {
+    let encoded = seed_for_second_kill_new_summon(2078);
+    let (mut session, minion_id) =
+        try_second_kill_new_summon_prefix(&encoded).expect("second bounce new-summon prefix");
+    let receipt = cast_bounce_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-returned-to-hand"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(
+        state(&session)["players"]["south"]["hand"]["spellbook"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == minion_id))
+    );
+    assert_exact_replay(&session);
 }
