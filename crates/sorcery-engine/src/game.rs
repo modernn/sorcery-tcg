@@ -28295,6 +28295,140 @@ pub mod catalog_proofs {
             });
         assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
     }
+
+    fn granary_rats_occupancy_game() -> Game {
+        let manifest = selfplay_manifest_with(31, |manifest| {
+            manifest["cards"]["north-site-1"]["elements"] = json!(["earth"]);
+            manifest["cards"]["north-site-2"]["elements"] = json!(["fire"]);
+            manifest["cards"]["north-spell-1"]["siteProvidesNoThreshold"] = json!(true);
+            manifest["cards"]["north-spell-1"]["manaCost"] = json!(0);
+        });
+        let mut game =
+            Game::from_manifest_json(&manifest).expect("valid Granary Rats occupancy fixture");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        north.domain_established = true;
+        north.mulligan_complete = true;
+        north.mana = 0;
+        game.position.players[seat_index(Seat::South)].mulligan_complete = true;
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        game
+    }
+
+    fn granary_rats_card_id(game: &Game, name: &str) -> CardId {
+        CardId(
+            u16::try_from(
+                game.rules
+                    .cards
+                    .iter()
+                    .position(|card| card.id == name)
+                    .expect("fixture card"),
+            )
+            .expect("fixture card index"),
+        )
+    }
+
+    fn granary_rats_place_site(game: &mut Game, cell: Cell, card_name: &str, fixture: &str) {
+        game.position.sites[cell.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: granary_rats_card_id(game, card_name),
+                instance_id: identity_hash(&json!({ "fixture": fixture })).expect("site identity"),
+                owner: Seat::North,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::North,
+            last_flight_turn: None,
+            warded: false,
+        });
+    }
+
+    fn granary_rats_place_copy(game: &mut Game, fixture: &str, location: Cell) {
+        let instance_id = identity_hash(&json!({ "fixture": fixture })).expect("rats identity");
+        let mut unit = test_minion(
+            granary_rats_card_id(game, "north-spell-1"),
+            instance_id.as_str(),
+            Seat::South,
+            location,
+            None,
+        );
+        unit.tapped = false;
+        game.position.units.push(unit);
+    }
+
+    pub fn rule_catalog_2473_occupied_site_stays_suppressed_after_turns_pass() {
+        let mut game = granary_rats_occupancy_game();
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "persist-earth");
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
+        granary_rats_place_copy(&mut game, "persist-rats", c4);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+        game.position.turn_number += 2;
+        game.position.active_seat = Seat::South;
+        game.position.decision_seat = Seat::South;
+        assert_eq!(game.position.units[0].location, c4);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+    }
+
+    pub fn rule_catalog_2474_leaving_the_site_restores_threshold_after_the_only_copy_moves_away() {
+        let mut game = granary_rats_occupancy_game();
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "empty-earth");
+        granary_rats_place_copy(&mut game, "empty-rats", c4);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+        game.position.units[0].location = c1;
+        assert!(game.position.sites[c4.index()].is_some());
+        assert!(game.position.sites[c1.index()].is_none());
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
+    }
+
+    pub fn rule_catalog_2475_newly_placed_site_under_existing_rats_is_suppressed() {
+        let mut game = granary_rats_occupancy_game();
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "arrival-earth");
+        granary_rats_place_copy(&mut game, "arrival-rats", c1);
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
+        granary_rats_place_site(&mut game, c1, "north-site-2", "arrival-fire");
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
+        game.position.units.clear();
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+    }
+
+    pub fn rule_catalog_2476_rats_suppress_every_occupied_site() {
+        let mut game = granary_rats_occupancy_game();
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "multi-earth");
+        granary_rats_place_site(&mut game, c1, "north-site-2", "multi-fire");
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 1, 0, 0]);
+        granary_rats_place_copy(&mut game, "multi-rats-c4", c4);
+        granary_rats_place_copy(&mut game, "multi-rats-c1", c1);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+    }
+
+    pub fn rule_catalog_2477_rats_leave_a_far_site_threshold_untouched() {
+        let mut game = granary_rats_occupancy_game();
+        let c1 = Cell::parse("C1").expect("C1");
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "far-earth");
+        granary_rats_place_site(&mut game, c1, "north-site-2", "far-fire");
+        granary_rats_place_copy(&mut game, "far-rats", c4);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 1, 0, 0]);
+        assert_eq!(game.position.units[0].location, c4);
+        assert!(game.position.sites[c1.index()].is_some());
+    }
+
+    pub fn rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site() {
+        let mut game = granary_rats_occupancy_game();
+        let c4 = Cell::parse("C4").expect("C4");
+        granary_rats_place_site(&mut game, c4, "north-site-1", "summon-earth");
+        assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
+        granary_rats_place_copy(&mut game, "summon-rats", c4);
+        assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "one direct Fatality proof keeps Ward, Stealth, underground, healthy, and allied copies together"

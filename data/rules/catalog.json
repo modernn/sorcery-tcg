@@ -53396,8 +53396,184 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2470_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2471",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2471_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2472",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2472_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2473",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Granary Rats with siteProvidesNoThreshold keeps suppressing the occupied earth site after later turns pass. Distinct from 0094, which checks suppression on the summoning turn, and from 0720, which never advances the turn counter.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2473_occupied_site_stays_suppressed_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2474",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "After the only enabled Granary Rats copy leaves the occupied earth site for an empty far cell, that site's earth threshold is restored. Distinct from 0720, which restores affinities by voiding a copy rather than moving it off the site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2474_leaving_the_site_restores_threshold_after_the_only_copy_moves_away"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2475",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A newly placed fire site under already-present Granary Rats is suppressed while the far earth site stays live. Distinct from 0094, which summons rats onto an existing site, and from 0720, which never places a second site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [
+        "play-site"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2475_newly_placed_site_under_existing_rats_is_suppressed"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2476",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Enabled Granary Rats copies occupying both an earth site and a fire site suppress every occupied site at once. Distinct from 0720, which uses one dual earth+fire site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2476_rats_suppress_every_occupied_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2477",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Granary Rats occupying the earth site leave the far fire site's threshold untouched. Distinct from 0720, which only inspects the occupied dual-element site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2477_rats_leave_a_far_site_threshold_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2478",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A newly summoned Granary Rats copy starts suppressing the occupied earth site that provided threshold before it arrived. Distinct from 0094, which then ends the turn, and from 0720, which starts with copies already in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "siteProvidesNoThreshold",
+        "elemental-threshold"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/readiness_affinity_rules.rs",
+        "testName": "rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2479",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2479_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2480",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2480_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2470,
+  "rustSupportedCount": 2480,
   "typescriptSupportedCount": 0
 }
