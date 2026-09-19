@@ -28295,7 +28295,6 @@ pub mod catalog_proofs {
             });
         assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
     }
-<<<<<<< HEAD
 
     fn granary_rats_occupancy_game() -> Game {
         let manifest = selfplay_manifest_with(31, |manifest| {
@@ -28318,9 +28317,6 @@ pub mod catalog_proofs {
     }
 
     fn granary_rats_card_id(game: &Game, name: &str) -> CardId {
-=======
-    fn fatality_filter_card_id(game: &Game, name: &str) -> CardId {
->>>>>>> cursor/fatality-matrix-supplemental-0005
         CardId(
             u16::try_from(
                 game.rules
@@ -28333,7 +28329,19 @@ pub mod catalog_proofs {
         )
     }
 
-<<<<<<< HEAD
+    fn fatality_filter_card_id(game: &Game, name: &str) -> CardId {
+        CardId(
+            u16::try_from(
+                game.rules
+                    .cards
+                    .iter()
+                    .position(|card| card.id == name)
+                    .expect("fixture card"),
+            )
+            .expect("fixture card index"),
+        )
+    }
+
     fn granary_rats_place_site(game: &mut Game, cell: Cell, card_name: &str, fixture: &str) {
         game.position.sites[cell.index()] = Some(SitePosition {
             card: CardInstance {
@@ -28432,7 +28440,9 @@ pub mod catalog_proofs {
         assert_eq!(game.elemental_affinities(Seat::North), [1, 0, 0, 0]);
         granary_rats_place_copy(&mut game, "summon-rats", c4);
         assert_eq!(game.elemental_affinities(Seat::North), [0, 0, 0, 0]);
-=======
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn place_fatality_filter_copy(
         game: &mut Game,
         identities: &mut BTreeMap<&'static str, IdentityHash>,
@@ -28528,7 +28538,6 @@ pub mod catalog_proofs {
                 source: CardSource::Spellbook,
             });
         }
->>>>>>> cursor/fatality-matrix-supplemental-0005
     }
 
     #[expect(
