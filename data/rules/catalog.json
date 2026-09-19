@@ -51722,8 +51722,209 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2401",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2401_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2402",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2402_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2403",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Token Magic hashed identities stay on B3 and C3 after later turns pass and remain absent from the owner's cemetery. Distinct from 0687, which checks identities only at summon time, and from 1873, which proves persistence without the identity recipe or cemetery-banish check.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2403_summoned_token_identities_stay_on_board_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2404",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "With two Token Magic spells in hand and no bordering enemy sites, a second cast is still a paid no-op that creates no identities. Distinct from 0687, which follows one empty cast with a later successful summon, and from 1874, which proves the empty repeat on the Border Militia fixture.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2404_second_token_magic_without_bordering_sites_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2405",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "With two Token Magic spells in hand, a second cast after enemy site arrival summons a new source-linked identity hashed from card, cell, ordinal, owner, token source, spell instance, and pre-cast state version. Distinct from 1875, which proves the new bordering cell without the identity recipe.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2405_second_token_magic_summons_a_hashed_identity_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2406",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Token Magic hashes a source-linked identity onto every controlled site bordering an enemy site and leaves C1 and C4 without a token. Distinct from 0687, which does not name the omitted cells, and from 1876, which proves every bordering cell without the identity recipe.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2406_token_magic_hashes_an_identity_on_every_bordering_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2407",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Token Magic leaves the non-bordering controlled C4 site and the far C1 site without a token identity while B3 and C3 keep hashed identities out of the cemetery. Distinct from 0688, which banishes the B3 token in combat, and from 1877, which omits C1 without the identity recipe.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2407_token_magic_leaves_a_non_bordering_site_without_a_token_identity"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2408",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "With two Token Magic spells in hand, a second cast after a newly placed bordering site hashes a source-linked identity onto that site. Distinct from 1878, which proves the new cell without the identity recipe, and from 0688, which banishes an already-summoned token instead of hashing a new one.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "token",
+        "summonTokenToEachControlledSiteBorderingEnemySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/token_summon_harness_rules.rs",
+        "testName": "rule_catalog_2408_second_token_magic_hashes_an_identity_on_a_newly_placed_bordering_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2409",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2409_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2410",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2410_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2400,
   "typescriptSupportedCount": 0
 }
