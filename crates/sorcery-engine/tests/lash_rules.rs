@@ -1,11 +1,15 @@
 //! Direct proofs for Lash damage-then-untap Magic (RULE-CATALOG-0024, 0699,
-//! RULE-CATALOG-1062, RULE-CATALOG-1120).
+//! RULE-CATALOG-1062, RULE-CATALOG-1120, RULE-CATALOG-2463–2468).
 //!
 //! `damageTargetUnit` with `targetNearby` and `untapTargetMinionAfterDamage`
 //! offers only a nearby minion, deals printed damage, and untaps the target
 //! only if it survives. Distinct from 0595–0596, which have no nearby filter
 //! and do not untap. While Deathrites wait for ordering, Lash Magic stays
-//! withheld until the chain drains.
+//! withheld until the chain drains. Supplemental 2463–2468 bind location
+//! persistence, empty-repeat after lethal, enemy-arrival at C3, multi-minion,
+//! far-minion at C1, and a newly summoned C4 lander. Distinct from 0699, which
+//! proves the same-turn surviving nearby untap, and from 1120, which proves
+//! lethal skips untap without a second cast.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -429,7 +433,7 @@ fn summon_south(session: &mut Session, card_id: &str, cell: &str) -> String {
         .to_owned()
 }
 
-fn setup_nearby_and_distant(session: &mut Session) -> (String, String) {
+fn setup_c4_and_c1(session: &mut Session, c4_card: &str) -> (String, String) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -437,7 +441,7 @@ fn setup_nearby_and_distant(session: &mut Session) -> (String, String) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
     });
-    let nearby_id = summon_south(session, "south-nearby", "C4");
+    let nearby_id = summon_south(session, c4_card, "C4");
     let distant_id = summon_south(session, "south-distant", "C1");
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
     accept_where(session, |descriptor| {
@@ -448,6 +452,10 @@ fn setup_nearby_and_distant(session: &mut Session) -> (String, String) {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
     (nearby_id, distant_id)
+}
+
+fn setup_nearby_and_distant(session: &mut Session) -> (String, String) {
+    setup_c4_and_c1(session, "south-nearby")
 }
 
 #[test]
@@ -601,4 +609,456 @@ fn rule_catalog_1062_lash_magic_withheld_during_pending_deathrite_order() {
     let survivor = unit(&after, &visitor_id).expect("surviving nearby visitor");
     assert_eq!(survivor["damage"], 2);
     assert_exact_replay(session);
+}
+
+fn fragile() -> Value {
+    nearby(1)
+}
+
+fn lash_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "lash-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-lash-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-lash": lash(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-distant": distant(),
+            "south-fragile": fragile(),
+            "south-nearby": nearby(2),
+            "south-site": site(),
+            "south-visitor": visitor(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-lash"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": [
+                    "south-nearby",
+                    "south-nearby",
+                    "south-fragile",
+                    "south-distant",
+                    "south-visitor",
+                    "south-nearby",
+                    "south-fragile",
+                    "south-distant",
+                ],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn seed_has_opening(encoded: &str, required_north: &[&str], required_south: &[&str]) -> bool {
+    let north = opening_spell_ids(encoded, "north");
+    let south = opening_spell_ids(encoded, "south");
+    required_north
+        .iter()
+        .all(|id| north.iter().any(|card| card == id))
+        && required_south
+            .iter()
+            .all(|id| south.iter().any(|card| card == id))
+}
+
+fn opening_count(encoded: &str, seat: &str, card_id: &str) -> usize {
+    opening_spell_ids(encoded, seat)
+        .iter()
+        .filter(|card| *card == card_id)
+        .count()
+}
+
+fn seed_with_start(start: u32, required_south: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(699..699 + 2048)
+        .map(lash_supplemental_manifest)
+        .find(|candidate| seed_has_opening(candidate, &["north-lash"], required_south))
+        .expect("bounded seed with Lash and required South minions")
+}
+
+fn lash_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-lash")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn try_end_turn(session: &mut Session) -> Option<()> {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        try_accept_where(session, |descriptor| descriptor["kind"] == "decline-attack")?;
+    }
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    Some(())
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    try_end_turn(session).expect("end turn");
+}
+
+fn try_north_draws_spellbook(session: &mut Session) -> Option<()> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    try_north_draws_spellbook(session).expect("North spellbook draw");
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    end_turn_if_offered(session);
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    try_pass_turn_to_north_spellbook(session).expect("pass back to North spellbook");
+}
+
+fn lash_kill_events() -> [&'static str; 5] {
+    [
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved",
+    ]
+}
+
+fn lash_survive_events() -> [&'static str; 5] {
+    [
+        "magic-cast",
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-untapped",
+        "magic-resolved",
+    ]
+}
+
+fn try_cast_lash(session: &mut Session, target_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == target_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn cast_lash(session: &mut Session, target_id: &str) -> Receipt {
+    try_cast_lash(session, target_id).expect("Lash target")
+}
+
+fn try_setup_c4_and_c1(session: &mut Session, c4_card: &str) -> Option<(String, String)> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let nearby_id = {
+        let (summoned, _) = try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == c4_card
+                && descriptor["cell"] == "C4"
+                && descriptor["region"].is_null()
+        })?;
+        summoned["cardInstanceId"].as_str()?.to_owned()
+    };
+    let distant_id = {
+        let (summoned, _) = try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-distant"
+                && descriptor["cell"] == "C1"
+                && descriptor["region"].is_null()
+        })?;
+        summoned["cardInstanceId"].as_str()?.to_owned()
+    };
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some((nearby_id, distant_id))
+}
+
+fn try_summon_south_at(session: &mut Session, card_id: &str, cell: &str) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == card_id
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    })?;
+    Some(summoned["cardInstanceId"].as_str()?.to_owned())
+}
+
+fn setup_two_nearby_at_c4(session: &mut Session) -> (String, String) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let first_id = summon_south(session, "south-nearby", "C4");
+    let second_id = summon_south(session, "south-nearby", "C4");
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    (first_id, second_id)
+}
+
+fn try_second_lash_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    if !seed_has_opening(
+        encoded,
+        &["north-lash"],
+        &["south-fragile", "south-distant", "south-visitor"],
+    ) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let (fragile_id, _) = try_setup_c4_and_c1(&mut session, "south-fragile")?;
+    try_north_draws_spellbook(&mut session)?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    let first = try_cast_lash(&mut session, &fragile_id)?;
+    if event_types(&first) != lash_kill_events() {
+        return None;
+    }
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    try_end_turn(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    let visitor_id = try_summon_south_at(&mut session, "south-visitor", "C3")?;
+    try_end_turn(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    lash_targets(&session)
+        .contains(&visitor_id)
+        .then_some((session, visitor_id))
+}
+
+fn seed_for_second_lash_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(699..699 + 8192)
+        .find_map(|seed| {
+            let encoded = lash_supplemental_manifest(seed);
+            try_second_lash_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Lash enemy-arrival setup")
+}
+
+fn try_second_lash_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    if !seed_has_opening(
+        encoded,
+        &["north-lash"],
+        &["south-fragile", "south-nearby", "south-distant"],
+    ) {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let (fragile_id, _) = try_setup_c4_and_c1(&mut session, "south-fragile")?;
+    try_north_draws_spellbook(&mut session)?;
+    let first = try_cast_lash(&mut session, &fragile_id)?;
+    if event_types(&first) != lash_kill_events() {
+        return None;
+    }
+    try_end_turn(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    let new_id = try_summon_south_at(&mut session, "south-nearby", "C4")?;
+    try_end_turn(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    lash_targets(&session)
+        .contains(&new_id)
+        .then_some((session, new_id))
+}
+
+fn seed_for_second_lash_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(699..699 + 8192)
+        .find_map(|seed| {
+            let encoded = lash_supplemental_manifest(seed);
+            try_second_lash_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Lash new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2463_lashed_nearby_minion_stays_at_c4_after_turns_pass() {
+    let encoded = seed_with_start(2463, &["south-nearby", "south-distant"]);
+    let mut session = opening_main(&encoded);
+    let (nearby_id, _) = setup_c4_and_c1(&mut session, "south-nearby");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == nearby_id
+    });
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let receipt = cast_lash(&mut session, &nearby_id);
+    assert_eq!(event_types(&receipt), lash_survive_events());
+    let after = state(&session);
+    let survivor = unit(&after, &nearby_id).expect("surviving nearby");
+    assert_eq!(survivor["damage"], 1);
+    assert_eq!(survivor["tapped"], false);
+    assert_eq!(survivor["location"], "C4");
+    pass_turn_to_north_spellbook(&mut session);
+    let later = state(&session);
+    let stayed = unit(&later, &nearby_id).expect("nearby after turns");
+    assert_eq!(stayed["location"], "C4");
+    assert_eq!(stayed["tapped"], false);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2464_second_lash_without_a_nearby_target_stays_unoffered() {
+    let encoded = seed_with_start(2464, &["south-fragile", "south-distant"]);
+    let mut session = opening_main(&encoded);
+    let (fragile_id, distant_id) = setup_c4_and_c1(&mut session, "south-fragile");
+    north_draws_spellbook(&mut session);
+    let receipt = cast_lash(&mut session, &fragile_id);
+    assert_eq!(event_types(&receipt), lash_kill_events());
+    assert!(unit(&state(&session), &fragile_id).is_none());
+    assert!(unit(&state(&session), &distant_id).is_some());
+    assert!(lash_spells_in_hand(&state(&session)) >= 1);
+    assert!(lash_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-lash"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2465_second_lash_damages_a_newly_arrived_nearby_minion_after_enemy_arrival() {
+    let encoded = seed_for_second_lash_enemy_arrival(2465);
+    let (mut session, visitor_id) =
+        try_second_lash_enemy_arrival_prefix(&encoded).expect("second Lash enemy-arrival prefix");
+    let receipt = cast_lash(&mut session, &visitor_id);
+    assert!(event_types(&receipt).contains(&"damage-dealt"));
+    let after = state(&session);
+    let arrived = unit(&after, &visitor_id).expect("arrived nearby");
+    assert_eq!(arrived["location"], "C3");
+    assert_eq!(arrived["damage"], 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2466_lash_offers_every_nearby_minion_at_c4_as_a_separate_target() {
+    let encoded = (2466..2466 + 2048)
+        .chain(699..699 + 2048)
+        .map(lash_supplemental_manifest)
+        .find(|candidate| {
+            seed_has_opening(candidate, &["north-lash"], &["south-nearby"])
+                && opening_count(candidate, "south", "south-nearby") >= 2
+        })
+        .expect("bounded seed with two nearby opening minions");
+    let mut session = opening_main(&encoded);
+    let (first_id, second_id) = setup_two_nearby_at_c4(&mut session);
+    north_draws_spellbook(&mut session);
+    let mut targets = lash_targets(&session);
+    targets.sort();
+    targets.dedup();
+    assert!(targets.contains(&first_id));
+    assert!(targets.contains(&second_id));
+    assert_eq!(targets.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2467_lash_leaves_a_far_minion_untouched() {
+    let encoded = seed_with_start(2467, &["south-nearby", "south-distant"]);
+    let mut session = opening_main(&encoded);
+    let (nearby_id, distant_id) = setup_c4_and_c1(&mut session, "south-nearby");
+    north_draws_spellbook(&mut session);
+    let receipt = cast_lash(&mut session, &nearby_id);
+    assert!(event_types(&receipt).contains(&"damage-dealt"));
+    let after = state(&session);
+    let lashed = unit(&after, &nearby_id).expect("lashed nearby");
+    assert_eq!(lashed["location"], "C4");
+    assert_eq!(lashed["damage"], 1);
+    let far = unit(&after, &distant_id).expect("far minion");
+    assert_eq!(far["location"], "C1");
+    assert!(far["damage"] == 0 || far["damage"].is_null());
+    assert!(!lash_targets(&session).contains(&distant_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2468_second_lash_damages_a_newly_summoned_nearby_minion() {
+    let encoded = seed_for_second_lash_new_summon(2468);
+    let (mut session, new_id) =
+        try_second_lash_new_summon_prefix(&encoded).expect("second Lash new-summon prefix");
+    let receipt = cast_lash(&mut session, &new_id);
+    assert!(event_types(&receipt).contains(&"damage-dealt"));
+    let after = state(&session);
+    let summoned = unit(&after, &new_id).expect("new nearby");
+    assert_eq!(summoned["location"], "C4");
+    assert_eq!(summoned["damage"], 1);
+    assert_exact_replay(&session);
 }

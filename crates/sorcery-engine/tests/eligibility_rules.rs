@@ -15560,3 +15560,26 @@ fn rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unver
     assert_eq!(seeds.len(), 240);
     assert_synthetic_batch_unranked(&seeds);
 }
+
+#[test]
+fn rule_catalog_2461_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(81953, 241);
+}
+
+#[test]
+fn rule_catalog_2462_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(82194, 242);
+}
+
+#[test]
+fn rule_catalog_2469_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(82436, 239);
+}
+
+#[test]
+fn rule_catalog_2470_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority() {
+    assert_unranked_synthetic_batch(82675, 240);
+}
