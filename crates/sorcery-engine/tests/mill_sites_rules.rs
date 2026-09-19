@@ -1,5 +1,5 @@
 //! Direct proofs for mill-site Magic (RULE-CATALOG-0629–0630,
-//! RULE-CATALOG-1043).
+//! RULE-CATALOG-1043, RULE-CATALOG-2113–2118).
 //!
 //! Mill-site Magic offers only both Avatars and puts top Atlas cards into the
 //! owner's cemetery in deck order. An empty Atlas is a paid no-op: no draw,
@@ -561,4 +561,358 @@ fn rule_catalog_1043_mill_sites_magic_withheld_during_pending_deathrite_order() 
         before.len() - 2
     );
     assert_exact_replay(session);
+}
+
+fn mill_sites_supplemental_manifest(seed: u32, south_atlas: usize) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "mill-sites-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-mill-sites-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mill": mill_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-mill"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; south_atlas],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, south_atlas: usize) -> String {
+    (start..start + 2048)
+        .chain(629..629 + 2048)
+        .map(|seed| mill_sites_supplemental_manifest(seed, south_atlas))
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-mill")
+        })
+        .expect("bounded seed with mill-sites Magic in the opening hand")
+}
+
+fn mill_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mill")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn mill_atlas(session: &Session, seat: &str) -> Vec<Value> {
+    state(session)["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .clone()
+}
+
+fn cemetery_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .map(|cards| {
+            cards
+                .iter()
+                .filter_map(|card| card["instanceId"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn site_instance_at(snapshot: &Value, cell: &str) -> String {
+    snapshot["realm"]["sites"][cell]["instanceId"]
+        .as_str()
+        .expect("site at cell")
+        .to_owned()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .is_ok_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_mill_on(session: &mut Session, seat: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == seat
+    });
+    receipt
+}
+
+fn discarded_site_ids(receipt: &Receipt) -> Vec<String> {
+    receipt
+        .events
+        .iter()
+        .filter(|event| event.event_type == "site-discarded")
+        .filter_map(|event| event.payload["instanceId"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn try_second_mill_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first = cast_mill_on(&mut session, "south");
+    if discarded_site_ids(&first).len() != 2 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let south_c1 = site_instance_at(&state(&session), "C1");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (mill_spells_in_hand(&state(&session)) >= 1 && mill_atlas(&session, "south").len() >= 2)
+        .then_some((session, south_c1))
+}
+
+fn seed_for_second_mill_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(629..629 + 8192)
+        .find_map(|seed| {
+            let encoded = mill_sites_supplemental_manifest(seed, 24);
+            opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-mill")
+                .then_some(encoded)
+                .and_then(|encoded| try_second_mill_enemy_arrival_prefix(&encoded).map(|_| encoded))
+        })
+        .expect("bounded seed reaching second mill-sites enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_2113_milled_sites_stay_in_the_cemetery_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2113, 24);
+    let mut session = opening_main(&encoded);
+    let before = mill_atlas(&session, "south");
+    let expected: Vec<_> = before.iter().take(2).cloned().collect();
+    assert_eq!(expected.len(), 2);
+    let first = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&first).len(), 2);
+    let milled: Vec<_> = expected
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("milled identity")
+                .to_owned()
+        })
+        .collect();
+    for instance_id in &milled {
+        assert!(cemetery_ids(&state(&session), "south").contains(instance_id));
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    for instance_id in &milled {
+        assert!(cemetery_ids(&state(&session), "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2114_second_mill_is_a_paid_noop_after_the_atlas_empties() {
+    let encoded = (2114..2114 + 8192)
+        .chain(629..629 + 8192)
+        .find_map(|seed| {
+            let candidate = mill_sites_supplemental_manifest(seed, 5);
+            if !opening_spell_ids(&candidate)
+                .iter()
+                .any(|card| card == "north-mill")
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            if mill_atlas(&session, "south").len() != 2 {
+                return None;
+            }
+            let first = cast_mill_on(&mut session, "south");
+            if discarded_site_ids(&first).len() != 2 {
+                return None;
+            }
+            if !mill_atlas(&session, "south").is_empty() {
+                return None;
+            }
+            (mill_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two mill-sites casts after emptying the Atlas");
+    let mut session = opening_main(&encoded);
+    assert_eq!(mill_atlas(&session, "south").len(), 2);
+    let first = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&first).len(), 2);
+    assert_eq!(mill_atlas(&session, "south"), Vec::<Value>::new());
+    assert!(mill_spells_in_hand(&state(&session)) >= 1);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    let second = cast_mill_on(&mut session, "south");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(discarded_site_ids(&second).is_empty());
+    assert_eq!(mill_atlas(&session, "south"), Vec::<Value>::new());
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2115_second_mill_discards_remaining_atlas_after_enemy_site_placement() {
+    let encoded = seed_for_second_mill_enemy_arrival(2115);
+    let (mut session, south_c1) = try_second_mill_enemy_arrival_prefix(&encoded)
+        .expect("second mill-sites enemy-arrival prefix");
+    let remaining = mill_atlas(&session, "south");
+    assert!(remaining.len() >= 2);
+    let receipt = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&receipt).len(), 2);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        south_c1
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2116_mill_sites_offers_both_avatars() {
+    let encoded = supplemental_seed_with_start(2116, 24);
+    let session = opening_main(&encoded);
+    assert_eq!(
+        mill_player_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert!(mill_atlas(&session, "south").len() >= 2);
+    assert!(mill_atlas(&session, "north").len() >= 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2117_mill_sites_leaves_the_other_atlas_untouched() {
+    let encoded = supplemental_seed_with_start(2117, 24);
+    let mut session = opening_main(&encoded);
+    let north_before = mill_atlas(&session, "north");
+    let south_before = mill_atlas(&session, "south");
+    assert!(south_before.len() >= 2);
+    let receipt = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&receipt).len(), 2);
+    assert_eq!(mill_atlas(&session, "north"), north_before);
+    assert_eq!(mill_atlas(&session, "south").len(), south_before.len() - 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2118_second_mill_discards_newly_remaining_atlas_cards() {
+    let encoded = supplemental_seed_with_start(2118, 24);
+    let mut session = opening_main(&encoded);
+    let before = mill_atlas(&session, "south");
+    assert!(before.len() >= 4);
+    assert!(mill_spells_in_hand(&state(&session)) >= 2);
+    let first_ids: Vec<_> = before
+        .iter()
+        .take(2)
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("first mill identity")
+                .to_owned()
+        })
+        .collect();
+    let second_ids: Vec<_> = before
+        .iter()
+        .skip(2)
+        .take(2)
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("second mill identity")
+                .to_owned()
+        })
+        .collect();
+    let first = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&first), first_ids);
+    let second = cast_mill_on(&mut session, "south");
+    assert_eq!(discarded_site_ids(&second), second_ids);
+    let cemetery = cemetery_ids(&state(&session), "south");
+    for instance_id in first_ids.iter().chain(second_ids.iter()) {
+        assert!(cemetery.contains(instance_id));
+    }
+    assert_eq!(mill_atlas(&session, "south").len(), before.len() - 4);
+    assert_exact_replay(&session);
 }
