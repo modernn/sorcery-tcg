@@ -1,5 +1,5 @@
 //! Direct proofs for destroy-target-aura Magic (RULE-CATALOG-0667–0668,
-//! RULE-CATALOG-1083).
+//! RULE-CATALOG-1083, RULE-CATALOG-2303–2308).
 //!
 //! Destroy-aura Magic offers every realm Aura and moves a real Aura into its
 //! owner's cemetery via `aura-destroyed`, not a return to hand or a duration
@@ -602,4 +602,411 @@ fn rule_catalog_1083_destroy_target_aura_withheld_during_pending_deathrite_order
     );
     assert!(!realm_has_aura(&state(session), &aura_id));
     assert_exact_replay(session);
+}
+
+fn destroy_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "destroy-aura-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-destroy-aura-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-flood": flood(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-destroy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-flood"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(667..667 + 2048)
+        .map(destroy_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-destroy")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-flood")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with destroy-aura Magic and required South Floods")
+}
+
+fn destroy_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-destroy")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cemetery_has(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn aura_covers(snapshot: &Value, instance_id: &str, cell: &str) -> bool {
+    snapshot["realm"]["auras"].as_array().is_some_and(|auras| {
+        auras.iter().any(|aura| {
+            aura["instanceId"] == instance_id
+                && aura["cells"]
+                    .as_array()
+                    .is_some_and(|cells| cells.iter().any(|value| value == cell))
+        })
+    })
+}
+
+fn latest_aura_covering(snapshot: &Value, cell: &str) -> String {
+    snapshot["realm"]["auras"]
+        .as_array()
+        .expect("realm auras")
+        .iter()
+        .rev()
+        .find(|aura| {
+            aura["cells"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().any(|value| value == cell))
+        })
+        .expect("aura covering cell")["instanceId"]
+        .as_str()
+        .expect("aura identity")
+        .to_owned()
+}
+
+fn try_cast_south_flood_covering(session: &mut Session, cell: &str) -> Option<String> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-aura"
+            && descriptor["cardId"] == "south-flood"
+            && cells_include(descriptor, cell)
+    })?;
+    Some(latest_aura_covering(&state(session), cell))
+}
+
+fn cast_south_flood_covering(session: &mut Session, cell: &str) -> String {
+    try_cast_south_flood_covering(session, cell).expect("South Flood covering cell")
+}
+
+fn setup_c1_with_south_floods(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    (0..count)
+        .map(|_| cast_south_flood_covering(session, "C1"))
+        .collect()
+}
+
+fn cast_destroy_on(session: &mut Session, aura_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetAuraInstanceId"] == aura_id
+    });
+    receipt
+}
+
+fn try_far_aura_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let far_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+    let near_id = try_cast_south_flood_covering(&mut session, "C4")?;
+    if near_id == far_id {
+        return None;
+    }
+    north_draws_spellbook(&mut session);
+    (destroy_spells_in_hand(&state(&session)) >= 1
+        && destroy_aura_targets(&session).contains(&near_id)
+        && destroy_aura_targets(&session).contains(&far_id))
+    .then_some((session, near_id, far_id))
+}
+
+fn seed_for_far_aura(start: u32) -> String {
+    (start..start + 2048)
+        .chain(667..667 + 2048)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-flood")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_far_aura_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching destroy-aura far-aura setup")
+}
+
+fn try_second_destroy_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let aura_id = try_cast_south_flood_covering(&mut session, "C2")?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_aura_targets(&session)
+        .contains(&aura_id)
+        .then_some((session, aura_id))
+}
+
+fn seed_for_second_destroy_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(667..667 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-flood")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_destroy_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-aura enemy-arrival setup")
+}
+
+fn try_second_destroy_new_placement_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &first_id);
+    if realm_has_aura(&state(&session), &first_id) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let aura_id = try_cast_south_flood_covering(&mut session, "C1")?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_aura_targets(&session)
+        .contains(&aura_id)
+        .then_some((session, aura_id))
+}
+
+fn seed_for_second_destroy_new_placement(start: u32) -> String {
+    (start..start + 8192)
+        .chain(667..667 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-flood")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_destroy_new_placement_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-aura new-placement setup")
+}
+
+#[test]
+fn rule_catalog_2303_aura_stays_covering_the_site_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2303, 1);
+    let mut session = opening_main(&encoded);
+    let aura_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    assert!(aura_covers(&state(&session), &aura_id, "C1"));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(aura_covers(&state(&session), &aura_id, "C1"));
+    assert!(realm_has_aura(&state(&session), &aura_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2304_second_destroy_offers_no_targets_after_destroying_the_only_aura() {
+    let encoded = (2304..2304 + 8192)
+        .chain(667..667 + 8192)
+        .find_map(|seed| {
+            let candidate = destroy_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let aura_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = cast_destroy_on(&mut session, &aura_id);
+            if !event_types(&first).contains(&"aura-destroyed") {
+                return None;
+            }
+            if realm_has_aura(&state(&session), &aura_id) {
+                return None;
+            }
+            (destroy_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two destroy-aura casts after clearing Auras");
+    let mut session = opening_main(&encoded);
+    let aura_id = setup_c1_with_south_floods(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_destroy_on(&mut session, &aura_id);
+    assert!(event_types(&first).contains(&"aura-destroyed"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert!(cemetery_has(&state(&session), "south", &aura_id));
+    assert!(destroy_spells_in_hand(&state(&session)) >= 1);
+    assert_eq!(destroy_aura_targets(&session), Vec::<String>::new());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-destroy"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2305_second_destroy_destroys_a_newly_arrived_aura_after_enemy_site_placement() {
+    let encoded = seed_for_second_destroy_enemy_arrival(2305);
+    let (mut session, aura_id) = try_second_destroy_enemy_arrival_prefix(&encoded)
+        .expect("second destroy-aura enemy-arrival prefix");
+    let receipt = cast_destroy_on(&mut session, &aura_id);
+    assert!(event_types(&receipt).contains(&"aura-destroyed"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert!(cemetery_has(&state(&session), "south", &aura_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2306_destroy_aura_offers_every_aura_in_the_realm() {
+    let encoded = supplemental_seed_with_start(2306, 2);
+    let mut session = opening_main(&encoded);
+    let aura_ids = setup_c1_with_south_floods(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = destroy_aura_targets(&session);
+    for aura_id in &aura_ids {
+        assert!(offered.contains(aura_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2307_destroy_aura_leaves_a_far_aura_untouched() {
+    let encoded = seed_for_far_aura(2307);
+    let (mut session, near_id, far_id) =
+        try_far_aura_prefix(&encoded).expect("destroy-aura far-aura prefix");
+    let receipt = cast_destroy_on(&mut session, &near_id);
+    assert!(event_types(&receipt).contains(&"aura-destroyed"));
+    assert!(!realm_has_aura(&state(&session), &near_id));
+    assert!(aura_covers(&state(&session), &far_id, "C1"));
+    assert!(realm_has_aura(&state(&session), &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2308_second_destroy_destroys_a_newly_placed_aura() {
+    let encoded = seed_for_second_destroy_new_placement(2308);
+    let (mut session, aura_id) = try_second_destroy_new_placement_prefix(&encoded)
+        .expect("second destroy-aura new-placement prefix");
+    let receipt = cast_destroy_on(&mut session, &aura_id);
+    assert!(event_types(&receipt).contains(&"aura-destroyed"));
+    assert!(!realm_has_aura(&state(&session), &aura_id));
+    assert!(cemetery_has(&state(&session), "south", &aura_id));
+    assert_exact_replay(&session);
 }
