@@ -1,5 +1,5 @@
 //! Direct proofs for destroy-target-site Magic (RULE-CATALOG-0623–0624,
-//! RULE-CATALOG-1035).
+//! RULE-CATALOG-1035, RULE-CATALOG-2083–2088).
 //!
 //! Destroy-site Magic offers every real site including the caster's own and
 //! never offers Rubble. Casting replaces the chosen site with Rubble and moves
@@ -614,4 +614,355 @@ fn rule_catalog_1035_destroy_site_magic_withheld_during_pending_deathrite_order(
     );
     assert_eq!(state(session)["realm"]["sites"]["C1"]["rubble"], true);
     assert_exact_replay(session);
+}
+
+fn destroy_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "destroy-site-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-destroy-site-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_spell(),
+            "north-site": site(false),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(false),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-destroy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn supplemental_seed_with_start(start: u32) -> String {
+    (start..start + 2048)
+        .chain(623..623 + 2048)
+        .map(destroy_supplemental_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-destroy")
+        })
+        .expect("bounded seed with destroy-site Magic in the opening hand")
+}
+
+fn destroy_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-destroy")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn site_instance_at(snapshot: &Value, cell: &str) -> String {
+    snapshot["realm"]["sites"][cell]["instanceId"]
+        .as_str()
+        .expect("site at cell")
+        .to_owned()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn play_south_site_at(session: &mut Session, cell: &str) -> String {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == cell
+    });
+    site_instance_at(&state(session), cell)
+}
+
+fn setup_south_sites_at(session: &mut Session, cells: &[&str]) -> Vec<(String, String)> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let mut placed = vec![(cells[0].to_string(), play_south_site_at(session, cells[0]))];
+    for cell in cells.iter().skip(1) {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+        });
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+        });
+        placed.push(((*cell).to_string(), play_south_site_at(session, cell)));
+    }
+    placed
+}
+
+fn cast_destroy_on(session: &mut Session, cell: &str, site_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetLocation"]["cell"] == cell
+            && descriptor["targetSiteInstanceId"] == site_id
+    });
+    receipt
+}
+
+fn try_second_destroy_enemy_site_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let (c1, south_c1) = setup_south_sites_at(&mut session, &["C1", "C2"])[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &c1, &south_c1);
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    let south_c3 = play_south_site_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_site_targets(&session)
+        .iter()
+        .any(|(cell, id)| cell == "C3" && *id == south_c3)
+        .then_some((session, "C3".to_owned(), south_c3))
+}
+
+fn seed_for_second_destroy_enemy_site(start: u32) -> String {
+    (start..start + 8192)
+        .chain(623..623 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            try_second_destroy_enemy_site_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-site enemy-arrival setup")
+}
+
+fn try_second_destroy_new_site_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let (c1, south_c1) = setup_south_sites_at(&mut session, &["C1"])[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &c1, &south_c1);
+    if state(&session)["realm"]["sites"]["C1"]["rubble"] != json!(true) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let south_c2 = play_south_site_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_site_targets(&session)
+        .iter()
+        .any(|(cell, id)| cell == "C2" && *id == south_c2)
+        .then_some((session, "C2".to_owned(), south_c2))
+}
+
+fn seed_for_second_destroy_new_site(start: u32) -> String {
+    (start..start + 8192)
+        .chain(623..623 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            try_second_destroy_new_site_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-site new-placement setup")
+}
+
+#[test]
+fn rule_catalog_2083_site_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2083);
+    let mut session = opening_main(&encoded);
+    let site_id = setup_south_sites_at(&mut session, &["C1"])[0].1.clone();
+    north_draws_spellbook(&mut session);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        site_id
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2084_second_destroy_offers_no_targets_after_the_only_real_site_becomes_rubble() {
+    let encoded = (2084..2084 + 8192)
+        .chain(623..623 + 8192)
+        .find_map(|seed| {
+            let candidate = destroy_supplemental_manifest(seed);
+            if !opening_spell_ids(&candidate)
+                .iter()
+                .any(|card| card == "north-destroy")
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            let north_site = site_instance_at(&state(&session), "C4");
+            let first = cast_destroy_on(&mut session, "C4", &north_site);
+            if !event_types(&first).contains(&"site-destroyed") {
+                return None;
+            }
+            if state(&session)["realm"]["sites"]["C4"]["rubble"] != json!(true) {
+                return None;
+            }
+            if destroy_spells_in_hand(&state(&session)) < 1 {
+                pass_turn_to_north_spellbook(&mut session);
+            }
+            (destroy_spells_in_hand(&state(&session)) >= 1
+                && destroy_site_targets(&session).is_empty())
+            .then_some(candidate)
+        })
+        .expect("bounded seed with two destroy-site casts after clearing real sites");
+    let mut session = opening_main(&encoded);
+    let north_site = site_instance_at(&state(&session), "C4");
+    let first = cast_destroy_on(&mut session, "C4", &north_site);
+    assert!(event_types(&first).contains(&"site-destroyed"));
+    assert_eq!(state(&session)["realm"]["sites"]["C4"]["rubble"], true);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        pass_turn_to_north_spellbook(&mut session);
+    }
+    assert!(destroy_spells_in_hand(&state(&session)) >= 1);
+    assert!(destroy_site_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-destroy"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2085_second_destroy_replaces_a_newly_arrived_site_after_enemy_site_placement() {
+    let encoded = seed_for_second_destroy_enemy_site(2085);
+    let (mut session, cell, site_id) =
+        try_second_destroy_enemy_site_prefix(&encoded).expect("second destroy-site prefix");
+    let receipt = cast_destroy_on(&mut session, &cell, &site_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert_eq!(state(&session)["realm"]["sites"][&cell]["rubble"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2086_destroy_site_offers_every_real_site_in_the_realm() {
+    let encoded = supplemental_seed_with_start(2086);
+    let mut session = opening_main(&encoded);
+    let south_sites = setup_south_sites_at(&mut session, &["C1", "C2"]);
+    north_draws_spellbook(&mut session);
+    let north_site = site_instance_at(&state(&session), "C4");
+    let offered = destroy_site_targets(&session);
+    for (cell, site_id) in &south_sites {
+        assert!(offered.contains(&(cell.clone(), site_id.clone())));
+    }
+    assert!(offered.contains(&("C4".to_owned(), north_site)));
+    assert_eq!(offered.len(), 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2087_destroy_site_leaves_a_far_site_untouched() {
+    let encoded = supplemental_seed_with_start(2087);
+    let mut session = opening_main(&encoded);
+    let far_id = setup_south_sites_at(&mut session, &["C1"])[0].1.clone();
+    north_draws_spellbook(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    let near_id = site_instance_at(&state(&session), "C3");
+    let receipt = cast_destroy_on(&mut session, "C3", &near_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert_eq!(state(&session)["realm"]["sites"]["C3"]["rubble"], true);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        far_id
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2088_second_destroy_replaces_a_newly_placed_site() {
+    let encoded = seed_for_second_destroy_new_site(2088);
+    let (mut session, cell, site_id) = try_second_destroy_new_site_prefix(&encoded)
+        .expect("second destroy-site new-placement prefix");
+    let receipt = cast_destroy_on(&mut session, &cell, &site_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert_eq!(state(&session)["realm"]["sites"][&cell]["rubble"], true);
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == site_id))
+    );
+    assert_exact_replay(&session);
 }
