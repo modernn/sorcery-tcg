@@ -1,11 +1,13 @@
 //! Direct proofs for printed Spellcaster while sick or tapped
-//! (RULE-CATALOG-0018, RULE-CATALOG-0689–0690).
+//! (RULE-CATALOG-0018, RULE-CATALOG-0689–0690, RULE-CATALOG-2413–2418).
 //!
 //! A printed Spellcaster may cast Magic and summon on the turn it enters, and
 //! may still cast after tapping. Magic originates at the chosen caster, so a
 //! tapped minion at C3 can Freeze nearby C2 while the Avatar at C4 cannot.
 //! Disabled (Waterbound-on-land) casters are excluded. Distinct from 0151
-//! (Tower-granted Spellcaster) and from 0661 (Freeze itself).
+//! (Tower-granted Spellcaster) and from 0661 (Freeze itself). Supplemental
+//! 2413–2418 keep persistence, empty-repeat, enemy-arrival, multi-minion,
+//! far-minion, and new-summon proofs on those sick and tapped boards.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -320,6 +322,254 @@ fn stage_tapped_caster_near_c2(session: &mut Session, caster_id: &str) -> String
         .to_owned()
 }
 
+fn freeze_count(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-freeze")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn is_disabled(snapshot: &Value, instance_id: &str) -> bool {
+    !unit(snapshot, instance_id)["disableEffects"].is_null()
+}
+
+fn freeze_targets_from_caster(session: &Session, caster_id: &str) -> Vec<String> {
+    session
+        .legal_actions()
+        .expect("legal actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic"
+                && action.descriptor["cardId"] == "north-freeze"
+                && action.descriptor["casterInstanceId"] == caster_id
+        })
+        .filter_map(|action| {
+            action.descriptor["target"]["instanceId"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn caster_can_freeze(session: &Session, caster_id: &str) -> bool {
+    !freeze_targets_from_caster(session, caster_id).is_empty()
+}
+
+fn freeze_from_caster(session: &mut Session, caster_id: &str, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-freeze"
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let Ok(StepResult::Accepted(receipt)) = session.step(ActionRequest {
+        action_id: action.action_id.to_string(),
+        seat: action.seat,
+        state_version: action.state_version,
+    }) else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn supplemental_seed_sick(start: u32, required: &[&str], min_freeze: usize) -> String {
+    (start..start + 2048)
+        .chain(689..689 + 2048)
+        .map(sick_manifest)
+        .find(|candidate| {
+            Session::new(candidate).ok().is_some_and(|preview| {
+                let snapshot = state(&preview);
+                north_hand_has(&snapshot, required) && freeze_count(&snapshot) >= min_freeze
+            })
+        })
+        .expect("bounded seed with required sick-harness opening cards")
+}
+
+fn supplemental_seed_tapped(start: u32) -> String {
+    (start..start + 2048)
+        .chain(689..689 + 2048)
+        .map(tapped_manifest)
+        .find(|candidate| {
+            Session::new(candidate).ok().is_some_and(|preview| {
+                north_hand_has(&state(&preview), &["north-caster", "north-freeze"])
+            })
+        })
+        .expect("bounded seed with tapped caster and Freeze in hand")
+}
+
+fn stage_tapped_caster_c2_and_c1(session: &mut Session, caster_id: &str) -> (String, String) {
+    end_then_draw_spell(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    let (far, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C1"
+    });
+    let far_id = far["cardInstanceId"]
+        .as_str()
+        .expect("far minion identity")
+        .to_owned();
+    end_then_draw_spell(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "move-and-attack"
+            && descriptor["unitInstanceId"] == caster_id
+            && descriptor["from"]["cell"] == "C4"
+            && descriptor["to"]["cell"] == "C3"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    end_then_draw_spell(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let (near, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C2"
+    });
+    end_then_draw_spell(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == caster_id
+    });
+    (
+        near["cardInstanceId"]
+            .as_str()
+            .expect("nearby minion identity")
+            .to_owned(),
+        far_id,
+    )
+}
+
+fn try_retap_caster(session: &mut Session, caster_id: &str) {
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "activate-mana" && descriptor["unitInstanceId"] == caster_id
+    });
+}
+
+fn try_second_freeze_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = {
+        let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
+                && descriptor["cardId"] == "north-caster"
+                && descriptor["cell"] == "C4"
+        })?;
+        summoned["cardInstanceId"].as_str()?.to_owned()
+    };
+    let nearby_id = stage_tapped_caster_near_c2(&mut session, &caster_id);
+    freeze_from_caster(&mut session, &caster_id, &nearby_id);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
+    })?;
+    let (visitor, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "D2"
+    })?;
+    let visitor_id = visitor["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_retap_caster(&mut session, &caster_id);
+    (freeze_count(&state(&session)) >= 1
+        && freeze_targets_from_caster(&session, &caster_id).contains(&visitor_id))
+    .then_some((session, caster_id, visitor_id))
+}
+
+fn seed_for_second_freeze_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(689..689 + 8192)
+        .find_map(|seed| {
+            let encoded = tapped_manifest(seed);
+            try_second_freeze_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching tapped Spellcaster enemy-arrival setup")
+}
+
+fn try_second_freeze_new_summon_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = {
+        let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["region"].is_null()
+                && descriptor["cardId"] == "north-caster"
+                && descriptor["cell"] == "C4"
+        })?;
+        summoned["cardInstanceId"].as_str()?.to_owned()
+    };
+    let nearby_id = stage_tapped_caster_near_c2(&mut session, &caster_id);
+    freeze_from_caster(&mut session, &caster_id, &nearby_id);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == "C2"
+    })?;
+    let new_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_retap_caster(&mut session, &caster_id);
+    (freeze_count(&state(&session)) >= 1
+        && freeze_targets_from_caster(&session, &caster_id).contains(&new_id))
+    .then_some((session, caster_id, new_id))
+}
+
+fn seed_for_second_freeze_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(689..689 + 8192)
+        .find_map(|seed| {
+            let encoded = tapped_manifest(seed);
+            try_second_freeze_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching tapped Spellcaster new-summon setup")
+}
+
 #[test]
 fn rule_catalog_0689_printed_spellcaster_casts_and_summons_while_summoning_sick() {
     let mut session = opening_main(&seed_sick());
@@ -439,5 +689,136 @@ fn rule_catalog_0690_printed_spellcaster_casts_from_its_site_while_tapped() {
         unit(&state(&session), &target_id)["disableEffects"][0]["sourceInstanceId"],
         receipt.events[0].payload["instanceId"]
     );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2413_sick_spellcaster_freeze_stays_disabled_after_turns_pass() {
+    let encoded = supplemental_seed_sick(2413, &["north-caster", "north-freeze"], 1);
+    let mut session = opening_main(&encoded);
+    let caster_id = summon_printed_caster(&mut session);
+    assert_eq!(
+        unit(&state(&session), &caster_id)["summoningSickness"],
+        true
+    );
+    freeze_from_caster(&mut session, &caster_id, &caster_id);
+    assert!(is_disabled(&state(&session), &caster_id));
+    accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    if try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })
+    .is_none()
+    {
+        accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        });
+    }
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    assert!(is_disabled(&state(&session), &caster_id));
+    assert!(!caster_can_freeze(&session, &caster_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2414_disabled_sick_spellcaster_cannot_recast_with_a_remaining_freeze() {
+    let encoded = supplemental_seed_sick(2414, &["north-caster"], 2);
+    let mut session = opening_main(&encoded);
+    let caster_id = summon_printed_caster(&mut session);
+    assert_eq!(
+        unit(&state(&session), &caster_id)["summoningSickness"],
+        true
+    );
+    freeze_from_caster(&mut session, &caster_id, &caster_id);
+    assert!(is_disabled(&state(&session), &caster_id));
+    assert!(freeze_count(&state(&session)) >= 1);
+    assert!(!caster_can_freeze(&session, &caster_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2415_tapped_spellcaster_freezes_a_newly_arrived_nearby_minion_after_enemy_site_placement()
+ {
+    let encoded = seed_for_second_freeze_enemy_arrival(2415);
+    let (mut session, caster_id, visitor_id) = try_second_freeze_enemy_arrival_prefix(&encoded)
+        .expect("tapped Spellcaster enemy-arrival prefix");
+    let receipt = freeze_from_caster(&mut session, &caster_id, &visitor_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert!(is_disabled(&state(&session), &visitor_id));
+    assert_eq!(unit(&state(&session), &visitor_id)["location"], "D2");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2416_sick_spellcaster_freeze_offers_every_nearby_minion() {
+    let encoded = supplemental_seed_sick(
+        2416,
+        &["north-caster", "north-disabled-caster", "north-freeze"],
+        1,
+    );
+    let mut session = opening_main(&encoded);
+    let caster_id = summon_printed_caster(&mut session);
+    assert_eq!(
+        unit(&state(&session), &caster_id)["summoningSickness"],
+        true
+    );
+    let (summoned, _) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["region"].is_null()
+            && descriptor["cardId"] == "north-disabled-caster"
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["cell"] == "C4"
+    });
+    let disabled_id = summoned["cardInstanceId"]
+        .as_str()
+        .expect("Disabled caster identity")
+        .to_owned();
+    let avatar_id = state(&session)["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity")
+        .to_owned();
+    let targets = freeze_targets_from_caster(&session, &caster_id);
+    assert!(targets.contains(&caster_id));
+    assert!(targets.contains(&disabled_id));
+    assert!(!targets.contains(&avatar_id));
+    assert_eq!(targets.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2417_tapped_spellcaster_leaves_a_far_minion_untouched() {
+    let encoded = supplemental_seed_tapped(2417);
+    let mut session = opening_main(&encoded);
+    let caster_id = summon_printed_caster(&mut session);
+    let (nearby_id, far_id) = stage_tapped_caster_c2_and_c1(&mut session, &caster_id);
+    let snapshot = state(&session);
+    assert_eq!(unit(&snapshot, &caster_id)["tapped"], true);
+    let targets = freeze_targets_from_caster(&session, &caster_id);
+    assert!(targets.contains(&nearby_id));
+    assert!(!targets.contains(&far_id));
+    freeze_from_caster(&mut session, &caster_id, &nearby_id);
+    assert!(is_disabled(&state(&session), &nearby_id));
+    assert!(!is_disabled(&state(&session), &far_id));
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
+    assert_eq!(unit(&state(&session), &far_id)["controller"], "south");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2418_tapped_spellcaster_freezes_a_newly_summoned_nearby_minion() {
+    let encoded = seed_for_second_freeze_new_summon(2418);
+    let (mut session, caster_id, new_id) = try_second_freeze_new_summon_prefix(&encoded)
+        .expect("tapped Spellcaster new-summon prefix");
+    let receipt = freeze_from_caster(&mut session, &caster_id, &new_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert!(is_disabled(&state(&session), &new_id));
+    assert_eq!(unit(&state(&session), &new_id)["location"], "C2");
     assert_exact_replay(&session);
 }

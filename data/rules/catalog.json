@@ -51722,8 +51722,232 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2411",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2411_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2412",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2412_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2413",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A summoning-sick printed Spellcaster Freeze on itself stays Disabled after the opponent plays their first site. Distinct from 0689, which only checks the same-turn Freeze receipt.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "stealth",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2413_sick_spellcaster_freeze_stays_disabled_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2414",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After a summoning-sick printed Spellcaster Freezes itself, a remaining Freeze in hand stays unoffered from that now-Disabled caster. Distinct from 0689, which disables a Waterbound Spellcaster summoned onto land rather than the original caster.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2414_disabled_sick_spellcaster_cannot_recast_with_a_remaining_freeze"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2415",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed Spellcaster that Freezes from its tapped C3 site later Freezes a newly arrived nearby minion at D2 after enemy site placement. Distinct from 0690, which Freezes only the original C2 minion on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "tapForMana",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "activate-mana",
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2415_tapped_spellcaster_freezes_a_newly_arrived_nearby_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2416",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A summoning-sick printed Spellcaster that just summoned a Waterbound Spellcaster onto land offers Freeze on both nearby minions and not the Avatar. Distinct from 0689, which Freezes only the original caster from a checkpoint that has not summoned yet.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "waterbound",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2416_sick_spellcaster_freeze_offers_every_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2417",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A tapped printed Spellcaster at C3 Freezes the nearby C2 minion and leaves the two-step C1 minion untouched. Distinct from 0690, which proves the Avatar at C4 cannot origin that Freeze rather than a far minion remaining enabled.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "tapForMana",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "activate-mana",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2417_tapped_spellcaster_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2418",
+      "requirementIds": [
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A printed Spellcaster that Freezes from its tapped C3 site later Freezes a newly summoned nearby minion at C2. Distinct from 0690, which Freezes only the original C2 minion on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "spellcaster",
+        "tapForMana",
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "activate-mana",
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "minion-disabled",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/spellcaster_harness_rules.rs",
+        "testName": "rule_catalog_2418_tapped_spellcaster_freezes_a_newly_summoned_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2419",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2419_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2420",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2420_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2420,
   "typescriptSupportedCount": 0
 }
