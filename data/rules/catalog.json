@@ -49741,8 +49741,205 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2331",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2331_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2332",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2332_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2333",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic leaves a wounded underground minion underground after the opponent turn passes, and still offers no Fatality target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2333_wounded_underground_minion_stays_underground_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2334",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast stays unoffered once the only remaining wounded minion is underground.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wounded_remains"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2335",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a wounded minion is burrowed, a later kill-target-wounded-minion cast kills a newly arrived surface wounded minion after enemy site placement and leaves the underground copy untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2336",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers every wounded minion in the caster region and does not offer a wounded underground copy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2336_fatality_offers_every_surface_wounded_minion_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2337",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic kills a wounded minion in the caster region and leaves a wounded underground minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2337_fatality_leaves_a_wounded_underground_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2338",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a wounded minion is burrowed, a later kill-target-wounded-minion cast kills a newly summoned surface wounded minion and leaves the underground copy untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-killed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_region_rules.rs",
+        "testName": "rule_catalog_2338_second_fatality_kills_a_newly_summoned_surface_wounded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2339",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2339_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2340",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2340_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }
