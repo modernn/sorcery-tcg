@@ -1214,3 +1214,33 @@ fn rule_catalog_0827_connected_top_bottom_wraps_only_the_minion() {
 fn rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0720_granary_rats_ignore_void_and_keep_suppressing_while_any_copy_is_enabled();
 }
+
+#[test]
+fn rule_catalog_2473_occupied_site_stays_suppressed_after_turns_pass() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2473_occupied_site_stays_suppressed_after_turns_pass();
+}
+
+#[test]
+fn rule_catalog_2474_leaving_the_site_restores_threshold_after_the_only_copy_moves_away() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2474_leaving_the_site_restores_threshold_after_the_only_copy_moves_away();
+}
+
+#[test]
+fn rule_catalog_2475_newly_placed_site_under_existing_rats_is_suppressed() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2475_newly_placed_site_under_existing_rats_is_suppressed();
+}
+
+#[test]
+fn rule_catalog_2476_rats_suppress_every_occupied_site() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2476_rats_suppress_every_occupied_site();
+}
+
+#[test]
+fn rule_catalog_2477_rats_leave_a_far_site_threshold_untouched() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2477_rats_leave_a_far_site_threshold_untouched();
+}
+
+#[test]
+fn rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site();
+}
