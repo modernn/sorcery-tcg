@@ -46207,8 +46207,200 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2110_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2111",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2111_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2112",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2112_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2113",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-sites Magic leaves discarded Atlas cards in the cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2113_milled_sites_stay_in_the_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2114",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-sites spells in hand, a second cast is a paid no-op after the first emptied the Atlas.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2114_second_mill_is_a_paid_noop_after_the_atlas_empties"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2115",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-sites spells in hand, a second cast discards remaining Atlas cards after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2115_second_mill_discards_remaining_atlas_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2116",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-sites Magic offers both Avatars.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2116_mill_sites_offers_both_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2117",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-sites Magic against one player leaves the other player's Atlas untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2117_mill_sites_leaves_the_other_atlas_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2118",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-sites spells in hand, a second cast discards the newly remaining Atlas cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_sites_rules.rs",
+        "testName": "rule_catalog_2118_second_mill_discards_newly_remaining_atlas_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2119",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2119_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2120",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2120_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2110,
+  "rustSupportedCount": 2120,
   "typescriptSupportedCount": 0
 }
