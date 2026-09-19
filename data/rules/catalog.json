@@ -53774,8 +53774,209 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2490_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2561",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2561_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2562",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2562_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2563",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Blink Magic, after the caster Avatar steps from C4 to C3, leaves the teleported adjacent C2 ally at its destination after later turns pass. Distinct from 0733, which proves self-play admission only, and from 1123, which checks destinations on an unmoved board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2563_blinked_ally_stays_at_the_destination_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2564",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Blink spells in hand after the caster Avatar steps from C4 to C3, a second cast is unoffered once the only adjacent minion ally teleports out of nearby range. Distinct from 1124, which keeps an aura when the ally stays adjacent, and from 0733, which never advances the board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2564_second_blink_offers_no_nearby_allies_after_the_only_copy_teleports_out_of_range"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2565",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Blink spells in hand after the caster Avatar steps from C4 to C3, a second cast teleports a newly arrived adjacent ally at C4 after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2565_second_blink_teleports_a_newly_arrived_adjacent_ally_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2566",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Blink Magic, after the caster Avatar steps from C4 to C3, offers every adjacent C2 minion ally and not the two-step C1 ally. Distinct from 1123, which lists destinations on an unmoved board, and from 0733, which never places two adjacent allies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2566_blink_offers_every_adjacent_ally_after_the_caster_moves"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2567",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "Blink Magic, after the caster Avatar steps from C4 to C3, teleports the adjacent C2 ally and leaves the two-step C1 ally untouched. Distinct from 1123, which never separates adjacent and far allies on a moved board, and from 0733, which proves admission without runtime range.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2567_blink_leaves_a_two_step_ally_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2568",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Blink spells in hand after the caster Avatar steps from C4 to C3, a second cast teleports a newly summoned adjacent ally at C2.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "teleportNearbyAllyThenDrawCard"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "unit-teleported"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/blink_admission_rules.rs",
+        "testName": "rule_catalog_2568_second_blink_teleports_a_newly_summoned_adjacent_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2569",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2569_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2570",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2570_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2490,
+  "rustSupportedCount": 2570,
   "typescriptSupportedCount": 0
 }

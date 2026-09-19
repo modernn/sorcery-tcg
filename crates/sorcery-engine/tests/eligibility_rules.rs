@@ -15806,3 +15806,51 @@ fn rule_catalog_2489_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked
 fn rule_catalog_2490_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority() {
     assert_unranked_synthetic_batch(84599, 240);
 }
+
+#[test]
+fn rule_catalog_2561_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(84839, 241);
+}
+
+#[test]
+fn rule_catalog_2562_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85080, 242);
+}
+
+#[test]
+fn rule_catalog_2569_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85322, 239);
+}
+
+#[test]
+fn rule_catalog_2570_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85561, 240);
+}
+
+#[test]
+fn rule_catalog_2571_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(84839, 241);
+}
+
+#[test]
+fn rule_catalog_2572_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85080, 242);
+}
+
+#[test]
+fn rule_catalog_2579_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85322, 239);
+}
+
+#[test]
+fn rule_catalog_2580_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(85561, 240);
+}
