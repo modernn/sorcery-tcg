@@ -52360,8 +52360,219 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2420_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2421",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2421_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2422",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2422_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2423",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic immediately settles a chosen Deathrite minion and leaves that minion in the cemetery after later turns pass. Distinct from 0691, which proves the same-turn settlement, from 0692, which pauses in deathrite-order, and from 2243, which kills an ordinary minion without a same-receipt site draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2423_settled_deathrite_minion_stays_in_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2424",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast stays unoffered after the only surface Deathrite minion settles in the same receipt. Distinct from 0692, which still has a deathrite-order prompt, and from 2244, which follows ordinary-minion death.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2424_second_bury_without_a_surface_target_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2425",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast immediately settles a newly arrived Deathrite minion after enemy site placement. Distinct from 0691, which settles the original C1 summon, and from 2245, which kills an ordinary arrival without a same-receipt site draw.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2425_second_bury_settles_a_newly_arrived_deathrite_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2426",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic offers every surface Deathrite minion at the target land site and stays in main without a deathrite-order prompt. Distinct from 0692, which burrows every Deathrite together then orders them, and from 2246, which offers ordinary minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2426_bury_offers_every_surface_deathrite_minion_at_the_target_land_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2427",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic immediately settles a nearby Deathrite minion and leaves a far Deathrite minion on the surface. Distinct from 0691, which places only one minion, from 0692, which burrows every Deathrite at the chosen land site, and from 2247, which kills an ordinary nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2427_bury_leaves_a_far_deathrite_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2428",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two burrow-target-minion-or-artifact spells in hand, a second cast immediately settles a newly summoned Deathrite minion. Distinct from 2248, which kills an ordinary summon without a same-receipt site draw, and from 0692, which still requires deathrite-order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/burrow_settlement_rules.rs",
+        "testName": "rule_catalog_2428_second_bury_settles_a_newly_summoned_deathrite_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2429",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2429_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2430",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2430_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2420,
+  "rustSupportedCount": 2430,
   "typescriptSupportedCount": 0
 }
