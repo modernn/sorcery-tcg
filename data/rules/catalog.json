@@ -49149,8 +49149,209 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2260_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2261",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2261_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2262",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2262_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2263",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic leaves a stolen Deathrite minion with the new controller after later turns pass. Distinct from 0659, which kills the stolen minion on the same turn, and from 0977, which then kills after the delay.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2263_stolen_minion_stays_with_the_new_controller_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2264",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand, a second cast on the already-stolen minion is a paid no-op. Distinct from 0659, which then kills the stolen minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2264_second_mesmerism_on_the_stolen_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2265",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand, a second cast steals a newly arrived nearby Deathrite minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2265_second_mesmerism_steals_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2266",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic offers every nearby minion sharing the caster cell. Distinct from 0659, which places only one nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2266_mesmerism_offers_every_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2267",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Nearby-control Magic steals a same-cell minion and leaves a far Deathrite minion with its original controller. Distinct from 0660, which places only a far minion, and from 0684, which filters a two-step minion after the caster moves.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2267_mesmerism_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2268",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two nearby-control spells in hand, a second cast steals a newly summoned nearby Deathrite minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetNearbyMinion",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/deathrite_magic_rules.rs",
+        "testName": "rule_catalog_2268_second_mesmerism_steals_a_newly_summoned_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2269",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2269_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2270",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2270_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2260,
+  "rustSupportedCount": 2270,
   "typescriptSupportedCount": 0
 }
