@@ -53182,8 +53182,222 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2460_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2461",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2461_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2462",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2462_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2463",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lash damage-then-untap Magic, after damaging and untapping a surviving nearby minion, leaves that minion at C4 after later turns pass. Distinct from 0699, which proves the same-turn damage and untap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "untap"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-untapped",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2463_lashed_nearby_minion_stays_at_c4_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2464",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Lash spells in hand, a second cast stays unoffered after the only nearby minion dies to lethal damage. Distinct from 1120, which proves lethal skips untap on the same turn, and from 0699, which uses a surviving nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2464_second_lash_without_a_nearby_target_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2465",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Lash spells in hand, a second cast damages a newly arrived nearby minion at C3 after enemy site placement. Distinct from 0699, which lashes the original C4 summon.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2465_second_lash_damages_a_newly_arrived_nearby_minion_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2466",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lash damage-then-untap Magic offers every nearby minion sharing C4 as a separate target. Distinct from 0699, which places only one nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2466_lash_offers_every_nearby_minion_at_c4_as_a_separate_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2467",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Lash damage-then-untap Magic damages a nearby minion at C4 and leaves a far minion at C1 untouched. Distinct from 0699, which only proves the far minion is not offered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2467_lash_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2468",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two Lash spells in hand, a second cast damages a newly summoned nearby minion at C4. Distinct from 0699, which lashes the original nearby summon.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinionAfterDamage",
+        "targetNearby"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "damage-dealt",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/lash_rules.rs",
+        "testName": "rule_catalog_2468_second_lash_damages_a_newly_summoned_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2469",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2469_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2470",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2470_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2460,
+  "rustSupportedCount": 2470,
   "typescriptSupportedCount": 0
 }
