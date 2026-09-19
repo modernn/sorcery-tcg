@@ -118,6 +118,46 @@ fn fatality_region_manifest(seed: u32) -> String {
     }))
 }
 
+fn fatality_region_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "fatality-region-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-fatality-region-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bury": bury(),
+            "north-fatality": fatality(),
+            "north-lash": lash(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": burrower(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": std::iter::repeat_n("north-lash", 8)
+                    .chain(std::iter::repeat_n("north-bury", 4))
+                    .chain(std::iter::repeat_n("north-fatality", 8))
+                    .collect::<Vec<_>>(),
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
 fn accept_where(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> (Value, Receipt) {
     let action = session
         .legal_actions()
@@ -263,12 +303,13 @@ fn seed_with_start(start: u32, need_second_lash: bool) -> String {
 fn seed_with_two_fatalities(start: u32) -> String {
     (start..start + 8192)
         .chain(673..673 + 8192)
-        .map(fatality_region_manifest)
+        .map(fatality_region_supplemental_manifest)
         .find(|candidate| {
             let (hand, library) = opening_card_ids(candidate);
             let lash_count = hand.iter().filter(|id| *id == "north-lash").count();
             hand.iter().filter(|id| *id == "north-fatality").count() >= 2
                 && hand.iter().any(|id| id == "north-bury")
+                && lash_count >= 1
                 && (lash_count >= 2 || library.first().map(String::as_str) == Some("north-lash"))
                 && opening_south_minions(candidate) >= 2
         })
@@ -683,7 +724,7 @@ fn seed_for_two_surface_and_one_buried(start: u32) -> String {
     (start..start + 8192)
         .chain(673..673 + 8192)
         .find_map(|seed| {
-            let encoded = fatality_region_manifest(seed);
+            let encoded = fatality_region_supplemental_manifest(seed);
             try_setup_two_surface_and_one_buried(&encoded).map(|_| encoded)
         })
         .expect("bounded seed with two surface wounded and one buried minion")
