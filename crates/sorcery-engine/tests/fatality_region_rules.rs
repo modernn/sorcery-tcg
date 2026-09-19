@@ -261,18 +261,18 @@ fn seed_with_start(start: u32, need_second_lash: bool) -> String {
 }
 
 fn seed_with_two_fatalities(start: u32) -> String {
-    (start..start + 2048)
-        .chain(673..673 + 2048)
+    (start..start + 8192)
+        .chain(673..673 + 8192)
         .map(fatality_region_manifest)
         .find(|candidate| {
             let (hand, library) = opening_card_ids(candidate);
+            let lash_count = hand.iter().filter(|id| *id == "north-lash").count();
             hand.iter().filter(|id| *id == "north-fatality").count() >= 2
-                && ["north-lash", "north-bury"]
-                    .into_iter()
-                    .all(|card_id| hand.iter().any(|id| id == card_id))
-                && library.first().map(String::as_str) == Some("north-lash")
+                && hand.iter().any(|id| id == "north-bury")
+                && (lash_count >= 2 || library.first().map(String::as_str) == Some("north-lash"))
+                && opening_south_minions(candidate) >= 2
         })
-        .expect("bounded seed with two Fatality spells and a follow-up Lash")
+        .expect("bounded seed with two Fatality spells and enough Lash copies")
 }
 
 fn seed_with_region_spells(need_second_lash: bool) -> String {
@@ -673,6 +673,9 @@ fn try_setup_two_surface_and_one_buried(
         descriptor["kind"] == "draw"
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
     })?;
+    try_lash_minion(&mut session, &first_id)?;
+    try_lash_minion(&mut session, &second_id)?;
+    try_lash_minion(&mut session, &buried_id)?;
     Some((session, first_id, second_id, buried_id))
 }
 
@@ -692,9 +695,6 @@ fn rule_catalog_2336_fatality_offers_every_surface_wounded_minion_not_undergroun
     let (mut session, first_id, second_id, buried_id) =
         try_setup_two_surface_and_one_buried(&encoded)
             .expect("Fatality region multi-wounded prefix");
-    lash_minion(&mut session, &first_id);
-    lash_minion(&mut session, &second_id);
-    lash_minion(&mut session, &buried_id);
     bury_minion(&mut session, &buried_id);
     let offered = fatality_targets(&session);
     assert!(offered.contains(&first_id));
