@@ -208,8 +208,10 @@ fn payment_supplemental_manifest(seed: u32) -> String {
     gnarled["sacrificeMinionAtSummoningLocationForManaDiscount"] = json!(2);
     let mut aramos = minion(3, &thresholds(Some("earth"), 1));
     aramos["discardRandomCardInsteadOfMana"] = json!(true);
+    let mut helper = minion(0, &thresholds(None, 0));
+    helper["summonToAnySite"] = json!(true);
     let mut water_site = site("water");
-    water_site["genesisGainMana"] = json!(10);
+    water_site["genesisGainMana"] = json!(6);
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "alternative-payment-supplemental" }))
@@ -226,7 +228,7 @@ fn payment_supplemental_manifest(seed: u32) -> String {
                 "life": 20,
             },
             "north-gnarled": gnarled,
-            "north-helper": minion(0, &thresholds(None, 0)),
+            "north-helper": helper,
             "north-minion": aramos,
             "north-water-site": water_site,
             "south-avatar": {
@@ -369,6 +371,55 @@ fn end_turn_if_offered(session: &mut Session) {
     }
 }
 
+fn north_mana(snapshot: &Value) -> u64 {
+    snapshot["players"]["north"]["mana"]
+        .as_u64()
+        .expect("north mana")
+}
+
+fn top_up_mana_if_needed(session: &mut Session, min_mana: u64) {
+    while north_mana(&state(session)) < min_mana
+        && try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cardId"] == "north-water-site"
+        })
+        .is_some()
+    {}
+}
+
+fn draw_until_atlas_at_least(session: &mut Session, min_atlas: usize) {
+    for _ in 0..8 {
+        if atlas_in_hand(&state(session)) >= min_atlas {
+            return;
+        }
+        end_turn_if_offered(session);
+        let _ = try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+        });
+    }
+}
+
+fn reach_site_at(session: &mut Session, cell: &str) -> Option<()> {
+    for _ in 0..16 {
+        if offers(session, |descriptor| {
+            descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+        }) {
+            try_accept_where(session, |descriptor| {
+                descriptor["kind"] == "play-site" && descriptor["cell"] == cell
+            })?;
+            return Some(());
+        }
+        draw_until_atlas_at_least(session, 1);
+        if !offers(session, |descriptor| descriptor["kind"] == "play-site") {
+            try_pass_turn_to_north_spellbook(session)?;
+            continue;
+        }
+        try_accept_where(session, |descriptor| descriptor["kind"] == "play-site")?;
+        try_pass_turn_to_north_spellbook(session)?;
+    }
+    None
+}
+
 fn pass_turn_to_north_spellbook(session: &mut Session) {
     end_turn_if_offered(session);
     accept_where(session, |descriptor| {
@@ -382,6 +433,22 @@ fn pass_turn_to_north_spellbook(session: &mut Session) {
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     });
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    end_turn_if_offered(session);
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
 }
 
 fn summon_helper_at(session: &mut Session, cell: &str) -> String {
@@ -513,6 +580,46 @@ fn try_accept_random_discard_summon(session: &mut Session) -> Option<Receipt> {
     Some(receipt)
 }
 
+fn try_accept_mana_summon(session: &mut Session) -> Option<Receipt> {
+    let descriptor = summon_actions(session, "north-minion")
+        .into_iter()
+        .find(|descriptor| descriptor["paymentMode"].is_null() && descriptor["manaCost"] == 3)?;
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| action.descriptor == descriptor)?;
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some(receipt)
+}
+
+fn minions_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-minion")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn atlas_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["atlas"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or_default()
+}
+
 fn accept_gnarled_sacrifice(session: &mut Session, sacrificed_id: &str) -> (String, Receipt) {
     let descriptor = session
         .legal_actions()
@@ -585,7 +692,7 @@ fn try_second_gnarled_enemy_arrival_prefix(encoded: &str) -> Option<(Session, St
             .iter()
             .filter(|card| *card == "north-helper")
             .count()
-            < 1
+            < 2
     {
         return None;
     }
@@ -599,33 +706,15 @@ fn try_second_gnarled_enemy_arrival_prefix(encoded: &str) -> Option<(Session, St
         return None;
     }
     pass_turn_to_north_spellbook(&mut session);
-    if gnarled_in_hand(&state(&session)) < 1 {
+    if gnarled_in_hand(&state(&session)) < 1 || helpers_in_hand(&state(&session)) < 1 {
         return None;
     }
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw"
-            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
-    })?;
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
-    })?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw"
-            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
-    })?;
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
-    })?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
+    reach_site_at(&mut session, "C3")?;
     if helpers_in_hand(&state(&session)) < 1 {
         return None;
     }
     let new_helper = try_summon_helper_at(&mut session, "C4")?;
+    top_up_mana_if_needed(&mut session, 4);
     gnarled_sacrifice_targets(&session)
         .contains(&new_helper)
         .then_some((session, new_helper))
@@ -642,51 +731,35 @@ fn seed_for_second_gnarled_enemy_arrival(start: u32) -> String {
 }
 
 fn try_far_helper_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    if opening_hand_spell_ids(encoded, "north")
+        .iter()
+        .filter(|card| *card == "north-helper")
+        .count()
+        < 2
+        || opening_hand_spell_ids(encoded, "north")
+            .iter()
+            .filter(|card| *card == "north-gnarled")
+            .count()
+            < 1
+    {
+        return None;
+    }
     let mut session = opening_main(encoded);
     let near_id = try_summon_helper_at(&mut session, "C4")?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw"
-            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
-    })?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw"
-            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
-    })?;
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
-    })?;
+    pass_turn_to_north_spellbook(&mut session);
     let far_id = try_summon_helper_at(&mut session, "C1")?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
+    top_up_mana_if_needed(&mut session, 4);
     (gnarled_in_hand(&state(&session)) >= 1
-        && gnarled_sacrifice_targets(&session).contains(&near_id))
+        && gnarled_sacrifice_targets(&session).contains(&near_id)
+        && !gnarled_sacrifice_targets(&session).contains(&far_id))
     .then_some((session, near_id, far_id))
 }
 
 fn seed_for_far_helper(start: u32) -> String {
     (start..start + 8192)
         .chain(729..729 + 8192)
-        .find_map(|seed| {
-            let encoded = payment_supplemental_manifest(seed);
-            if opening_hand_spell_ids(&encoded, "north")
-                .iter()
-                .filter(|card| *card == "north-helper")
-                .count()
-                < 2
-                || opening_hand_spell_ids(&encoded, "north")
-                    .iter()
-                    .filter(|card| *card == "north-gnarled")
-                    .count()
-                    < 1
-            {
-                return None;
-            }
-            try_far_helper_prefix(&encoded).map(|_| encoded)
-        })
+        .map(payment_supplemental_manifest)
+        .find(|candidate| try_far_helper_prefix(candidate).is_some())
         .expect("bounded seed reaching far-helper setup")
 }
 
@@ -700,7 +773,7 @@ fn try_second_gnarled_new_summon_prefix(encoded: &str) -> Option<(Session, Strin
             .iter()
             .filter(|card| *card == "north-helper")
             .count()
-            < 1
+            < 2
     {
         return None;
     }
@@ -718,6 +791,7 @@ fn try_second_gnarled_new_summon_prefix(encoded: &str) -> Option<(Session, Strin
         return None;
     }
     let new_helper = try_summon_helper_at(&mut session, "C4")?;
+    top_up_mana_if_needed(&mut session, 4);
     gnarled_sacrifice_targets(&session)
         .contains(&new_helper)
         .then_some((session, new_helper))
@@ -736,6 +810,8 @@ fn seed_for_second_gnarled_new_summon(start: u32) -> String {
 fn discard_supplemental_manifest(seed: u32) -> String {
     let mut aramos = minion(3, &thresholds(Some("earth"), 1));
     aramos["discardRandomCardInsteadOfMana"] = json!(true);
+    let mut north_site = site("earth");
+    north_site["genesisGainMana"] = json!(6);
     finish_manifest(json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": "alternative-payment-discard-supplemental" }))
@@ -752,7 +828,7 @@ fn discard_supplemental_manifest(seed: u32) -> String {
                 "life": 20,
             },
             "north-minion": aramos,
-            "north-site": site("earth"),
+            "north-site": north_site,
             "south-avatar": {
                 "attack": 1,
                 "cardType": "avatar",
@@ -782,55 +858,44 @@ fn discard_supplemental_manifest(seed: u32) -> String {
     }))
 }
 
-fn try_second_discard_prefix(encoded: &str) -> Option<String> {
+fn prepare_second_discard_session(encoded: &str) -> Option<Session> {
     if opening_hand_spell_ids(encoded, "north")
         .iter()
         .filter(|card| *card == "north-minion")
         .count()
-        < 2
+        < 3
     {
         return None;
     }
     let mut session = opening_main(encoded);
-    let before = state(&session);
-    let atlas_cards = before["players"]["north"]["hand"]["atlas"]
-        .as_array()
-        .map(|hand| hand.len())
-        .unwrap_or_default();
-    let minions_in_hand = before["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .map(|hand| {
-            hand.iter()
-                .filter(|card| card["cardId"] == "north-minion")
-                .count()
-        })
-        .unwrap_or_default();
-    if atlas_cards == 0 || minions_in_hand < 2 {
-        return None;
+    while minions_in_hand(&state(&session)) > 1 {
+        try_accept_mana_summon(&mut session)?;
     }
+    (minions_in_hand(&state(&session)) == 1 && atlas_in_hand(&state(&session)) >= 1)
+        .then_some(session)
+}
+
+fn try_second_discard_prefix(encoded: &str) -> Option<String> {
+    let mut session = prepare_second_discard_session(encoded)?;
     try_accept_random_discard_summon(&mut session)?;
-    let after = state(&session);
-    if after["players"]["north"]["hand"]["atlas"]
-        .as_array()
-        .is_some_and(|hand| !hand.is_empty())
-    {
-        return None;
-    }
-    if after["players"]["north"]["hand"]["spellbook"]
-        .as_array()
-        .map(|hand| {
-            hand.iter()
-                .filter(|card| card["cardId"] == "north-minion")
-                .count()
-        })
-        != Some(1)
-    {
+    if minions_in_hand(&state(&session)) != 0 {
         return None;
     }
     (!summon_actions(&session, "north-minion")
         .iter()
         .any(|descriptor| descriptor["paymentMode"] == "random-card-discard"))
     .then_some(encoded.to_owned())
+}
+
+fn seed_for_second_discard(start: u32) -> String {
+    (start..start + 8192)
+        .chain(729..729 + 8192)
+        .chain(922..922 + 8192)
+        .find_map(|seed| {
+            let encoded = discard_supplemental_manifest(seed);
+            try_second_discard_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed with two Aramos and one discard payment card")
 }
 
 #[test]
@@ -1003,12 +1068,9 @@ fn rule_catalog_2523_sacrifice_summoned_gnarled_stays_on_the_board_after_turns_p
 
 #[test]
 fn rule_catalog_2524_second_random_discard_offers_no_payment_after_discarding_the_only_hand_card() {
-    let encoded = (2524..2524 + 8192)
-        .chain(729..729 + 8192)
-        .chain(922..922 + 8192)
-        .find_map(|seed| try_second_discard_prefix(&discard_supplemental_manifest(seed)))
-        .expect("bounded seed with two Aramos and one discard payment card");
-    let mut session = opening_main(&encoded);
+    let encoded = seed_for_second_discard(2524);
+    let mut session =
+        prepare_second_discard_session(&encoded).expect("second discard payment setup");
     accept_random_discard_summon(&mut session);
     assert!(
         !summon_actions(&session, "north-minion")
