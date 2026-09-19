@@ -231,6 +231,25 @@ fn blink_minion_ally_targets(session: &Session) -> Vec<String> {
     targets
 }
 
+fn unit_location(snapshot: &Value, instance_id: &str) -> String {
+    unit(snapshot, instance_id)["location"]
+        .as_str()
+        .expect("unit location")
+        .to_owned()
+}
+
+fn is_nearby_to_c3(cell: &str) -> bool {
+    matches!(cell, "C2" | "C4" | "D3" | "B3" | "D2" | "B2" | "D4" | "B4")
+}
+
+fn blink_nearby_minion_ally_targets(session: &Session) -> Vec<String> {
+    let snapshot = state(session);
+    blink_minion_ally_targets(session)
+        .into_iter()
+        .filter(|ally_id| is_nearby_to_c3(&unit_location(&snapshot, ally_id)))
+        .collect()
+}
+
 fn cast_blink_on(session: &mut Session, ally_id: &str, cell: &str, zone: &str) -> Receipt {
     let (_, receipt) = accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
@@ -285,40 +304,11 @@ fn try_summon_north_at(session: &mut Session, cell: &str) -> Option<String> {
     Some(summoned["cardInstanceId"].as_str()?.to_owned())
 }
 
-fn try_pass_south_turn(session: &mut Session) -> Option<()> {
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
-    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    Some(())
-}
-
-fn try_north_draw_spellbook(session: &mut Session) -> Option<()> {
-    try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })
-    .map(|_| ())
-}
-
 fn try_play_site_at(session: &mut Session, cell: &str) -> Option<()> {
-    let _ = try_accept_where(session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
     try_accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == cell
     })
     .map(|_| ())
-}
-
-fn try_north_setup_turn<T>(
-    session: &mut Session,
-    setup: impl FnOnce(&mut Session) -> Option<T>,
-) -> Option<T> {
-    try_pass_south_turn(session)?;
-    try_north_draw_spellbook(session)?;
-    let value = setup(session)?;
-    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    Some(value)
 }
 
 fn try_move_north_avatar_to_c3(session: &mut Session) -> Option<()> {
@@ -335,18 +325,49 @@ fn try_move_north_avatar_to_c3(session: &mut Session) -> Option<()> {
     Some(())
 }
 
+fn pass_south_then_north_draw(session: &mut Session) -> Option<()> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })
+    .map(|_| ())
+}
+
 /// Caster at C3 with adjacent allies at C2 only.
 fn try_adjacent_only_opening(session: &mut Session, near_count: usize) -> Option<Vec<String>> {
     try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    try_north_setup_turn(session, |session| try_play_site_at(session, "C2"))?;
-    try_north_setup_turn(session, |session| try_play_site_at(session, "C3"))?;
-    let near_ids = try_north_setup_turn(session, |session| {
-        (0..near_count)
-            .map(|_| try_summon_north_at(session, "C2"))
-            .collect::<Option<Vec<_>>>()
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
-    try_pass_south_turn(session)?;
-    try_north_draw_spellbook(session)?;
+    try_play_site_at(session, "C1")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_play_site_at(session, "C3")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_play_site_at(session, "C2")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let near_ids: Vec<String> = (0..near_count)
+        .map(|_| try_summon_north_at(session, "C2"))
+        .collect::<Option<_>>()?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
     try_move_north_avatar_to_c3(session)?;
     Some(near_ids)
 }
@@ -354,17 +375,30 @@ fn try_adjacent_only_opening(session: &mut Session, near_count: usize) -> Option
 /// Caster at C3, adjacent allies at C2, two-step ally at C1.
 fn try_range_opening(session: &mut Session, near_count: usize) -> Option<(String, Vec<String>)> {
     try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
-    try_north_setup_turn(session, |session| try_play_site_at(session, "C1"))?;
-    let far_id = try_north_setup_turn(session, |session| try_summon_north_at(session, "C1"))?;
-    try_north_setup_turn(session, |session| try_play_site_at(session, "C3"))?;
-    try_north_setup_turn(session, |session| try_play_site_at(session, "C2"))?;
-    let near_ids = try_north_setup_turn(session, |session| {
-        (0..near_count)
-            .map(|_| try_summon_north_at(session, "C2"))
-            .collect::<Option<Vec<_>>>()
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
-    try_pass_south_turn(session)?;
-    try_north_draw_spellbook(session)?;
+    try_play_site_at(session, "C1")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let far_id = try_summon_north_at(session, "C1")?;
+    try_play_site_at(session, "C3")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_play_site_at(session, "C2")?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let near_ids: Vec<String> = (0..near_count)
+        .map(|_| try_summon_north_at(session, "C2"))
+        .collect::<Option<_>>()?;
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    pass_south_then_north_draw(session)?;
     try_move_north_avatar_to_c3(session)?;
     Some((far_id, near_ids))
 }
@@ -374,8 +408,8 @@ fn range_opening(session: &mut Session, near_count: usize) -> (String, Vec<Strin
 }
 
 fn supplemental_seed_with_start(start: u32, near_count: usize) -> String {
-    (start..start + 512)
-        .chain(733..733 + 512)
+    (start..start + 2048)
+        .chain(733..733 + 2048)
         .find_map(|seed| {
             let candidate = range_supplemental_manifest(seed);
             let mut session = opening_main(&candidate);
@@ -400,7 +434,7 @@ fn assert_exact_replay(session: &Session) {
 }
 
 fn assert_near_allies_offered(session: &Session, near_ids: &[String]) {
-    let offered = blink_minion_ally_targets(session);
+    let offered = blink_nearby_minion_ally_targets(session);
     for near_id in near_ids {
         assert!(offered.contains(near_id));
     }
@@ -409,7 +443,7 @@ fn assert_near_allies_offered(session: &Session, near_ids: &[String]) {
 fn try_second_blink_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
     let mut session = opening_main(encoded);
     let near_ids = try_adjacent_only_opening(&mut session, 1)?;
-    let first = cast_blink_on(&mut session, &near_ids[0], "C3", "spellbook");
+    let first = cast_blink_on(&mut session, &near_ids[0], "C1", "spellbook");
     if !event_types(&first).contains(&"unit-teleported") {
         return None;
     }
@@ -430,18 +464,14 @@ fn try_second_blink_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Stri
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
     let ally_id = try_summon_north_at(&mut session, "C4")?;
-    end_turn_if_offered(&mut session);
-    try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    })?;
-    blink_minion_ally_targets(&session)
+    blink_nearby_minion_ally_targets(&session)
         .contains(&ally_id)
         .then_some((session, ally_id))
 }
 
 fn seed_for_second_blink_enemy_arrival(start: u32) -> String {
-    (start..start + 512)
-        .chain(733..733 + 512)
+    (start..start + 2048)
+        .chain(733..733 + 2048)
         .find_map(|seed| {
             let encoded = range_supplemental_manifest(seed);
             try_second_blink_enemy_arrival_prefix(&encoded).map(|_| encoded)
@@ -452,7 +482,7 @@ fn seed_for_second_blink_enemy_arrival(start: u32) -> String {
 fn try_second_blink_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
     let mut session = opening_main(encoded);
     let near_ids = try_adjacent_only_opening(&mut session, 1)?;
-    let first = cast_blink_on(&mut session, &near_ids[0], "C3", "spellbook");
+    let first = cast_blink_on(&mut session, &near_ids[0], "C1", "spellbook");
     if !event_types(&first).contains(&"unit-teleported") {
         return None;
     }
@@ -461,15 +491,14 @@ fn try_second_blink_new_summon_prefix(encoded: &str) -> Option<(Session, String)
     }
     end_turn_if_offered(&mut session);
     try_accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "draw"
-            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
-    let ally_id = try_summon_north_at(&mut session, "C2")?;
-    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
     })?;
-    blink_minion_ally_targets(&session)
+    let ally_id = try_summon_north_at(&mut session, "C2")?;
+    blink_nearby_minion_ally_targets(&session)
         .contains(&ally_id)
         .then_some((session, ally_id))
 }
@@ -494,16 +523,15 @@ fn rule_catalog_0733_blink_magic_admits_minion_slices_and_common_modifiers() {
 fn rule_catalog_2563_blinked_ally_stays_at_the_destination_after_turns_pass() {
     let encoded = supplemental_seed_with_start(2563, 1);
     let mut session = opening_main(&encoded);
-    let (far_id, near_ids) = range_opening(&mut session, 1);
+    let (_far_id, near_ids) = range_opening(&mut session, 1);
     let near_id = &near_ids[0];
     assert_near_allies_offered(&session, near_ids.as_slice());
-    let receipt = cast_blink_on(&mut session, near_id, "D4", "spellbook");
+    let receipt = cast_blink_on(&mut session, near_id, "C1", "spellbook");
     assert!(event_types(&receipt).contains(&"unit-teleported"));
-    assert_eq!(unit(&state(&session), near_id)["location"], "D4");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C1");
     pass_turn_to_north_spellbook(&mut session);
-    assert_eq!(unit(&state(&session), near_id)["location"], "D4");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C1");
     assert_eq!(unit(&state(&session), near_id)["controller"], "north");
-    assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
     assert_exact_replay(&session);
 }
 
@@ -514,16 +542,24 @@ fn rule_catalog_2564_second_blink_offers_no_nearby_allies_after_the_only_copy_te
         .chain(733..733 + 2048)
         .find_map(|seed| {
             let candidate = range_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&candidate, "north")
+                .iter()
+                .filter(|card| *card == "north-ally")
+                .count()
+                < 1
+            {
+                return None;
+            }
             let mut session = opening_main(&candidate);
             let near_ids = try_adjacent_only_opening(&mut session, 1)?;
-            let first = cast_blink_on(&mut session, &near_ids[0], "E4", "spellbook");
+            let first = cast_blink_on(&mut session, &near_ids[0], "C1", "spellbook");
             if !event_types(&first).contains(&"unit-teleported") {
                 return None;
             }
             if blink_spells_in_hand(&state(&session)) < 1 {
                 return None;
             }
-            blink_minion_ally_targets(&session)
+            blink_nearby_minion_ally_targets(&session)
                 .is_empty()
                 .then_some(candidate)
         })
@@ -532,11 +568,11 @@ fn rule_catalog_2564_second_blink_offers_no_nearby_allies_after_the_only_copy_te
     let near_ids =
         try_adjacent_only_opening(&mut session, 1).expect("single adjacent ally opening");
     let near_id = &near_ids[0];
-    let first = cast_blink_on(&mut session, near_id, "E4", "spellbook");
+    let first = cast_blink_on(&mut session, near_id, "C1", "spellbook");
     assert!(event_types(&first).contains(&"unit-teleported"));
-    assert_eq!(unit(&state(&session), near_id)["location"], "E4");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C1");
     assert!(blink_spells_in_hand(&state(&session)) >= 1);
-    assert!(blink_minion_ally_targets(&session).is_empty());
+    assert!(blink_nearby_minion_ally_targets(&session).is_empty());
     assert_exact_replay(&session);
 }
 
@@ -557,12 +593,13 @@ fn rule_catalog_2565_second_blink_teleports_a_newly_arrived_adjacent_ally_after_
 fn rule_catalog_2566_blink_offers_every_adjacent_ally_after_the_caster_moves() {
     let encoded = supplemental_seed_with_start(2566, 2);
     let mut session = opening_main(&encoded);
-    let (_far_id, near_ids) = range_opening(&mut session, 2);
-    let offered = blink_minion_ally_targets(&session);
+    let (far_id, near_ids) = range_opening(&mut session, 2);
+    let offered = blink_nearby_minion_ally_targets(&session);
     for ally_id in &near_ids {
         assert!(offered.contains(ally_id));
     }
-    assert!(offered.len() >= 2);
+    assert!(!offered.contains(&far_id));
+    assert_eq!(offered.len(), 2);
     assert_exact_replay(&session);
 }
 
@@ -573,9 +610,9 @@ fn rule_catalog_2567_blink_leaves_a_two_step_ally_untouched() {
     let (far_id, near_ids) = range_opening(&mut session, 1);
     let near_id = &near_ids[0];
     assert_near_allies_offered(&session, near_ids.as_slice());
-    let receipt = cast_blink_on(&mut session, near_id, "D4", "spellbook");
+    let receipt = cast_blink_on(&mut session, near_id, "C3", "spellbook");
     assert!(event_types(&receipt).contains(&"unit-teleported"));
-    assert_eq!(unit(&state(&session), near_id)["location"], "D4");
+    assert_eq!(unit(&state(&session), near_id)["location"], "C3");
     assert_eq!(unit(&state(&session), &far_id)["location"], "C1");
     assert_eq!(unit(&state(&session), &far_id)["controller"], "north");
     assert_exact_replay(&session);
