@@ -1,10 +1,12 @@
 //! Direct proofs for Craterize discard-cost site destruction and damage grid
-//! (RULE-CATALOG-0160, 0705–0706, 1075).
+//! (RULE-CATALOG-0160, 0705–0706, 1075, 2253–2258).
 //!
 //! 0657–0658 cover the Session replay slice. 0705 is the unprotected
 //! discard/destroy/grid happy path; 0706 is discard-cost refusal plus
 //! protected-site damage without destroying the site. While Deathrites wait
 //! for ordering, Craterize Magic stays withheld until the chain drains.
+//! 2253–2258 are the unprotected 0657 supplemental persistence, no-real-site
+//! repeat, enemy-arrival, multi-site, far-site, and new-placement proofs.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -387,4 +389,421 @@ fn rule_catalog_1075_craterize_magic_withheld_during_pending_deathrite_order() {
     );
     assert_eq!(state(session)["realm"]["sites"]["C1"]["rubble"], true);
     assert_exact_replay(session);
+}
+
+fn minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 1,
+        "manaCost": 0,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn opening_main(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("valid Craterize session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn craterize_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "craterize-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-craterize-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-craterize": craterize_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-craterize"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn supplemental_seed_with_start(start: u32) -> String {
+    (start..start + 2048)
+        .chain(657..657 + 2048)
+        .map(craterize_supplemental_manifest)
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-craterize")
+        })
+        .expect("bounded seed with Craterize Magic in the opening hand")
+}
+
+fn craterize_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-craterize")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn site_instance_at(snapshot: &Value, cell: &str) -> String {
+    snapshot["realm"]["sites"][cell]["instanceId"]
+        .as_str()
+        .expect("site at cell")
+        .to_owned()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn play_south_site_at(session: &mut Session, cell: &str) -> String {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == cell
+    });
+    site_instance_at(&state(session), cell)
+}
+
+fn setup_south_sites_at(session: &mut Session, cells: &[&str]) -> Vec<(String, String)> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    let mut placed = vec![(cells[0].to_string(), play_south_site_at(session, cells[0]))];
+    for cell in cells.iter().skip(1) {
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+        });
+        accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+        accept_where(session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+        });
+        placed.push(((*cell).to_string(), play_south_site_at(session, cell)));
+    }
+    placed
+}
+
+fn cast_craterize_on(session: &mut Session, cell: &str, site_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-craterize"
+            && descriptor["targetLocation"]["cell"] == cell
+            && descriptor["targetSiteInstanceId"] == site_id
+            && descriptor["discardSiteInstanceId"].is_string()
+    });
+    receipt
+}
+
+fn try_cast_craterize_on(session: &mut Session, cell: &str, site_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-craterize"
+            && descriptor["targetLocation"]["cell"] == cell
+            && descriptor["targetSiteInstanceId"] == site_id
+            && descriptor["discardSiteInstanceId"].is_string()
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn craterize_real_site_targets(session: &Session) -> Vec<(String, String)> {
+    let snapshot = state(session);
+    craterize_targets(session)
+        .into_iter()
+        .filter(|(cell, id)| {
+            snapshot["realm"]["sites"][cell]["instanceId"] == *id
+                && snapshot["realm"]["sites"][cell]["rubble"] != json!(true)
+        })
+        .collect()
+}
+
+fn try_second_craterize_enemy_site_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let (c1, south_c1) = setup_south_sites_at(&mut session, &["C1", "C2"])[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = try_cast_craterize_on(&mut session, &c1, &south_c1)?;
+    if !event_types(&first).contains(&"site-destroyed") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if craterize_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    let south_c3 = play_south_site_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    craterize_targets(&session)
+        .iter()
+        .any(|(cell, id)| cell == "C3" && *id == south_c3)
+        .then_some((session, "C3".to_owned(), south_c3))
+}
+
+fn seed_for_second_craterize_enemy_site(start: u32) -> String {
+    (start..start + 8192)
+        .chain(657..657 + 8192)
+        .find_map(|seed| {
+            let encoded = craterize_supplemental_manifest(seed);
+            try_second_craterize_enemy_site_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Craterize enemy-arrival setup")
+}
+
+fn try_second_craterize_new_site_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let (c1, south_c1) = setup_south_sites_at(&mut session, &["C1"])[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = try_cast_craterize_on(&mut session, &c1, &south_c1)?;
+    if !event_types(&first).contains(&"site-destroyed") {
+        return None;
+    }
+    if state(&session)["realm"]["sites"]["C1"]["rubble"] != json!(true) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if craterize_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let south_c2 = play_south_site_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    craterize_targets(&session)
+        .iter()
+        .any(|(cell, id)| cell == "C2" && *id == south_c2)
+        .then_some((session, "C2".to_owned(), south_c2))
+}
+
+fn seed_for_second_craterize_new_site(start: u32) -> String {
+    (start..start + 8192)
+        .chain(657..657 + 8192)
+        .find_map(|seed| {
+            let encoded = craterize_supplemental_manifest(seed);
+            try_second_craterize_new_site_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Craterize new-placement setup")
+}
+
+#[test]
+fn rule_catalog_2253_site_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2253);
+    let mut session = opening_main(&encoded);
+    let site_id = setup_south_sites_at(&mut session, &["C1"])[0].1.clone();
+    north_draws_spellbook(&mut session);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        site_id
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2254_second_craterize_offers_no_real_site_targets_after_the_only_real_site_becomes_rubble()
+ {
+    let encoded = (2254..2254 + 8192)
+        .chain(657..657 + 8192)
+        .find_map(|seed| {
+            let candidate = craterize_supplemental_manifest(seed);
+            if !opening_spell_ids(&candidate)
+                .iter()
+                .any(|card| card == "north-craterize")
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            let north_site = site_instance_at(&state(&session), "C4");
+            let first = try_cast_craterize_on(&mut session, "C4", &north_site)?;
+            if !event_types(&first).contains(&"site-destroyed") {
+                return None;
+            }
+            if state(&session)["realm"]["sites"]["C4"]["rubble"] != json!(true) {
+                return None;
+            }
+            if craterize_spells_in_hand(&state(&session)) < 1 {
+                return None;
+            }
+            craterize_real_site_targets(&session)
+                .is_empty()
+                .then_some(candidate)
+        })
+        .expect("bounded seed with two Craterize casts after clearing real sites");
+    let mut session = opening_main(&encoded);
+    let north_site = site_instance_at(&state(&session), "C4");
+    let first = cast_craterize_on(&mut session, "C4", &north_site);
+    assert!(event_types(&first).contains(&"site-destroyed"));
+    assert!(event_types(&first).contains(&"card-discarded"));
+    assert_eq!(state(&session)["realm"]["sites"]["C4"]["rubble"], true);
+    assert!(craterize_spells_in_hand(&state(&session)) >= 1);
+    assert!(craterize_real_site_targets(&session).is_empty());
+    assert_eq!(
+        craterize_targets(&session),
+        [("C4".to_owned(), site_instance_at(&state(&session), "C4"))]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2255_second_craterize_replaces_a_newly_arrived_site_after_enemy_site_placement() {
+    let encoded = seed_for_second_craterize_enemy_site(2255);
+    let (mut session, cell, site_id) =
+        try_second_craterize_enemy_site_prefix(&encoded).expect("second Craterize prefix");
+    let receipt = cast_craterize_on(&mut session, &cell, &site_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert_eq!(state(&session)["realm"]["sites"][&cell]["rubble"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2256_craterize_offers_every_real_site_in_the_realm() {
+    let encoded = supplemental_seed_with_start(2256);
+    let mut session = opening_main(&encoded);
+    let south_sites = setup_south_sites_at(&mut session, &["C1", "C2"]);
+    north_draws_spellbook(&mut session);
+    let north_site = site_instance_at(&state(&session), "C4");
+    let offered = craterize_targets(&session);
+    for (cell, site_id) in &south_sites {
+        assert!(offered.contains(&(cell.clone(), site_id.clone())));
+    }
+    assert!(offered.contains(&("C4".to_owned(), north_site)));
+    assert_eq!(offered.len(), 3);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2257_craterize_leaves_a_far_site_untouched() {
+    let encoded = supplemental_seed_with_start(2257);
+    let mut session = opening_main(&encoded);
+    let far_id = setup_south_sites_at(&mut session, &["C1"])[0].1.clone();
+    north_draws_spellbook(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "north-site"
+            && descriptor["cell"] == "C3"
+    });
+    let near_id = site_instance_at(&state(&session), "C3");
+    let receipt = cast_craterize_on(&mut session, "C3", &near_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert_eq!(state(&session)["realm"]["sites"]["C3"]["rubble"], true);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        far_id
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2258_second_craterize_replaces_a_newly_placed_site() {
+    let encoded = seed_for_second_craterize_new_site(2258);
+    let (mut session, cell, site_id) = try_second_craterize_new_site_prefix(&encoded)
+        .expect("second Craterize new-placement prefix");
+    let receipt = cast_craterize_on(&mut session, &cell, &site_id);
+    assert!(event_types(&receipt).contains(&"site-destroyed"));
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert_eq!(state(&session)["realm"]["sites"][&cell]["rubble"], true);
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == site_id))
+    );
+    assert_exact_replay(&session);
 }
