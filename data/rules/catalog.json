@@ -45622,8 +45622,201 @@
         "file": "crates/sorcery-engine/tests/bounce_rules.rs",
         "testName": "rule_catalog_2078_second_bounce_returns_a_newly_summoned_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2101",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2101_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2102",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2102_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2103",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-spell Magic leaves milled Spellbook cards in the owner's cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2103_milled_library_cards_stay_in_the_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2104",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-spell Magic spells in hand, a second cast still resolves as a paid no-op when the chosen Spellbook is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2104_second_mill_on_an_empty_library_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2105",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-spell Magic spells in hand, a second cast still mills remaining Spellbook cards after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2105_second_mill_still_mills_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2106",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-spell Magic offers every Avatar and mills the printed number of the chosen player's top Spellbook cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2106_mill_spells_offers_every_avatar"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2107",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Mill-spell Magic against one Avatar leaves the unselected player's Spellbook untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2107_mill_spells_leaves_the_unselected_library_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2108",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two mill-spell Magic spells in hand, a second cast mills the newly exposed top Spellbook cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "millSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/mill_spells_rules.rs",
+        "testName": "rule_catalog_2108_second_mill_mills_the_newly_exposed_library_top"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2109",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2109_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2110",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2110_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2080,
+  "rustSupportedCount": 2110,
   "typescriptSupportedCount": 0
 }
