@@ -893,7 +893,7 @@ fn rule_catalog_0988_token_summon_grant_then_empty_spellbook_is_a_deck_out() {
     assert_exact_replay(&session);
 }
 
-include!("grant_admission_supplemental.inc.rs");
+include!("common/grant_admission_supplemental.inc.rs");
 
 #[test]
 fn rule_catalog_0989_cemetery_bottom_grant_then_empty_spellbook_is_a_deck_out() {
