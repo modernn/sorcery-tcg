@@ -15018,3 +15018,34 @@ fn rule_catalog_2210_two_hundred_forty_game_synthetic_batch_stays_unranked_unver
     assert_eq!(seeds.len(), 240);
     assert_synthetic_batch_unranked(&seeds);
 }
+
+#[test]
+fn rule_catalog_2211_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (57904..58145).collect();
+    assert_eq!(seeds.len(), 241);
+    assert_synthetic_batch_unranked(&seeds);
+}
+
+#[test]
+fn rule_catalog_2212_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (58145..58387).collect();
+    assert_eq!(seeds.len(), 242);
+    assert_synthetic_batch_unranked(&seeds);
+}
+
+#[test]
+fn rule_catalog_2219_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (58387..58626).collect();
+    assert_eq!(seeds.len(), 239);
+    assert_synthetic_batch_unranked(&seeds);
+}
+
+#[test]
+fn rule_catalog_2220_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds: Vec<u32> = (58626..58866).collect();
+    assert_eq!(seeds.len(), 240);
+    assert_synthetic_batch_unranked(&seeds);
+}

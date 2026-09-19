@@ -48146,8 +48146,200 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2210_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2211",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2211_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2212",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2212_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2213",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-loss Magic leaves the chosen Avatar at its reduced life after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2213_life_loss_stays_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2214",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-loss spells in hand, a second cast is a paid no-op after the chosen Avatar is already at Death's Door.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2214_second_life_loss_is_a_paid_noop_after_deaths_door"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2215",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-loss spells in hand, a second cast still reduces remaining life after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2215_second_life_loss_still_hits_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2216",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-loss Magic offers both Avatars.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2216_target_player_life_loss_offers_both_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2217",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Target-player life-loss Magic against one Avatar leaves the other Avatar's life untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2217_life_loss_leaves_the_other_avatar_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2218",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two target-player life-loss spells in hand, a second cast reduces the newly remaining life.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "targetPlayerLosesLife"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "avatar-life-lost"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/target_player_life_loss_rules.rs",
+        "testName": "rule_catalog_2218_second_life_loss_reduces_newly_remaining_life"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2219",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2219_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2220",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2220_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2210,
+  "rustSupportedCount": 2220,
   "typescriptSupportedCount": 0
 }

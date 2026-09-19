@@ -1,5 +1,5 @@
 //! Direct proofs for target-player life-loss Magic (RULE-CATALOG-0649–0650,
-//! RULE-CATALOG-1057).
+//! RULE-CATALOG-1057, RULE-CATALOG-2213–2218).
 //!
 //! Target-player life-loss Magic pays, offers only both Avatars, never offers
 //! a minion, and reduces the chosen Avatar's life without dealing damage. Life
@@ -641,4 +641,294 @@ fn rule_catalog_1057_target_player_life_loss_withheld_during_pending_deathrite_o
     assert_eq!(lost.payload["seat"], "south");
     assert_eq!(state(session)["players"]["south"]["avatar"]["life"], 18);
     assert_exact_replay(session);
+}
+
+fn life_loss_supplemental_manifest(seed: u32, north_life: u8, south_life: u8) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "target-player-life-loss-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-target-player-life-loss-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(north_life),
+            "north-life-loss": life_loss_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(south_life),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-life-loss"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, north_life: u8, south_life: u8) -> String {
+    (start..start + 2048)
+        .chain(649..649 + 2048)
+        .map(|seed| life_loss_supplemental_manifest(seed, north_life, south_life))
+        .find(|candidate| {
+            opening_spell_ids(candidate)
+                .iter()
+                .any(|card| card == "north-life-loss")
+        })
+        .expect("bounded seed with target-player life-loss Magic in the opening hand")
+}
+
+fn life_loss_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-life-loss")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn avatar_life(snapshot: &Value, seat: &str) -> u64 {
+    snapshot["players"][seat]["avatar"]["life"]
+        .as_u64()
+        .expect("avatar life")
+}
+
+fn site_instance_at(snapshot: &Value, cell: &str) -> String {
+    snapshot["realm"]["sites"][cell]["instanceId"]
+        .as_str()
+        .expect("site at cell")
+        .to_owned()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .is_ok_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_life_loss_on(session: &mut Session, seat: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-life-loss"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == seat
+    });
+    receipt
+}
+
+fn try_second_life_loss_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first = cast_life_loss_on(&mut session, "south");
+    if !event_types(&first).contains(&"avatar-life-lost") {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C1"
+    })?;
+    let south_c1 = site_instance_at(&state(&session), "C1");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (life_loss_spells_in_hand(&state(&session)) >= 1).then_some((session, south_c1))
+}
+
+fn seed_for_second_life_loss_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(649..649 + 8192)
+        .find_map(|seed| {
+            let encoded = life_loss_supplemental_manifest(seed, 20, 20);
+            opening_spell_ids(&encoded)
+                .iter()
+                .any(|card| card == "north-life-loss")
+                .then_some(encoded)
+                .and_then(|encoded| {
+                    try_second_life_loss_enemy_arrival_prefix(&encoded).map(|_| encoded)
+                })
+        })
+        .expect("bounded seed reaching second target-player life-loss enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_2213_life_loss_stays_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2213, 20, 20);
+    let mut session = opening_main(&encoded);
+    assert_eq!(avatar_life(&state(&session), "south"), 20);
+    let first = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&first).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "south"), 18);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(avatar_life(&state(&session), "south"), 18);
+    assert_eq!(avatar_life(&state(&session), "north"), 20);
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2214_second_life_loss_is_a_paid_noop_after_deaths_door() {
+    let encoded = (2214..2214 + 8192)
+        .chain(649..649 + 8192)
+        .find_map(|seed| {
+            let candidate = life_loss_supplemental_manifest(seed, 20, 2);
+            if opening_spell_ids(&candidate)
+                .iter()
+                .filter(|card| *card == "north-life-loss")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            if life_loss_spells_in_hand(&state(&session)) < 2
+                || avatar_life(&state(&session), "south") != 2
+            {
+                return None;
+            }
+            let first = cast_life_loss_on(&mut session, "south");
+            if !event_types(&first).contains(&"avatar-reached-deaths-door") {
+                return None;
+            }
+            (avatar_life(&state(&session), "south") == 0
+                && life_loss_spells_in_hand(&state(&session)) >= 1)
+                .then_some(candidate)
+        })
+        .expect("bounded seed with two target-player life-loss casts after Death's Door");
+    let mut session = opening_main(&encoded);
+    assert!(life_loss_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&first).contains(&"avatar-life-lost"));
+    assert!(event_types(&first).contains(&"avatar-reached-deaths-door"));
+    assert_eq!(avatar_life(&state(&session), "south"), 0);
+    assert!(life_loss_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_life_loss_on(&mut session, "south");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "south"), 0);
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2215_second_life_loss_still_hits_after_enemy_site_placement() {
+    let encoded = seed_for_second_life_loss_enemy_arrival(2215);
+    let (mut session, south_c1) = try_second_life_loss_enemy_arrival_prefix(&encoded)
+        .expect("second target-player life-loss enemy-arrival prefix");
+    assert_eq!(avatar_life(&state(&session), "south"), 18);
+    let receipt = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&receipt).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "south"), 16);
+    assert_eq!(
+        state(&session)["realm"]["sites"]["C1"]["instanceId"],
+        south_c1
+    );
+    assert_ne!(
+        state(&session)["realm"]["sites"]["C1"]["rubble"],
+        json!(true)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2216_target_player_life_loss_offers_both_avatars() {
+    let encoded = supplemental_seed_with_start(2216, 20, 20);
+    let session = opening_main(&encoded);
+    assert_eq!(
+        life_loss_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2217_life_loss_leaves_the_other_avatar_untouched() {
+    let encoded = supplemental_seed_with_start(2217, 20, 20);
+    let mut session = opening_main(&encoded);
+    assert_eq!(avatar_life(&state(&session), "north"), 20);
+    assert_eq!(avatar_life(&state(&session), "south"), 20);
+    let receipt = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&receipt).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "north"), 20);
+    assert_eq!(avatar_life(&state(&session), "south"), 18);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2218_second_life_loss_reduces_newly_remaining_life() {
+    let encoded = supplemental_seed_with_start(2218, 20, 20);
+    let mut session = opening_main(&encoded);
+    assert!(life_loss_spells_in_hand(&state(&session)) >= 2);
+    assert_eq!(avatar_life(&state(&session), "south"), 20);
+    let first = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&first).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "south"), 18);
+    let second = cast_life_loss_on(&mut session, "south");
+    assert!(event_types(&second).contains(&"avatar-life-lost"));
+    assert_eq!(avatar_life(&state(&session), "south"), 16);
+    assert_eq!(avatar_life(&state(&session), "north"), 20);
+    assert_exact_replay(&session);
 }
