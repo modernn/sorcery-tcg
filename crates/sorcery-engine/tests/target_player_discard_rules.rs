@@ -332,7 +332,7 @@ fn seed_with(count: u8, north_spells: usize, start: u32) -> String {
     (start..start + 256)
         .map(|seed| discard_cards_manifest(seed, count, north_spells))
         .find(|candidate| {
-            Session::new(candidate).ok().is_some_and(|preview| {
+            Session::new(candidate).is_ok_and(|preview| {
                 north_hand_ids(&state(&preview))
                     .iter()
                     .any(|card| card == "north-discard")
@@ -1206,8 +1206,7 @@ fn cemetery_ids(snapshot: &Value, seat: &str) -> Vec<String> {
 fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
     session
         .legal_actions()
-        .ok()
-        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+        .is_ok_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
 }
 
 fn decline_attack_if_needed(session: &mut Session) {
