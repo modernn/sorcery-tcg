@@ -49350,8 +49350,204 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2270_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2271",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2271_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2272",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2272_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2273",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Disable-target-nearby-minion-until-next-turn Magic leaves a minion disabled after the opponent turn passes.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2273_disabled_minion_stays_disabled_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2274",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two disable-target-nearby-minion-until-next-turn spells in hand, a second cast stays unoffered once no nearby minion remains.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2274_second_freeze_without_a_nearby_target_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2275",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two disable-target-nearby-minion-until-next-turn spells in hand, a second cast disables a newly arrived nearby minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2275_second_freeze_disables_a_newly_arrived_nearby_minion_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2276",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Disable-target-nearby-minion-until-next-turn Magic offers every nearby minion as a separate target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2276_freeze_offers_every_nearby_minion_as_a_separate_target"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2277",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Disable-target-nearby-minion-until-next-turn Magic leaves a far minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2277_freeze_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2278",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a disable-target-nearby-minion-until-next-turn cast, a later cast disables a newly summoned nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "disableTargetNearbyMinionUntilNextTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-disabled"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/freeze_rules.rs",
+        "testName": "rule_catalog_2278_second_freeze_disables_a_newly_summoned_nearby_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2279",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2279_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2280",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2280_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2270,
+  "rustSupportedCount": 2280,
   "typescriptSupportedCount": 0
 }

@@ -1,10 +1,13 @@
 //! Direct proofs for disable-target-nearby-minion-until-next-turn Magic
-//! (RULE-CATALOG-0581–0582, RULE-CATALOG-1013).
+//! (RULE-CATALOG-0581–0582, RULE-CATALOG-0661–0662, RULE-CATALOG-1013,
+//! RULE-CATALOG-2273–2278).
 //!
 //! Ordinary Freeze Magic disables a nearby minion until the caster's next Start
 //! Phase. Unlike measured disable-until-damaged, the flag expires on that turn
 //! boundary rather than on damage. While Deathrites wait for ordering, Freeze
-//! Magic stays withheld until the chain drains.
+//! Magic stays withheld until the chain drains. Supplemental 2273–2278 bind
+//! persistence, empty-repeat, enemy-arrival, multi-target, far-minion, and a
+//! newly summoned nearby minion.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -704,20 +707,22 @@ fn freeze_supplemental_manifest(seed: u32) -> String {
     }))
 }
 
+fn seed_has_opening(encoded: &str, required_north: &[&str]) -> bool {
+    let north = opening_spell_ids(encoded, "north");
+    let south = opening_spell_ids(encoded, "south");
+    required_north
+        .iter()
+        .all(|id| north.iter().any(|card| card == id))
+        && ["south-far", "south-nearby"]
+            .into_iter()
+            .all(|id| south.iter().any(|card| card == id))
+}
+
 fn seed_with_start(start: u32, required: &[&str]) -> String {
     (start..start + 2048)
-        .chain(581..581 + 2048)
+        .chain(661..661 + 2048)
         .map(freeze_supplemental_manifest)
-        .find(|candidate| {
-            let north = opening_spell_ids(candidate, "north");
-            let south = opening_spell_ids(candidate, "south");
-            required
-                .iter()
-                .all(|id| north.iter().any(|card| card == id))
-                && ["south-far", "south-nearby"]
-                    .into_iter()
-                    .all(|id| south.iter().any(|card| card == id))
-        })
+        .find(|candidate| seed_has_opening(candidate, required))
         .expect("bounded seed with required opening cards")
 }
 
@@ -754,28 +759,33 @@ fn end_turn_if_offered(session: &mut Session) {
     accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
 }
 
-fn pass_turn_to_north_spellbook(session: &mut Session) {
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
     end_turn_if_offered(session);
-    accept_where(session, |descriptor| {
+    try_accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
+    })?;
     let _ = try_accept_where(session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
     });
     decline_attack_if_needed(session);
     end_turn_if_offered(session);
-    accept_where(session, |descriptor| {
+    try_accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    })?;
+    Some(())
 }
 
-fn cast_freeze(session: &mut Session, target_id: &str) -> Receipt {
-    let (_, receipt) = accept_where(session, |descriptor| {
+fn try_cast_freeze(session: &mut Session, target_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
         descriptor["kind"] == "cast-magic"
             && descriptor["cardId"] == "north-freeze"
             && descriptor["target"]["instanceId"] == target_id
-    });
-    receipt
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn cast_freeze(session: &mut Session, target_id: &str) -> Receipt {
+    try_cast_freeze(session, target_id).expect("Freeze target")
 }
 
 fn cast_kill(session: &mut Session, target_id: &str) -> Receipt {
@@ -814,10 +824,13 @@ fn setup_two_nearby_minions(session: &mut Session) -> (String, String) {
 }
 
 fn try_second_freeze_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    if !seed_has_opening(encoded, &["north-freeze"]) {
+        return None;
+    }
     let mut session = opening_main(encoded);
     let (nearby_id, _) = setup_nearby_and_far(&mut session);
-    cast_freeze(&mut session, &nearby_id);
-    pass_turn_to_north_spellbook(&mut session);
+    try_cast_freeze(&mut session, &nearby_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
     if freeze_spells_in_hand(&state(&session)) < 1 {
         return None;
     }
@@ -825,9 +838,9 @@ fn try_second_freeze_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Str
         descriptor["kind"] == "play-site" && descriptor["cell"] == "D3"
     })?;
     end_turn_if_offered(&mut session);
-    accept_where(&mut session, |descriptor| {
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
+    })?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
     })?;
@@ -839,9 +852,9 @@ fn try_second_freeze_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Str
     })?;
     let visitor_id = summoned["cardInstanceId"].as_str()?.to_owned();
     end_turn_if_offered(&mut session);
-    accept_where(&mut session, |descriptor| {
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    })?;
     freeze_targets(&session)
         .contains(&visitor_id)
         .then_some((session, visitor_id))
@@ -849,25 +862,22 @@ fn try_second_freeze_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Str
 
 fn seed_for_second_freeze_enemy_arrival(start: u32) -> String {
     (start..start + 8192)
-        .chain(581..581 + 8192)
+        .chain(661..661 + 8192)
         .find_map(|seed| {
             let encoded = freeze_supplemental_manifest(seed);
-            if !opening_spell_ids(&encoded, "north")
-                .iter()
-                .any(|card| card == "north-freeze")
-            {
-                return None;
-            }
             try_second_freeze_enemy_arrival_prefix(&encoded).map(|_| encoded)
         })
         .expect("bounded seed reaching second Freeze enemy-arrival setup")
 }
 
 fn try_second_freeze_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    if !seed_has_opening(encoded, &["north-freeze"]) {
+        return None;
+    }
     let mut session = opening_main(encoded);
     let (nearby_id, _) = setup_nearby_and_far(&mut session);
-    cast_freeze(&mut session, &nearby_id);
-    pass_turn_to_north_spellbook(&mut session);
+    try_cast_freeze(&mut session, &nearby_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
     if freeze_spells_in_hand(&state(&session)) < 1 {
         return None;
     }
@@ -875,9 +885,9 @@ fn try_second_freeze_new_summon_prefix(encoded: &str) -> Option<(Session, String
         descriptor["kind"] == "play-site" && descriptor["cell"] == "D3"
     })?;
     end_turn_if_offered(&mut session);
-    accept_where(&mut session, |descriptor| {
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
-    });
+    })?;
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "D2"
     })?;
@@ -889,9 +899,9 @@ fn try_second_freeze_new_summon_prefix(encoded: &str) -> Option<(Session, String
     })?;
     let new_id = summoned["cardInstanceId"].as_str()?.to_owned();
     end_turn_if_offered(&mut session);
-    accept_where(&mut session, |descriptor| {
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
-    });
+    })?;
     freeze_targets(&session)
         .contains(&new_id)
         .then_some((session, new_id))
@@ -899,15 +909,9 @@ fn try_second_freeze_new_summon_prefix(encoded: &str) -> Option<(Session, String
 
 fn seed_for_second_freeze_new_summon(start: u32) -> String {
     (start..start + 8192)
-        .chain(581..581 + 8192)
+        .chain(661..661 + 8192)
         .find_map(|seed| {
             let encoded = freeze_supplemental_manifest(seed);
-            if !opening_spell_ids(&encoded, "north")
-                .iter()
-                .any(|card| card == "north-freeze")
-            {
-                return None;
-            }
             try_second_freeze_new_summon_prefix(&encoded).map(|_| encoded)
         })
         .expect("bounded seed reaching second Freeze new-summon setup")
@@ -991,6 +995,96 @@ fn rule_catalog_1887_freeze_leaves_a_far_minion_untouched() {
 #[test]
 fn rule_catalog_1888_second_freeze_disables_a_newly_summoned_nearby_minion() {
     let encoded = seed_for_second_freeze_new_summon(1888);
+    let (mut session, new_id) =
+        try_second_freeze_new_summon_prefix(&encoded).expect("second Freeze new-summon prefix");
+    let receipt = cast_freeze(&mut session, &new_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert!(is_disabled(&state(&session), &new_id));
+    assert!(!has_activate_mana(&session, &new_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2273_disabled_minion_stays_disabled_after_turns_pass() {
+    let encoded = seed_with_start(2273, &["north-freeze"]);
+    let mut session = opening_main(&encoded);
+    let (nearby_id, _) = setup_nearby_and_far(&mut session);
+    cast_freeze(&mut session, &nearby_id);
+    assert!(is_disabled(&state(&session), &nearby_id));
+    end_turn_if_offered(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    assert!(is_disabled(&state(&session), &nearby_id));
+    assert!(!has_activate_mana(&session, &nearby_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2274_second_freeze_without_a_nearby_target_stays_unoffered() {
+    let encoded = seed_with_start(2274, &["north-freeze", "north-kill"]);
+    let mut session = opening_main(&encoded);
+    let (nearby_id, _) = setup_nearby_and_far(&mut session);
+    cast_freeze(&mut session, &nearby_id);
+    assert!(is_disabled(&state(&session), &nearby_id));
+    cast_kill(&mut session, &nearby_id);
+    assert!(freeze_spells_in_hand(&state(&session)) >= 1);
+    assert!(freeze_targets(&session).is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2275_second_freeze_disables_a_newly_arrived_nearby_minion_after_enemy_arrival() {
+    let encoded = seed_for_second_freeze_enemy_arrival(2275);
+    let (mut session, visitor_id) = try_second_freeze_enemy_arrival_prefix(&encoded)
+        .expect("second Freeze enemy-arrival prefix");
+    let receipt = cast_freeze(&mut session, &visitor_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-disabled", "magic-resolved"]
+    );
+    assert!(is_disabled(&state(&session), &visitor_id));
+    assert!(!has_activate_mana(&session, &visitor_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2276_freeze_offers_every_nearby_minion_as_a_separate_target() {
+    let encoded = seed_with_start(2276, &["north-freeze"]);
+    let mut session = opening_main(&encoded);
+    let (first_id, second_id) = setup_two_nearby_minions(&mut session);
+    let targets = freeze_targets(&session);
+    assert!(targets.contains(&first_id));
+    assert!(targets.contains(&second_id));
+    assert_eq!(targets.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2277_freeze_leaves_a_far_minion_untouched() {
+    let encoded = seed_with_start(2277, &["north-freeze"]);
+    let mut session = opening_main(&encoded);
+    let (nearby_id, far_id) = setup_nearby_and_far(&mut session);
+    cast_freeze(&mut session, &nearby_id);
+    assert!(is_disabled(&state(&session), &nearby_id));
+    assert!(!is_disabled(&state(&session), &far_id));
+    assert!(!has_activate_mana(&session, &nearby_id));
+    assert!(
+        state(&session)["realm"]["units"]
+            .as_array()
+            .expect("realm units")
+            .iter()
+            .any(|unit| unit["instanceId"] == far_id)
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2278_second_freeze_disables_a_newly_summoned_nearby_minion() {
+    let encoded = seed_for_second_freeze_new_summon(2278);
     let (mut session, new_id) =
         try_second_freeze_new_summon_prefix(&encoded).expect("second Freeze new-summon prefix");
     let receipt = cast_freeze(&mut session, &new_id);
