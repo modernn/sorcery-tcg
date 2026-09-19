@@ -13344,3 +13344,54 @@ fn rule_catalog_2080_two_hundred_forty_game_synthetic_batch_stays_unranked_unver
     let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
     assert!(!batch_policy.authority_verified);
 }
+
+fn assert_synthetic_batch_stays_unranked(seeds: &[u32], expected_len: usize) {
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), expected_len);
+    assert_eq!(records.len(), expected_len);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority,
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+
+#[test]
+fn rule_catalog_2161_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (53093..53334).collect();
+    assert_synthetic_batch_stays_unranked(&seeds, 241);
+}
+
+#[test]
+fn rule_catalog_2162_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (53334..53576).collect();
+    assert_synthetic_batch_stays_unranked(&seeds, 242);
+}
+
+#[test]
+fn rule_catalog_2169_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    let seeds: Vec<u32> = (53576..53815).collect();
+    assert_synthetic_batch_stays_unranked(&seeds, 239);
+}
+
+#[test]
+fn rule_catalog_2170_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority() {
+    let seeds: Vec<u32> = (53815..54055).collect();
+    assert_synthetic_batch_stays_unranked(&seeds, 240);
+}

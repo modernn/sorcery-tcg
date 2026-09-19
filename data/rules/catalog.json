@@ -45622,8 +45622,201 @@
         "file": "crates/sorcery-engine/tests/bounce_rules.rs",
         "testName": "rule_catalog_2078_second_bounce_returns_a_newly_summoned_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2161",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2161_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2162",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2162_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2163",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Site return Magic leaves a returned site in the hidden Atlas hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2163_returned_site_stays_in_atlas_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2164",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Site return spells in hand, a second cast with an empty own cemetery still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2164_second_return_without_a_cemetery_site_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2165",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Site return spells in hand, a second cast returns a newly destroyed own site after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "site-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2165_second_return_returns_a_newly_destroyed_site_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2166",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Site return Magic offers every own cemetery Site when multiple are present.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2166_cemetery_site_return_offers_every_own_cemetery_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2167",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Site return Magic leaves an unselected own cemetery Site in the cemetery.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2167_cemetery_site_return_leaves_an_unselected_cemetery_site_in_place"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2168",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Site return spells in hand, a second cast returns a newly destroyed own site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetSiteFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_site_return_rules.rs",
+        "testName": "rule_catalog_2168_second_return_returns_a_newly_destroyed_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2169",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2169_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2170",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2170_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2080,
+  "rustSupportedCount": 2090,
   "typescriptSupportedCount": 0
 }
