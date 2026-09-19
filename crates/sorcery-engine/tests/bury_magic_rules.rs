@@ -1,5 +1,6 @@
 //! Direct proofs for burrow-target-minion-or-artifact Magic settlement
-//! (RULE-CATALOG-0655–0656, RULE-CATALOG-1036).
+//! (RULE-CATALOG-0655–0656, RULE-CATALOG-1036, RULE-CATALOG-1913–1918,
+//! RULE-CATALOG-2243–2248).
 //!
 //! Bury forcefully burrows a chosen ordinary minion on Earth, then region
 //! settlement kills it because it has no Burrowing. A Water site is still
@@ -984,6 +985,87 @@ fn rule_catalog_1917_bury_leaves_a_far_minion_untouched() {
 #[test]
 fn rule_catalog_1918_second_bury_kills_a_newly_summoned_minion() {
     let encoded = seed_for_second_bury_new_summon(1918);
+    let (mut session, minion_id) =
+        try_second_bury_new_summon_prefix(&encoded).expect("second Bury new-summon prefix");
+    let receipt = cast_bury_target(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(cemetery_has(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2243_buried_minion_stays_in_cemetery_after_turns_pass() {
+    let encoded = seed_with_start(2243, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &target_id);
+    assert!(cemetery_has(&state(&session), "south", &target_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(cemetery_has(&state(&session), "south", &target_id));
+    assert!(realm_unit(&state(&session), &target_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2244_second_bury_without_a_surface_target_stays_unoffered() {
+    let encoded = seed_with_start(2244, 1);
+    let mut session = opening_main(&encoded);
+    let target_id = setup_c1_with_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bury_target(&mut session, &target_id);
+    assert!(bury_spells_in_hand(&state(&session)) >= 1);
+    assert!(bury_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| descriptor["kind"]
+        == "cast-magic"
+        && descriptor["cardId"] == "north-bury"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2245_second_bury_kills_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_bury_enemy_arrival(2245);
+    let (mut session, minion_id) =
+        try_second_bury_enemy_arrival_prefix(&encoded).expect("second Bury enemy-arrival prefix");
+    let receipt = cast_bury_target(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(cemetery_has(&state(&session), "south", &minion_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2246_bury_offers_every_surface_minion_at_the_target_land_site() {
+    let encoded = seed_with_start(2246, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c1_with_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = bury_targets(&session);
+    assert_eq!(offered.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2247_bury_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(2247);
+    let (mut session, c1_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("Bury far-minion prefix");
+    let buried_id = &c1_ids[0];
+    cast_bury_target(&mut session, buried_id);
+    assert!(cemetery_has(&state(&session), "south", buried_id));
+    assert!(realm_unit(&state(&session), &far_id).is_some());
+    assert_eq!(
+        realm_unit(&state(&session), &far_id).expect("far minion")["location"],
+        "C4"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2248_second_bury_kills_a_newly_summoned_minion() {
+    let encoded = seed_for_second_bury_new_summon(2248);
     let (mut session, minion_id) =
         try_second_bury_new_summon_prefix(&encoded).expect("second Bury new-summon prefix");
     let receipt = cast_bury_target(&mut session, &minion_id);
