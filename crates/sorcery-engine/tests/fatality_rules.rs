@@ -1,5 +1,5 @@
 //! Direct proofs for kill-target-wounded-minion Magic (RULE-CATALOG-0609–0610,
-//! RULE-CATALOG-0721, RULE-CATALOG-1021, RULE-CATALOG-1091).
+//! RULE-CATALOG-0721, RULE-CATALOG-1021, RULE-CATALOG-1091, RULE-CATALOG-2013–2018).
 //!
 //! Fatality kills only a wounded minion in the caster region. Healthy minions
 //! are never offered as legal targets. Enemy Stealth and underground region
@@ -658,4 +658,452 @@ fn rule_catalog_1091_fatality_magic_withheld_during_pending_deathrite_order() {
     );
     assert!(realm_unit(&state(session), &visitor_id).is_none());
     assert_exact_replay(session);
+}
+
+fn supplemental_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn fatality_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "fatality-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-fatality-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-fatality": fatality(),
+            "north-lash": lash(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": supplemental_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": std::iter::repeat_n("north-lash", 8)
+                    .chain(std::iter::repeat_n("north-fatality", 8))
+                    .collect::<Vec<_>>(),
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(609..609 + 2048)
+        .map(fatality_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-fatality")
+                && opening_hand_spell_ids(candidate, "north")
+                    .iter()
+                    .any(|card| card == "north-lash")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with Fatality, Lash, and required South minions")
+}
+
+fn fatality_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-fatality")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn lash_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-lash")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("Fatality target identity")
+        .to_owned()
+}
+
+fn setup_c2_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    (0..count).map(|_| summon_south_at(session, "C2")).collect()
+}
+
+fn lash_target(session: &mut Session, target_id: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-lash"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+}
+
+fn cast_fatality_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-fatality"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let c2_ids = setup_c2_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (lash_spells_in_hand(&state(&session)) >= 1).then_some((session, c2_ids[0].clone(), far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(609..609 + 2048)
+        .find_map(|seed| {
+            let encoded = fatality_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching Fatality far-minion setup")
+}
+
+fn try_second_fatality_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    lash_target(&mut session, &first_id);
+    cast_fatality_on(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if fatality_spells_in_hand(&state(&session)) < 1 || lash_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    lash_target(&mut session, &minion_id);
+    fatality_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_fatality_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(609..609 + 8192)
+        .find_map(|seed| {
+            let encoded = fatality_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_fatality_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Fatality enemy-arrival setup")
+}
+
+fn try_second_fatality_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    lash_target(&mut session, &first_id);
+    cast_fatality_on(&mut session, &first_id);
+    if realm_unit(&state(&session), &first_id).is_some() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if fatality_spells_in_hand(&state(&session)) < 1 || lash_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    lash_target(&mut session, &minion_id);
+    fatality_targets(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_fatality_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(609..609 + 8192)
+        .find_map(|seed| {
+            let encoded = fatality_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_fatality_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Fatality new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2013_wounded_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2013, 1);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    lash_target(&mut session, &minion_id);
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 1);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert!(realm_unit(&state(&session), &minion_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2014_second_fatality_offers_no_targets_after_killing_the_only_wounded_minion() {
+    let encoded = (2014..2014 + 8192)
+        .chain(609..609 + 8192)
+        .find_map(|seed| {
+            let candidate = fatality_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            lash_target(&mut session, &minion_id);
+            let first = cast_fatality_on(&mut session, &minion_id);
+            if !event_types(&first).contains(&"minion-died") {
+                return None;
+            }
+            if realm_unit(&state(&session), &minion_id).is_some() {
+                return None;
+            }
+            (fatality_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two Fatality casts after clearing wounded minions");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    lash_target(&mut session, &minion_id);
+    let first = cast_fatality_on(&mut session, &minion_id);
+    assert!(event_types(&first).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(fatality_spells_in_hand(&state(&session)) >= 1);
+    assert!(fatality_targets(&session).is_empty());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-fatality"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2015_second_fatality_kills_a_newly_arrived_wounded_minion_after_enemy_site_placement()
+ {
+    let encoded = seed_for_second_fatality_enemy_arrival(2015);
+    let (mut session, minion_id) = try_second_fatality_enemy_arrival_prefix(&encoded)
+        .expect("second Fatality enemy-arrival prefix");
+    let receipt = cast_fatality_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2016_fatality_offers_every_wounded_minion_in_the_caster_region() {
+    let encoded = supplemental_seed_with_start(2016, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c2_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    for minion_id in &minion_ids {
+        lash_target(&mut session, minion_id);
+    }
+    let offered = fatality_targets(&session);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2017_fatality_leaves_a_far_healthy_minion_untouched() {
+    let encoded = seed_for_far_minion(2017);
+    let (mut session, wounded_id, far_id) =
+        try_far_minion_prefix(&encoded).expect("Fatality far-minion prefix");
+    lash_target(&mut session, &wounded_id);
+    let receipt = cast_fatality_on(&mut session, &wounded_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &wounded_id).is_none());
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2018_second_fatality_kills_a_newly_summoned_wounded_minion() {
+    let encoded = seed_for_second_fatality_new_summon(2018);
+    let (mut session, minion_id) =
+        try_second_fatality_new_summon_prefix(&encoded).expect("second Fatality new-summon prefix");
+    let receipt = cast_fatality_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == minion_id))
+    );
+    assert_exact_replay(&session);
 }

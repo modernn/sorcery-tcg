@@ -44247,8 +44247,205 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2010_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2011",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2011_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2012",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2012_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2013",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic leaves a wounded minion at its location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2013_wounded_minion_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2014",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast offers no targets after the only wounded minion dies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2014_second_fatality_offers_no_targets_after_killing_the_only_wounded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2015",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast kills a newly arrived wounded enemy minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2015_second_fatality_kills_a_newly_arrived_wounded_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2016",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers every wounded minion in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2016_fatality_offers_every_wounded_minion_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2017",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic at one site leaves a far healthy minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2017_fatality_leaves_a_far_healthy_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2018",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast kills a newly summoned wounded enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2018_second_fatality_kills_a_newly_summoned_wounded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2019",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2019_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2020",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2020_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2010,
+  "rustSupportedCount": 2020,
   "typescriptSupportedCount": 0
 }
