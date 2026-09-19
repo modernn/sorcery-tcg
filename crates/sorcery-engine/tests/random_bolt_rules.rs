@@ -1,5 +1,5 @@
 //! Direct proofs for damage-random-unit-at-location Magic (RULE-CATALOG-0607–0608, 1027,
-//! RULE-CATALOG-1095).
+//! RULE-CATALOG-1095, RULE-CATALOG-2003–2008).
 //!
 //! Lightning Bolt-style Magic picks a surface location, then deterministically
 //! damages one random unit there. Ward absorbs the hit when the random draw
@@ -745,4 +745,484 @@ fn rule_catalog_1095_random_bolt_withheld_during_pending_deathrite_order() {
         3
     );
     assert_exact_replay(session);
+}
+fn supplemental_minion(extra: Value) -> Value {
+    let mut value = json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    });
+    let Value::Object(extra) = extra else {
+        panic!("extra minion facts must be an object");
+    };
+    value.as_object_mut().expect("minion facts").extend(extra);
+    value
+}
+
+fn fragile_supplemental_minion() -> Value {
+    supplemental_minion(json!({ "defense": 1 }))
+}
+
+fn survivor_supplemental_minion() -> Value {
+    supplemental_minion(json!({}))
+}
+
+fn bolt_supplemental_manifest(seed: u32, fragile: bool) -> String {
+    let south_minion = if fragile {
+        fragile_supplemental_minion()
+    } else {
+        survivor_supplemental_minion()
+    };
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "random-bolt-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-random-bolt-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bolt": bolt(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": south_minion,
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-bolt"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize, fragile: bool) -> String {
+    (start..start + 2048)
+        .chain(607..607 + 2048)
+        .map(|seed| bolt_supplemental_manifest(seed, fragile))
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-bolt")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with random bolt and required South minions")
+}
+
+fn bolt_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-bolt")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn damage_dealt_amount(receipt: &Receipt, instance_id: &str) -> u64 {
+    receipt
+        .events
+        .iter()
+        .find(|event| {
+            event.event_type == "damage-dealt" && event.payload["instanceId"] == instance_id
+        })
+        .expect("damage-dealt")
+        .payload["amount"]
+        .as_u64()
+        .expect("damage amount")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("random bolt target identity")
+        .to_owned()
+}
+
+fn setup_c2_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    (0..count).map(|_| summon_south_at(session, "C2")).collect()
+}
+
+fn cast_bolt_at(session: &mut Session, cell: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bolt"
+            && descriptor["targetLocation"]["cell"] == cell
+    });
+    receipt
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, Vec<String>, String)> {
+    let mut session = opening_main(encoded);
+    let c2_ids = setup_c2_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    bolt_locations(&session)
+        .contains(&"C2".to_owned())
+        .then_some((session, c2_ids, far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(607..607 + 2048)
+        .find_map(|seed| {
+            let encoded = bolt_supplemental_manifest(seed, false);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching random bolt far-minion setup")
+}
+
+fn try_second_bolt_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    setup_c2_with_south_minions(&mut session, 1);
+    north_draws_spellbook(&mut session);
+    cast_bolt_at(&mut session, "C2");
+    pass_turn_to_north_spellbook(&mut session);
+    if bolt_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    bolt_locations(&session)
+        .contains(&"C3".to_owned())
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_bolt_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(607..607 + 8192)
+        .find_map(|seed| {
+            let encoded = bolt_supplemental_manifest(seed, false);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_bolt_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second random bolt enemy-arrival setup")
+}
+
+fn try_second_bolt_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bolt_at(&mut session, "C2");
+    if realm_unit(&state(&session), &first_id).is_some() {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if bolt_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    bolt_locations(&session)
+        .contains(&"C2".to_owned())
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_bolt_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(607..607 + 8192)
+        .find_map(|seed| {
+            let encoded = bolt_supplemental_manifest(seed, true);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_bolt_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second random bolt new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2003_damaged_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2003, 1, false);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_bolt_at(&mut session, "C2");
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 2);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert!(realm_unit(&state(&session), &minion_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2004_second_bolt_at_an_empty_location_is_a_paid_noop() {
+    let encoded = (2004..2004 + 8192)
+        .chain(607..607 + 8192)
+        .find_map(|seed| {
+            let candidate = bolt_supplemental_manifest(seed, true);
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = cast_bolt_at(&mut session, "C2");
+            if !event_types(&first).contains(&"minion-died") {
+                return None;
+            }
+            if realm_unit(&state(&session), &minion_id).is_some() {
+                return None;
+            }
+            (bolt_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two random bolt casts after clearing C2");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_bolt_at(&mut session, "C2");
+    assert!(event_types(&first).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(bolt_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_bolt_at(&mut session, "C2");
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"damage-dealt"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2005_second_bolt_damages_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_bolt_enemy_arrival(2005);
+    let (mut session, minion_id) =
+        try_second_bolt_enemy_arrival_prefix(&encoded).expect("second bolt enemy-arrival prefix");
+    let receipt = cast_bolt_at(&mut session, "C3");
+    assert_eq!(damage_dealt_amount(&receipt, &minion_id), 2);
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2006_random_bolt_at_a_site_with_multiple_minions_damages_exactly_one() {
+    let encoded = supplemental_seed_with_start(2006, 2, false);
+    let mut session = opening_main(&encoded);
+    let candidates = setup_c2_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+
+    let receipt = cast_bolt_at(&mut session, "C2");
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "magic-cast",
+            "magic-damage-allocated",
+            "damage-dealt",
+            "magic-resolved",
+        ]
+    );
+    assert!(receipt.random_draws.iter().all(|draw| {
+        draw["purpose"] == "magic_random_unit_at_location"
+            && draw["domain"]["kind"] == "unit_index_candidate"
+            && draw["domain"]["exclusiveMaximum"] == 2
+    }));
+    let accepted = receipt
+        .random_draws
+        .iter()
+        .rev()
+        .find(|draw| draw["domain"]["accepted"] == true)
+        .expect("accepted random draw");
+    let selected_index = usize::try_from(
+        accepted["result"].as_u64().expect("random uint32") % candidates.len() as u64,
+    )
+    .expect("candidate index");
+    let selected = candidates[selected_index].clone();
+    let spared = candidates
+        .iter()
+        .find(|instance_id| **instance_id != selected)
+        .expect("spared candidate")
+        .clone();
+    assert_eq!(
+        receipt.events[1].payload["targetInstanceId"],
+        selected.as_str()
+    );
+    assert_eq!(unit(&state(&session), &selected)["damage"], 2);
+    assert_eq!(unit(&state(&session), &spared)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2007_random_bolt_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(2007);
+    let (mut session, c2_ids, far_id) =
+        try_far_minion_prefix(&encoded).expect("random bolt far-minion prefix");
+    let receipt = cast_bolt_at(&mut session, "C2");
+    let struck = receipt.events[1].payload["targetInstanceId"]
+        .as_str()
+        .expect("random bolt target");
+    assert!(c2_ids.iter().any(|id| id == struck));
+    assert_eq!(damage_dealt_amount(&receipt, struck), 2);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2008_second_bolt_kills_a_newly_summoned_minion() {
+    let encoded = seed_for_second_bolt_new_summon(2008);
+    let (mut session, minion_id) =
+        try_second_bolt_new_summon_prefix(&encoded).expect("second bolt new-summon prefix");
+    let receipt = cast_bolt_at(&mut session, "C2");
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert_eq!(damage_dealt_amount(&receipt, &minion_id), 2);
+    assert!(realm_unit(&state(&session), &minion_id).is_none());
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == minion_id))
+    );
+    assert_exact_replay(&session);
 }
