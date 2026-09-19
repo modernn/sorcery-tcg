@@ -46791,6 +46791,199 @@
       }
     },
     {
+      "ruleId": "RULE-CATALOG-2141",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2141_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2142",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2142_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2143",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Magic return leaves restored Magic in the hidden Spellbook hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2143_returned_magic_stays_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2144",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Magic return spells in hand, a second cast with no Magic in the own cemetery still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2144_second_cemetery_magic_return_without_cemetery_magic_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2145",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Magic return spells in hand, a second cast restores a newly cemetery-bound Magic after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2145_second_cemetery_magic_return_returns_a_newly_arrived_magic_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2146",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Magic return offers every own-cemetery Magic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2146_cemetery_magic_return_offers_every_own_cemetery_magic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2147",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Cemetery Magic return leaves an unselected cemetery Magic in place.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2147_cemetery_magic_return_leaves_an_unselected_cemetery_magic_in_place"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2148",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two cemetery Magic return spells in hand, a second cast restores a newly cemetery-bound Magic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnTargetMagicFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/cemetery_magic_return_rules.rs",
+        "testName": "rule_catalog_2148_second_cemetery_magic_return_returns_a_newly_arrived_cemetery_magic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2149",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2149_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2150",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2150_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
       "ruleId": "RULE-CATALOG-2151",
       "requirementIds": [
         "RULE-04"
@@ -47567,6 +47760,6 @@
       }
     }
   ],
-  "rustSupportedCount": 2180,
+  "rustSupportedCount": 2190,
   "typescriptSupportedCount": 0
 }
