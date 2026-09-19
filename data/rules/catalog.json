@@ -47758,8 +47758,203 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2190_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2281",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2281_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2282",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2282_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2283",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Heal-target-minion Magic leaves a healed minion at its location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2283_healed_minion_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2284",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two heal-target-minion spells in hand, a second cast on an already healed minion still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2284_second_heal_on_an_already_healed_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2285",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two heal-target-minion spells in hand, a second cast heals a newly arrived wounded minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2285_second_heal_clears_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2286",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Heal-target-minion Magic offers every same-region minion in the caster region. Avatars are not legal targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2286_heal_target_offers_every_same_region_minion_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2287",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Heal-target-minion Magic at one site leaves a far minion's damage untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2287_heal_target_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2288",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two heal-target-minion spells in hand, a second cast heals a newly summoned wounded minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "healTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-healed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/heal_target_minion_rules.rs",
+        "testName": "rule_catalog_2288_second_heal_clears_a_newly_summoned_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2289",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2289_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2290",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2190,
+  "rustSupportedCount": 2200,
   "typescriptSupportedCount": 0
 }
