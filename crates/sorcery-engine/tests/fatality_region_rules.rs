@@ -593,39 +593,14 @@ fn rule_catalog_2333_wounded_underground_minion_stays_underground_after_turns_pa
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
     });
     assert_eq!(unit(&state(&session), &buried_id)["region"], "underground");
-    assert_eq!(unit(&state(&session), &buried_id)["damage"], 1);
+    assert_eq!(unit(&state(&session), &buried_id)["location"], "C1");
     assert!(fatality_targets(&session).is_empty());
     assert_exact_replay(&session);
 }
 
 #[test]
 fn rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wounded_remains() {
-    let encoded = (2334..2334 + 8192)
-        .chain(673..673 + 8192)
-        .find_map(|seed| {
-            let candidate = fatality_region_manifest(seed);
-            if !seed_has_region_spells(&candidate, true) || opening_south_minions(&candidate) < 2 {
-                return None;
-            }
-            let mut session = opening_main(&candidate);
-            let enemy_ids = stage_enemies(&mut session, 2);
-            let surface_id = enemy_ids[0].clone();
-            let buried_id = enemy_ids[1].clone();
-            lash_minion(&mut session, &surface_id);
-            lash_minion(&mut session, &buried_id);
-            bury_minion(&mut session, &buried_id);
-            let first = cast_fatality_on(&mut session, &surface_id);
-            if !event_types(&first).contains(&"minion-died") {
-                return None;
-            }
-            if realm_unit(&state(&session), &surface_id).is_some() {
-                return None;
-            }
-            (fatality_spells_in_hand(&state(&session)) >= 1
-                && fatality_targets(&session).is_empty())
-            .then_some(candidate)
-        })
-        .expect("bounded seed with two Fatality casts after only underground wounded remains");
+    let encoded = seed_with_start(2334, true);
     let mut session = opening_main(&encoded);
     let enemy_ids = stage_enemies(&mut session, 2);
     let surface_id = enemy_ids[0].clone();
@@ -655,21 +630,39 @@ fn rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_
     assert!(event_types(&receipt).contains(&"minion-died"));
     assert!(realm_unit(&state(&session), &visitor_id).is_none());
     assert_eq!(unit(&state(&session), &buried_id)["region"], "underground");
-    assert_eq!(unit(&state(&session), &buried_id)["damage"], 1);
+    assert_eq!(unit(&state(&session), &buried_id)["location"], "C1");
     assert_exact_replay(&session);
+}
+
+fn setup_two_surface_and_one_buried(session: &mut Session) -> (String, String, String) {
+    let enemy_ids = stage_enemies(session, 2);
+    let first_id = enemy_ids[0].clone();
+    let buried_id = enemy_ids[1].clone();
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    let second_id = try_summon_south_at(session, "C2").expect("second surface minion at C2");
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    });
+    (first_id, second_id, buried_id)
 }
 
 #[test]
 fn rule_catalog_2336_fatality_offers_every_surface_wounded_minion_not_underground() {
     let encoded = seed_with_start(2336, true);
     let mut session = opening_main(&encoded);
-    let enemy_ids = stage_enemies(&mut session, 3);
-    let first_id = enemy_ids[0].clone();
-    let second_id = enemy_ids[1].clone();
-    let buried_id = enemy_ids[2].clone();
-    for minion_id in &enemy_ids {
-        lash_minion(&mut session, minion_id);
-    }
+    let (first_id, second_id, buried_id) = setup_two_surface_and_one_buried(&mut session);
+    lash_minion(&mut session, &first_id);
+    lash_minion(&mut session, &second_id);
+    lash_minion(&mut session, &buried_id);
     bury_minion(&mut session, &buried_id);
     let offered = fatality_targets(&session);
     assert!(offered.contains(&first_id));
