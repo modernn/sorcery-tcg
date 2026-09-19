@@ -1,11 +1,13 @@
 //! Direct proofs for cemetery Artifact return Magic (RULE-CATALOG-0637–0638,
-//! RULE-CATALOG-1060).
+//! RULE-CATALOG-1060, RULE-CATALOG-2153–2158).
 //!
 //! Cemetery Artifact return offers only Artifacts in the caster's own cemetery
 //! and restores the chosen instance to the hidden Spellbook hand. A cemetery
 //! that holds only Magic is still a paid no-choice resolution. While Deathrites
 //! wait for ordering, cemetery Artifact return Magic stays withheld until the
-//! chain drains.
+//! chain drains. Supplemental 2153–2158 bind persistence, empty-cemetery
+//! repeat, enemy-arrival, multi-artifact offer, unselected remainder, and a
+//! newly destroyed Artifact.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -266,7 +268,7 @@ fn seed_with(required: &[&str], include_setup: bool, start: u32) -> String {
     (start..start + 256)
         .map(|seed| cemetery_artifact_manifest(seed, include_setup))
         .find(|candidate| {
-            Session::new(candidate).ok().is_some_and(|preview| {
+            Session::new(candidate).is_ok_and(|preview| {
                 let snapshot = state(&preview);
                 let hand = north_hand_ids(&snapshot);
                 required.iter().all(|id| hand.iter().any(|card| card == id))
@@ -649,4 +651,417 @@ fn rule_catalog_1060_cemetery_artifact_return_withheld_during_pending_deathrite_
     );
     assert!(!cemetery_has_card(&state(session), "north", &relic_id));
     assert_exact_replay(session);
+}
+
+fn cemetery_artifact_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cemetery-artifact-return-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cemetery-artifact-return-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_spell(),
+            "north-relic": relic(),
+            "north-return": return_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-relic",
+                    "north-destroy",
+                    "north-return",
+                    "north-return",
+                    "north-relic",
+                    "north-destroy",
+                    "north-relic",
+                    "north-return",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    north_hand_ids(&state(&preview))
+}
+
+fn supplemental_seed_with_start(start: u32, required: &[&str]) -> String {
+    (start..start + 2048)
+        .chain(637..637 + 2048)
+        .map(cemetery_artifact_supplemental_manifest)
+        .find(|candidate| {
+            required.iter().all(|id| {
+                opening_hand_spell_ids(candidate)
+                    .iter()
+                    .any(|card| card == *id)
+            })
+        })
+        .expect("bounded seed with cemetery Artifact return supplemental opening cards")
+}
+
+fn return_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-return")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cemetery_artifact_instance_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .map(|cemetery| {
+            cemetery
+                .iter()
+                .filter(|card| card["cardId"] == "north-relic")
+                .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn hand_has_instance(snapshot: &Value, seat: &str, instance_id: &str) -> bool {
+    snapshot["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .is_ok_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn try_opening_main(encoded: &str) -> Option<Session> {
+    let mut session = Session::new(encoded).ok()?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "mulligan"
+            && descriptor["atlasOrder"] == json!([])
+            && descriptor["spellbookOrder"] == json!([])
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    Some(session)
+}
+
+fn try_end_turn_if_offered(session: &mut Session) -> Option<()> {
+    decline_attack_if_needed(session);
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    Some(())
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    try_end_turn_if_offered(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    try_end_turn_if_offered(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    try_pass_turn_to_north_spellbook(session).expect("north Spellbook draw");
+}
+
+fn try_advance_north_spellbook_draws(session: &mut Session, draws: usize) -> Option<()> {
+    for _ in 0..draws {
+        try_pass_turn_to_north_spellbook(session)?;
+    }
+    Some(())
+}
+
+fn try_destroy_own_relic(session: &mut Session, avoid: &[String]) -> Option<String> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "north-relic"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == "C4"
+            && !avoid.iter().any(|id| descriptor["cardInstanceId"] == *id)
+    })?;
+    let relic_id = state(session)["realm"]["artifacts"]
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|artifact| artifact["cardId"] == "north-relic")?["instanceId"]
+        .as_str()?
+        .to_owned();
+    let (_, destroyed) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetArtifactInstanceId"] == relic_id
+    })?;
+    event_types(&destroyed)
+        .contains(&"artifact-destroyed")
+        .then_some(relic_id)
+}
+
+fn destroy_own_relic(session: &mut Session) -> String {
+    try_destroy_own_relic(session, &[]).expect("own cemetery Artifact")
+}
+
+fn try_cast_return_target(session: &mut Session, relic_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == relic_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn cast_return_target(session: &mut Session, relic_id: &str) -> Receipt {
+    try_cast_return_target(session, relic_id).expect("cemetery Artifact return")
+}
+
+fn try_two_cemetery_artifacts_on_session(session: &mut Session) -> Option<[String; 2]> {
+    let first = try_destroy_own_relic(session, &[])?;
+    let mut second = None;
+    for _ in 0..4 {
+        if let Some(id) = try_destroy_own_relic(session, std::slice::from_ref(&first)) {
+            second = Some(id);
+            break;
+        }
+        try_pass_turn_to_north_spellbook(session)?;
+    }
+    let second = second?;
+    (cemetery_artifact_instance_ids(&state(session), "north").len() == 2).then_some([first, second])
+}
+
+fn seed_with_two_cemetery_artifacts(start: u32) -> String {
+    (start..start + 8192)
+        .chain(637..637 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_artifact_supplemental_manifest(seed);
+            if !["north-relic", "north-destroy", "north-return"]
+                .iter()
+                .all(|id| {
+                    opening_hand_spell_ids(&encoded)
+                        .iter()
+                        .any(|card| card == *id)
+                })
+            {
+                return None;
+            }
+            let mut session = try_opening_main(&encoded)?;
+            try_two_cemetery_artifacts_on_session(&mut session).map(|_| encoded)
+        })
+        .expect("bounded seed with two own cemetery Artifacts")
+}
+
+fn prepare_two_cemetery_artifacts(encoded: &str) -> (Session, [String; 2]) {
+    let mut session = try_opening_main(encoded).expect("opening main");
+    let relics =
+        try_two_cemetery_artifacts_on_session(&mut session).expect("two own cemetery Artifacts");
+    (session, relics)
+}
+
+fn try_second_return_empty_prefix(encoded: &str) -> Option<Session> {
+    let mut session = try_opening_main(encoded)?;
+    let relic_id = try_destroy_own_relic(&mut session, &[])?;
+    try_cast_return_target(&mut session, &relic_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_artifact_instance_ids(&state(&session), "north").is_empty())
+    .then_some(session)
+}
+
+fn seed_for_second_return_empty(start: u32) -> String {
+    (start..start + 8192)
+        .chain(637..637 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_artifact_supplemental_manifest(seed);
+            try_second_return_empty_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Artifact return empty-cemetery setup")
+}
+
+fn try_second_return_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = try_opening_main(encoded)?;
+    let first_id = try_destroy_own_relic(&mut session, &[])?;
+    try_cast_return_target(&mut session, &first_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_end_turn_if_offered(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    try_end_turn_if_offered(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_advance_north_spellbook_draws(&mut session, 2)?;
+    let second_id = try_destroy_own_relic(&mut session, &[first_id])?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_artifact_cast_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_return_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(637..637 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_artifact_supplemental_manifest(seed);
+            try_second_return_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Artifact return enemy-arrival setup")
+}
+
+fn try_second_return_new_destroy_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = try_opening_main(encoded)?;
+    let first_id = try_destroy_own_relic(&mut session, &[])?;
+    try_cast_return_target(&mut session, &first_id)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_advance_north_spellbook_draws(&mut session, 2)?;
+    let second_id = try_destroy_own_relic(&mut session, &[first_id])?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_artifact_cast_ids(&session).contains(&second_id))
+    .then_some((session, second_id))
+}
+
+fn seed_for_second_return_new_destroy(start: u32) -> String {
+    (start..start + 8192)
+        .chain(637..637 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_artifact_supplemental_manifest(seed);
+            try_second_return_new_destroy_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Artifact return new-destroy setup")
+}
+
+#[test]
+fn rule_catalog_2153_returned_artifact_stays_in_hand_after_turns_pass() {
+    let encoded =
+        supplemental_seed_with_start(2153, &["north-relic", "north-destroy", "north-return"]);
+    let mut session = opening_main(&encoded);
+    let relic_id = destroy_own_relic(&mut session);
+    cast_return_target(&mut session, &relic_id);
+    assert!(hand_has_instance(&state(&session), "north", &relic_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), "north", &relic_id));
+    assert!(cemetery_artifact_instance_ids(&state(&session), "north").is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2154_second_return_without_a_cemetery_artifact_is_a_paid_noop() {
+    let encoded = seed_for_second_return_empty(2154);
+    let mut session = try_second_return_empty_prefix(&encoded)
+        .expect("second cemetery Artifact return empty prefix");
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-return"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "artifact-returned-to-hand")
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2155_second_return_restores_a_newly_destroyed_artifact_after_enemy_site_placement()
+{
+    let encoded = seed_for_second_return_enemy_arrival(2155);
+    let (mut session, relic_id) = try_second_return_enemy_arrival_prefix(&encoded)
+        .expect("second cemetery Artifact return enemy-arrival prefix");
+    let receipt = cast_return_target(&mut session, &relic_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &relic_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2156_cemetery_artifact_return_offers_every_own_cemetery_artifact() {
+    let encoded = seed_with_two_cemetery_artifacts(2156);
+    let (session, relic_ids) = prepare_two_cemetery_artifacts(&encoded);
+    let mut offered = cemetery_artifact_cast_ids(&session);
+    offered.sort();
+    offered.dedup();
+    assert_eq!(offered.len(), 2);
+    for relic_id in &relic_ids {
+        assert!(offered.contains(relic_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2157_cemetery_artifact_return_leaves_an_unselected_cemetery_artifact_in_place() {
+    let encoded = seed_with_two_cemetery_artifacts(2157);
+    let (mut session, relic_ids) = prepare_two_cemetery_artifacts(&encoded);
+    let returned_id = &relic_ids[0];
+    cast_return_target(&mut session, returned_id);
+    assert!(hand_has_instance(&state(&session), "north", returned_id));
+    let remaining = cemetery_artifact_instance_ids(&state(&session), "north");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0], relic_ids[1]);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2158_second_return_restores_a_newly_destroyed_artifact() {
+    let encoded = seed_for_second_return_new_destroy(2158);
+    let (mut session, relic_id) = try_second_return_new_destroy_prefix(&encoded)
+        .expect("second cemetery Artifact return new-destroy prefix");
+    let receipt = cast_return_target(&mut session, &relic_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "artifact-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &relic_id));
+    assert_exact_replay(&session);
 }

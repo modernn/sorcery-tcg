@@ -13344,3 +13344,51 @@ fn rule_catalog_2080_two_hundred_forty_game_synthetic_batch_stays_unranked_unver
     let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
     assert!(!batch_policy.authority_verified);
 }
+
+fn assert_unranked_synthetic_batch(start: u32, count: usize) {
+    let seeds: Vec<u32> = (start..start + u32::try_from(count).expect("batch count")).collect();
+    let manifests: Vec<String> = seeds
+        .iter()
+        .map(|seed| synthetic_demo_manifest_json(*seed).expect("synthetic manifest"))
+        .collect();
+    let records: Vec<_> = seeds
+        .iter()
+        .map(|seed| record_synthetic_demo(*seed).expect("finished synthetic record"))
+        .collect();
+    assert_eq!(manifests.len(), count);
+    assert_eq!(records.len(), count);
+    for record in &records {
+        assert!(record.replay_verified);
+        assert!(record.eligibility.gates.all_passed());
+        assert!(!record.eligibility.ranked);
+        assert_eq!(
+            record.classification,
+            BatchClassification::UnrankedUnverifiedAuthority,
+        );
+    }
+    let batch_policy = eligibility_policy_for_manifest_jsons(manifests.iter().map(String::as_str));
+    assert!(!batch_policy.authority_verified);
+}
+
+#[test]
+fn rule_catalog_2151_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(52131, 241);
+}
+
+#[test]
+fn rule_catalog_2152_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(52372, 242);
+}
+
+#[test]
+fn rule_catalog_2159_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority()
+ {
+    assert_unranked_synthetic_batch(52614, 239);
+}
+
+#[test]
+fn rule_catalog_2160_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority() {
+    assert_unranked_synthetic_batch(52853, 240);
+}
