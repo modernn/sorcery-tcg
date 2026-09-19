@@ -49741,8 +49741,206 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2341",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2341_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2342",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2342_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2343",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here leaves struck Avatar life lost after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2343_struck_avatar_life_stays_lost_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2344",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Summoning a second genesis-strike titan onto an empty own site emits no strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2344_second_titan_on_an_empty_own_site_emits_no_strike"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2345",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a genesis-strike titan summons, a later titan strikes a newly arrived enemy after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2345_second_titan_strikes_a_newly_arrived_enemy_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2346",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here hits every enemy minion sharing the newcomer's cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2346_genesis_strike_hits_every_co_located_enemy_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2347",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Genesis strike-each-enemy-here leaves a far enemy untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2347_genesis_strike_leaves_a_far_enemy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2348",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a genesis-strike titan summons, a later titan strikes a newly summoned enemy sharing its cell.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "genesisStrikeEachEnemyHere"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-summoned",
+        "strike-damage-allocated"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/genesis_strike_here_rules.rs",
+        "testName": "rule_catalog_2348_second_titan_strikes_a_newly_summoned_enemy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2349",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2349_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2350",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2350_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }
