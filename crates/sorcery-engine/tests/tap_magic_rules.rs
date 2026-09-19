@@ -1,5 +1,5 @@
 //! Direct proofs for tap-target-minion Magic (RULE-CATALOG-0611–0612,
-//! RULE-CATALOG-0999).
+//! RULE-CATALOG-0999, RULE-CATALOG-2023–2028).
 //!
 //! Tap Magic exhausts a ready same-region minion. Enemy Ward absorbs the cast
 //! without tapping the minion. While Deathrites wait for ordering, tap Magic
@@ -536,4 +536,423 @@ fn rule_catalog_0999_tap_target_minion_withheld_during_pending_deathrite_order()
     );
     assert_eq!(realm_unit(&state(session), &visitor_id)["tapped"], true);
     assert_exact_replay(session);
+}
+
+fn supplemental_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn tap_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "tap-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-tap-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-site": site(),
+            "north-tap": tap_spell(),
+            "south-avatar": avatar(),
+            "south-minion": supplemental_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-tap"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(611..611 + 2048)
+        .map(tap_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-tap")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with tap Magic and required South minions")
+}
+
+fn tap_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-tap")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("tap target identity")
+        .to_owned()
+}
+
+fn setup_c2_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    (0..count).map(|_| summon_south_at(session, "C2")).collect()
+}
+
+fn cast_tap_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-tap"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn tap_target_ids(session: &Session) -> Vec<String> {
+    tap_minion_targets(session)
+        .into_iter()
+        .map(|(_, instance_id)| instance_id)
+        .collect()
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let c2_ids = setup_c2_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (tap_spells_in_hand(&state(&session)) >= 1).then_some((session, c2_ids[0].clone(), far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(611..611 + 2048)
+        .find_map(|seed| {
+            let encoded = tap_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching tap far-minion setup")
+}
+
+fn try_second_tap_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_tap_on(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if tap_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    tap_target_ids(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_tap_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(611..611 + 8192)
+        .find_map(|seed| {
+            let encoded = tap_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_tap_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second tap enemy-arrival setup")
+}
+
+fn try_second_tap_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_tap_on(&mut session, &first_id);
+    if !unit(&state(&session), &first_id)["tapped"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if tap_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    tap_target_ids(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_tap_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(611..611 + 8192)
+        .find_map(|seed| {
+            let encoded = tap_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_tap_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second tap new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2023_tapped_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2023, 1);
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_tap_on(&mut session, &minion_id);
+    assert_eq!(unit(&state(&session), &minion_id)["tapped"], true);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(realm_unit(&state(&session), &minion_id)["location"], "C2");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2024_second_tap_on_an_already_tapped_minion_is_a_paid_noop() {
+    let encoded = (2024..2024 + 8192)
+        .chain(611..611 + 8192)
+        .find_map(|seed| {
+            let candidate = tap_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = cast_tap_on(&mut session, &minion_id);
+            if !event_types(&first).contains(&"minion-tapped") {
+                return None;
+            }
+            if !unit(&state(&session), &minion_id)["tapped"]
+                .as_bool()
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            (tap_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two tap casts after exhausting the first minion");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_tap_on(&mut session, &minion_id);
+    assert!(event_types(&first).contains(&"minion-tapped"));
+    assert_eq!(unit(&state(&session), &minion_id)["tapped"], true);
+    assert!(tap_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_tap_on(&mut session, &minion_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"minion-tapped"));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2025_second_tap_exhausts_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_tap_enemy_arrival(2025);
+    let (mut session, minion_id) =
+        try_second_tap_enemy_arrival_prefix(&encoded).expect("second tap enemy-arrival prefix");
+    let receipt = cast_tap_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-tapped"));
+    assert_eq!(unit(&state(&session), &minion_id)["tapped"], true);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2026_tap_offers_every_same_region_minion_in_the_caster_region() {
+    let encoded = supplemental_seed_with_start(2026, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c2_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = tap_target_ids(&session);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2027_tap_leaves_a_far_ready_minion_untouched() {
+    let encoded = seed_for_far_minion(2027);
+    let (mut session, tapped_id, far_id) =
+        try_far_minion_prefix(&encoded).expect("tap far-minion prefix");
+    let receipt = cast_tap_on(&mut session, &tapped_id);
+    assert!(event_types(&receipt).contains(&"minion-tapped"));
+    assert_eq!(unit(&state(&session), &tapped_id)["tapped"], true);
+    assert_eq!(unit(&state(&session), &far_id)["tapped"], false);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2028_second_tap_exhausts_a_newly_summoned_minion() {
+    let encoded = seed_for_second_tap_new_summon(2028);
+    let (mut session, minion_id) =
+        try_second_tap_new_summon_prefix(&encoded).expect("second tap new-summon prefix");
+    let receipt = cast_tap_on(&mut session, &minion_id);
+    assert!(event_types(&receipt).contains(&"minion-tapped"));
+    assert_eq!(unit(&state(&session), &minion_id)["tapped"], true);
+    assert_exact_replay(&session);
 }
