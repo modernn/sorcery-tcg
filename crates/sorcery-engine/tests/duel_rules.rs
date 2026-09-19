@@ -1,4 +1,5 @@
-//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946, 0965, 1007, 1045).
+//! Direct proofs for fight-ally-with-adjacent-enemy Magic (RULE-CATALOG-0603–0604, 0711–0712, 0946,
+//! 0965, 1007, 1045, 1983–1988).
 //!
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
@@ -1176,4 +1177,507 @@ fn rule_catalog_1045_duel_magic_withheld_during_pending_deathrite_order() {
     assert!(realm_unit(&state(session), &visitor_id).is_none());
     assert!(realm_unit(&state(session), &ally_id).is_some());
     assert_exact_replay(session);
+}
+
+fn duel_supplemental_manifest(seed: u32, nonlethal: bool) -> String {
+    let (ally_stats, enemy_stats) = if nonlethal {
+        (
+            json!({ "attack": 1, "defense": 5 }),
+            json!({ "attack": 1, "defense": 5 }),
+        )
+    } else {
+        (
+            json!({ "attack": 3, "defense": 4 }),
+            json!({ "attack": 2, "defense": 3 }),
+        )
+    };
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "duel-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-duel-supplemental-v1",
+        },
+        "cards": {
+            "north-ally": minion(ally_stats),
+            "north-avatar": avatar(),
+            "north-caster": minion(json!({ "spellcaster": true })),
+            "north-duel": duel(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-enemy": minion(enemy_stats),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-ally",
+                    "north-caster",
+                    "north-ally",
+                    "north-caster",
+                    "north-duel",
+                    "north-duel",
+                    "north-duel",
+                    "north-duel",
+                    "north-ally",
+                    "north-caster",
+                    "north-duel",
+                    "north-duel",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-enemy"; 12],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn duel_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-duel")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn cast_duel(session: &mut Session, ally_id: &str, caster_id: &str, enemy_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    });
+    receipt
+}
+
+fn try_cast_duel(
+    session: &mut Session,
+    ally_id: &str,
+    caster_id: &str,
+    enemy_id: &str,
+) -> Option<Receipt> {
+    let (_, receipt) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-duel"
+            && descriptor["ally"]["instanceId"] == ally_id
+            && descriptor["casterInstanceId"] == caster_id
+            && descriptor["target"]["instanceId"] == enemy_id
+    })?;
+    Some(receipt)
+}
+
+fn advance_full_round(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    })?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    try_accept_where(session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn duel_ready_for_target(
+    session: &Session,
+    ally_id: &str,
+    caster_id: &str,
+    enemy_id: &str,
+) -> bool {
+    duel_targets(session).contains(&(
+        ally_id.to_owned(),
+        caster_id.to_owned(),
+        enemy_id.to_owned(),
+    ))
+}
+
+fn duel_minion_ally_targets(session: &Session) -> Vec<String> {
+    let snapshot = state(session);
+    let mut allies: Vec<_> = duel_targets(session)
+        .into_iter()
+        .filter_map(|(ally_id, _caster_id, _enemy_id)| {
+            realm_unit(&snapshot, &ally_id)
+                .and_then(|unit| (unit["cardId"] == "north-ally").then_some(ally_id))
+        })
+        .collect();
+    allies.sort_unstable();
+    allies.dedup();
+    allies
+}
+
+fn try_summon_south_enemy_at(session: &mut Session, cell: &str) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-enemy"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    })?;
+    Some(summoned["cardInstanceId"].as_str()?.to_owned())
+}
+
+fn try_summon_north_ally_at(session: &mut Session, cell: &str) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-ally"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    })?;
+    Some(summoned["cardInstanceId"].as_str()?.to_owned())
+}
+
+fn try_two_ally_duel_prefix(encoded: &str) -> Option<(Session, Vec<String>, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let first = try_summon_north_ally_at(&mut session, "C4")?;
+    let (caster_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = caster_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let second = try_summon_north_ally_at(&mut session, "C2")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let enemy_id = try_summon_south_enemy_at(&mut session, "C3")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let offered = duel_minion_ally_targets(&session);
+    (offered.contains(&first) && offered.contains(&second)).then_some((
+        session,
+        vec![first, second],
+        caster_id,
+        enemy_id,
+    ))
+}
+
+fn seed_for_two_ally_duel_targets(start: u32) -> String {
+    (start..start + 16384)
+        .chain(603..603 + 16384)
+        .find_map(|seed| {
+            try_two_ally_duel_prefix(&duel_supplemental_manifest(seed, false)).map(|_| seed)
+        })
+        .map(|seed| duel_supplemental_manifest(seed, false))
+        .expect("bounded seed reaching two-ally Duel target setup")
+}
+
+fn try_far_enemy_duel_prefix(encoded: &str) -> Option<(Session, String, String, String, String)> {
+    let mut session = Session::new(encoded).ok()?;
+    keep(&mut session);
+    keep(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    })?;
+    let ally_id = try_summon_north_ally_at(&mut session, "C4")?;
+    let (caster_summon, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-caster"
+            && descriptor["cell"] == "C4"
+    })?;
+    let caster_id = caster_summon["cardInstanceId"].as_str()?.to_owned();
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let far_id = try_summon_south_enemy_at(&mut session, "C1")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let nearby_id = try_summon_south_enemy_at(&mut session, "C3")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    duel_ready_for_target(&session, &ally_id, &caster_id, &nearby_id)
+        .then_some((session, ally_id, caster_id, nearby_id, far_id))
+}
+
+fn seed_for_far_enemy_duel(start: u32) -> String {
+    (start..start + 16384)
+        .chain(603..603 + 16384)
+        .find_map(|seed| {
+            try_far_enemy_duel_prefix(&duel_supplemental_manifest(seed, false)).map(|_| seed)
+        })
+        .map(|seed| duel_supplemental_manifest(seed, false))
+        .expect("bounded seed reaching Duel far-enemy setup")
+}
+
+fn try_second_duel_new_enemy_prefix(encoded: &str) -> Option<(Session, String, String, String)> {
+    let (mut session, ally_id, caster_id, first_enemy) = try_setup_duel(encoded)?;
+    let receipt = try_cast_duel(&mut session, &ally_id, &caster_id, &first_enemy)?;
+    if !event_types(&receipt).contains(&"minion-died") {
+        return None;
+    }
+    if realm_unit(&state(&session), &first_enemy).is_some() {
+        return None;
+    }
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if duel_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let second_enemy = try_summon_south_enemy_at(&mut session, "C3")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    duel_ready_for_target(&session, &ally_id, &caster_id, &second_enemy).then_some((
+        session,
+        ally_id,
+        caster_id,
+        second_enemy,
+    ))
+}
+
+fn seed_for_second_duel_new_enemy(start: u32) -> String {
+    (start..start + 16384)
+        .chain(603..603 + 16384)
+        .find_map(|seed| {
+            try_second_duel_new_enemy_prefix(&duel_supplemental_manifest(seed, false)).map(|_| seed)
+        })
+        .map(|seed| duel_supplemental_manifest(seed, false))
+        .expect("bounded seed reaching second Duel new-enemy setup")
+}
+
+fn try_second_duel_enemy_arrival_prefix(
+    encoded: &str,
+) -> Option<(Session, String, String, String)> {
+    let (mut session, ally_id, caster_id, first_enemy) = try_setup_duel(encoded)?;
+    let receipt = try_cast_duel(&mut session, &ally_id, &caster_id, &first_enemy)?;
+    if !event_types(&receipt).contains(&"minion-died") {
+        return None;
+    }
+    if realm_unit(&state(&session), &first_enemy).is_some() {
+        return None;
+    }
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if duel_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let second_enemy = try_summon_south_enemy_at(&mut session, "C3")?;
+    try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    duel_ready_for_target(&session, &ally_id, &caster_id, &second_enemy).then_some((
+        session,
+        ally_id,
+        caster_id,
+        second_enemy,
+    ))
+}
+
+fn seed_for_second_duel_enemy_arrival(start: u32) -> String {
+    (start..start + 16384)
+        .chain(603..603 + 16384)
+        .find_map(|seed| {
+            try_second_duel_enemy_arrival_prefix(&duel_supplemental_manifest(seed, false))
+                .map(|_| seed)
+        })
+        .map(|seed| duel_supplemental_manifest(seed, false))
+        .expect("bounded seed reaching second Duel enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_1983_dueled_units_stay_on_the_board_after_turns_pass() {
+    let encoded = (1983..1983 + 8192)
+        .chain(603..603 + 8192)
+        .find_map(|seed| {
+            let candidate = duel_supplemental_manifest(seed, true);
+            try_setup_duel(&candidate).is_some().then_some(candidate)
+        })
+        .expect("bounded nonlethal seed with complete Duel setup");
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel(&encoded);
+    cast_duel(&mut session, &ally_id, &caster_id, &enemy_id);
+    let ally_location = unit(&state(&session), &ally_id)["location"].clone();
+    let enemy_location = unit(&state(&session), &enemy_id)["location"].clone();
+    advance_full_round(&mut session);
+    assert_eq!(unit(&state(&session), &ally_id)["location"], ally_location);
+    assert_eq!(
+        unit(&state(&session), &enemy_id)["location"],
+        enemy_location
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1984_second_duel_without_adjacent_enemy_is_not_castable() {
+    let encoded = (1984..1984 + 8192)
+        .chain(603..603 + 8192)
+        .map(|seed| duel_supplemental_manifest(seed, false))
+        .find(|candidate| {
+            let Some((mut session, ally_id, caster_id, enemy_id)) = try_setup_duel(candidate)
+            else {
+                return false;
+            };
+            if duel_spells_in_hand(&state(&session)) < 2 {
+                return false;
+            }
+            let first = cast_duel(&mut session, &ally_id, &caster_id, &enemy_id);
+            if !event_types(&first).contains(&"minion-died") {
+                return false;
+            }
+            realm_unit(&state(&session), &enemy_id).is_none()
+                && duel_spells_in_hand(&state(&session)) >= 1
+                && duel_targets(&session).is_empty()
+        })
+        .expect("bounded seed with withheld second Duel after setup");
+    let (mut session, ally_id, caster_id, enemy_id) = setup_duel(&encoded);
+    let first = cast_duel(&mut session, &ally_id, &caster_id, &enemy_id);
+    assert!(event_types(&first).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &enemy_id).is_none());
+    assert!(duel_spells_in_hand(&state(&session)) >= 1);
+    assert!(duel_targets(&session).is_empty());
+    assert!(
+        !session
+            .legal_actions()
+            .expect("legal actions")
+            .iter()
+            .any(|action| {
+                action.descriptor["kind"] == "cast-magic"
+                    && action.descriptor["cardId"] == "north-duel"
+            })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1985_second_duel_fights_a_newly_arrived_enemy_after_enemy_site_placement() {
+    let encoded = seed_for_second_duel_enemy_arrival(1985);
+    let (mut session, ally_id, caster_id, enemy_id) =
+        try_second_duel_enemy_arrival_prefix(&encoded).expect("second Duel enemy-arrival prefix");
+    let receipt = cast_duel(&mut session, &ally_id, &caster_id, &enemy_id);
+    assert!(event_types(&receipt).contains(&"fight-started"));
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &enemy_id).is_none());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1986_duel_offers_every_controlled_north_ally_adjacent_to_enemy_at_c3() {
+    let encoded = seed_for_two_ally_duel_targets(1986);
+    let (session, ally_ids, _caster_id, _enemy_id) =
+        try_two_ally_duel_prefix(&encoded).expect("two-ally Duel prefix");
+    let offered = duel_minion_ally_targets(&session);
+    assert_eq!(offered.len(), 2);
+    for ally_id in &ally_ids {
+        assert!(offered.contains(ally_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1987_duel_leaves_a_far_enemy_untouched() {
+    let encoded = seed_for_far_enemy_duel(1987);
+    let (mut session, ally_id, caster_id, nearby_id, far_id) =
+        try_far_enemy_duel_prefix(&encoded).expect("Duel far-enemy prefix");
+    let far_location = unit(&state(&session), &far_id)["location"].clone();
+    let far_damage = unit(&state(&session), &far_id)["damage"].clone();
+    let receipt = cast_duel(&mut session, &ally_id, &caster_id, &nearby_id);
+    assert!(event_types(&receipt).contains(&"fight-started"));
+    assert!(realm_unit(&state(&session), &nearby_id).is_none());
+    assert_eq!(unit(&state(&session), &far_id)["location"], far_location);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], far_damage);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_1988_second_duel_fights_a_newly_summoned_enemy() {
+    let encoded = seed_for_second_duel_new_enemy(1988);
+    let (mut session, ally_id, caster_id, enemy_id) =
+        try_second_duel_new_enemy_prefix(&encoded).expect("second Duel new-enemy prefix");
+    let receipt = cast_duel(&mut session, &ally_id, &caster_id, &enemy_id);
+    assert!(event_types(&receipt).contains(&"fight-started"));
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &enemy_id).is_none());
+    assert_exact_replay(&session);
 }
