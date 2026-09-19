@@ -260,6 +260,21 @@ fn seed_with_start(start: u32, need_second_lash: bool) -> String {
         .expect("bounded seed with Fatality region spells in hand")
 }
 
+fn seed_with_two_fatalities(start: u32) -> String {
+    (start..start + 2048)
+        .chain(673..673 + 2048)
+        .map(fatality_region_manifest)
+        .find(|candidate| {
+            let (hand, library) = opening_card_ids(candidate);
+            hand.iter().filter(|id| *id == "north-fatality").count() >= 2
+                && ["north-lash", "north-bury"]
+                    .into_iter()
+                    .all(|card_id| hand.iter().any(|id| id == card_id))
+                && library.first().map(String::as_str) == Some("north-lash")
+        })
+        .expect("bounded seed with two Fatality spells and a follow-up Lash")
+}
+
 fn seed_with_region_spells(need_second_lash: bool) -> String {
     seed_with_start(673, need_second_lash)
 }
@@ -600,7 +615,7 @@ fn rule_catalog_2333_wounded_underground_minion_stays_underground_after_turns_pa
 
 #[test]
 fn rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wounded_remains() {
-    let encoded = seed_with_start(2334, true);
+    let encoded = seed_with_two_fatalities(2334);
     let mut session = opening_main(&encoded);
     let enemy_ids = stage_enemies(&mut session, 2);
     let surface_id = enemy_ids[0].clone();
@@ -634,32 +649,49 @@ fn rule_catalog_2335_second_fatality_kills_a_newly_arrived_surface_minion_after_
     assert_exact_replay(&session);
 }
 
-fn setup_two_surface_and_one_buried(session: &mut Session) -> (String, String, String) {
-    let enemy_ids = stage_enemies(session, 2);
+fn try_setup_two_surface_and_one_buried(
+    encoded: &str,
+) -> Option<(Session, String, String, String)> {
+    if !seed_has_region_spells(encoded, true) || opening_south_minions(encoded) < 3 {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let enemy_ids = stage_enemies(&mut session, 2);
     let first_id = enemy_ids[0].clone();
     let buried_id = enemy_ids[1].clone();
-    end_turn_if_offered(session);
-    accept_where(session, |descriptor| {
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw"
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
-    });
-    accept_where(session, |descriptor| {
+    })?;
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
-    });
-    let second_id = try_summon_south_at(session, "C2").expect("second surface minion at C2");
-    end_turn_if_offered(session);
-    accept_where(session, |descriptor| {
+    })?;
+    let second_id = try_summon_south_at(&mut session, "C2")?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw"
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
-    });
-    (first_id, second_id, buried_id)
+    })?;
+    Some((session, first_id, second_id, buried_id))
+}
+
+fn seed_for_two_surface_and_one_buried(start: u32) -> String {
+    (start..start + 8192)
+        .chain(673..673 + 8192)
+        .find_map(|seed| {
+            let encoded = fatality_region_manifest(seed);
+            try_setup_two_surface_and_one_buried(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed with two surface wounded and one buried minion")
 }
 
 #[test]
 fn rule_catalog_2336_fatality_offers_every_surface_wounded_minion_not_underground() {
-    let encoded = seed_with_start(2336, true);
-    let mut session = opening_main(&encoded);
-    let (first_id, second_id, buried_id) = setup_two_surface_and_one_buried(&mut session);
+    let encoded = seed_for_two_surface_and_one_buried(2336);
+    let (mut session, first_id, second_id, buried_id) =
+        try_setup_two_surface_and_one_buried(&encoded)
+            .expect("Fatality region multi-wounded prefix");
     lash_minion(&mut session, &first_id);
     lash_minion(&mut session, &second_id);
     lash_minion(&mut session, &buried_id);
