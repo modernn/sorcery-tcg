@@ -53975,8 +53975,1764 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2570_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2491",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2491_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2492",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2492_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2493",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Sparkmage activation at adjacent rubble C3, after damaging a surviving occupant, leaves both the rubble marker and the wounded minion at C3 after later turns pass. Distinct from 0723, which proves same-turn rubble targeting, and from 0865, which uses a played site instead of rubble.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2493_rubble_target_and_damaged_unit_persist_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2494",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After Sparkmage activation at rubble C3 kills the only C3 occupant and taps the Avatar, a second activate-sparkmage stays unoffered on the same turn. Distinct from 0802, which proves zero-threshold tap without prior lethal damage, and from 0723, which never activates.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2494_second_activate_sparkmage_stays_unoffered_after_avatar_taps"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2495",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After Sparkmage activation at rubble C3 kills the first occupant, a later activation on a fresh turn damages a newly arrived minion summoned onto the same rubble cell. Distinct from 0723, which never adds a later occupant, and from 0865, which keeps the original nearby site matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2495_second_sparkmage_damages_a_newly_arrived_unit_at_rubble_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2496",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Sparkmage activation at rubble C3 offers one hidden random target among two other units sharing that rubble cell. Distinct from 0150, which uses played-site occupants, and from 0723, which places only one candidate.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2496_sparkmage_offers_one_hidden_activation_for_multiple_c3_occupants"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2497",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Sparkmage activation at rubble C3 damages the C3 occupant and leaves a far C1 minion untouched while C1 stays off the nearby activation list. Distinct from 0723, which never places a far occupant, and from 0865, which only checks hidden selection at the avatar site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2497_sparkmage_at_rubble_c3_leaves_a_far_c1_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2498",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After Sparkmage activation at rubble C3 kills the first occupant, a later activation damages a newly summoned minion on the same rubble cell. Distinct from 0723, which never re-summons onto rubble, and from 2495, which arrives through a fresh enemy turn without the first-kill prefix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "activate-sparkmage",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "sparkmage-activated",
+        "damage-dealt"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/sparkmage_rules.rs",
+        "testName": "rule_catalog_2498_second_sparkmage_damages_a_newly_summoned_unit_at_rubble_c3"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2499",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2499_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2500",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2500_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2501",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2501_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2502",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2502_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2503",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Two local surface Artifacts at C4 stay pickable after later turns pass while underground and far-cell copies remain filtered. Distinct from 0727, which checks the filter matrix on a programmatic board without waiting a turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact",
+        "region"
+      ],
+      "actionHints": [
+        "pick-up"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2503_local_surface_artifacts_stay_pickable_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2504",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "After Pick Up carries every local surface Artifact at C4, no further Pick Up actions are offered while remote and underground copies stay filtered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact",
+        "region"
+      ],
+      "actionHints": [
+        "pick-up"
+      ],
+      "eventHints": [
+        "artifacts-picked-up"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2504_second_pick_up_stays_unoffered_after_carrying_all_local_surface_artifacts"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2505",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pick Up offers a newly enemy-cast surface Artifact at C4 after the filter-matrix prefix. Distinct from 0727, which never waits for a later arrival.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "cast-artifact",
+        "pick-up"
+      ],
+      "eventHints": [
+        "artifacts-picked-up"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2505_pick_up_offers_a_newly_arrived_surface_artifact_after_enemy_cast"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2506",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pick Up offers every nonempty subset of the two local surface Artifacts at C4 as separate bearer actions. Distinct from 0727, which proves the same subset matrix on a programmatic board.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "pick-up"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2506_pick_up_offers_every_local_surface_subset_at_c4"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2507",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Pick Up carrying one local surface Artifact leaves a far-cell surface copy at C3 loose and still unoffered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "pick-up"
+      ],
+      "eventHints": [
+        "artifacts-picked-up"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2507_pick_up_leaves_a_far_cell_artifact_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2508",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A newly summoned bearer at C4 can Pick Up a freshly cast local surface Artifact while remote and underground copies stay filtered.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "artifact"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "cast-artifact",
+        "pick-up"
+      ],
+      "eventHints": [
+        "artifacts-picked-up"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/artifact_carry_rules.rs",
+        "testName": "rule_catalog_2508_pick_up_offers_a_newly_summoned_bearer_for_a_fresh_surface_artifact"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2509",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2509_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2510",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2510_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2511",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2511_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2512",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2512_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2513",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "End-turn cleanup still zeroes accumulated air-threshold cast counters after later turns pass. Distinct from 0728, which calls finish_end_turn_cleanup once without a full turn cycle, and from 0865, which checks one reset before a zero-damage activation.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2513_air_threshold_cast_counter_reset_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2514",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After end-turn cleanup zeroes an air-threshold cast counter, a later end-turn with the counter already at zero leaves it at zero. Distinct from 0728, which only checks the first reset, and from 2513, which accumulates again before the second reset.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2514_repeat_end_turn_leaves_zero_air_threshold_counter"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2515",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "When the opponent ends their turn, the inactive player's accumulated air-threshold cast counter also resets to zero. Distinct from 0728, which seeds both counters without opponent-turn play, and from 2516, which waits until both players have elevated counts.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2515_opponent_end_turn_resets_active_air_threshold_counter"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2516",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "End-turn cleanup zeroes both players' air-threshold cast counters when each has accumulated air-threshold casts through summoning. Distinct from 0728, which assigns counts directly without casting, and from 2515, which resets after only one player accumulates on the opponent turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2516_end_turn_resets_both_players_air_threshold_counters"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2517",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "End-turn cleanup zeroes only players tracking air-threshold cast counts; players without the Sparkmage counter field stay untracked. Distinct from 0728, which sets both players to Some(n), and from 2516, which gives both Sparkmage avatars counters.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2517_end_turn_resets_only_tracked_air_threshold_counters"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2518",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After end-turn cleanup resets an air-threshold cast counter to zero, summoning an air-threshold minion on the next turn increments it again. Distinct from 0728, which never casts after reset, and from 2514, which leaves the counter at zero without a new cast.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "tapDamageRandomOtherUnitAtNearbyLocationPerAirThresholdCastThisTurn"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "end-turn"
+      ],
+      "eventHints": [
+        "turn-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2518_post_reset_air_threshold_cast_accumulates_again"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2519",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2519_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2520",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2520_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2521",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2521_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2522",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2522_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2523",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "A Gnarled minion summoned via local sacrifice discount stays on the board after later turns pass. Distinct from 0729, which stops on the summoning turn, and from 0921, which only checks threshold gates.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2523_sacrifice_summoned_gnarled_stays_on_the_board_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2524",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "With two random-discard minions in hand, using the only eligible hand card for the first summon leaves no random-discard payment for the second copy. Distinct from 0729, which proves one-card admission, and from 0921, which blocks before thresholds are met.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardRandomCardInsteadOfMana"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "card-discarded",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2524_second_random_discard_offers_no_payment_after_discarding_the_only_hand_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2525",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "With two sacrifice-discount minions in hand, a second summon sacrifices a newly arrived helper after enemy site placement. Distinct from 0729, which sacrifices the opening helper on the same board, and from 2523, which never replaces the helper.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2525_second_gnarled_sacrifices_a_newly_arrived_helper_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2526",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sacrifice-discount summon offers every local helper at the summoning site. Distinct from 0729, which places only one helper, and from 0921, which never checks multiple sacrifice targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2526_gnarled_offers_every_local_helper_sacrifice_option"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2527",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "Sacrifice-discount summon at C4 sacrifices a local helper and leaves a far helper at C1 untouched. Distinct from 0729, which has no far helper, and from 2526, which only checks same-cell copies.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2527_gnarled_sacrifice_leaves_a_far_helper_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2528",
+      "requirementIds": [
+        "RULE-03"
+      ],
+      "plainLanguage": "With two sacrifice-discount minions in hand, a second summon sacrifices a newly summoned helper at the summoning site. Distinct from 0729, which sacrifices the opening helper, and from 2525, which requires enemy site placement first.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "sacrificeMinionAtSummoningLocationForManaDiscount"
+      ],
+      "actionHints": [
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-sacrificed",
+        "minion-died",
+        "minion-summoned"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/alternative_payment_rules.rs",
+        "testName": "rule_catalog_2528_second_gnarled_sacrifices_a_newly_summoned_helper"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2529",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2529_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2530",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2530_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2531",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2531_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2532",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2532_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2533",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic passes self-play admission with ordinary minions and Burrowing, Submerge, Waterbound, Landbound, and Voidwalk targets. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "burrowing",
+        "submerge",
+        "waterbound",
+        "landbound",
+        "voidwalk"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2533_burrow_magic_admits_ordinary_and_movement_keyword_minions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2534",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic passes self-play admission with start-turn draw, mill, lure, and random-teleport minion slices. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "atStartOfControllerTurnTeleportToRandomSiteOrVoid",
+        "atStartOfControllerTurnDrawSpells",
+        "atStartOfControllerTurnDrawSites",
+        "atStartOfControllerTurnLureNearbyEnemyMinion",
+        "atStartOfControllerTurnMillSpells",
+        "atStartOfControllerTurnMillSites",
+        "voidwalk"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2534_burrow_magic_admits_start_turn_trigger_minion_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2535",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic passes self-play admission with Deathrite spell-draw and spell- or site-mill library effects. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "deathriteDrawSpells",
+        "deathriteMillSpells",
+        "deathriteMillSites"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2535_burrow_magic_admits_deathrite_library_minion_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2536",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic passes self-play admission with end-turn life changes, does-not-untap, and forced-attack minion facts. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "atEndOfControllerTurnControllerGainsLife",
+        "atEndOfControllerTurnControllerLosesLife",
+        "doesNotUntapDuringControllersStartPhase",
+        "mustAttackAUnitIfAble",
+        "enemiesMustAttackThisIfAble"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2536_burrow_magic_admits_end_turn_and_forced_attack_minion_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2537",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-target-minion-or-artifact Magic passes self-play admission with common Artifact bearer modifiers including power, Lethal, nearby-must-attack, nearby-double-strike, and composed Mask effects. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowTargetMinionOrArtifact",
+        "grantsBearerPower",
+        "grantsBearerLethal",
+        "nearbyMinionsMustAttackIfAble",
+        "nearbyStrikesAgainstUnitsDealDoubleDamage"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2537_burrow_magic_admits_common_artifact_bearer_modifiers"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2538",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03"
+      ],
+      "plainLanguage": "Burrow-all-minions-and-artifacts-at-target-land-site Magic passes self-play admission with and without common Artifact bearers. Distinct from 0730, which keeps every burrow admission slice in one matrix.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "burrowAllMinionsAndArtifactsAtTargetLandSite",
+        "grantsBearerPower"
+      ],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/bury_rules.rs",
+        "testName": "rule_catalog_2538_burrow_magic_admits_cave_in_area_burrow_slices"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2539",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2539_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2540",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2540_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2541",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2541_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2542",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2542_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2543",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Post-action settlement tails still slot before magic-resolved after later turns pass and a second targeted Magic cast. Distinct from 0731, which proves OutcomeLog reordering in isolation, and from 2393, which persists cemetery state without re-checking event order.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2543_post_action_settlement_order_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2544",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A second targeted Magic cast with no settlement tails still ends on magic-resolved without game-ended preceding completion. Distinct from 0731, which uses synthetic OutcomeLog tails, and from 2394, which only proves empty minion targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-cast",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2544_second_lash_without_settlement_tails_ends_on_magic_resolved"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2545",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A second targeted Magic kill keeps minion-died and site-drawn before magic-resolved after enemy site placement and a newly arrived minion. Distinct from 0731, which never reaches a live session, and from 2395, which omits ordering checks.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2545_second_lash_settlement_stays_before_magic_resolved_after_enemy_arrival"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2546",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Targeted Magic keeps settlement tails before magic-resolved when two nearby minions are legal targets and only one dies. Distinct from 0731, which never enumerates live targets, and from 2396, which only lists offered targets.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2546_lash_settlement_stays_before_magic_resolved_with_two_nearby_minions"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2547",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Targeted Magic keeps settlement tails before magic-resolved while leaving a far minion untouched. Distinct from 0731, which uses synthetic events only, and from 2397, which never asserts ordering.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2547_lash_settlement_stays_before_magic_resolved_and_leaves_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2548",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A second targeted Magic kill keeps minion-died and site-drawn before magic-resolved on a newly summoned minion. Distinct from 0731, which never summons mid-scenario, and from 2398, which omits ordering checks.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died",
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2548_second_lash_settlement_stays_before_magic_resolved_on_new_summon"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2549",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2549_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2550",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2550_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2551",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2551_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2552",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2552_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2553",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Resolved Chain Magic stays omitted from authoritative state after ordered terminal cleanup even when state version and turn counters advance. Distinct from 0732, which proves the one-shot cleanup, and from 0731, which checks event ordering.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2553_resolved_chain_magic_stays_omitted_after_terminal_state_reserializes"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2554",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ordered terminal cleanup with no resolved Chain Magic still leaves pendingChainMagic absent from authoritative state. Distinct from 0732, which starts from Resolved, and from 2553, which re-serializes after cleanup.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2554_terminal_cleanup_without_resolved_chain_magic_keeps_pending_chain_magic_absent"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2555",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ordered terminal cleanup omits resolved Chain Magic while clearing other resolved movement continuations from authoritative state. Distinct from 0732, which checks Chain Magic only, and from 2554, which never stages other continuations.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2555_terminal_cleanup_omits_resolved_chain_magic_alongside_other_resolved_continuations"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2556",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ordered terminal cleanup omits resolved Chain Magic after a multi-target Chain spell stages Pending then Resolved. Distinct from 0732, which sets Resolved directly, and from 2555, which uses movement continuations.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2556_terminal_cleanup_omits_resolved_chain_magic_after_multi_hop_staging"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2557",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "Ordered terminal cleanup omits resolved Chain Magic while clearing still-Pending basic movement from authoritative state. Distinct from 0732, which has no concurrent continuations, and from 2555, which resolves movement first.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2557_terminal_cleanup_omits_resolved_chain_magic_while_other_continuations_stay_pending"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2558",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A second ordered terminal cleanup pass still omits newly resolved Chain Magic from authoritative state. Distinct from 0732, which runs cleanup once, and from 2553, which never re-stages resolved Chain Magic.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageChainNearbyUnits"
+      ],
+      "actionHints": [],
+      "eventHints": [
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/phase_storyline_rules.rs",
+        "testName": "rule_catalog_2558_second_terminal_cleanup_still_omits_newly_resolved_chain_magic"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2559",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2559_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2560",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2560_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2571",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2571_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2572",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2572_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2573",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Airborne-to-ally-this-turn Magic leaves a granted ally at its location after later turns pass. Shared End Phase cleanup expires the temporary source. Distinct from 0274, which proves the same-turn grant, and from 2293, which persists a target-minion grant.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "airborne-granted",
+        "airborne-expired"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2573_granted_ally_stays_at_c4_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2574",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Airborne-to-ally-this-turn spells in hand, a second cast stays unoffered after South Rain kills the only ally. Distinct from 0734, which proves admission across the matrix, and from 2464, which empties Lash targets by killing a nearby minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn",
+        "damageEachAbovegroundMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2574_second_grant_stays_unoffered_after_south_rain_kills_the_only_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2575",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Airborne-to-ally-this-turn spells in hand, a second cast marks a newly arrived ally after North site placement at C3. Distinct from 2295, which marks a newly arrived enemy minion, and from 0734, which proves admission only.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn",
+        "summonToAnySite"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2575_second_grant_marks_a_newly_arrived_ally_after_north_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2576",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Airborne-to-ally-this-turn Magic offers every allied minion at C4 as a separate target. Distinct from 2296, which offers every same-region target minion, and from 0734, which proves admission across minion slices.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2576_grant_airborne_to_ally_offers_every_allied_minion_at_c4"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2577",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Airborne-to-ally-this-turn Magic offers only allied minions and leaves a far enemy at C1 untouched. Distinct from 2297, which leaves a far target minion unmarked, and from 1807, which proves double-strike reach separately.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2577_grant_airborne_to_ally_leaves_a_far_enemy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2578",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Airborne-to-ally-this-turn spells in hand, a second cast marks a newly summoned ally at C4. Distinct from 2298, which marks a newly summoned target minion, and from 1808, which doubles a newly summoned ally strike.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantAirborneToAllyThisTurn"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "airborne-granted"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_admission_rules.rs",
+        "testName": "rule_catalog_2578_second_grant_marks_a_newly_summoned_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2579",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2579_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2580",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2580_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2581",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2581_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2582",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2582_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2583",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "This-turn enemy-minion control Magic still offers a surface burrowing enemy after later turns pass and still filters an underground burrowed copy. Distinct from 0735, which proves the admission matrix, and from 0930, which steals a distant Deathrite on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2583_burrowing_enemy_still_offered_for_betrayal_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2584",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two this-turn enemy-control spells in hand, a second cast on the already-stolen burrowing minion is a paid no-op. Distinct from 0735, which proves admission only, and from 0513, which steals once on the same turn.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2584_second_betrayal_on_the_stolen_burrower_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2585",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two this-turn enemy-control spells in hand, a second cast steals a newly arrived surface burrowing minion after enemy site placement while an underground burrowed copy stays filtered. Distinct from 0930, which never adds a later copy, and from 0513, which steals only the opening distant minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2585_second_betrayal_steals_a_newly_arrived_burrower_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2586",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "This-turn enemy-minion control Magic offers every surface burrowing enemy and not an underground burrowed copy. Distinct from 0735, which proves admission for many minion slices without runtime targeting, and from 0513, which places only one distant enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2586_betrayal_offers_every_surface_burrower_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2587",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "This-turn enemy-minion control Magic steals a surface burrowing enemy and leaves an underground burrowed copy with its original controller. Distinct from 0930, which steals a distant Deathrite without a buried matrix copy, and from 0513, which never buries a sibling target.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2587_betrayal_leaves_a_burrowed_underground_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2588",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two this-turn enemy-control spells in hand, a second cast steals a newly summoned surface burrowing minion while an underground burrowed copy stays filtered. Distinct from 0930, which never summons a later target, and from 0513, which opens on a single distant enemy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "gainControlOfTargetEnemyMinionThisTurn",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-control-changed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/control_admission_rules.rs",
+        "testName": "rule_catalog_2588_second_betrayal_steals_a_newly_summoned_burrower"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2589",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2589_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2590",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2590_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2570,
+  "rustSupportedCount": 2590,
   "typescriptSupportedCount": 0
 }
