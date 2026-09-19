@@ -51722,8 +51722,208 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2431",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2431_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2432",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2432_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2433",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic, after killing a non-Submerge minion at a Water site, leaves that minion dead in the cemetery after later turns pass. Distinct from 0693, which proves the same-turn death, and from 1933, which keeps a Submerge minion underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2433_drowned_non_submerge_minion_stays_dead_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2434",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two submerge-target-minion spells in hand, a second cast stays unoffered after the only non-Submerge surface target dies. Distinct from 1934, where the Submerge minion remains underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2434_second_drown_without_a_surface_target_stays_unoffered"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2435",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two submerge-target-minion spells in hand, a second cast kills a newly arrived non-Submerge minion after enemy site placement. Distinct from 0693, which kills the original C1 summon, and from 1935, which keeps a Submerge arrival in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2435_second_drown_kills_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2436",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic offers every surface non-Submerge minion sharing the target Water site. Distinct from 0693, which places only one lander, and from 1936, which offers Submerge minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2436_drown_offers_every_surface_non_submerge_minion_at_the_target_water_site"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2437",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Submerge-target-minion Magic kills a nearby non-Submerge minion at a Water site and leaves a far minion on the surface. Distinct from 0693, which places only one minion, and from 1937, which leaves the nearby Submerge minion underwater.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2437_drown_leaves_a_far_minion_on_the_surface"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2438",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two submerge-target-minion spells in hand, a second cast kills a newly summoned non-Submerge minion. Distinct from 1938, which keeps a Submerge summon in play.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "submergeTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-submerged",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/drown_heal_legacy_rules.rs",
+        "testName": "rule_catalog_2438_second_drown_kills_a_newly_summoned_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2439",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2439_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2440",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2440_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2400,
   "typescriptSupportedCount": 0
 }
