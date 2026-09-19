@@ -47758,8 +47758,211 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2190_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2231",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2231_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2232",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2232_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2233",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "Chosen-discard additional cost Magic leaves the discarded card in the caster's cemetery after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2233_discarded_card_stays_in_the_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2234",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "After a chosen-discard additional cost pays the last other hand card, a leftover copy of the spell is unoffered once Atlas is also empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2234_leftover_cost_is_unoffered_after_emptying_the_other_hand"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2235",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "With two chosen-discard additional cost spells in hand, a second cast still discards after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2235_second_cost_still_discards_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2236",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A chosen-discard additional cost offers every other Atlas or Spellbook hand card and never the spell being cast.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2236_chosen_discard_cost_offers_every_other_hand_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2237",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "A chosen-discard additional cost never offers an opponent's hand card and leaves that hand untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2237_chosen_discard_cost_leaves_the_opponent_hand_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2238",
+      "requirementIds": [
+        "RULE-02",
+        "RULE-03",
+        "RULE-04"
+      ],
+      "plainLanguage": "With two chosen-discard additional cost spells in hand, a second cast may discard a newly drawn card.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "discardCardAsAdditionalCost",
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "card-discarded"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/chosen_discard_cost_rules.rs",
+        "testName": "rule_catalog_2238_second_cost_discards_a_newly_drawn_card"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2239",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2239_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2240",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2240_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2190,
+  "rustSupportedCount": 2200,
   "typescriptSupportedCount": 0
 }
