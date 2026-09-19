@@ -28295,12 +28295,121 @@ pub mod catalog_proofs {
             });
         assert_eq!(one_disabled.elemental_affinities(Seat::North), [1, 1, 0, 0]);
     }
+    fn fatality_filter_card_id(game: &Game, name: &str) -> CardId {
+        CardId(
+            u16::try_from(
+                game.rules
+                    .cards
+                    .iter()
+                    .position(|card| card.id == name)
+                    .expect("fixture card"),
+            )
+            .expect("fixture card index"),
+        )
+    }
+
+    fn place_fatality_filter_copy(
+        game: &mut Game,
+        identities: &mut BTreeMap<&'static str, IdentityHash>,
+        name: &'static str,
+        card: &str,
+        controller: Seat,
+        region: Region,
+        stealthed: bool,
+        warded: bool,
+        damage: u16,
+        location: Cell,
+    ) {
+        let instance_id = identity_hash(&json!({ "fixture": name, "kind": "fatality-filter" }))
+            .expect("fixture identity");
+        let mut unit = test_minion(
+            fatality_filter_card_id(game, card),
+            instance_id.as_str(),
+            controller,
+            location,
+            None,
+        );
+        unit.damage = damage;
+        unit.region = region;
+        unit.stealthed = stealthed;
+        unit.tapped = false;
+        unit.warded = warded;
+        identities.insert(name, instance_id);
+        game.position.units.push(unit);
+    }
+
+    fn fatality_filter_targets(game: &Game) -> BTreeSet<IdentityHash> {
+        game.legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .filter_map(|action| match action.descriptor {
+                ActionDescriptor::CastMagic {
+                    target: Some(UnitTarget::Minion { instance_id, .. }),
+                    ..
+                } => Some(instance_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn cast_fatality_filter_on(
+        game: &mut Game,
+        target: &IdentityHash,
+    ) -> Vec<(String, serde_json::Value)> {
+        let cast = game
+            .legal_actions()
+            .expect("Fatality actions")
+            .into_iter()
+            .find(|action| {
+                matches!(
+                    &action.descriptor,
+                    ActionDescriptor::CastMagic {
+                        target: Some(UnitTarget::Minion { instance_id, .. }),
+                        ..
+                    } if *instance_id == *target
+                )
+            })
+            .expect("Fatality target");
+        let (events, random_draws) = game.apply_action_recorded(&cast).expect("Fatality cast");
+        assert!(random_draws.is_empty());
+        events
+    }
+
+    fn fatality_filter_alive(game: &Game, id: &IdentityHash) -> bool {
+        game.position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == *id)
+    }
+
+    fn ensure_fatality_filter_spells(game: &mut Game, count: usize) {
+        let card_id = fatality_filter_card_id(game, "north-spell-1");
+        let north = &mut game.position.players[seat_index(Seat::North)];
+        let mut have = north
+            .hand_spellbook
+            .iter()
+            .filter(|card| card.card_id == card_id)
+            .count();
+        while have < count {
+            have += 1;
+            north.hand_spellbook.push(CardInstance {
+                card_id,
+                instance_id: identity_hash(&json!({
+                    "fixture": "fatality-filter-spell",
+                    "n": have
+                }))
+                .expect("fatality identity"),
+                owner: Seat::North,
+                source: CardSource::Spellbook,
+            });
+        }
+    }
+
     #[expect(
         clippy::too_many_lines,
-        reason = "one direct Fatality proof keeps Ward, Stealth, underground, healthy, and allied copies together"
+        reason = "one shared Fatality board keeps Ward, Stealth, underground, healthy, and allied copies together"
     )]
-    pub fn rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies()
-     {
+    fn fatality_filter_matrix_board() -> (Game, BTreeMap<&'static str, IdentityHash>) {
         let manifest = selfplay_manifest_with(31, |manifest| {
             for ordinal in 1..=50 {
                 manifest["cards"][format!("north-spell-{ordinal}")] = json!({
@@ -28327,22 +28436,10 @@ pub mod catalog_proofs {
             });
         });
         let mut game = Game::from_manifest_json(&manifest).expect("valid Fatality filter game");
-        let card_id = |name: &str| {
-            CardId(
-                u16::try_from(
-                    game.rules
-                        .cards
-                        .iter()
-                        .position(|card| card.id == name)
-                        .expect("fixture card"),
-                )
-                .expect("fixture card index"),
-            )
-        };
         let c4 = Cell::parse("C4").expect("C4");
         game.position.sites[c4.index()] = Some(SitePosition {
             card: CardInstance {
-                card_id: card_id("north-site-1"),
+                card_id: fatality_filter_card_id(&game, "north-site-1"),
                 instance_id: identity_hash(&json!({ "fixture": "fatality-filter-site" }))
                     .expect("site identity"),
                 owner: Seat::North,
@@ -28401,16 +28498,18 @@ pub mod catalog_proofs {
                 1,
             ),
         ] {
-            let instance_id = identity_hash(&json!({ "fixture": name, "kind": "fatality-filter" }))
-                .expect("fixture identity");
-            let mut unit = test_minion(card_id(card), instance_id.as_str(), controller, c4, None);
-            unit.damage = damage;
-            unit.region = region;
-            unit.stealthed = stealthed;
-            unit.tapped = false;
-            unit.warded = warded;
-            identities.insert(name, instance_id);
-            game.position.units.push(unit);
+            place_fatality_filter_copy(
+                &mut game,
+                &mut identities,
+                name,
+                card,
+                controller,
+                region,
+                stealthed,
+                warded,
+                damage,
+                c4,
+            );
         }
         let north = &mut game.position.players[seat_index(Seat::North)];
         north.avatar.location = c4;
@@ -28419,45 +28518,32 @@ pub mod catalog_proofs {
         game.position.active_seat = Seat::North;
         game.position.decision_seat = Seat::North;
         game.position.phase = Phase::Main;
+        ensure_fatality_filter_spells(&mut game, 3);
+        (game, identities)
+    }
 
-        let fatality_targets: BTreeSet<_> = game
-            .legal_actions()
-            .expect("Fatality actions")
-            .into_iter()
-            .filter_map(|action| match action.descriptor {
-                ActionDescriptor::CastMagic {
-                    target: Some(UnitTarget::Minion { instance_id, .. }),
-                    ..
-                } => Some(instance_id),
-                _ => None,
-            })
-            .collect();
-        let expected = [identities["warded"].clone(), identities["ally"].clone()];
-        assert_eq!(fatality_targets.len(), 2);
-        assert!(expected.iter().all(|id| fatality_targets.contains(id)));
-        assert!(!fatality_targets.contains(&identities["hidden"]));
-        assert!(!fatality_targets.contains(&identities["underground"]));
-        assert!(!fatality_targets.contains(&identities["healthy"]));
+    fn assert_fatality_filter_matrix(
+        game: &Game,
+        identities: &BTreeMap<&'static str, IdentityHash>,
+        extra_legal: &[&IdentityHash],
+    ) {
+        let targets = fatality_filter_targets(game);
+        let mut expected = vec![identities["warded"].clone(), identities["ally"].clone()];
+        expected.extend(extra_legal.iter().map(|id| (*id).clone()));
+        assert_eq!(targets.len(), expected.len());
+        assert!(expected.iter().all(|id| targets.contains(id)));
+        assert!(!targets.contains(&identities["hidden"]));
+        assert!(!targets.contains(&identities["underground"]));
+        assert!(!targets.contains(&identities["healthy"]));
+    }
+
+    pub fn rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies()
+     {
+        let (mut game, identities) = fatality_filter_matrix_board();
+        assert_fatality_filter_matrix(&game, &identities, &[]);
 
         let warded_id = identities["warded"].clone();
-        let warded_cast = game
-            .legal_actions()
-            .expect("Fatality actions")
-            .into_iter()
-            .find(|action| {
-                matches!(
-                    &action.descriptor,
-                    ActionDescriptor::CastMagic {
-                        target: Some(UnitTarget::Minion { instance_id, .. }),
-                        ..
-                    } if *instance_id == warded_id
-                )
-            })
-            .expect("Ward Fatality");
-        let (events, random_draws) = game
-            .apply_action_recorded(&warded_cast)
-            .expect("Fatality Ward cast");
-        assert!(random_draws.is_empty());
+        let events = cast_fatality_filter_on(&mut game, &warded_id);
         assert_eq!(
             events
                 .iter()
@@ -28472,6 +28558,218 @@ pub mod catalog_proofs {
             .find(|unit| unit.card.instance_id == warded_id)
             .expect("warded target");
         assert_eq!((surviving.damage, surviving.warded), (1, false));
+    }
+
+    pub fn rule_catalog_2483_fatality_filter_matrix_persists_after_turns_pass() {
+        let (mut game, identities) = fatality_filter_matrix_board();
+        assert_fatality_filter_matrix(&game, &identities, &[]);
+        game.position.turn_number += 1;
+        let warded = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == identities["warded"])
+            .expect("warded copy");
+        assert_eq!(
+            (warded.damage, warded.warded, warded.stealthed),
+            (1, true, false)
+        );
+        let hidden = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == identities["hidden"])
+            .expect("hidden copy");
+        assert!(hidden.stealthed);
+        assert_eq!(hidden.damage, 1);
+        let buried = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == identities["underground"])
+            .expect("underground copy");
+        assert_eq!((buried.region, buried.damage), (Region::Underground, 1));
+        let ally = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == identities["ally"])
+            .expect("allied copy");
+        assert_eq!(
+            (ally.controller, ally.stealthed, ally.damage),
+            (Seat::North, true, 1)
+        );
+        assert_fatality_filter_matrix(&game, &identities, &[]);
+    }
+
+    pub fn rule_catalog_2484_second_fatality_offers_no_targets_after_legal_filter_copies_die() {
+        let (mut game, identities) = fatality_filter_matrix_board();
+        let ally_id = identities["ally"].clone();
+        let warded_id = identities["warded"].clone();
+        let events = cast_fatality_filter_on(&mut game, &ally_id);
+        assert!(
+            events
+                .iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        assert!(!fatality_filter_alive(&game, &ally_id));
+        let ward_events = cast_fatality_filter_on(&mut game, &warded_id);
+        assert_eq!(
+            ward_events
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            ["magic-cast", "ward-broken", "magic-resolved"]
+        );
+        let kill_events = cast_fatality_filter_on(&mut game, &warded_id);
+        assert!(
+            kill_events
+                .iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        assert!(!fatality_filter_alive(&game, &warded_id));
+        assert!(fatality_filter_alive(&game, &identities["hidden"]));
+        assert!(fatality_filter_alive(&game, &identities["underground"]));
+        assert!(fatality_filter_alive(&game, &identities["healthy"]));
+        assert!(fatality_filter_targets(&game).is_empty());
+    }
+
+    pub fn rule_catalog_2485_second_fatality_kills_a_newly_arrived_unfiltered_wounded_minion() {
+        let (mut game, mut identities) = fatality_filter_matrix_board();
+        let ally_id = identities["ally"].clone();
+        let events = cast_fatality_filter_on(&mut game, &ally_id);
+        assert!(
+            events
+                .iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        let c4 = Cell::parse("C4").expect("C4");
+        place_fatality_filter_copy(
+            &mut game,
+            &mut identities,
+            "visitor",
+            "south-spell-3",
+            Seat::South,
+            Region::Surface,
+            false,
+            false,
+            1,
+            c4,
+        );
+        let visitor_id = identities["visitor"].clone();
+        assert!(fatality_filter_targets(&game).contains(&visitor_id));
+        assert!(!fatality_filter_targets(&game).contains(&identities["hidden"]));
+        let kill = cast_fatality_filter_on(&mut game, &visitor_id);
+        assert!(
+            kill.iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        assert!(!fatality_filter_alive(&game, &visitor_id));
+        assert!(fatality_filter_alive(&game, &identities["hidden"]));
+        assert!(fatality_filter_alive(&game, &identities["warded"]));
+    }
+
+    pub fn rule_catalog_2486_fatality_offers_every_legal_filter_matrix_copy() {
+        let (mut game, mut identities) = fatality_filter_matrix_board();
+        let c4 = Cell::parse("C4").expect("C4");
+        place_fatality_filter_copy(
+            &mut game,
+            &mut identities,
+            "plain",
+            "south-spell-3",
+            Seat::South,
+            Region::Surface,
+            false,
+            false,
+            1,
+            c4,
+        );
+        assert_fatality_filter_matrix(&game, &identities, &[&identities["plain"]]);
+    }
+
+    pub fn rule_catalog_2487_fatality_leaves_a_far_stealthed_wounded_copy_untouched() {
+        let (mut game, mut identities) = fatality_filter_matrix_board();
+        let c1 = Cell::parse("C1").expect("C1");
+        game.position.sites[c1.index()] = Some(SitePosition {
+            card: CardInstance {
+                card_id: fatality_filter_card_id(&game, "south-site-1"),
+                instance_id: identity_hash(&json!({ "fixture": "fatality-filter-far-site" }))
+                    .expect("far site identity"),
+                owner: Seat::South,
+                source: CardSource::Atlas,
+            },
+            controller: Seat::South,
+            last_flight_turn: None,
+            warded: false,
+        });
+        place_fatality_filter_copy(
+            &mut game,
+            &mut identities,
+            "far_hidden",
+            "south-spell-2",
+            Seat::South,
+            Region::Surface,
+            true,
+            false,
+            1,
+            c1,
+        );
+        let ally_id = identities["ally"].clone();
+        let events = cast_fatality_filter_on(&mut game, &ally_id);
+        assert!(
+            events
+                .iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        let far = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == identities["far_hidden"])
+            .expect("far stealthed copy");
+        assert_eq!(far.location, c1);
+        assert!(far.stealthed);
+        assert_eq!(far.damage, 1);
+        assert!(!fatality_filter_targets(&game).contains(&identities["far_hidden"]));
+    }
+
+    pub fn rule_catalog_2488_second_fatality_kills_a_newly_summoned_unfiltered_wounded_minion() {
+        let (mut game, mut identities) = fatality_filter_matrix_board();
+        let ally_id = identities["ally"].clone();
+        let events = cast_fatality_filter_on(&mut game, &ally_id);
+        assert!(
+            events
+                .iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        let c4 = Cell::parse("C4").expect("C4");
+        place_fatality_filter_copy(
+            &mut game,
+            &mut identities,
+            "recruit",
+            "south-spell-3",
+            Seat::South,
+            Region::Surface,
+            false,
+            false,
+            1,
+            c4,
+        );
+        let recruit_id = identities["recruit"].clone();
+        assert!(fatality_filter_targets(&game).contains(&recruit_id));
+        let kill = cast_fatality_filter_on(&mut game, &recruit_id);
+        assert!(
+            kill.iter()
+                .any(|(event_type, _)| event_type == "minion-died")
+        );
+        assert!(!fatality_filter_alive(&game, &recruit_id));
+        assert!(
+            game.position.players[seat_index(Seat::South)]
+                .cemetery
+                .iter()
+                .any(|card| card.instance_id == recruit_id)
+        );
+        assert!(fatality_filter_alive(&game, &identities["hidden"]));
     }
 
     pub fn rule_catalog_0723_rubble_at_nearby_location_is_valid_activate_sparkmage_target() {

@@ -1,9 +1,14 @@
 //! Direct proofs for kill-target-wounded-minion Magic (RULE-CATALOG-0609–0610,
-//! RULE-CATALOG-0721, RULE-CATALOG-1021, RULE-CATALOG-1091, RULE-CATALOG-2013–2018).
+//! RULE-CATALOG-0721, RULE-CATALOG-1021, RULE-CATALOG-1091, RULE-CATALOG-2013–2018,
+//! RULE-CATALOG-2483–2488).
 //!
 //! Fatality kills only a wounded minion in the caster region. Healthy minions
 //! are never offered as legal targets. Enemy Stealth and underground region
-//! filter wounded copies; Ward absorbs without killing. While Deathrites wait
+//! filter wounded copies; Ward absorbs without killing. Allied wounded minions
+//! remain legal even when stealthed. Supplemental 2483–2488 bind persistence,
+//! empty-repeat after legal copies die, enemy-arrival, multi-legal, far Stealth,
+//! and a newly summoned unfiltered wounded minion. Distinct from 2013–2018
+//! (wounded versus healthy) and 2333–2338 (region only). While Deathrites wait
 //! for ordering, Fatality Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
@@ -385,6 +390,36 @@ fn rule_catalog_0610_fatality_offers_no_target_when_every_minion_is_healthy() {
 #[test]
 fn rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies() {
     sorcery_engine::game::catalog_proofs::rule_catalog_0721_fatality_breaks_ward_and_filters_healthy_stealthed_and_underground_copies();
+}
+
+#[test]
+fn rule_catalog_2483_fatality_filter_matrix_persists_after_turns_pass() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2483_fatality_filter_matrix_persists_after_turns_pass();
+}
+
+#[test]
+fn rule_catalog_2484_second_fatality_offers_no_targets_after_legal_filter_copies_die() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2484_second_fatality_offers_no_targets_after_legal_filter_copies_die();
+}
+
+#[test]
+fn rule_catalog_2485_second_fatality_kills_a_newly_arrived_unfiltered_wounded_minion() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2485_second_fatality_kills_a_newly_arrived_unfiltered_wounded_minion();
+}
+
+#[test]
+fn rule_catalog_2486_fatality_offers_every_legal_filter_matrix_copy() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2486_fatality_offers_every_legal_filter_matrix_copy();
+}
+
+#[test]
+fn rule_catalog_2487_fatality_leaves_a_far_stealthed_wounded_copy_untouched() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2487_fatality_leaves_a_far_stealthed_wounded_copy_untouched();
+}
+
+#[test]
+fn rule_catalog_2488_second_fatality_kills_a_newly_summoned_unfiltered_wounded_minion() {
+    sorcery_engine::game::catalog_proofs::rule_catalog_2488_second_fatality_kills_a_newly_summoned_unfiltered_wounded_minion();
 }
 
 #[test]

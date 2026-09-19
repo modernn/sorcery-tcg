@@ -51722,8 +51722,210 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2481",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2481_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2482",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2482_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2483",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic still offers the warded and allied-stealthed wounded copies, and still filters healthy, enemy-stealthed, and underground wounded copies, after later turns pass. Distinct from 0721, which proves the same-turn matrix, and from 2013, which persists an unfiltered wounded minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "ward",
+        "stealth",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2483_fatality_filter_matrix_persists_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2484",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With three kill-target-wounded-minion spells in hand, Fatality stays unoffered after the allied stealthed copy dies and Ward absorption then kill remove the warded copy, while healthy, enemy-stealthed, and underground wounded copies remain. Distinct from 2014, which empties the board of wounded minions, and from 2334, which leaves only an underground wounded copy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "ward",
+        "stealth",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died",
+        "ward-broken"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2484_second_fatality_offers_no_targets_after_legal_filter_copies_die"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2485",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast kills a newly arrived unfiltered wounded minion while enemy-stealthed and underground wounded copies stay filtered. Distinct from 2015, which arrives through enemy site placement without the filter matrix, and from 0721, which never adds a later copy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "stealth",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2485_second_fatality_kills_a_newly_arrived_unfiltered_wounded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2486",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic offers every legal filter-matrix copy (warded, allied stealthed, and an extra unfiltered wounded minion) and not the healthy, enemy-stealthed, or underground wounded copies. Distinct from 0721, which places only two legal copies, and from 2016, which offers every wounded minion in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "ward",
+        "stealth",
+        "burrowing"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2486_fatality_offers_every_legal_filter_matrix_copy"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2487",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Kill-target-wounded-minion Magic kills the allied stealthed wounded copy and leaves a far enemy-stealthed wounded minion untouched. Distinct from 2017, which leaves a far healthy minion, and from 2337, which leaves an underground copy at the same site.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "stealth"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2487_fatality_leaves_a_far_stealthed_wounded_copy_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2488",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two kill-target-wounded-minion spells in hand, a second cast kills a newly summoned unfiltered wounded minion and leaves enemy-stealthed wounded copies filtered. Distinct from 2018, which summons without the filter matrix, and from 2338, which summons onto a board that still has an underground wounded copy.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "killTargetWoundedMinion",
+        "stealth"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/fatality_rules.rs",
+        "testName": "rule_catalog_2488_second_fatality_kills_a_newly_summoned_unfiltered_wounded_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2489",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2489_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2490",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2490_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2400,
   "typescriptSupportedCount": 0
 }
