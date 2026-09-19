@@ -1,10 +1,13 @@
 //! Direct proofs for targetless draw-site Magic (RULE-CATALOG-0647–0648,
-//! RULE-CATALOG-1044).
+//! RULE-CATALOG-1044, RULE-CATALOG-2203–2208).
 //!
 //! Draw-site Magic pays, draws the printed number of hidden Atlas cards in
 //! deck order, and enters its owner's cemetery. Drawing from an empty Atlas
 //! loses immediately after any partial draws. While Deathrites wait for
 //! ordering, draw-site Magic stays withheld until the chain drains.
+//! Supplemental proofs cover persistence, empty-library deck-out repeat,
+//! enemy-arrival, targetless offering, the opponent's Atlas, and newly
+//! remaining library cards.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -534,4 +537,313 @@ fn rule_catalog_1044_draw_sites_magic_withheld_during_pending_deathrite_order() 
             .any(|card| card["instanceId"] == spell_id)
     );
     assert_exact_replay(session);
+}
+
+fn supplemental_draw_site() -> Value {
+    let mut value = draw_site();
+    value["manaCost"] = json!(0);
+    value
+}
+
+fn draw_sites_supplemental_manifest(seed: u32, north_atlas: usize) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "draw-sites-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-draw-sites-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-draw": supplemental_draw_site(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; north_atlas],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-draw"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, north_atlas: usize, required_draws: usize) -> String {
+    (start..start + 2048)
+        .chain(647..647 + 2048)
+        .map(|seed| draw_sites_supplemental_manifest(seed, north_atlas))
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate)
+                .iter()
+                .filter(|card| *card == "north-draw")
+                .count()
+                >= required_draws
+        })
+        .expect("bounded seed with draw-sites Magic in the opening hand")
+}
+
+fn draw_sites_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-draw")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn atlas_ids(session: &Session, seat: &str) -> Vec<String> {
+    state(session)["players"][seat]["atlas"]
+        .as_array()
+        .expect("atlas")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("atlas identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn atlas_hand_ids(session: &Session, seat: &str) -> Vec<String> {
+    state(session)["players"][seat]["hand"]["atlas"]
+        .as_array()
+        .expect("atlas hand")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("atlas hand identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .is_ok_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_draw(session: &mut Session) -> (Value, Receipt) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-draw"
+    })
+}
+
+fn drawn_count(receipt: &Receipt) -> usize {
+    event_types(receipt)
+        .iter()
+        .filter(|event| **event == "site-drawn")
+        .count()
+}
+
+fn try_second_draw_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Vec<String>)> {
+    let mut session = opening_main(encoded);
+    if draw_sites_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    let (_, first) = cast_draw(&mut session);
+    if drawn_count(&first) != 2 {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if state(&session)["realm"]["sites"]["C1"].is_null() {
+        return None;
+    }
+    if draw_sites_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let remaining = atlas_ids(&session, "north");
+    (remaining.len() >= 2).then_some((session, remaining))
+}
+
+fn seed_for_second_draw_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(647..647 + 8192)
+        .find_map(|seed| {
+            let encoded = draw_sites_supplemental_manifest(seed, 24);
+            try_second_draw_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second draw-sites enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_2203_drawn_atlas_cards_stay_in_hand_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2203, 24, 1);
+    let mut session = opening_main(&encoded);
+    let expected: Vec<_> = atlas_ids(&session, "north").into_iter().take(2).collect();
+    assert_eq!(expected.len(), 2);
+    let (_, receipt) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&receipt), 2);
+    for instance_id in &expected {
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+        assert!(!atlas_ids(&session, "north").contains(instance_id));
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    for instance_id in &expected {
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2204_second_draw_on_an_empty_atlas_decks_out() {
+    let encoded = supplemental_seed_with_start(2204, 5, 2);
+    let mut session = opening_main(&encoded);
+    assert_eq!(atlas_ids(&session, "north").len(), 2);
+    assert!(draw_sites_in_hand(&state(&session)) >= 2);
+    let (_, first) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&first), 2);
+    assert_eq!(atlas_ids(&session, "north").len(), 0);
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert!(draw_sites_in_hand(&state(&session)) >= 1);
+    let (_, second) = cast_draw(&mut session);
+    let kinds = event_types(&second);
+    assert_eq!(kinds.first(), Some(&"magic-cast"));
+    assert_eq!(drawn_count(&second), 0);
+    assert_eq!(kinds.last(), Some(&"game-ended"));
+    assert!(kinds.contains(&"magic-resolved"));
+    let after = state(&session);
+    assert_eq!(after["terminal"]["reason"], "deck_empty");
+    assert_eq!(after["terminal"]["loser"], "north");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2205_second_draw_still_draws_after_enemy_site_placement() {
+    let encoded = seed_for_second_draw_enemy_arrival(2205);
+    let (mut session, remaining) = try_second_draw_enemy_arrival_prefix(&encoded)
+        .expect("second draw-sites enemy-arrival prefix");
+    let expected: Vec<_> = remaining.into_iter().take(2).collect();
+    let (_, receipt) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&receipt), 2);
+    for instance_id in &expected {
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+        assert!(!atlas_ids(&session, "north").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2206_draw_sites_is_targetless_and_draws_printed_cards() {
+    let encoded = supplemental_seed_with_start(2206, 24, 1);
+    let mut session = opening_main(&encoded);
+    let draw_actions: Vec<_> = session
+        .legal_actions()
+        .expect("draw-sites actions")
+        .into_iter()
+        .filter(|action| {
+            action.descriptor["kind"] == "cast-magic" && action.descriptor["cardId"] == "north-draw"
+        })
+        .collect();
+    assert!(!draw_actions.is_empty());
+    assert_eq!(draw_actions.len(), draw_sites_in_hand(&state(&session)));
+    assert!(
+        draw_actions
+            .iter()
+            .all(|action| action.descriptor.get("target").is_none())
+    );
+    let expected: Vec<_> = atlas_ids(&session, "north").into_iter().take(2).collect();
+    let (descriptor, receipt) = cast_draw(&mut session);
+    assert!(descriptor.get("target").is_none());
+    assert_eq!(drawn_count(&receipt), 2);
+    for instance_id in &expected {
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2207_draw_sites_leaves_the_opponent_atlas_untouched() {
+    let encoded = supplemental_seed_with_start(2207, 24, 1);
+    let mut session = opening_main(&encoded);
+    let north_before = atlas_ids(&session, "north");
+    let south_before = atlas_ids(&session, "south");
+    assert!(north_before.len() >= 2);
+    let (_, receipt) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&receipt), 2);
+    assert_eq!(atlas_ids(&session, "south"), south_before);
+    for instance_id in north_before.iter().take(2) {
+        assert!(!atlas_ids(&session, "north").contains(instance_id));
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2208_second_draw_draws_the_newly_exposed_atlas_top() {
+    let encoded = supplemental_seed_with_start(2208, 24, 2);
+    let mut session = opening_main(&encoded);
+    let before = atlas_ids(&session, "north");
+    assert!(before.len() >= 4);
+    assert!(draw_sites_in_hand(&state(&session)) >= 2);
+    let (_, first) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&first), 2);
+    let exposed: Vec<_> = before.iter().skip(2).take(2).cloned().collect();
+    let remaining = atlas_ids(&session, "north");
+    assert_eq!(&remaining[..2], &exposed[..]);
+    let (_, second) = cast_draw(&mut session);
+    assert_eq!(drawn_count(&second), 2);
+    for instance_id in &exposed {
+        assert!(atlas_hand_ids(&session, "north").contains(instance_id));
+        assert!(!atlas_ids(&session, "north").contains(instance_id));
+    }
+    assert_exact_replay(&session);
 }

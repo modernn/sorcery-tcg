@@ -47952,8 +47952,202 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2200_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2201",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2201_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2202",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2202_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2203",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Draw-site Magic leaves drawn Atlas cards in the caster's hidden Atlas hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2203_drawn_atlas_cards_stay_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2204",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-site Magic spells in hand, a second cast loses immediately when the Atlas is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2204_second_draw_on_an_empty_atlas_decks_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2205",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-site Magic spells in hand, a second cast still draws remaining Atlas cards after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2205_second_draw_still_draws_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2206",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic is offered without a target and draws the printed number of the caster's top Atlas cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2206_draw_sites_is_targetless_and_draws_printed_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2207",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-site Magic leaves the opponent's Atlas untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2207_draw_sites_leaves_the_opponent_atlas_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2208",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-site Magic spells in hand, a second cast draws the newly exposed top Atlas cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSites"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_sites_rules.rs",
+        "testName": "rule_catalog_2208_second_draw_draws_the_newly_exposed_atlas_top"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2209",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2209_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2210",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2210_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2200,
+  "rustSupportedCount": 2210,
   "typescriptSupportedCount": 0
 }
