@@ -1,5 +1,5 @@
 //! Direct proofs for destroy-target-artifact Magic (RULE-CATALOG-0633–0634,
-//! RULE-CATALOG-1048).
+//! RULE-CATALOG-1048, RULE-CATALOG-2133–2138).
 //!
 //! Destroy-artifact Magic offers every Artifact in the caster region, whether
 //! loose or carried, and moves a real Artifact into its owner's cemetery. It
@@ -624,4 +624,413 @@ fn rule_catalog_1048_destroy_artifact_magic_withheld_during_pending_deathrite_or
     );
     assert!(!realm_has_artifact(&state(session), &artifact_id));
     assert_exact_replay(session);
+}
+
+fn destroy_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "destroy-artifact-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-destroy-artifact-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-destroy": destroy_spell(),
+            "north-site": site(),
+            "south-artifact": artifact(),
+            "south-avatar": avatar(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-destroy"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-artifact"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(633..633 + 2048)
+        .map(destroy_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-destroy")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-artifact")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with destroy-artifact Magic and required South Artifacts")
+}
+
+fn destroy_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-destroy")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn artifact_location<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["artifacts"]
+        .as_array()
+        .expect("realm artifacts")
+        .iter()
+        .find(|artifact| artifact["instanceId"] == instance_id)
+        .expect("expected realm artifact")
+}
+
+fn cast_south_artifact_at(session: &mut Session, cell: &str) -> String {
+    let (cast, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-artifact"
+            && descriptor["cardId"] == "south-artifact"
+            && descriptor["bearer"].is_null()
+            && descriptor["cell"] == cell
+    });
+    cast["cardInstanceId"]
+        .as_str()
+        .expect("destroy-artifact supplemental identity")
+        .to_owned()
+}
+
+fn setup_c1_with_south_artifacts(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    (0..count)
+        .map(|_| cast_south_artifact_at(session, "C1"))
+        .collect()
+}
+
+fn play_south_site_at(session: &mut Session, cell: &str) {
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == cell
+    });
+}
+
+fn cast_destroy_on(session: &mut Session, artifact_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-destroy"
+            && descriptor["targetArtifactInstanceId"] == artifact_id
+    });
+    receipt
+}
+
+fn try_far_artifact_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let far_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    play_south_site_at(&mut session, "C2");
+    let near_id = cast_south_artifact_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    (destroy_spells_in_hand(&state(&session)) >= 1).then_some((session, near_id, far_id))
+}
+
+fn seed_for_far_artifact(start: u32) -> String {
+    (start..start + 2048)
+        .chain(633..633 + 2048)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-artifact")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_far_artifact_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching destroy-artifact far-artifact setup")
+}
+
+fn try_second_destroy_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &first_id);
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let artifact_id = cast_south_artifact_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_artifact_targets(&session)
+        .contains(&artifact_id)
+        .then_some((session, artifact_id))
+}
+
+fn seed_for_second_destroy_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(633..633 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-artifact")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_destroy_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-artifact enemy-arrival setup")
+}
+
+fn try_second_destroy_new_placement_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    cast_destroy_on(&mut session, &first_id);
+    if realm_has_artifact(&state(&session), &first_id) {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if destroy_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let artifact_id = cast_south_artifact_at(&mut session, "C1");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    destroy_artifact_targets(&session)
+        .contains(&artifact_id)
+        .then_some((session, artifact_id))
+}
+
+fn seed_for_second_destroy_new_placement(start: u32) -> String {
+    (start..start + 8192)
+        .chain(633..633 + 8192)
+        .find_map(|seed| {
+            let encoded = destroy_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-artifact")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_destroy_new_placement_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second destroy-artifact new-placement setup")
+}
+
+#[test]
+fn rule_catalog_2133_artifact_stays_at_the_location_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2133, 1);
+    let mut session = opening_main(&encoded);
+    let artifact_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    assert_eq!(
+        artifact_location(&state(&session), &artifact_id)["location"],
+        "C1"
+    );
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(
+        artifact_location(&state(&session), &artifact_id)["location"],
+        "C1"
+    );
+    assert!(realm_has_artifact(&state(&session), &artifact_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2134_second_destroy_offers_no_targets_after_destroying_the_only_artifact() {
+    let encoded = (2134..2134 + 8192)
+        .chain(633..633 + 8192)
+        .find_map(|seed| {
+            let candidate = destroy_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let artifact_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = cast_destroy_on(&mut session, &artifact_id);
+            if !event_types(&first).contains(&"artifact-destroyed") {
+                return None;
+            }
+            if realm_has_artifact(&state(&session), &artifact_id) {
+                return None;
+            }
+            (destroy_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two destroy-artifact casts after clearing Artifacts");
+    let mut session = opening_main(&encoded);
+    let artifact_id = setup_c1_with_south_artifacts(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = cast_destroy_on(&mut session, &artifact_id);
+    assert!(event_types(&first).contains(&"artifact-destroyed"));
+    assert!(!realm_has_artifact(&state(&session), &artifact_id));
+    assert!(destroy_spells_in_hand(&state(&session)) >= 1);
+    assert_eq!(destroy_artifact_targets(&session), Vec::<String>::new());
+    assert!(!offers(&session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-destroy"
+    }));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2135_second_destroy_destroys_a_newly_arrived_artifact_after_enemy_site_placement() {
+    let encoded = seed_for_second_destroy_enemy_arrival(2135);
+    let (mut session, artifact_id) = try_second_destroy_enemy_arrival_prefix(&encoded)
+        .expect("second destroy-artifact enemy-arrival prefix");
+    let receipt = cast_destroy_on(&mut session, &artifact_id);
+    assert!(event_types(&receipt).contains(&"artifact-destroyed"));
+    assert!(!realm_has_artifact(&state(&session), &artifact_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2136_destroy_artifact_offers_every_artifact_in_the_caster_region() {
+    let encoded = supplemental_seed_with_start(2136, 2);
+    let mut session = opening_main(&encoded);
+    let artifact_ids = setup_c1_with_south_artifacts(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = destroy_artifact_targets(&session);
+    for artifact_id in &artifact_ids {
+        assert!(offered.contains(artifact_id));
+    }
+    assert_eq!(offered.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2137_destroy_artifact_leaves_a_far_artifact_untouched() {
+    let encoded = seed_for_far_artifact(2137);
+    let (mut session, near_id, far_id) =
+        try_far_artifact_prefix(&encoded).expect("destroy-artifact far-artifact prefix");
+    let receipt = cast_destroy_on(&mut session, &near_id);
+    assert!(event_types(&receipt).contains(&"artifact-destroyed"));
+    assert!(!realm_has_artifact(&state(&session), &near_id));
+    assert_eq!(
+        artifact_location(&state(&session), &far_id)["location"],
+        "C1"
+    );
+    assert!(realm_has_artifact(&state(&session), &far_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2138_second_destroy_destroys_a_newly_placed_artifact() {
+    let encoded = seed_for_second_destroy_new_placement(2138);
+    let (mut session, artifact_id) = try_second_destroy_new_placement_prefix(&encoded)
+        .expect("second destroy-artifact new-placement prefix");
+    let receipt = cast_destroy_on(&mut session, &artifact_id);
+    assert!(event_types(&receipt).contains(&"artifact-destroyed"));
+    assert!(!realm_has_artifact(&state(&session), &artifact_id));
+    assert!(
+        state(&session)["players"]["south"]["cemetery"]
+            .as_array()
+            .is_some_and(|cards| cards.iter().any(|card| card["instanceId"] == artifact_id))
+    );
+    assert_exact_replay(&session);
 }
