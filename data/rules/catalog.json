@@ -49741,8 +49741,202 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2290_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2371",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2371_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2372",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2372_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2373",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic leaves a rescued own minion in the hidden Spellbook hand after later turns pass while an opposing cemetery minion remains. Distinct from 1943, which never places an opposing cemetery minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2373_rescued_own_minion_stays_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2374",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast with an empty own cemetery still resolves as a paid no-op while an opposing cemetery minion remains unoffered. Distinct from 1944, which has no opposing cemetery minion, and from 0682, which never had an own cemetery minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2374_second_rescue_ignores_an_opposing_cemetery_minion_as_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2375",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast returns a newly milled own minion after enemy site placement and still omits opposing cemetery minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2375_second_rescue_returns_a_newly_milled_own_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2376",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic offers every own cemetery minion when multiple are present and still omits opposing cemetery minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2376_rescue_offers_every_own_cemetery_minion_and_no_opposing_one"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2377",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Return-minion-from-own-cemetery Magic leaves an unselected own cemetery minion in the cemetery and leaves the opposing cemetery untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2377_rescue_leaves_an_unselected_own_and_the_opposing_cemetery_in_place"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2378",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two return-minion-from-own-cemetery spells in hand, a second cast returns a newly milled own minion and still omits opposing cemetery minions.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "returnMinionFromOwnCemetery"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "minion-returned-to-hand"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/rescue_rules.rs",
+        "testName": "rule_catalog_2378_second_rescue_returns_a_newly_milled_own_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2379",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2379_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2380",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2380_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2290,
+  "rustSupportedCount": 2300,
   "typescriptSupportedCount": 0
 }

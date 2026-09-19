@@ -1,12 +1,15 @@
 //! Direct proofs for return-minion-from-own-cemetery Magic
-//! (RULE-CATALOG-0593–0594, 0681–0682, 1051, RULE-CATALOG-1943–1948).
+//! (RULE-CATALOG-0593–0594, 0681–0682, 1051, RULE-CATALOG-1943–1948,
+//! RULE-CATALOG-2373–2378).
 //!
 //! Ordinary Rescue Magic offers only minions in the caster's own cemetery and
 //! returns the chosen instance to the hidden Spellbook hand. An empty own
 //! cemetery still resolves the spell as a paid no-op. 0593–0594 never place an
 //! opposing cemetery minion; 0681–0682 mill one onto each side so the own-only
-//! filter is the thing under test. While Deathrites wait for ordering, Rescue
-//! Magic stays withheld until the chain drains.
+//! filter is the thing under test. Supplemental 2373–2378 keep that opposing
+//! mill filter on later IDs: persistence, empty-repeat, enemy-arrival,
+//! multi-own, unselected, and a newly milled own minion. While Deathrites wait
+//! for ordering, Rescue Magic stays withheld until the chain drains.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -1211,5 +1214,322 @@ fn rule_catalog_1948_second_rescue_returns_a_newly_killed_minion() {
         ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
     );
     assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert_exact_replay(&session);
+}
+
+fn opposing_rescue_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "rescue-opposing-cemetery-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-rescue-opposing-cemetery-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-minion": minion(),
+            "north-rescue": rescue(),
+            "north-site": mill_site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": mill_site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-minion",
+                    "north-rescue",
+                    "north-minion",
+                    "north-rescue",
+                    "north-minion",
+                    "north-rescue",
+                    "north-minion",
+                    "north-rescue",
+                    "north-minion",
+                    "north-rescue",
+                    "north-minion",
+                    "north-rescue",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 12],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opposing_opening_matches(encoded: &str) -> bool {
+    let preview = Session::new(encoded).expect("candidate session");
+    let snapshot = state(&preview);
+    let north_top = top_spell_ids(&snapshot, "north");
+    let south_top = top_spell_ids(&snapshot, "south");
+    let north_milled = north_top.iter().filter(|id| **id == "north-minion").count();
+    hand_has(&snapshot, "north", "north-rescue")
+        && south_top.contains(&"south-minion")
+        && north_milled == 1
+}
+
+fn seed_opposing_supplemental(start: u32) -> String {
+    (start..start + 2048)
+        .chain(681..681 + 2048)
+        .map(opposing_rescue_supplemental_manifest)
+        .find(|candidate| opposing_opening_matches(candidate))
+        .expect("bounded seed with opposing cemetery mill")
+}
+
+fn seed_opposing_supplemental_where(start: u32, predicate: impl Fn(&str) -> bool) -> String {
+    (start..start + 2048)
+        .chain(681..681 + 2048)
+        .map(opposing_rescue_supplemental_manifest)
+        .find(|candidate| opposing_opening_matches(candidate) && predicate(candidate))
+        .expect("bounded seed with opposing cemetery supplemental setup")
+}
+
+fn try_mill_another_own(session: &mut Session) -> Option<String> {
+    let before = cemetery_instance_ids(&state(session), "north");
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "north-site"
+    })?;
+    cemetery_instance_ids(&state(session), "north")
+        .into_iter()
+        .find(|id| !before.contains(id))
+}
+
+fn offered_excludes_opposing(session: &Session) -> bool {
+    let opposing = cemetery_instance_ids(&state(session), "south");
+    rescue_cemetery_ids(session)
+        .iter()
+        .all(|id| !opposing.contains(id))
+}
+
+fn try_second_rescue_opposing_empty_prefix(encoded: &str) -> Option<Session> {
+    let mut session = opening_main(encoded);
+    mill_south_opening_site(&mut session);
+    let own = cemetery_instance_ids(&state(&session), "north");
+    if own.len() != 1 || cemetery_instance_ids(&state(&session), "south").is_empty() {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == own[0]
+    })?;
+    (rescue_spells_in_hand(&state(&session)) >= 1
+        && rescue_cemetery_ids(&session).is_empty()
+        && !cemetery_instance_ids(&state(&session), "south").is_empty())
+    .then_some(session)
+}
+
+fn try_two_own_plus_opposing_prefix(encoded: &str) -> Option<(Session, [String; 2])> {
+    let mut session = opening_main(encoded);
+    mill_south_opening_site(&mut session);
+    let first = cemetery_instance_ids(&state(&session), "north");
+    if first.len() != 1 || cemetery_instance_ids(&state(&session), "south").is_empty() {
+        return None;
+    }
+    let second_id = try_mill_another_own(&mut session)?;
+    let own = cemetery_instance_ids(&state(&session), "north");
+    if own.len() != 2 {
+        return None;
+    }
+    let offered = rescue_cemetery_ids(&session);
+    (offered.contains(&first[0])
+        && offered.contains(&second_id)
+        && offered_excludes_opposing(&session))
+    .then_some((session, [first[0].clone(), second_id]))
+}
+
+fn try_second_rescue_enemy_arrival_opposing_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    mill_south_opening_site(&mut session);
+    let first = cemetery_instance_ids(&state(&session), "north");
+    if first.len() != 1 {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == first[0]
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let second_id = try_mill_another_own(&mut session)?;
+    (rescue_spells_in_hand(&state(&session)) >= 1
+        && rescue_cemetery_ids(&session).contains(&second_id)
+        && offered_excludes_opposing(&session)
+        && !cemetery_instance_ids(&state(&session), "south").is_empty())
+    .then_some((session, second_id))
+}
+
+fn try_second_rescue_new_mill_opposing_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    mill_south_opening_site(&mut session);
+    let first = cemetery_instance_ids(&state(&session), "north");
+    if first.len() != 1 {
+        return None;
+    }
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-rescue"
+            && descriptor["cemeteryMinionInstanceId"] == first[0]
+    })?;
+    let second_id = try_mill_another_own(&mut session)?;
+    (rescue_spells_in_hand(&state(&session)) >= 1
+        && rescue_cemetery_ids(&session).contains(&second_id)
+        && offered_excludes_opposing(&session)
+        && !cemetery_instance_ids(&state(&session), "south").is_empty())
+    .then_some((session, second_id))
+}
+
+#[test]
+fn rule_catalog_2373_rescued_own_minion_stays_in_hand_after_turns_pass() {
+    let encoded = seed_opposing_supplemental(2373);
+    let mut session = opening_main(&encoded);
+    mill_south_opening_site(&mut session);
+    let before = state(&session);
+    let own = cemetery_instance_ids(&before, "north");
+    let opposing = cemetery_instance_ids(&before, "south");
+    assert_eq!(own.len(), 1);
+    assert!(!opposing.is_empty());
+    let own_id = own[0].clone();
+    let mut choices = rescue_cemetery_ids(&session);
+    choices.sort();
+    choices.dedup();
+    assert_eq!(choices, [own_id.as_str()]);
+    cast_rescue_target(&mut session, &own_id);
+    assert!(hand_has_instance(&state(&session), "north", &own_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), "north", &own_id));
+    assert!(cemetery_instance_ids(&state(&session), "north").is_empty());
+    assert!(!cemetery_instance_ids(&state(&session), "south").is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2374_second_rescue_ignores_an_opposing_cemetery_minion_as_a_paid_noop() {
+    let encoded = seed_opposing_supplemental_where(2374, |candidate| {
+        try_second_rescue_opposing_empty_prefix(candidate).is_some()
+    });
+    let mut session = try_second_rescue_opposing_empty_prefix(&encoded)
+        .expect("second Rescue opposing empty prefix");
+    let south_before = cemetery_instance_ids(&state(&session), "south");
+    assert!(!south_before.is_empty());
+    assert!(cemetery_instance_ids(&state(&session), "north").is_empty());
+    assert!(rescue_cemetery_ids(&session).is_empty());
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rescue"
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "minion-returned-to-hand")
+    );
+    assert_eq!(
+        cemetery_instance_ids(&state(&session), "south"),
+        south_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2375_second_rescue_returns_a_newly_milled_own_minion_after_enemy_site_placement() {
+    let encoded = seed_opposing_supplemental_where(2375, |candidate| {
+        try_second_rescue_enemy_arrival_opposing_prefix(candidate).is_some()
+    });
+    let (mut session, minion_id) = try_second_rescue_enemy_arrival_opposing_prefix(&encoded)
+        .expect("second Rescue opposing enemy-arrival prefix");
+    let south_before = cemetery_instance_ids(&state(&session), "south");
+    let receipt = cast_rescue_target(&mut session, &minion_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert_eq!(
+        cemetery_instance_ids(&state(&session), "south"),
+        south_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2376_rescue_offers_every_own_cemetery_minion_and_no_opposing_one() {
+    let encoded = seed_opposing_supplemental_where(2376, |candidate| {
+        try_two_own_plus_opposing_prefix(candidate).is_some()
+    });
+    let (session, minion_ids) =
+        try_two_own_plus_opposing_prefix(&encoded).expect("two own plus opposing cemetery");
+    let mut offered = rescue_cemetery_ids(&session);
+    offered.sort();
+    offered.dedup();
+    assert_eq!(offered.len(), 2);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert!(offered_excludes_opposing(&session));
+    assert!(!cemetery_instance_ids(&state(&session), "south").is_empty());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2377_rescue_leaves_an_unselected_own_and_the_opposing_cemetery_in_place() {
+    let encoded = seed_opposing_supplemental_where(2377, |candidate| {
+        try_two_own_plus_opposing_prefix(candidate).is_some()
+    });
+    let (mut session, minion_ids) =
+        try_two_own_plus_opposing_prefix(&encoded).expect("two own plus opposing cemetery");
+    let south_before = cemetery_instance_ids(&state(&session), "south");
+    let rescued_id = &minion_ids[0];
+    cast_rescue_target(&mut session, rescued_id);
+    assert!(hand_has_instance(&state(&session), "north", rescued_id));
+    let remaining = cemetery_instance_ids(&state(&session), "north");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0], minion_ids[1]);
+    assert_eq!(
+        cemetery_instance_ids(&state(&session), "south"),
+        south_before
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2378_second_rescue_returns_a_newly_milled_own_minion() {
+    let encoded = seed_opposing_supplemental_where(2378, |candidate| {
+        try_second_rescue_new_mill_opposing_prefix(candidate).is_some()
+    });
+    let (mut session, minion_id) = try_second_rescue_new_mill_opposing_prefix(&encoded)
+        .expect("second Rescue opposing new-mill prefix");
+    let south_before = cemetery_instance_ids(&state(&session), "south");
+    let receipt = cast_rescue_target(&mut session, &minion_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "minion-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), "north", &minion_id));
+    assert_eq!(
+        cemetery_instance_ids(&state(&session), "south"),
+        south_before
+    );
     assert_exact_replay(&session);
 }
