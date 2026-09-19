@@ -1,4 +1,5 @@
-//! Direct proofs for cemetery Magic return (RULE-CATALOG-0635–0636, 1059).
+//! Direct proofs for cemetery Magic return (RULE-CATALOG-0635–0636, 1059,
+//! RULE-CATALOG-2143–2148).
 //!
 //! Cemetery Magic return is the Rescue sibling for Magic cards: it offers
 //! only Magic in the caster's own cemetery and returns the unchanged instance
@@ -558,4 +559,359 @@ fn rule_catalog_1059_cemetery_magic_return_withheld_during_pending_deathrite_ord
             .any(|card| card["instanceId"] == cemetery_magic_id)
     );
     assert_exact_replay(session);
+}
+
+fn cemetery_magic_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "cemetery-magic-return-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-cemetery-magic-return-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-rain": rain_spell(),
+            "north-return": return_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-return",
+                    "north-rain",
+                    "north-return",
+                    "north-rain",
+                    "north-return",
+                    "north-rain",
+                    "north-return",
+                    "north-rain",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_card_count(encoded: &str, card_id: &str) -> usize {
+    opening_spell_ids(encoded)
+        .into_iter()
+        .filter(|card| card == card_id)
+        .count()
+}
+
+fn supplemental_seed_with_start(start: u32, min_return: usize, min_rain: usize) -> String {
+    (start..start + 2048)
+        .chain(635..635 + 2048)
+        .map(cemetery_magic_supplemental_manifest)
+        .find(|candidate| {
+            opening_card_count(candidate, "north-return") >= min_return
+                && opening_card_count(candidate, "north-rain") >= min_rain
+        })
+        .expect("bounded seed with cemetery Magic return supplemental opening cards")
+}
+
+fn return_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-return")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn rain_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-rain")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn hand_has_instance(snapshot: &Value, instance_id: &str) -> bool {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .is_some_and(|hand| hand.iter().any(|card| card["instanceId"] == instance_id))
+}
+
+fn cemetery_instance_ids(snapshot: &Value) -> Vec<String> {
+    snapshot["players"]["north"]["cemetery"]
+        .as_array()
+        .expect("north cemetery")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("cemetery identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn try_seed_untargeted_return(session: &mut Session) -> Option<String> {
+    let (descriptor, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor.get("cemeteryMinionInstanceId").is_none()
+    })?;
+    descriptor["cardInstanceId"].as_str().map(ToOwned::to_owned)
+}
+
+fn try_cast_rain(session: &mut Session) -> Option<String> {
+    let (descriptor, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
+    })?;
+    descriptor["cardInstanceId"].as_str().map(ToOwned::to_owned)
+}
+
+fn cast_return_target(session: &mut Session, magic_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == magic_id
+    });
+    receipt
+}
+
+fn try_two_cemetery_magics_on_session(session: &mut Session) -> Option<[String; 2]> {
+    let first = try_seed_untargeted_return(session)?;
+    let second = try_cast_rain(session)?;
+    let mut offered = cemetery_magic_cast_ids(session);
+    offered.sort();
+    offered.dedup();
+    (offered.len() == 2 && offered.contains(&first) && offered.contains(&second))
+        .then_some([first, second])
+}
+
+fn try_two_cemetery_magics_prefix(encoded: &str) -> Option<[String; 2]> {
+    let mut session = opening_main(encoded);
+    try_two_cemetery_magics_on_session(&mut session)
+}
+
+fn prepare_two_cemetery_magics(encoded: &str) -> (Session, [String; 2]) {
+    let mut session = opening_main(encoded);
+    let magics =
+        try_two_cemetery_magics_on_session(&mut session).expect("two own cemetery Magic cards");
+    (session, magics)
+}
+
+fn seed_with_two_cemetery_magics(start: u32) -> String {
+    (start..start + 2048)
+        .chain(635..635 + 2048)
+        .find_map(|seed| {
+            let encoded = cemetery_magic_supplemental_manifest(seed);
+            if opening_card_count(&encoded, "north-return") < 1
+                || opening_card_count(&encoded, "north-rain") < 1
+            {
+                return None;
+            }
+            try_two_cemetery_magics_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed with two own cemetery Magic cards")
+}
+
+fn try_second_return_new_magic_prefix(
+    encoded: &str,
+    enemy_site: bool,
+) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = try_seed_untargeted_return(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor["cemeteryMinionInstanceId"] == first_id
+    })?;
+    pass_turn_to_north_spellbook(&mut session);
+    if enemy_site {
+        end_turn_if_offered(&mut session);
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw"
+                && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+        })?;
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "play-site"
+                && descriptor["cardId"] == "south-site"
+                && descriptor["cell"] == "C2"
+        })?;
+        end_turn_if_offered(&mut session);
+        try_accept_where(&mut session, |descriptor| {
+            descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+        })?;
+    }
+    for _ in 0..4 {
+        if rain_spells_in_hand(&state(&session)) >= 1
+            && return_spells_in_hand(&state(&session)) >= 1
+        {
+            break;
+        }
+        pass_turn_to_north_spellbook(&mut session);
+    }
+    if rain_spells_in_hand(&state(&session)) < 1 || return_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let rain_id = try_cast_rain(&mut session)?;
+    (return_spells_in_hand(&state(&session)) >= 1
+        && cemetery_magic_cast_ids(&session).contains(&rain_id))
+    .then_some((session, rain_id))
+}
+
+fn seed_for_second_return_new_magic(start: u32, enemy_site: bool) -> String {
+    (start..start + 8192)
+        .chain(635..635 + 8192)
+        .find_map(|seed| {
+            let encoded = cemetery_magic_supplemental_manifest(seed);
+            if opening_card_count(&encoded, "north-return") < 1 {
+                return None;
+            }
+            try_second_return_new_magic_prefix(&encoded, enemy_site).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second cemetery Magic return new-arrival setup")
+}
+
+#[test]
+fn rule_catalog_2143_returned_magic_stays_in_hand_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2143, 2, 0);
+    let mut session = opening_main(&encoded);
+    let seed_id = try_seed_untargeted_return(&mut session).expect("empty-cemetery seed cast");
+    let receipt = cast_return_target(&mut session, &seed_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), &seed_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(hand_has_instance(&state(&session), &seed_id));
+    assert!(!cemetery_instance_ids(&state(&session)).contains(&seed_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2144_second_cemetery_magic_return_without_cemetery_magic_is_a_paid_noop() {
+    let encoded = supplemental_seed_with_start(2144, 2, 0);
+    let mut session = opening_main(&encoded);
+    assert_eq!(cemetery_magic_cast_ids(&session), Vec::<String>::new());
+    assert!(return_spells_in_hand(&state(&session)) >= 2);
+    let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-return"
+            && descriptor.get("cemeteryMinionInstanceId").is_none()
+    });
+    assert!(descriptor.get("cemeteryMinionInstanceId").is_none());
+    assert_eq!(event_types(&receipt), ["magic-cast", "magic-resolved"]);
+    assert!(
+        !receipt
+            .events
+            .iter()
+            .any(|event| event.event_type == "magic-returned-to-hand"
+                || event.event_type == "minion-returned-to-hand")
+    );
+    assert!(return_spells_in_hand(&state(&session)) >= 1);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2145_second_cemetery_magic_return_returns_a_newly_arrived_magic_after_enemy_site_placement()
+ {
+    let encoded = seed_for_second_return_new_magic(2145, true);
+    let (mut session, magic_id) = try_second_return_new_magic_prefix(&encoded, true)
+        .expect("second cemetery Magic return enemy-arrival prefix");
+    let receipt = cast_return_target(&mut session, &magic_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), &magic_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2146_cemetery_magic_return_offers_every_own_cemetery_magic() {
+    let encoded = seed_with_two_cemetery_magics(2146);
+    let (session, magic_ids) = prepare_two_cemetery_magics(&encoded);
+    let mut offered = cemetery_magic_cast_ids(&session);
+    offered.sort();
+    offered.dedup();
+    assert_eq!(offered.len(), 2);
+    for magic_id in &magic_ids {
+        assert!(offered.contains(magic_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2147_cemetery_magic_return_leaves_an_unselected_cemetery_magic_in_place() {
+    let encoded = seed_with_two_cemetery_magics(2147);
+    let (mut session, magic_ids) = prepare_two_cemetery_magics(&encoded);
+    let returned_id = &magic_ids[0];
+    cast_return_target(&mut session, returned_id);
+    assert!(hand_has_instance(&state(&session), returned_id));
+    let remaining = cemetery_instance_ids(&state(&session));
+    assert!(remaining.contains(&magic_ids[1]));
+    assert!(!remaining.contains(returned_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2148_second_cemetery_magic_return_returns_a_newly_arrived_cemetery_magic() {
+    let encoded = seed_for_second_return_new_magic(2148, false);
+    let (mut session, magic_id) = try_second_return_new_magic_prefix(&encoded, false)
+        .expect("second cemetery Magic return new-arrival prefix");
+    let receipt = cast_return_target(&mut session, &magic_id);
+    assert_eq!(
+        event_types(&receipt),
+        ["magic-cast", "magic-returned-to-hand", "magic-resolved"]
+    );
+    assert!(hand_has_instance(&state(&session), &magic_id));
+    assert_exact_replay(&session);
 }
