@@ -707,7 +707,7 @@ fn rule_catalog_2333_wounded_underground_minion_stays_underground_after_turns_pa
 #[test]
 fn rule_catalog_2334_second_fatality_offers_no_targets_after_only_underground_wounded_remains() {
     let encoded = seed_with_two_fatalities(2334);
-    let (mut session, surface_id, buried_id) =
+    let (session, surface_id, buried_id) =
         try_second_fatality_empty_prefix(&encoded).expect("Fatality region empty-repeat prefix");
     assert!(realm_unit(&state(&session), &surface_id).is_none());
     assert_eq!(unit(&state(&session), &buried_id)["region"], "underground");
@@ -758,7 +758,13 @@ fn try_setup_two_surface_and_one_buried(
             && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
     })?;
     try_rain(&mut session)?;
-    Some((session, first_id, second_id, buried_id))
+    try_bury_minion(&mut session, &buried_id)?;
+    let offered = fatality_targets(&session);
+    (offered.contains(&first_id)
+        && offered.contains(&second_id)
+        && !offered.contains(&buried_id)
+        && offered.len() == 2)
+        .then_some((session, first_id, second_id, buried_id))
 }
 
 fn seed_for_two_surface_and_one_buried(start: u32) -> String {
@@ -774,10 +780,8 @@ fn seed_for_two_surface_and_one_buried(start: u32) -> String {
 #[test]
 fn rule_catalog_2336_fatality_offers_every_surface_wounded_minion_not_underground() {
     let encoded = seed_for_two_surface_and_one_buried(2336);
-    let (mut session, first_id, second_id, buried_id) =
-        try_setup_two_surface_and_one_buried(&encoded)
-            .expect("Fatality region multi-wounded prefix");
-    bury_minion(&mut session, &buried_id);
+    let (session, first_id, second_id, buried_id) = try_setup_two_surface_and_one_buried(&encoded)
+        .expect("Fatality region multi-wounded prefix");
     let offered = fatality_targets(&session);
     assert!(offered.contains(&first_id));
     assert!(offered.contains(&second_id));
