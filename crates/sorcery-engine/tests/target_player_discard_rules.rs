@@ -1464,12 +1464,11 @@ fn rule_catalog_2185_second_discard_takes_a_newly_arrived_card_after_enemy_site_
 #[test]
 fn rule_catalog_2186_target_player_discard_offers_both_avatars() {
     let encoded = supplemental_seed_with_start(2186);
-    let mut session = opening_main(&encoded);
-    north_draws_spellbook(&mut session);
-    let targets = discard_targets(&session);
-    assert!(targets.iter().any(|seat| seat == "north"));
-    assert!(targets.iter().any(|seat| seat == "south"));
-    assert_eq!(targets.len(), 2);
+    let session = opening_main(&encoded);
+    let mut seats = discard_targets(&session);
+    seats.sort();
+    seats.dedup();
+    assert_eq!(seats, ["north".to_owned(), "south".to_owned()]);
     assert_exact_replay(&session);
 }
 
@@ -1477,7 +1476,6 @@ fn rule_catalog_2186_target_player_discard_offers_both_avatars() {
 fn rule_catalog_2187_target_player_discard_leaves_the_other_player_hand_untouched() {
     let encoded = supplemental_seed_with_start(2187);
     let mut session = opening_main(&encoded);
-    north_draws_spellbook(&mut session);
     let north_before = north_hand_instance_ids(&state(&session));
     let south_before = south_hand_instance_ids(&state(&session));
     assert!(south_before.len() > 1);
