@@ -45035,8 +45035,205 @@
         "file": "crates/sorcery-engine/tests/grant_ward_rules.rs",
         "testName": "rule_catalog_2048_second_ward_marks_a_newly_summoned_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2051",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2051_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2052",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2052_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2059",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2059_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2060",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2060_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2053",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Stealth-to-target-minion Magic leaves a stealthed minion at its location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2053_stealthed_minion_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2054",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Stealth-to-target-minion spells in hand, a second cast offers no targets after hiding the only minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2054_second_grant_stealth_offers_no_targets_after_hiding_the_only_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2055",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Stealth-to-target-minion spells in hand, a second cast hides a newly arrived enemy minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2055_second_grant_stealth_hides_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2056",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Stealth-to-target-minion Magic offers every same-region minion in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2056_grant_stealth_offers_every_same_region_minion_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2057",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Grant-Stealth-to-target-minion Magic at one site leaves a far unstealthed minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2057_grant_stealth_leaves_a_far_unstealthed_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2058",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two grant-Stealth-to-target-minion spells in hand, a second cast hides a newly summoned enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "grantStealthToTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-stealthed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/grant_stealth_rules.rs",
+        "testName": "rule_catalog_2058_second_grant_stealth_hides_a_newly_summoned_minion"
+      }
     }
   ],
-  "rustSupportedCount": 2050,
+  "rustSupportedCount": 2060,
   "typescriptSupportedCount": 0
 }
