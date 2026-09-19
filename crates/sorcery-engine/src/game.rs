@@ -7488,10 +7488,17 @@ impl Game {
                 .targeted_magic_choices(seat, caster_instance_id, false, true)?
                 .into_iter()
                 .filter(|choice| {
-                    choice
-                        .target
-                        .as_ref()
-                        .is_some_and(|target| target.seat() != seat)
+                    choice.target.as_ref().is_some_and(|target| match target {
+                        UnitTarget::Avatar {
+                            seat: target_seat, ..
+                        } => *target_seat != seat,
+                        UnitTarget::Minion { instance_id, .. } => self
+                            .position
+                            .units
+                            .iter()
+                            .find(|unit| unit.card.instance_id == *instance_id)
+                            .is_some_and(|unit| unit.card.owner != seat),
+                    })
                 })
                 .collect(),
             MagicEffect::KillTargetWoundedMinion => self
