@@ -1,6 +1,6 @@
 //! Direct proofs for player-chosen additional Magic discard
 //! (RULE-CATALOG-0653–0654, 0671–0672, RULE-CATALOG-1087,
-//! RULE-CATALOG-2233–2238).
+//! RULE-CATALOG-2233–2238, RULE-CATALOG-2323–2328).
 //!
 //! A chosen-discard cost is a Storyline choice among every other Atlas or
 //! Spellbook hand card. It cannot select the spell being cast, pays
@@ -1134,9 +1134,11 @@ fn rule_catalog_2236_chosen_discard_cost_offers_every_other_hand_card() {
             assert!(discard_ids.contains(id));
         }
     }
-    assert!(discard_ids
-        .iter()
-        .all(|id| seat_hand_ids(&before, "north").contains(id)));
+    assert!(
+        discard_ids
+            .iter()
+            .all(|id| seat_hand_ids(&before, "north").contains(id))
+    );
     assert_exact_replay(&session);
 }
 
@@ -1163,6 +1165,198 @@ fn rule_catalog_2238_second_cost_discards_a_newly_drawn_card() {
         try_second_cost_new_draw_prefix(&encoded).expect("second chosen-discard new-draw prefix");
     let receipt = cast_cost_discarding(&mut session, &new_id);
     assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert!(cemetery_ids(&state(&session), "north").contains(&new_id));
+    assert!(!seat_hand_ids(&state(&session), "north").contains(&new_id));
+    assert_exact_replay(&session);
+}
+
+fn atlas_seed_candidates(start: u32) -> impl Iterator<Item = u32> {
+    (start..start + 2048).chain(671..671 + 2048)
+}
+
+fn atlas_supplemental_seed_with_start(start: u32, min_cost: usize, min_fodder: usize) -> String {
+    atlas_seed_candidates(start)
+        .map(chosen_discard_supplemental_manifest)
+        .find(|candidate| {
+            let hand = opening_spell_ids(candidate);
+            hand.iter().filter(|card| *card == "north-cost").count() >= min_cost
+                && hand.iter().filter(|card| *card == "north-fodder").count() >= min_fodder
+        })
+        .expect("bounded seed with chosen-discard Atlas supplemental opening cards")
+}
+
+fn offered_atlas_discard(session: &Session) -> Option<String> {
+    let atlas = north_hand_ids(&state(session), "atlas");
+    discard_cost_ids(session)
+        .into_iter()
+        .find(|id| atlas.contains(id))
+}
+
+fn try_second_atlas_cost_after_enemy_site(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    if cost_spells_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    let first = offered_atlas_discard(&session)?;
+    let receipt = cast_cost_discarding(&mut session, &first);
+    if receipt.events[0].payload["zone"] != "atlas" {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if state(&session)["realm"]["sites"]["C1"].is_null() {
+        return None;
+    }
+    if cost_spells_in_hand(&state(&session)) < 1 || !offers_cost(&session) {
+        return None;
+    }
+    let discard_id = offered_atlas_discard(&session)?;
+    Some((session, discard_id))
+}
+
+fn seed_for_second_atlas_cost_after_enemy_site(start: u32) -> String {
+    atlas_seed_candidates(start)
+        .find_map(|seed| {
+            let encoded = chosen_discard_supplemental_manifest(seed);
+            try_second_atlas_cost_after_enemy_site(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second Atlas chosen-discard after enemy site placement")
+}
+
+fn try_second_atlas_cost_of_drawn_site(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    if cost_spells_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    let before = north_hand_ids(&state(&session), "atlas");
+    let first = offered_atlas_discard(&session)?;
+    let receipt = cast_cost_discarding(&mut session, &first);
+    if receipt.events[0].payload["zone"] != "atlas" {
+        return None;
+    }
+    if cost_spells_in_hand(&state(&session)) < 1 || !offers_cost(&session) {
+        return None;
+    }
+    let new_id = north_hand_ids(&state(&session), "atlas")
+        .into_iter()
+        .find(|id| !before.contains(id) && discard_cost_ids(&session).contains(id))?;
+    Some((session, new_id))
+}
+
+fn seed_for_second_atlas_cost_of_drawn_site(start: u32) -> String {
+    atlas_seed_candidates(start)
+        .find_map(|seed| {
+            let encoded = chosen_discard_supplemental_manifest(seed);
+            try_second_atlas_cost_of_drawn_site(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second chosen-discard of a newly drawn Atlas card")
+}
+
+fn seed_for_empty_atlas_unoffered(start: u32) -> String {
+    atlas_seed_candidates(start)
+        .find_map(|seed| {
+            let encoded = chosen_discard_empty_hand_manifest(seed);
+            try_empty_other_hand_unoffered(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching leftover chosen-discard unoffered after emptying Atlas leftovers")
+}
+
+#[test]
+fn rule_catalog_2323_discarded_atlas_card_stays_in_the_cemetery_after_turns_pass() {
+    let encoded = atlas_supplemental_seed_with_start(2323, 1, 1);
+    let mut session = opening_main(&encoded);
+    let site_id = offered_atlas_discard(&session).expect("Atlas discard offered");
+    let receipt = cast_cost_discarding(&mut session, &site_id);
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    assert_eq!(receipt.events[0].payload["cardId"], "north-site");
+    assert!(cemetery_ids(&state(&session), "north").contains(&site_id));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(cemetery_ids(&state(&session), "north").contains(&site_id));
+    assert!(!seat_hand_ids(&state(&session), "north").contains(&site_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2324_leftover_cost_is_unoffered_after_emptying_atlas_leftovers() {
+    let encoded = seed_for_empty_atlas_unoffered(2324);
+    let session = try_empty_other_hand_unoffered(&encoded)
+        .expect("leftover chosen-discard unoffered after emptying Atlas leftovers");
+    let after = state(&session);
+    assert_eq!(north_hand_ids(&after, "atlas").len(), 0);
+    assert_eq!(north_spell_card_ids(&after), ["north-cost".to_owned()]);
+    assert!(!offers_cost(&session));
+    assert_eq!(after["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2325_second_atlas_cost_still_discards_after_enemy_site_placement() {
+    let encoded = seed_for_second_atlas_cost_after_enemy_site(2325);
+    let (mut session, discard_id) = try_second_atlas_cost_after_enemy_site(&encoded)
+        .expect("second Atlas chosen-discard enemy-arrival prefix");
+    let receipt = cast_cost_discarding(&mut session, &discard_id);
+    assert_eq!(
+        event_types(&receipt),
+        [
+            "card-discarded",
+            "magic-cast",
+            "site-drawn",
+            "magic-resolved"
+        ]
+    );
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    assert!(cemetery_ids(&state(&session), "north").contains(&discard_id));
+    assert!(!seat_hand_ids(&state(&session), "north").contains(&discard_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2326_chosen_discard_cost_offers_every_atlas_hand_card() {
+    let encoded = atlas_supplemental_seed_with_start(2326, 1, 1);
+    let session = opening_main(&encoded);
+    let before = state(&session);
+    let cost_ids: Vec<_> = before["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .expect("north Spellbook")
+        .iter()
+        .filter(|card| card["cardId"] == "north-cost")
+        .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+        .collect();
+    let atlas_ids = north_hand_ids(&before, "atlas");
+    assert!(!atlas_ids.is_empty());
+    let discard_ids = discard_cost_ids(&session);
+    assert!(atlas_ids.iter().all(|id| discard_ids.contains(id)));
+    if cost_ids.len() == 1 {
+        assert!(!discard_ids.contains(&cost_ids[0]));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2327_chosen_discard_cost_leaves_the_opponent_atlas_untouched() {
+    let encoded = atlas_supplemental_seed_with_start(2327, 1, 1);
+    let mut session = opening_main(&encoded);
+    let south_before = seat_hand_ids(&state(&session), "south");
+    assert!(!south_before.is_empty());
+    let site_id = offered_atlas_discard(&session).expect("Atlas discard offered");
+    let discard_ids = discard_cost_ids(&session);
+    assert!(south_before.iter().all(|id| !discard_ids.contains(id)));
+    let receipt = cast_cost_discarding(&mut session, &site_id);
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
+    assert_eq!(seat_hand_ids(&state(&session), "south"), south_before);
+    assert!(!cemetery_ids(&state(&session), "south").contains(&site_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2328_second_cost_discards_a_newly_drawn_atlas_card() {
+    let encoded = seed_for_second_atlas_cost_of_drawn_site(2328);
+    let (mut session, new_id) = try_second_atlas_cost_of_drawn_site(&encoded)
+        .expect("second chosen-discard of a newly drawn Atlas card");
+    let receipt = cast_cost_discarding(&mut session, &new_id);
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert_eq!(receipt.events[0].payload["zone"], "atlas");
     assert!(cemetery_ids(&state(&session), "north").contains(&new_id));
     assert!(!seat_hand_ids(&state(&session), "north").contains(&new_id));
     assert_exact_replay(&session);
