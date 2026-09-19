@@ -1,5 +1,6 @@
 //! Direct proofs for target-player discard Magic (RULE-CATALOG-0643–0644,
-//! RULE-CATALOG-0919, RULE-CATALOG-1050, RULE-CATALOG-1166).
+//! RULE-CATALOG-0919, RULE-CATALOG-1050, RULE-CATALOG-1166,
+//! RULE-CATALOG-2183–2188).
 //!
 //! Target-player discard offers only both Avatars. After the cast is
 //! announced, the targeted player chooses one of their own Atlas or
@@ -10,6 +11,8 @@
 //! the chain drains. 1166 covers the Storyline itself: a discard cast that
 //! settles Deathrites before any discard-card choice is issued withholds
 //! discard-card until the order drains, then returns the pending choice.
+//! Supplemental proofs cover persistence, empty-hand repeat, enemy-arrival,
+//! both-Avatar targeting, the unselected player's hand, and a newly drawn card.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -1078,4 +1081,454 @@ fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
     assert_eq!(after["phase"], "main");
     assert_eq!(after["decisionSeat"], "north");
     assert!(after.get("pendingDiscardCards").is_none());
+}
+
+fn discard_supplemental_manifest(seed: u32, count: u8) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "target-player-discard-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-target-player-discard-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-discard": discard_spell(count),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-discard"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32) -> String {
+    (start..start + 2048)
+        .chain(643..643 + 2048)
+        .map(|seed| discard_supplemental_manifest(seed, 1))
+        .find(|candidate| {
+            opening_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-discard")
+        })
+        .expect("bounded seed with target-player discard Magic in the opening hand")
+}
+
+fn discard_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-discard")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn hand_len(snapshot: &Value, seat: &str) -> usize {
+    ["atlas", "spellbook"]
+        .iter()
+        .map(|zone| {
+            snapshot["players"][seat]["hand"][zone]
+                .as_array()
+                .map(Vec::len)
+                .unwrap_or_default()
+        })
+        .sum()
+}
+
+fn north_hand_instance_ids(snapshot: &Value) -> Vec<String> {
+    ["atlas", "spellbook"]
+        .iter()
+        .flat_map(|zone| {
+            snapshot["players"]["north"]["hand"][zone]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+        })
+        .collect()
+}
+
+fn south_hand_instance_ids(snapshot: &Value) -> Vec<String> {
+    ["atlas", "spellbook"]
+        .iter()
+        .flat_map(|zone| {
+            snapshot["players"]["south"]["hand"][zone]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+        })
+        .collect()
+}
+
+fn cemetery_ids(snapshot: &Value, seat: &str) -> Vec<String> {
+    snapshot["players"][seat]["cemetery"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|card| card["instanceId"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn resolve_pending_discard(session: &mut Session) -> Option<Receipt> {
+    if state(session)["phase"] != "discard-card" {
+        return None;
+    }
+    Some(accept_where(session, |descriptor| descriptor["kind"] == "discard-card").1)
+}
+
+fn cast_discard_on_south(session: &mut Session) -> Receipt {
+    let (_, cast) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    resolve_pending_discard(session).unwrap_or(cast)
+}
+
+fn try_second_discard_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        north_draws_spellbook(&mut session);
+    }
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let first = cast_discard_on_south(&mut session);
+    if !event_types(&first).contains(&"card-discarded") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site"
+            && descriptor["cardId"] == "south-site"
+            && descriptor["cell"] == "C3"
+    });
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if discard_spells_in_hand(&state(&session)) < 1 || hand_len(&state(&session), "south") == 0 {
+        return None;
+    }
+    let chosen = south_hand_instance_ids(&state(&session))
+        .into_iter()
+        .next()?;
+    discard_targets(&session)
+        .iter()
+        .any(|seat| seat == "south")
+        .then_some((session, chosen))
+}
+
+fn seed_for_second_discard_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(643..643 + 8192)
+        .find_map(|seed| {
+            let encoded = discard_supplemental_manifest(seed, 1);
+            try_second_discard_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second target-player discard enemy-arrival setup")
+}
+
+fn try_second_discard_new_draw_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        north_draws_spellbook(&mut session);
+    }
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let before = south_hand_instance_ids(&state(&session));
+    let first = cast_discard_on_south(&mut session);
+    if !event_types(&first).contains(&"card-discarded") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let _ = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let new_id = south_hand_instance_ids(&state(&session))
+        .into_iter()
+        .find(|id| !before.contains(id))?;
+    discard_targets(&session)
+        .iter()
+        .any(|seat| seat == "south")
+        .then_some((session, new_id))
+}
+
+fn seed_for_second_discard_new_draw(start: u32) -> String {
+    (start..start + 8192)
+        .chain(643..643 + 8192)
+        .find_map(|seed| {
+            let encoded = discard_supplemental_manifest(seed, 1);
+            try_second_discard_new_draw_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second target-player discard new-draw setup")
+}
+
+#[test]
+fn rule_catalog_2183_discarded_card_stays_in_the_cemetery_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2183);
+    let mut session = opening_main(&encoded);
+    if discard_spells_in_hand(&state(&session)) < 1 {
+        north_draws_spellbook(&mut session);
+    }
+    let first = cast_discard_on_south(&mut session);
+    assert!(event_types(&first).contains(&"card-discarded"));
+    let discarded = first
+        .events
+        .iter()
+        .find(|event| event.event_type == "card-discarded")
+        .expect("discard event")
+        .payload["instanceId"]
+        .as_str()
+        .expect("discarded identity")
+        .to_owned();
+    assert!(cemetery_ids(&state(&session), "south").contains(&discarded));
+    pass_turn_to_north_spellbook(&mut session);
+    assert!(cemetery_ids(&state(&session), "south").contains(&discarded));
+    assert!(!south_hand_instance_ids(&state(&session)).contains(&discarded));
+    assert_exact_replay(&session);
+}
+
+fn empty_south_hand_with_discard(session: &mut Session) -> Option<Receipt> {
+    let (_, cast) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    })?;
+    let mut last = cast;
+    while state(session)["phase"] == "discard-card" {
+        last = resolve_pending_discard(session)?;
+    }
+    Some(last)
+}
+
+#[test]
+fn rule_catalog_2184_second_discard_is_a_paid_noop_after_emptying_the_hand() {
+    let encoded = (2184..2184 + 8192)
+        .chain(643..643 + 8192)
+        .find_map(|seed| {
+            let candidate = discard_supplemental_manifest(seed, 6);
+            if opening_spell_ids(&candidate, "north")
+                .iter()
+                .filter(|card| *card == "north-discard")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            if discard_spells_in_hand(&state(&session)) < 2
+                || hand_len(&state(&session), "south") == 0
+            {
+                return None;
+            }
+            let first = empty_south_hand_with_discard(&mut session)?;
+            if !event_types(&first).contains(&"card-discarded") {
+                return None;
+            }
+            (hand_len(&state(&session), "south") == 0
+                && discard_spells_in_hand(&state(&session)) >= 1)
+                .then_some(candidate)
+        })
+        .expect("bounded seed with two target-player discard casts after emptying the hand");
+    let mut session = opening_main(&encoded);
+    assert!(discard_spells_in_hand(&state(&session)) >= 2);
+    let first = empty_south_hand_with_discard(&mut session).expect("first empty-hand discard");
+    assert!(event_types(&first).contains(&"card-discarded"));
+    assert_eq!(hand_len(&state(&session), "south"), 0);
+    assert!(discard_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_discard_on_south(&mut session);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"card-discarded"));
+    assert_eq!(state(&session)["terminal"]["status"], "active");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2185_second_discard_takes_a_newly_arrived_card_after_enemy_site_placement() {
+    let encoded = seed_for_second_discard_enemy_arrival(2185);
+    let (mut session, chosen) = try_second_discard_enemy_arrival_prefix(&encoded)
+        .expect("second target-player discard enemy-arrival prefix");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card" && descriptor["cardInstanceId"] == chosen
+    });
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert!(cemetery_ids(&state(&session), "south").contains(&chosen));
+    assert!(!south_hand_instance_ids(&state(&session)).contains(&chosen));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2186_target_player_discard_offers_both_avatars() {
+    let encoded = supplemental_seed_with_start(2186);
+    let mut session = opening_main(&encoded);
+    north_draws_spellbook(&mut session);
+    let targets = discard_targets(&session);
+    assert!(targets.iter().any(|seat| seat == "north"));
+    assert!(targets.iter().any(|seat| seat == "south"));
+    assert_eq!(targets.len(), 2);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2187_target_player_discard_leaves_the_other_player_hand_untouched() {
+    let encoded = supplemental_seed_with_start(2187);
+    let mut session = opening_main(&encoded);
+    north_draws_spellbook(&mut session);
+    let north_before = north_hand_instance_ids(&state(&session));
+    let south_before = south_hand_instance_ids(&state(&session));
+    assert!(south_before.len() > 1);
+    let (descriptor, cast) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    let spent = descriptor["cardInstanceId"]
+        .as_str()
+        .expect("spent discard identity")
+        .to_owned();
+    let receipt = resolve_pending_discard(&mut session).unwrap_or(cast);
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    let discarded = receipt
+        .events
+        .iter()
+        .find(|event| event.event_type == "card-discarded")
+        .expect("discard event")
+        .payload["instanceId"]
+        .as_str()
+        .expect("discarded identity")
+        .to_owned();
+    let north_after = north_hand_instance_ids(&state(&session));
+    assert!(!north_after.contains(&spent));
+    for id in north_before.iter().filter(|id| *id != &spent) {
+        assert!(north_after.contains(id));
+    }
+    let south_after = south_hand_instance_ids(&state(&session));
+    assert!(!south_after.contains(&discarded));
+    for id in south_before.iter().filter(|id| *id != &discarded) {
+        assert!(south_after.contains(id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2188_second_discard_takes_a_newly_drawn_card() {
+    let encoded = seed_for_second_discard_new_draw(2188);
+    let (mut session, new_id) = try_second_discard_new_draw_prefix(&encoded)
+        .expect("second target-player discard new-draw prefix");
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-discard"
+            && descriptor["target"]["seat"] == "south"
+    });
+    let (_, receipt) = accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "discard-card" && descriptor["cardInstanceId"] == new_id
+    });
+    assert!(event_types(&receipt).contains(&"card-discarded"));
+    assert!(cemetery_ids(&state(&session), "south").contains(&new_id));
+    assert!(!south_hand_instance_ids(&state(&session)).contains(&new_id));
+    assert_exact_replay(&session);
 }
