@@ -1,15 +1,17 @@
 //! Direct proofs for heal-target-minion Magic (RULE-CATALOG-0298–0299,
 //! RULE-CATALOG-0663–0664, RULE-CATALOG-0908, RULE-CATALOG-0992,
-//! RULE-CATALOG-0997, RULE-CATALOG-1113).
+//! RULE-CATALOG-0997, RULE-CATALOG-1113, RULE-CATALOG-2283–2288).
 //!
 //! Official Magic can remove damage from a living minion without targeting
 //! Avatars or breaking Ward. Healing a healthy minion is a paid no-op. End
 //! Phase clears leftover damage, so the wound and the heal must share a turn.
 //! Supplemental 0663–0664 keep that slice on high IDs: a same-turn heal, and a
 //! Death's Door Avatar that is still excluded while an at-cap minion no-ops.
+//! Supplemental 2283–2288 keep persistence, paid-noop-repeat, enemy-arrival,
+//! multi-minion, far-minion, and new-summon proofs on later IDs.
 
 use serde_json::{Value, json};
-use sorcery_engine::canonical::identity_hash;
+use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
     create_game_checkpoint, parse_game_checkpoint, resume_game_checkpoint,
     serialize_game_checkpoint,
@@ -1049,4 +1051,533 @@ fn rule_catalog_1171_end_turn_withheld_during_pending_deathrite_order() {
             .any(|action| action.descriptor["kind"] == "end-turn")
     );
     assert_exact_replay(session);
+}
+
+fn finish_manifest(mut value: Value) -> String {
+    value["manifestId"] =
+        json!(identity_hash(&value).expect("canonical synthetic manifest identity"));
+    canonical_json(&value).expect("canonical synthetic manifest")
+}
+
+fn supplemental_minion() -> Value {
+    json!({
+        "attack": 1,
+        "cardType": "minion",
+        "defense": 4,
+        "manaCost": 0,
+        "summonToAnySite": true,
+        "thresholds": { "air": 0, "earth": 0, "fire": 0, "water": 0 },
+    })
+}
+
+fn heal_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "heal-target-minion-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-heal-target-minion-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-damage": magic(("damageTargetUnit", json!(1))),
+            "north-heal": magic(("healTargetMinion", json!(1))),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": supplemental_minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": [
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                    "north-heal",
+                    "north-damage",
+                ],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(start: u32, required_south: usize) -> String {
+    (start..start + 2048)
+        .chain(663..663 + 2048)
+        .map(heal_supplemental_manifest)
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .any(|card| card == "north-heal")
+                && opening_hand_spell_ids(candidate, "south")
+                    .iter()
+                    .filter(|card| *card == "south-minion")
+                    .count()
+                    >= required_south
+        })
+        .expect("bounded seed with heal-target Magic and required South minions")
+}
+
+fn heal_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-heal")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn damage_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-damage")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    snapshot["realm"]["units"]
+        .as_array()
+        .expect("realm units")
+        .iter()
+        .find(|unit| unit["instanceId"] == instance_id)
+        .expect("expected realm unit")
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn north_draws_spellbook(session: &mut Session) {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn opening_main(encoded: &str) -> Session {
+    let mut session = Session::new(encoded).expect("valid heal-target session");
+    keep(&mut session);
+    keep(&mut session);
+    accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
+    });
+    session
+}
+
+fn summon_south_at(session: &mut Session, cell: &str) -> String {
+    let (summoned, _) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-minion"
+            && descriptor["cell"] == cell
+            && descriptor["region"].is_null()
+    });
+    summoned["cardInstanceId"]
+        .as_str()
+        .expect("heal-target supplemental identity")
+        .to_owned()
+}
+
+fn setup_c2_with_south_minions(session: &mut Session, count: usize) -> Vec<String> {
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    });
+    (0..count).map(|_| summon_south_at(session, "C2")).collect()
+}
+
+fn heal_target_ids(session: &Session) -> Vec<String> {
+    heal_minion_targets(session)
+        .into_iter()
+        .map(|(_, instance_id)| instance_id)
+        .collect()
+}
+
+fn cast_damage_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-damage"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn cast_heal_on(session: &mut Session, target_id: &str) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-heal"
+            && descriptor["target"]["kind"] == "minion"
+            && descriptor["target"]["instanceId"] == target_id
+    });
+    receipt
+}
+
+fn wound_then_heal(session: &mut Session, target_id: &str) -> Option<Receipt> {
+    if damage_spells_in_hand(&state(session)) < 1 || heal_spells_in_hand(&state(session)) < 1 {
+        return None;
+    }
+    let damage = cast_damage_on(session, target_id);
+    if !event_types(&damage).contains(&"damage-dealt") {
+        return None;
+    }
+    if unit(&state(session), target_id)["damage"] != 1 {
+        return None;
+    }
+    Some(cast_heal_on(session, target_id))
+}
+
+fn try_far_minion_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let mut session = opening_main(encoded);
+    let c2_ids = setup_c2_with_south_minions(&mut session, 2);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let far_id = summon_south_at(&mut session, "C4");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if damage_spells_in_hand(&state(&session)) < 1 || heal_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    Some((session, c2_ids[0].clone(), far_id))
+}
+
+fn seed_for_far_minion(start: u32) -> String {
+    (start..start + 2048)
+        .chain(663..663 + 2048)
+        .find_map(|seed| {
+            let encoded = heal_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 3
+            {
+                return None;
+            }
+            try_far_minion_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching heal-target far-minion setup")
+}
+
+fn try_second_heal_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = wound_then_heal(&mut session, &first_id)?;
+    if !event_types(&first).contains(&"minion-healed") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C3"
+    })?;
+    let minion_id = summon_south_at(&mut session, "C3");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if damage_spells_in_hand(&state(&session)) < 1 || heal_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    heal_target_ids(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_heal_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(663..663 + 8192)
+        .find_map(|seed| {
+            let encoded = heal_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_heal_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second heal-target enemy-arrival setup")
+}
+
+fn try_second_heal_new_summon_prefix(encoded: &str) -> Option<(Session, String)> {
+    let mut session = opening_main(encoded);
+    let first_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = wound_then_heal(&mut session, &first_id)?;
+    if !event_types(&first).contains(&"minion-healed") {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    })?;
+    let minion_id = summon_south_at(&mut session, "C2");
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    if damage_spells_in_hand(&state(&session)) < 1 || heal_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    heal_target_ids(&session)
+        .contains(&minion_id)
+        .then_some((session, minion_id))
+}
+
+fn seed_for_second_heal_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(663..663 + 8192)
+        .find_map(|seed| {
+            let encoded = heal_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&encoded, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 2
+            {
+                return None;
+            }
+            try_second_heal_new_summon_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second heal-target new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2283_healed_minion_stays_at_the_location_after_turns_pass() {
+    let encoded = (2283..2283 + 8192)
+        .chain(663..663 + 8192)
+        .find_map(|seed| {
+            let candidate = heal_supplemental_manifest(seed);
+            if opening_hand_spell_ids(&candidate, "south")
+                .iter()
+                .filter(|card| *card == "south-minion")
+                .count()
+                < 1
+            {
+                return None;
+            }
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            wound_then_heal(&mut session, &minion_id)
+                .filter(|receipt| event_types(receipt).contains(&"minion-healed"))
+                .map(|_| candidate)
+        })
+        .expect("bounded seed with same-turn heal-target persistence setup");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let receipt = wound_then_heal(&mut session, &minion_id).expect("same-turn heal");
+    assert!(event_types(&receipt).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    pass_turn_to_north_spellbook(&mut session);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    assert!(realm_unit(&state(&session), &minion_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2284_second_heal_on_an_already_healed_minion_is_a_paid_noop() {
+    let encoded = (2284..2284 + 8192)
+        .chain(663..663 + 8192)
+        .find_map(|seed| {
+            let candidate = heal_supplemental_manifest(seed);
+            let mut session = opening_main(&candidate);
+            let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+            north_draws_spellbook(&mut session);
+            let first = wound_then_heal(&mut session, &minion_id)?;
+            if !event_types(&first).contains(&"minion-healed") {
+                return None;
+            }
+            if unit(&state(&session), &minion_id)["damage"] != 0 {
+                return None;
+            }
+            (heal_spells_in_hand(&state(&session)) >= 1).then_some(candidate)
+        })
+        .expect("bounded seed with two heal-target casts after clearing damage");
+    let mut session = opening_main(&encoded);
+    let minion_id = setup_c2_with_south_minions(&mut session, 1)[0].clone();
+    north_draws_spellbook(&mut session);
+    let first = wound_then_heal(&mut session, &minion_id).expect("same-turn heal");
+    assert!(event_types(&first).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    assert!(heal_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_heal_on(&mut session, &minion_id);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2285_second_heal_clears_a_newly_arrived_minion_after_enemy_site_placement() {
+    let encoded = seed_for_second_heal_enemy_arrival(2285);
+    let (mut session, minion_id) = try_second_heal_enemy_arrival_prefix(&encoded)
+        .expect("second heal-target enemy-arrival prefix");
+    let receipt = wound_then_heal(&mut session, &minion_id).expect("same-turn heal of new arrival");
+    assert!(event_types(&receipt).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C3");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2286_heal_target_offers_every_same_region_minion_in_the_caster_region() {
+    let encoded = supplemental_seed_with_start(2286, 2);
+    let mut session = opening_main(&encoded);
+    let minion_ids = setup_c2_with_south_minions(&mut session, 2);
+    north_draws_spellbook(&mut session);
+    let offered = heal_target_ids(&session);
+    for minion_id in &minion_ids {
+        assert!(offered.contains(minion_id));
+    }
+    assert_eq!(offered.len(), 2);
+    let snapshot = state(&session);
+    let north_avatar = snapshot["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("North Avatar identity")
+        .to_owned();
+    let south_avatar = snapshot["players"]["south"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("South Avatar identity")
+        .to_owned();
+    assert!(
+        heal_minion_targets(&session)
+            .iter()
+            .all(|(kind, instance_id)| {
+                kind == "minion" && *instance_id != north_avatar && *instance_id != south_avatar
+            })
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2287_heal_target_leaves_a_far_minion_untouched() {
+    let encoded = seed_for_far_minion(2287);
+    let (mut session, healed_id, far_id) =
+        try_far_minion_prefix(&encoded).expect("heal-target far-minion prefix");
+    let receipt = wound_then_heal(&mut session, &healed_id).expect("same-turn heal");
+    assert!(event_types(&receipt).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &healed_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &far_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2288_second_heal_clears_a_newly_summoned_minion() {
+    let encoded = seed_for_second_heal_new_summon(2288);
+    let (mut session, minion_id) =
+        try_second_heal_new_summon_prefix(&encoded).expect("second heal-target new-summon prefix");
+    let receipt = wound_then_heal(&mut session, &minion_id).expect("same-turn heal of new summon");
+    assert!(event_types(&receipt).contains(&"minion-healed"));
+    assert_eq!(unit(&state(&session), &minion_id)["damage"], 0);
+    assert_eq!(unit(&state(&session), &minion_id)["location"], "C2");
+    assert_exact_replay(&session);
 }
