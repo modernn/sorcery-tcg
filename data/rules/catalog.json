@@ -47758,8 +47758,202 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2190_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2191",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2191_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2192",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2192_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2193",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Draw-spell Magic leaves drawn Spellbook cards in the caster's hidden hand after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2193_drawn_library_cards_stay_in_hand_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2194",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-spell Magic spells in hand, a second cast loses immediately when the Spellbook is empty.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved",
+        "game-ended"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2194_second_draw_on_an_empty_library_decks_out"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2195",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-spell Magic spells in hand, a second cast still draws remaining Spellbook cards after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2195_second_draw_still_draws_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2196",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic is offered without a target and draws the printed number of the caster's top Spellbook cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2196_draw_spells_is_targetless_and_draws_printed_cards"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2197",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targetless draw-spell Magic leaves the opponent's Spellbook untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2197_draw_spells_leaves_the_opponent_library_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2198",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two draw-spell Magic spells in hand, a second cast draws the newly exposed top Spellbook cards.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "drawSpells"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "spell-drawn"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/draw_spells_rules.rs",
+        "testName": "rule_catalog_2198_second_draw_draws_the_newly_exposed_library_top"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2199",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2199_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2200",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2200_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2190,
+  "rustSupportedCount": 2200,
   "typescriptSupportedCount": 0
 }
