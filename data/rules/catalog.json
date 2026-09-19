@@ -44641,8 +44641,205 @@
         "file": "crates/sorcery-engine/tests/tap_magic_rules.rs",
         "testName": "rule_catalog_2028_second_tap_exhausts_a_newly_summoned_minion"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2031",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2031_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2032",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2032_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2039",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2039_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2040",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2040_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2033",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Untap-target-minion Magic leaves an untapped minion at its location after later turns pass.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2033_untapped_minion_stays_at_the_location_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2034",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two untap-target-minion spells in hand, a second cast on an already ready minion still resolves as a paid no-op.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-resolved"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2034_second_untap_on_an_already_ready_minion_is_a_paid_noop"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2035",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two untap-target-minion spells in hand, a second cast readies a newly arrived tapped enemy minion after enemy site placement.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2035_second_untap_readies_a_newly_arrived_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2036",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Untap-target-minion Magic offers every tapped same-region minion in the caster region.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2036_untap_offers_every_tapped_same_region_minion_in_the_caster_region"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2037",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Untap-target-minion Magic at one site leaves a far ready minion untouched.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2037_untap_leaves_a_far_ready_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2038",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two untap-target-minion spells in hand, a second cast readies a newly summoned tapped enemy minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "untapTargetMinion"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-untapped"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/untap_magic_rules.rs",
+        "testName": "rule_catalog_2038_second_untap_readies_a_newly_summoned_minion"
+      }
     }
   ],
-  "rustSupportedCount": 2030,
+  "rustSupportedCount": 2040,
   "typescriptSupportedCount": 0
 }
