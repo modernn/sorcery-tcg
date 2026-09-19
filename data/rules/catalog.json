@@ -51722,8 +51722,221 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2391",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2391_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2392",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2392_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2393",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic kills a Deathrite minion that prevents high-power unit damage as a non-unit source. After later turns pass, the corpse stays in its owner's cemetery and the controller's Deathrite site draw remains. Distinct from 0685, which stops on the same turn, and from 1953, which persists a surviving damaged minion without Deathrite.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "magic-damage-allocated",
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2393_killed_deathrite_minion_stays_in_the_cemetery_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2394",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two targeted-damage spells in hand, killing the only Deathrite minion as a non-unit source leaves no minion targets for a second cast while Avatar targets remain. Distinct from 0685, which casts once, and from 1954, which proves the empty minion list after ordinary Zap.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2394_second_lash_offers_no_minion_targets_after_killing_the_only_deathrite"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2395",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two targeted-damage spells in hand, a second cast kills a newly arrived Deathrite minion after enemy site placement as a non-unit source and draws a site for its controller. Distinct from 0685, which kills the opening Deathrite on the same board, and from 1955, which only damages a newly arrived ordinary minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2395_second_lash_kills_a_newly_arrived_deathrite_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2396",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic offers every same-region Deathrite minion and both Avatars. Distinct from 0685, which places only one Deathrite minion, and from 2066, which never offers Avatars.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2396_lash_offers_every_same_region_deathrite_minion_and_both_avatars"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2397",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Targeted Magic kills a Deathrite minion at C1 as a non-unit source and leaves a far Deathrite minion at C4 untouched. Distinct from 0685, which has no far minion, and from 1957, which damages a surviving nearby minion without Deathrite.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2397_lash_kills_a_deathrite_minion_and_leaves_a_far_minion_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2398",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "With two targeted-damage spells in hand, a second cast kills a newly summoned Deathrite minion as a non-unit source and draws a site for its controller. Distinct from 0685, which kills the opening Deathrite, and from 1958, which kills a newly summoned ordinary minion.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "damageTargetUnit",
+        "deathriteDrawSite",
+        "preventsDamageFromUnitsWithPowerAtLeast"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "site-drawn",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/early_magic_harness_rules.rs",
+        "testName": "rule_catalog_2398_second_lash_kills_a_newly_summoned_deathrite_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2399",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2399_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2400",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2400_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2400,
   "typescriptSupportedCount": 0
 }
