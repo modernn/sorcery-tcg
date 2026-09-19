@@ -1,5 +1,5 @@
 //! Direct proofs for mill-spell Magic (RULE-CATALOG-0627–0628,
-//! RULE-CATALOG-1037).
+//! RULE-CATALOG-1037, RULE-CATALOG-2103–2108).
 //!
 //! Mill-spell Magic offers only both Avatars and puts the printed number of
 //! the chosen player's top Spellbook cards into that owner's cemetery. An
@@ -563,4 +563,341 @@ fn rule_catalog_1037_mill_spells_magic_withheld_during_pending_deathrite_order()
         before.len() - 2
     );
     assert_exact_replay(session);
+}
+
+fn mill_supplemental_manifest(seed: u32, south_spellbook: usize) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "mill-spells-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-mill-spells-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-mill": mill_spell(),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-minion": minion(),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": vec!["north-mill"; 8],
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-minion"; south_spellbook],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn opening_hand_spell_ids(encoded: &str, seat: &str) -> Vec<String> {
+    let preview = Session::new(encoded).expect("candidate session");
+    state(&preview)["players"][seat]["hand"]["spellbook"]
+        .as_array()
+        .expect("opening Spellbook hand")
+        .iter()
+        .map(|card| {
+            card["cardId"]
+                .as_str()
+                .expect("hand card identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn supplemental_seed_with_start(
+    start: u32,
+    south_spellbook: usize,
+    required_mills: usize,
+) -> String {
+    (start..start + 2048)
+        .chain(627..627 + 2048)
+        .map(|seed| mill_supplemental_manifest(seed, south_spellbook))
+        .find(|candidate| {
+            opening_hand_spell_ids(candidate, "north")
+                .iter()
+                .filter(|card| *card == "north-mill")
+                .count()
+                >= required_mills
+        })
+        .expect("bounded seed with mill-spell Magic in the opening hand")
+}
+
+fn mill_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-mill")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn library_ids(session: &Session, seat: &str) -> Vec<String> {
+    state(session)["players"][seat]["spellbook"]
+        .as_array()
+        .expect("library")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("library identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn cemetery_ids(session: &Session, seat: &str) -> Vec<String> {
+    state(session)["players"][seat]["cemetery"]
+        .as_array()
+        .expect("cemetery")
+        .iter()
+        .map(|card| {
+            card["instanceId"]
+                .as_str()
+                .expect("cemetery identity")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn pass_turn_to_north_spellbook(session: &mut Session) {
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "spellbook" || descriptor["zone"] == "atlas")
+    });
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    });
+}
+
+fn cast_mill_south(session: &mut Session) -> Receipt {
+    let (_, receipt) = accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-mill"
+            && descriptor["target"]["kind"] == "avatar"
+            && descriptor["target"]["seat"] == "south"
+    });
+    receipt
+}
+
+fn try_second_mill_enemy_arrival_prefix(encoded: &str) -> Option<(Session, Vec<String>)> {
+    let mut session = opening_main(encoded);
+    if mill_spells_in_hand(&state(&session)) < 2 {
+        return None;
+    }
+    let first = cast_mill_south(&mut session);
+    if event_types(&first)
+        .iter()
+        .filter(|event| **event == "spell-discarded")
+        .count()
+        != 2
+    {
+        return None;
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    if state(&session)["realm"]["sites"]["C1"].is_null() {
+        return None;
+    }
+    if mill_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let remaining = library_ids(&session, "south");
+    (remaining.len() >= 2).then_some((session, remaining))
+}
+
+fn seed_for_second_mill_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(627..627 + 8192)
+        .find_map(|seed| {
+            let encoded = mill_supplemental_manifest(seed, 8);
+            try_second_mill_enemy_arrival_prefix(&encoded).map(|_| encoded)
+        })
+        .expect("bounded seed reaching second mill-spells enemy-arrival setup")
+}
+
+#[test]
+fn rule_catalog_2103_milled_library_cards_stay_in_the_cemetery_after_turns_pass() {
+    let encoded = supplemental_seed_with_start(2103, 8, 1);
+    let mut session = opening_main(&encoded);
+    let expected: Vec<_> = library_ids(&session, "south").into_iter().take(2).collect();
+    assert_eq!(expected.len(), 2);
+    let receipt = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&receipt)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    for instance_id in &expected {
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+    }
+    pass_turn_to_north_spellbook(&mut session);
+    for instance_id in &expected {
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2104_second_mill_on_an_empty_library_is_a_paid_noop() {
+    let encoded = supplemental_seed_with_start(2104, 5, 2);
+    let mut session = opening_main(&encoded);
+    assert_eq!(south_library(&session).len(), 2);
+    assert!(mill_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&first)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    assert_eq!(south_library(&session).len(), 0);
+    assert!(mill_spells_in_hand(&state(&session)) >= 1);
+    let second = cast_mill_south(&mut session);
+    assert_eq!(event_types(&second), ["magic-cast", "magic-resolved"]);
+    assert!(!event_types(&second).contains(&"spell-discarded"));
+    assert!(!event_types(&second).contains(&"game-ended"));
+    assert_eq!(south_library(&session).len(), 0);
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2105_second_mill_still_mills_after_enemy_site_placement() {
+    let encoded = seed_for_second_mill_enemy_arrival(2105);
+    let (mut session, remaining) = try_second_mill_enemy_arrival_prefix(&encoded)
+        .expect("second mill-spells enemy-arrival prefix");
+    let expected: Vec<_> = remaining.into_iter().take(2).collect();
+    let receipt = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&receipt)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    for instance_id in &expected {
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+        assert!(!library_ids(&session, "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2106_mill_spells_offers_every_avatar() {
+    let encoded = supplemental_seed_with_start(2106, 8, 1);
+    let mut session = opening_main(&encoded);
+    assert_eq!(
+        mill_targets(&session),
+        [
+            ("avatar".to_owned(), "north".to_owned()),
+            ("avatar".to_owned(), "south".to_owned())
+        ]
+    );
+    let expected: Vec<_> = library_ids(&session, "south").into_iter().take(2).collect();
+    let receipt = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&receipt)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    for instance_id in &expected {
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2107_mill_spells_leaves_the_unselected_library_untouched() {
+    let encoded = supplemental_seed_with_start(2107, 8, 1);
+    let mut session = opening_main(&encoded);
+    let north_before = library_ids(&session, "north");
+    let south_before = library_ids(&session, "south");
+    assert!(south_before.len() >= 2);
+    let receipt = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&receipt)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    assert_eq!(library_ids(&session, "north"), north_before);
+    for instance_id in south_before.iter().take(2) {
+        assert!(!library_ids(&session, "south").contains(instance_id));
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2108_second_mill_mills_the_newly_exposed_library_top() {
+    let encoded = supplemental_seed_with_start(2108, 8, 2);
+    let mut session = opening_main(&encoded);
+    let before = library_ids(&session, "south");
+    assert!(before.len() >= 4);
+    assert!(mill_spells_in_hand(&state(&session)) >= 2);
+    let first = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&first)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    let exposed: Vec<_> = before.iter().skip(2).take(2).cloned().collect();
+    let remaining = library_ids(&session, "south");
+    assert_eq!(&remaining[..2], &exposed[..]);
+    let second = cast_mill_south(&mut session);
+    assert_eq!(
+        event_types(&second)
+            .iter()
+            .filter(|event| **event == "spell-discarded")
+            .count(),
+        2
+    );
+    for instance_id in &exposed {
+        assert!(cemetery_ids(&session, "south").contains(instance_id));
+        assert!(!library_ids(&session, "south").contains(instance_id));
+    }
+    assert_exact_replay(&session);
 }
