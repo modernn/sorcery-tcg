@@ -1,9 +1,13 @@
 //! Direct proofs for Magic target filters by caster region and enemy Stealth
-//! (RULE-CATALOG-0023, RULE-CATALOG-0697).
+//! (RULE-CATALOG-0023, RULE-CATALOG-0697, RULE-CATALOG-2453–2458).
 //!
 //! Targeted Magic offers only units in the caster region. Enemy Stealth is
 //! excluded; own Stealth stays targetable. Distinct from 0617–0618 (Grant-
-//! Stealth) and from 0673–0674 (Fatality's wounded-minion region filter).
+//! Stealth), from 0673–0674 (Fatality's wounded-minion region filter), and
+//! from 0698 (Freeze Disable killing an underground burrower). Supplemental
+//! 2453–2458 bind persistence, empty-repeat, enemy-arrival, multi-minion,
+//! underground, and a newly summoned surface minion. Seed search starts at
+//! the catalog id and falls back to 697.
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
@@ -356,6 +360,426 @@ fn rule_catalog_0023_magic_targets_exclude_enemy_stealth() {
     assert!(
         !surface.contains(&stealth_id),
         "enemy active Stealth must never be offered"
+    );
+    assert_exact_replay(&session);
+}
+
+fn region_supplemental_manifest(seed: u32) -> String {
+    finish_manifest(json!({
+        "authority": {
+            "contentHash": identity_hash(&json!({ "fixture": "magic-region-target-supplemental" }))
+                .expect("synthetic authority identity"),
+            "mode": "synthetic",
+            "revisionId": "synthetic-magic-region-target-supplemental-v1",
+        },
+        "cards": {
+            "north-avatar": avatar(),
+            "north-bury": bury(),
+            "north-magic": zap(),
+            "north-minion": minion(json!({ "burrowing": true })),
+            "north-site": site(),
+            "south-avatar": avatar(),
+            "south-plain": minion(json!({})),
+            "south-site": site(),
+        },
+        "decks": {
+            "north": {
+                "atlas": vec!["north-site"; 24],
+                "avatar": "north-avatar",
+                "spellbook": std::iter::repeat_n("north-magic", 8)
+                    .chain(std::iter::repeat_n("north-bury", 4))
+                    .chain(std::iter::repeat_n("north-minion", 4))
+                    .collect::<Vec<_>>(),
+            },
+            "south": {
+                "atlas": vec!["south-site"; 24],
+                "avatar": "south-avatar",
+                "spellbook": vec!["south-plain"; 8],
+            },
+        },
+        "engineVersion": "sorcery-core-v1",
+        "firstSeat": "north",
+        "schemaVersion": 1,
+        "seed": seed,
+    }))
+}
+
+fn unit<'a>(snapshot: &'a Value, instance_id: &str) -> &'a Value {
+    realm_unit(snapshot, instance_id).expect("expected realm unit")
+}
+
+fn magic_spells_in_hand(snapshot: &Value) -> usize {
+    snapshot["players"]["north"]["hand"]["spellbook"]
+        .as_array()
+        .map(|hand| {
+            hand.iter()
+                .filter(|card| card["cardId"] == "north-magic")
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+fn opening_south_plains(encoded: &str) -> usize {
+    Session::new(encoded)
+        .ok()
+        .and_then(|preview| {
+            state(&preview)["players"]["south"]["hand"]["spellbook"]
+                .as_array()
+                .map(|hand| {
+                    hand.iter()
+                        .filter(|card| card["cardId"] == "south-plain")
+                        .count()
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn try_accept_where(
+    session: &mut Session,
+    predicate: impl Fn(&Value) -> bool,
+) -> Option<(Value, Receipt)> {
+    let action = session
+        .legal_actions()
+        .ok()?
+        .into_iter()
+        .find(|action| predicate(&action.descriptor))?;
+    let descriptor = action.descriptor.clone();
+    let StepResult::Accepted(receipt) = session
+        .step(ActionRequest {
+            action_id: action.action_id.to_string(),
+            seat: action.seat,
+            state_version: action.state_version,
+        })
+        .ok()?
+    else {
+        return None;
+    };
+    Some((descriptor, receipt))
+}
+
+fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {
+    session
+        .legal_actions()
+        .ok()
+        .is_some_and(|actions| actions.iter().any(|action| predicate(&action.descriptor)))
+}
+
+fn decline_attack_if_needed(session: &mut Session) {
+    while offers(session, |descriptor| descriptor["kind"] == "decline-attack") {
+        accept_where(session, |descriptor| descriptor["kind"] == "decline-attack");
+    }
+}
+
+fn end_turn_if_offered(session: &mut Session) {
+    decline_attack_if_needed(session);
+    accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
+}
+
+fn try_draw_any(session: &mut Session) -> Option<()> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw"
+            && (descriptor["zone"] == "atlas" || descriptor["zone"] == "spellbook")
+    })
+    .map(|_| ())
+}
+
+fn try_summon_north_minion(session: &mut Session) -> Option<String> {
+    let (summoned, _) = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "north-minion"
+            && descriptor["region"].is_null()
+    })?;
+    summoned["cardInstanceId"].as_str().map(str::to_owned)
+}
+
+fn try_south_plays_c1_and_summons(session: &mut Session, count: usize) -> Option<Vec<String>> {
+    end_turn_if_offered(session);
+    try_draw_any(session)?;
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C1"
+    })?;
+    let mut enemy_ids = Vec::new();
+    for _ in 0..count {
+        let (summoned, _) = try_accept_where(session, |descriptor| {
+            descriptor["kind"] == "summon-minion"
+                && descriptor["cardId"] == "south-plain"
+                && descriptor["region"].is_null()
+        })?;
+        enemy_ids.push(summoned["cardInstanceId"].as_str()?.to_owned());
+    }
+    end_turn_if_offered(session);
+    try_draw_any(session)?;
+    Some(enemy_ids)
+}
+
+fn try_bury(session: &mut Session, instance_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-bury"
+            && descriptor["target"]["instanceId"] == instance_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn try_zap(session: &mut Session, instance_id: &str) -> Option<Receipt> {
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "cast-magic"
+            && descriptor["cardId"] == "north-magic"
+            && descriptor["target"]["instanceId"] == instance_id
+    })
+    .map(|(_, receipt)| receipt)
+}
+
+fn try_pass_turn_to_north_spellbook(session: &mut Session) -> Option<()> {
+    end_turn_if_offered(session);
+    try_draw_any(session)?;
+    let _ = try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cardId"] == "south-site"
+    });
+    decline_attack_if_needed(session);
+    end_turn_if_offered(session);
+    try_accept_where(session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    Some(())
+}
+
+fn try_opening_bury(encoded: &str, south_count: usize) -> Option<(Session, String, Vec<String>)> {
+    if !opening_has_all(encoded, &["north-bury", "north-magic", "north-minion"])
+        || opening_south_plains(encoded) < south_count
+    {
+        return None;
+    }
+    let mut session = opening_main(encoded);
+    let friendly_id = try_summon_north_minion(&mut session)?;
+    let surface_ids = try_south_plays_c1_and_summons(&mut session, south_count)?;
+    let buried = try_bury(&mut session, &friendly_id)?;
+    if !event_types(&buried).contains(&"minion-burrowed") {
+        return None;
+    }
+    if unit(&state(&session), &friendly_id)["region"] != "underground" {
+        return None;
+    }
+    let offered = magic_target_ids(&session);
+    if offered.contains(&friendly_id) || surface_ids.iter().any(|id| !offered.contains(id)) {
+        return None;
+    }
+    Some((session, friendly_id, surface_ids))
+}
+
+fn seed_for_opening_bury(start: u32, south_count: usize) -> String {
+    (start..start + 8192)
+        .chain(697..697 + 8192)
+        .map(region_supplemental_manifest)
+        .find(|candidate| try_opening_bury(candidate, south_count).is_some())
+        .expect("bounded seed with caster-region bury setup")
+}
+
+fn try_empty_repeat_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let (mut session, friendly_id, surface_ids) = try_opening_bury(encoded, 1)?;
+    if magic_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    let surface_id = surface_ids[0].clone();
+    let zapped = try_zap(&mut session, &surface_id)?;
+    if !event_types(&zapped).contains(&"minion-died") {
+        return None;
+    }
+    if realm_unit(&state(&session), &surface_id).is_some() {
+        return None;
+    }
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    let offered = magic_target_ids(&session);
+    (magic_spells_in_hand(&state(&session)) >= 1 && !offered.contains(&friendly_id)).then_some((
+        session,
+        friendly_id,
+        surface_id,
+    ))
+}
+
+fn seed_for_empty_repeat(start: u32) -> String {
+    (start..start + 8192)
+        .chain(697..697 + 8192)
+        .map(region_supplemental_manifest)
+        .find(|candidate| try_empty_repeat_prefix(candidate).is_some())
+        .expect("bounded seed with caster-region empty-repeat setup")
+}
+
+fn try_enemy_arrival_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let (mut session, friendly_id, _) = try_opening_bury(encoded, 1)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if magic_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_draw_any(&mut session)?;
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "play-site" && descriptor["cell"] == "C2"
+    })?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-plain"
+            && descriptor["cell"] == "C2"
+            && descriptor["region"].is_null()
+    })?;
+    let visitor_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let offered = magic_target_ids(&session);
+    (offered.contains(&visitor_id) && !offered.contains(&friendly_id)).then_some((
+        session,
+        visitor_id,
+        friendly_id,
+    ))
+}
+
+fn seed_for_enemy_arrival(start: u32) -> String {
+    (start..start + 8192)
+        .chain(697..697 + 8192)
+        .map(region_supplemental_manifest)
+        .find(|candidate| {
+            opening_south_plains(candidate) >= 2 && try_enemy_arrival_prefix(candidate).is_some()
+        })
+        .expect("bounded seed with caster-region enemy-arrival setup")
+}
+
+fn try_new_summon_prefix(encoded: &str) -> Option<(Session, String, String)> {
+    let (mut session, friendly_id, _) = try_opening_bury(encoded, 1)?;
+    try_pass_turn_to_north_spellbook(&mut session)?;
+    if magic_spells_in_hand(&state(&session)) < 1 {
+        return None;
+    }
+    end_turn_if_offered(&mut session);
+    try_draw_any(&mut session)?;
+    let (summoned, _) = try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "summon-minion"
+            && descriptor["cardId"] == "south-plain"
+            && descriptor["cell"] == "C1"
+            && descriptor["region"].is_null()
+    })?;
+    let new_id = summoned["cardInstanceId"].as_str()?.to_owned();
+    end_turn_if_offered(&mut session);
+    try_accept_where(&mut session, |descriptor| {
+        descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
+    })?;
+    let offered = magic_target_ids(&session);
+    (offered.contains(&new_id) && !offered.contains(&friendly_id)).then_some((
+        session,
+        new_id,
+        friendly_id,
+    ))
+}
+
+fn seed_for_new_summon(start: u32) -> String {
+    (start..start + 8192)
+        .chain(697..697 + 8192)
+        .map(region_supplemental_manifest)
+        .find(|candidate| {
+            opening_south_plains(candidate) >= 2 && try_new_summon_prefix(candidate).is_some()
+        })
+        .expect("bounded seed with caster-region new-summon setup")
+}
+
+#[test]
+fn rule_catalog_2453_burrowed_ally_stays_unoffered_after_turns_pass() {
+    let encoded = seed_for_opening_bury(2453, 1);
+    let (mut session, friendly_id, surface_ids) =
+        try_opening_bury(&encoded, 1).expect("caster-region persistence prefix");
+    let surface_id = surface_ids[0].clone();
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    try_pass_turn_to_north_spellbook(&mut session).expect("turn cycle after bury");
+    let offered = magic_target_ids(&session);
+    assert!(!offered.contains(&friendly_id));
+    assert!(offered.contains(&surface_id));
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    assert_eq!(unit(&state(&session), &friendly_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2454_second_zap_still_omits_the_burrowed_ally() {
+    let encoded = seed_for_empty_repeat(2454);
+    let (session, friendly_id, surface_id) =
+        try_empty_repeat_prefix(&encoded).expect("caster-region empty-repeat prefix");
+    assert!(realm_unit(&state(&session), &surface_id).is_none());
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    assert!(magic_spells_in_hand(&state(&session)) >= 1);
+    assert!(!magic_target_ids(&session).contains(&friendly_id));
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2455_zap_offers_a_newly_arrived_surface_minion_after_enemy_site_placement() {
+    let encoded = seed_for_enemy_arrival(2455);
+    let (mut session, visitor_id, friendly_id) =
+        try_enemy_arrival_prefix(&encoded).expect("caster-region enemy-arrival prefix");
+    let receipt = try_zap(&mut session, &visitor_id).expect("zap newly arrived surface minion");
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &visitor_id).is_none());
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    assert_eq!(unit(&state(&session), &friendly_id)["location"], "C4");
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2456_zap_offers_every_surface_minion_not_underground() {
+    let encoded = seed_for_opening_bury(2456, 2);
+    let (session, friendly_id, surface_ids) =
+        try_opening_bury(&encoded, 2).expect("caster-region multi-minion prefix");
+    let offered = magic_target_ids(&session);
+    assert!(offered.contains(&surface_ids[0]));
+    assert!(offered.contains(&surface_ids[1]));
+    assert!(!offered.contains(&friendly_id));
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2457_zap_leaves_a_burrowed_ally_untouched() {
+    let encoded = seed_for_opening_bury(2457, 1);
+    let (mut session, friendly_id, surface_ids) =
+        try_opening_bury(&encoded, 1).expect("caster-region underground prefix");
+    let surface_id = surface_ids[0].clone();
+    let receipt = try_zap(&mut session, &surface_id).expect("zap surface enemy");
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &surface_id).is_none());
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
+    );
+    assert_eq!(unit(&state(&session), &friendly_id)["location"], "C4");
+    assert!(realm_unit(&state(&session), &friendly_id).is_some());
+    assert_exact_replay(&session);
+}
+
+#[test]
+fn rule_catalog_2458_zap_offers_a_newly_summoned_surface_minion() {
+    let encoded = seed_for_new_summon(2458);
+    let (mut session, new_id, friendly_id) =
+        try_new_summon_prefix(&encoded).expect("caster-region new-summon prefix");
+    let receipt = try_zap(&mut session, &new_id).expect("zap newly summoned surface minion");
+    assert!(event_types(&receipt).contains(&"minion-died"));
+    assert!(realm_unit(&state(&session), &new_id).is_none());
+    assert_eq!(
+        unit(&state(&session), &friendly_id)["region"],
+        "underground"
     );
     assert_exact_replay(&session);
 }

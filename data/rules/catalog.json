@@ -51722,8 +51722,209 @@
         "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
         "testName": "rule_catalog_2390_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
       }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2451",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-one game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2451_two_hundred_forty_one_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2452",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty-two game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2452_two_hundred_forty_two_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2453",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-target-unit Magic still omits a burrowed ally after later turns pass, while an exposed surface enemy stays reachable. Distinct from 0697, which never waits a turn, and from 0698, which kills an underground burrower with Disable.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2453_burrowed_ally_stays_unoffered_after_turns_pass"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2454",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a surface caster burrows its ally and damages the only exposed surface enemy, a second damage-target-unit cast still does not offer that underground ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-burrowed",
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2454_second_zap_still_omits_the_burrowed_ally"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2455",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a surface caster burrows its ally, a later damage-target-unit cast offers a newly arrived surface minion after enemy site placement and still omits the underground ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "play-site",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2455_zap_offers_a_newly_arrived_surface_minion_after_enemy_site_placement"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2456",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-target-unit Magic offers every exposed minion in the caster region and does not offer a burrowed ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2456_zap_offers_every_surface_minion_not_underground"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2457",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "Damage-target-unit Magic damages a surface enemy and leaves a burrowed ally underground and in play. Distinct from 0698, which kills an underground Burrowing minion with Freeze Disable.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2457_zap_leaves_a_burrowed_ally_untouched"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2458",
+      "requirementIds": [
+        "RULE-04",
+        "RULE-05"
+      ],
+      "plainLanguage": "After a surface caster burrows its ally, a later damage-target-unit cast offers a newly summoned surface minion and still omits the underground ally.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [
+        "region",
+        "burrowTargetMinionOrArtifact"
+      ],
+      "actionHints": [
+        "cast-magic",
+        "summon-minion"
+      ],
+      "eventHints": [
+        "minion-died"
+      ],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/magic_region_target_rules.rs",
+        "testName": "rule_catalog_2458_zap_offers_a_newly_summoned_surface_minion"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2459",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred thirty-nine game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2459_two_hundred_thirty_nine_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
+    },
+    {
+      "ruleId": "RULE-CATALOG-2460",
+      "requirementIds": [
+        "RULE-04"
+      ],
+      "plainLanguage": "A two hundred forty game synthetic batch with passing TEST-04 gates still classifies as unranked unverified authority.",
+      "implementationStatus": "rust-supported",
+      "genericFactHints": [],
+      "actionHints": [],
+      "eventHints": [],
+      "scenarioProof": {
+        "file": "crates/sorcery-engine/tests/eligibility_rules.rs",
+        "testName": "rule_catalog_2460_two_hundred_forty_game_synthetic_batch_stays_unranked_unverified_authority"
+      }
     }
   ],
-  "rustSupportedCount": 2390,
+  "rustSupportedCount": 2400,
   "typescriptSupportedCount": 0
 }
