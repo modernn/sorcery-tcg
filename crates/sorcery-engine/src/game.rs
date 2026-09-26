@@ -47,7 +47,7 @@ mod trigger_tests;
 mod triggers;
 use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use choices::PendingAbilityChoice;
-use damage_order::{PendingDamageOrder, RangedDamage};
+use damage_order::{FightDamage, PendingDamageOrder, RangedDamage};
 use effect::{AbilityEntry, EffectFrame, RealmReference};
 use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
@@ -2208,7 +2208,7 @@ impl Game {
             "viewer": viewer,
         });
         if let Some(pending) = &self.position.pending_damage_order {
-            view["pendingDamageOrder"] = pending.value();
+            view["pendingDamageOrder"] = pending.value(self);
         }
         Ok(view)
     }
@@ -12679,16 +12679,35 @@ impl Game {
         Ok(())
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one strike window keeps simultaneous damage and event order explicit"
-    )]
     fn resolve_fight_window(
         &mut self,
         pending: &PendingCombat,
         attacker_strikes: bool,
         striking_combatant_ids: &[IdentityHash],
         continuation: Option<ResolutionContinuation>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<bool, GameError> {
+        self.resolve_fight_window_with_damage(
+            pending,
+            attacker_strikes,
+            striking_combatant_ids,
+            continuation,
+            None,
+            outcomes,
+        )
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one strike window keeps simultaneous damage and event order explicit"
+    )]
+    fn resolve_fight_window_with_damage(
+        &mut self,
+        pending: &PendingCombat,
+        attacker_strikes: bool,
+        striking_combatant_ids: &[IdentityHash],
+        continuation: Option<ResolutionContinuation>,
+        ordered_damage: Option<&[u16]>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<bool, GameError> {
         let attacker_id = pending.attacker_instance_id.clone();
@@ -12749,6 +12768,45 @@ impl Game {
                 })
             })
             .collect::<Result<Vec<_>, GameError>>()?;
+        if ordered_damage.is_none() {
+            let mixed_return = return_sources
+                .iter()
+                .any(|(_, _, strike)| strike.additive_bonus > 0)
+                && self.nearby_unit_strike_multiplier(
+                    attacker_kind,
+                    attacking_seat,
+                    &attacker_id,
+                )? > 1;
+            let mixed_attack = attacker_owes_allocation
+                && attacker.additive_bonus > 0
+                && pending.combatants.iter().try_fold(false, |mixed, target| {
+                    let kind = match target {
+                        UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                        UnitTarget::Minion { .. } => UnitKind::Minion,
+                    };
+                    self.nearby_unit_strike_multiplier(kind, target.seat(), target.instance_id())
+                        .map(|multiplier| mixed || multiplier > 1)
+                })?;
+            if mixed_attack && pending.combatants.len() > 1 {
+                return Err(GameError::UnsupportedMechanic("mixed strike modifiers across split allocations require authoritative allocation timing".to_owned()));
+            }
+            if mixed_return || mixed_attack {
+                self.begin_fight_damage_order(
+                    FightDamage {
+                        pending: pending.clone(),
+                        attacker_strikes,
+                        striking_combatant_ids: striking_combatant_ids.to_vec(),
+                        continuation,
+                    },
+                    &attacker,
+                    attacker_owes_allocation,
+                    &return_sources,
+                    outcomes,
+                )?;
+                // The queue owns any first-strike continuation, even if it auto-resolved.
+                return Ok(true);
+            }
+        }
         let combatant_statuses = pending
             .combatants
             .iter()
@@ -12773,15 +12831,21 @@ impl Game {
         }
         let return_damage_sources = return_sources
             .iter()
-            .map(|(_, _, strike)| {
-                Ok((
+            .enumerate()
+            .map(|(index, (_, _, strike))| {
+                let amount = if let Some(amounts) = ordered_damage {
+                    *amounts.get(index).ok_or(GameError::IllegalAction)?
+                } else {
                     self.nearby_unit_strike_amount(
                         strike.amount,
                         strike.additive_bonus,
                         attacker_kind,
                         attacking_seat,
                         &attacker_id,
-                    )?,
+                    )?
+                };
+                Ok((
+                    amount,
                     UnitDamageSource {
                         current_power: strike.current_power,
                         lethal: strike.lethal,
@@ -12805,7 +12869,12 @@ impl Game {
         };
         let mut combatant_results = Vec::with_capacity(pending.combatants.len());
         if attacker_owes_allocation {
-            for (target, minion_status) in pending.combatants.iter().zip(combatant_statuses) {
+            for (index, (target, minion_status)) in pending
+                .combatants
+                .iter()
+                .zip(combatant_statuses)
+                .enumerate()
+            {
                 let allocation = pending
                     .allocations
                     .iter()
@@ -12819,13 +12888,19 @@ impl Game {
                     kind,
                     target.seat(),
                     target.instance_id(),
-                    self.nearby_unit_strike_amount(
-                        allocation.amount,
-                        attacker.additive_bonus,
-                        kind,
-                        target.seat(),
-                        target.instance_id(),
-                    )?,
+                    if let Some(amounts) = ordered_damage {
+                        *amounts
+                            .get(return_sources.len() + index)
+                            .ok_or(GameError::IllegalAction)?
+                    } else {
+                        self.nearby_unit_strike_amount(
+                            allocation.amount,
+                            attacker.additive_bonus,
+                            kind,
+                            target.seat(),
+                            target.instance_id(),
+                        )?
+                    },
                     UnitDamageSource {
                         current_power: attacker.current_power,
                         lethal: attacker.lethal,
@@ -24263,7 +24338,7 @@ impl Game {
         if let Value::Object(object) = &mut value {
             self.insert_pending_genesis_state(object);
             if let Some(pending) = &self.position.pending_damage_order {
-                object.insert("pendingDamageOrder".to_owned(), pending.value());
+                object.insert("pendingDamageOrder".to_owned(), pending.value(self));
             }
             if let Some(pending) = &self.position.pending_deathrites {
                 object.insert(

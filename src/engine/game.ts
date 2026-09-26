@@ -866,29 +866,46 @@ type PendingCombat = Readonly<{
   targetRemoved: boolean;
 }>;
 
+type StrikeStats = Readonly<{
+  additiveBonus: number;
+  amount: number;
+  consumedArtifacts: readonly Readonly<{ instanceId: StateHash; realmEntry: number }>[];
+  currentPower: number;
+  lanceCount: number;
+  lethal: boolean;
+}>;
+
+type PendingDamageContinuation = Readonly<{
+  kind: 'ranged-strike';
+  returnPhase: GamePhase;
+  seat: GameSeat;
+  shooterInstanceId: StateHash;
+  stepAfter: boolean;
+  strike: StrikeStats;
+  target: GameUnitRef;
+}> | Readonly<{
+  kind: 'fight-window';
+  pending: PendingCombat;
+  attackerStrikes: boolean;
+  strikingCombatantIds: readonly StateHash[];
+  continuation: JsonValue | null;
+}>;
+
 export type PendingDamageOrder = Readonly<{
   activeSeat: GameSeat;
   amount: number;
-  continuation: Readonly<{
-    kind: 'ranged-strike';
-    returnPhase: GamePhase;
-    seat: GameSeat;
-    shooterInstanceId: StateHash;
-    stepAfter: boolean;
-    strike: Readonly<{
-      additiveBonus: number;
-      amount: number;
-      consumedArtifacts: readonly Readonly<{ instanceId: StateHash; realmEntry: number }>[];
-      currentPower: number;
-      lanceCount: number;
-      lethal: boolean;
-    }>;
+  currentDamageIndex: number;
+  damage: readonly Readonly<{
+    amount: number;
+    striker: GameUnitRef;
     target: GameUnitRef;
-  }>;
+  }>[];
+  continuation: PendingDamageContinuation;
   remaining: readonly Readonly<{
     amount: number;
     choosingSeat: GameSeat;
     controller: GameSeat | null;
+    damageIndex: number;
     operation: 'add' | 'double';
     owner: GameSeat;
     source: Readonly<{ instanceId: StateHash; realmEntry: number }>;

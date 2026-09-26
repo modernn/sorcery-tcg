@@ -14,7 +14,13 @@ fn act(session: &mut Session, predicate: impl Fn(&Value) -> bool) -> Receipt {
         .expect("actions")
         .into_iter()
         .find(|action| predicate(&action.descriptor))
-        .expect("issued action");
+        .unwrap_or_else(|| {
+            let state = session.replay_value().expect("state");
+            panic!(
+                "issued action phase={} seat={}",
+                state["state"]["phase"], state["state"]["decisionSeat"]
+            )
+        });
     let StepResult::Accepted(receipt) = session
         .step(ActionRequest {
             action_id: action.action_id.to_string(),
@@ -119,6 +125,80 @@ fn pending(first: &str, bonuses: usize, step_after: bool) -> Session {
         );
     }
     assert_eq!(state["state"]["players"][enemy]["avatar"]["life"], 20);
+    session
+}
+
+fn fight_pending(first: &str) -> Session {
+    let mut value: Value = serde_json::from_str(&manifest(first, 1, false)).unwrap();
+    value["cards"]["shooter"]["ranged"] = json!(false);
+    value["cards"]["shooter"]["entersCarrying"] = json!(["bonus", "double"]);
+    value.as_object_mut().unwrap().remove("manifestId");
+    value["manifestId"] = json!(identity_hash(&value).unwrap());
+    let encoded = canonical_json(&value).unwrap();
+    let mut session = Session::new(&encoded).expect("manifest");
+    for _ in 0..2 {
+        act(&mut session, |a| {
+            a["kind"] == "mulligan"
+                && a["atlasOrder"] == json!([])
+                && a["spellbookOrder"] == json!([])
+        });
+    }
+    let cells = if first == "north" {
+        ["C4", "C3", "C2"]
+    } else {
+        ["C1", "C2", "C3"]
+    };
+    let enemy_home = if first == "north" { "C1" } else { "C4" };
+    let enemy = if first == "north" { "south" } else { "north" };
+    for (index, cell) in cells.into_iter().enumerate() {
+        if index > 0 {
+            act(&mut session, |a| {
+                a["kind"] == "draw" && a["zone"] == "atlas"
+            });
+        }
+        act(&mut session, |a| {
+            a["kind"] == "play-site" && a["cell"] == cell
+        });
+        if index == 2 {
+            act(&mut session, |a| {
+                a["kind"] == "summon-minion" && a["cardId"] == "shooter" && a["cell"] == cell
+            });
+        }
+        kind(&mut session, "end-turn");
+        act(&mut session, |a| {
+            a["kind"] == "draw" && a["zone"] == "atlas"
+        });
+        if index == 0 {
+            act(&mut session, |a| {
+                a["kind"] == "play-site" && a["cell"] == enemy_home
+            });
+        }
+        kind(&mut session, "end-turn");
+    }
+    act(&mut session, |a| {
+        a["kind"] == "draw" && a["zone"] == "atlas"
+    });
+    act(&mut session, |a| {
+        a["kind"] == "move-and-attack" && a["to"]["cell"] == enemy_home
+    });
+    while session.replay_value().unwrap()["state"]["phase"] == "movement" {
+        act(&mut session, |a| a["kind"] == "continue-basic-movement");
+    }
+    act(&mut session, |a| {
+        a["kind"] == "declare-attack"
+            && a["target"]["kind"] == "avatar"
+            && a["target"]["seat"] == enemy
+    });
+    act(&mut session, |a| {
+        a["kind"] == "close-defend" && a["originalTargetParticipates"] == true
+    });
+    if session.replay_value().unwrap()["state"]["phase"] == "intercept" {
+        act(&mut session, |a| a["kind"] == "close-intercept");
+    }
+    assert_eq!(
+        session.replay_value().unwrap()["state"]["phase"],
+        "damage-order"
+    );
     session
 }
 
@@ -239,4 +319,95 @@ fn intermediate_order_checkpoint_retains_sources_and_resumes_ranged_step() {
         a["kind"] == "resolve-ranged-step" && a["choice"] == "decline"
     });
     assert!(resumed.verify_replay().unwrap());
+}
+
+fn finish_fight_damage_order(session: &mut Session) {
+    while session.replay_value().unwrap()["state"]["phase"] == "damage-order" {
+        let index = session
+            .legal_actions()
+            .unwrap()
+            .into_iter()
+            .find(|action| action.descriptor["kind"] == "choose-damage-modifier")
+            .and_then(|action| action.descriptor["modifierIndex"].as_u64())
+            .expect("issued damage modifier choice");
+        act(session, |a| {
+            a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+        });
+    }
+}
+
+#[test]
+fn fight_damage_order_checkpoint_replays_all_packets_for_both_seats() {
+    for first in ["north", "south"] {
+        let original = fight_pending(first);
+        let state = original.replay_value().unwrap();
+        assert!(
+            state["state"]["pendingDamageOrder"]["damage"]
+                .as_array()
+                .unwrap()
+                .len()
+                >= 2
+        );
+        let parallel = std::thread::scope(|scope| {
+            (0..4)
+                .map(|_| {
+                    let mut branch = original.clone();
+                    scope.spawn(move || {
+                        finish_fight_damage_order(&mut branch);
+                        assert!(branch.verify_replay().unwrap());
+                        branch.replay_value().unwrap()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(parallel.windows(2).all(|values| values[0] == values[1]));
+        let checkpoint = create_game_checkpoint(&original).unwrap();
+        let mut resumed = resume_game_checkpoint(
+            &parse_game_checkpoint(&serialize_game_checkpoint(&checkpoint).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let mut branch = original.clone();
+        while branch.replay_value().unwrap()["state"]["phase"] == "damage-order" {
+            let index = branch
+                .legal_actions()
+                .unwrap()
+                .into_iter()
+                .find(|action| action.descriptor["kind"] == "choose-damage-modifier")
+                .and_then(|action| action.descriptor["modifierIndex"].as_u64())
+                .expect("issued damage modifier choice");
+            let receipt = act(&mut branch, |a| {
+                a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+            });
+            let resumed_receipt = act(&mut resumed, |a| {
+                a["kind"] == "choose-damage-modifier" && a["modifierIndex"] == index
+            });
+            assert_eq!(receipt, resumed_receipt);
+        }
+        assert_eq!(
+            resumed.replay_value().unwrap(),
+            branch.replay_value().unwrap()
+        );
+        assert!(resumed.verify_replay().unwrap());
+        let completed = resumed.replay_value().unwrap();
+        assert!(completed["state"]["pendingDamageOrder"].is_null());
+        assert_eq!(
+            completed["state"]["players"][if first == "north" { "south" } else { "north" }]["avatar"]
+                ["life"],
+            14
+        );
+        let units = completed["state"]["realm"]["units"].as_array().unwrap();
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0]["damage"], 2);
+        let final_checkpoint = create_game_checkpoint(&resumed).unwrap();
+        assert_eq!(
+            resume_game_checkpoint(&final_checkpoint)
+                .unwrap()
+                .replay_value()
+                .unwrap(),
+            resumed.replay_value().unwrap()
+        );
+    }
 }

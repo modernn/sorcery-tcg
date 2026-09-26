@@ -289,3 +289,293 @@ fn legacy_counter_bonuses_remain_independently_orderable() {
     assert_eq!(game.position.units[0].carried_lance_count, 0);
     assert!(game.position.pending_damage_order.is_none());
 }
+
+fn fight_setup() -> (Game, IdentityHash, IdentityHash) {
+    let (mut game, attacker, defender) = setup();
+    game.position.units[0].location = Cell::parse("C4").unwrap();
+    let mut bonus = game.position.artifacts[0].clone();
+    bonus.card.instance_id = id("defender-bonus");
+    bonus.card.owner = Seat::South;
+    bonus.placement = ArtifactPlacement::Carried {
+        bearer: UnitTarget::Minion {
+            instance_id: defender.clone(),
+            seat: Seat::South,
+        },
+        cell: None,
+    };
+    let mut double = game.position.artifacts[1].clone();
+    double.card.instance_id = id("defender-double");
+    double.card.owner = Seat::South;
+    game.position.artifacts.extend([bonus, double]);
+    game.position.pending_combat = Some(super::PendingCombat {
+        allocations: vec![super::StrikeAllocation {
+            amount: 3,
+            target_instance_id: defender.clone(),
+        }],
+        attacker_instance_id: attacker.clone(),
+        attacker_kind: super::UnitKind::Minion,
+        attacking_seat: Seat::North,
+        cell: Cell::parse("C4").unwrap(),
+        combatants: vec![UnitTarget::Minion {
+            instance_id: defender.clone(),
+            seat: Seat::South,
+        }],
+        defenders: vec![],
+        original_target: None,
+        region: Region::Surface,
+        target_removed: false,
+    });
+    (game, attacker, defender)
+}
+
+fn choose_operation(game: &mut Game, operation: &str) -> Vec<(String, serde_json::Value)> {
+    let pending = game
+        .position
+        .pending_damage_order
+        .as_ref()
+        .unwrap()
+        .value(game);
+    let action = game
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            let super::ActionDescriptor::ChooseDamageModifier { modifier_index } =
+                action.descriptor
+            else {
+                return false;
+            };
+            pending["remaining"][usize::try_from(modifier_index).unwrap()]["operation"] == operation
+        })
+        .expect("issued modifier choice");
+    game.apply_action_recorded(&action)
+        .expect("apply modifier")
+        .0
+}
+
+#[test]
+fn simultaneous_fight_holds_damage_and_consumption_until_both_players_finish_ordering() {
+    let (mut game, attacker, defender) = fight_setup();
+    game.resolve_pending_fight(&mut super::OutcomeLog::Ignore)
+        .expect("fight");
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    assert_eq!(game.position.decision_seat, Seat::North);
+    choose_operation(&mut game, "add");
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    assert_eq!(game.position.decision_seat, Seat::South);
+    assert!(game.position.units.iter().all(|unit| unit.damage == 0));
+    assert_eq!(game.position.artifacts.len(), 4);
+    let events = choose_operation(&mut game, "add");
+    assert!(game.position.pending_damage_order.is_none());
+    assert!(game.position.pending_combat.is_none());
+    // Both lethal packets were determined with both doubling sources still in play.
+    assert!(
+        !game
+            .position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == attacker || unit.card.instance_id == defender)
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "artifact-consumed-after-strike")
+            .count(),
+        2
+    );
+    assert!(
+        game.position.players[0]
+            .cemetery
+            .iter()
+            .any(|card| card.instance_id == attacker)
+    );
+    assert!(
+        game.position.players[1]
+            .cemetery
+            .iter()
+            .any(|card| card.instance_id == defender)
+    );
+}
+
+#[test]
+fn fight_ward_waits_for_all_replacements_and_still_consumes_both_bonuses() {
+    let (mut game, attacker, _) = fight_setup();
+    game.position.units[0].warded = true;
+    game.resolve_pending_fight(&mut super::OutcomeLog::Ignore)
+        .expect("fight");
+    choose_operation(&mut game, "add");
+    assert!(game.position.units[0].warded);
+    let events = choose_operation(&mut game, "double");
+    let survivor = game
+        .position
+        .units
+        .iter()
+        .find(|unit| unit.card.instance_id == attacker)
+        .unwrap();
+    assert_eq!(survivor.damage, 0);
+    assert!(!survivor.warded);
+    let last_modifier = events
+        .iter()
+        .rposition(|(kind, _)| kind == "damage-modifier-applied")
+        .unwrap();
+    let ward = events
+        .iter()
+        .position(|(kind, _)| kind == "ward-broken")
+        .unwrap();
+    let consumed = events
+        .iter()
+        .position(|(kind, _)| kind == "artifact-consumed-after-strike")
+        .unwrap();
+    assert!(last_modifier < ward && ward < consumed);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "artifact-consumed-after-strike")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn first_strike_resumes_only_surviving_retaliators_after_ordered_damage() {
+    for defender_warded in [false, true] {
+        let (mut game, attacker, defender) = fight_setup();
+        game.position.units[0].temporary_modifiers.grant(
+            super::TemporaryModifierKind::FirstStrike,
+            1,
+            id("first-strike"),
+        );
+        game.position.units[1].warded = defender_warded;
+        game.resolve_pending_fight(&mut super::OutcomeLog::Ignore)
+            .expect("first strike");
+        assert_eq!(game.position.phase, Phase::DamageOrder);
+        assert_eq!(game.position.decision_seat, Seat::North);
+        choose_operation(&mut game, "add");
+        if defender_warded {
+            assert_eq!(game.position.phase, Phase::DamageOrder);
+            assert_eq!(game.position.decision_seat, Seat::South);
+            assert!(game.position.units.iter().all(|unit| unit.damage == 0));
+            assert!(!game.position.units[1].warded);
+            choose_operation(&mut game, "add");
+            assert!(
+                !game
+                    .position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == attacker)
+            );
+            assert!(
+                game.position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == defender)
+            );
+        } else {
+            assert!(game.position.pending_damage_order.is_none());
+            assert!(
+                !game
+                    .position
+                    .units
+                    .iter()
+                    .any(|unit| unit.card.instance_id == defender)
+            );
+            assert_eq!(
+                game.position
+                    .units
+                    .iter()
+                    .find(|unit| unit.card.instance_id == attacker)
+                    .unwrap()
+                    .damage,
+                0
+            );
+        }
+        assert!(game.position.pending_combat.is_none());
+    }
+}
+
+#[test]
+fn several_retaliations_share_one_prevention_window_after_all_choices() {
+    let (mut game, attacker, _) = fight_setup();
+    game.position.artifacts.remove(0);
+    game.position.units[0].warded = true;
+    let mut defender = game.position.units[1].clone();
+    defender.card.instance_id = id("second-defender");
+    let target = UnitTarget::Minion {
+        instance_id: defender.card.instance_id.clone(),
+        seat: Seat::South,
+    };
+    let mut bonus = game.position.artifacts[1].clone();
+    bonus.card.instance_id = id("second-defender-bonus");
+    bonus.placement = ArtifactPlacement::Carried {
+        bearer: target.clone(),
+        cell: None,
+    };
+    game.position.artifacts.push(bonus);
+    game.position.units.push(defender);
+    let pending = game.position.pending_combat.as_mut().unwrap();
+    pending.allocations[0].amount = 1;
+    pending.allocations.push(super::StrikeAllocation {
+        amount: 1,
+        target_instance_id: target.instance_id().clone(),
+    });
+    pending.combatants.push(target);
+    game.resolve_pending_fight(&mut super::OutcomeLog::Ignore)
+        .expect("several return strikes");
+    assert_eq!(game.position.decision_seat, Seat::South);
+    choose_operation(&mut game, "add");
+    assert_eq!(game.position.phase, Phase::DamageOrder);
+    assert!(game.position.units.iter().all(|unit| unit.damage == 0));
+    assert!(game.position.units[0].warded);
+    let events = choose_operation(&mut game, "add");
+    assert!(game.position.pending_damage_order.is_none());
+    assert_eq!(game.position.units.len(), 3);
+    for unit in &game.position.units {
+        assert_eq!(
+            unit.damage,
+            if unit.card.instance_id == attacker {
+                0
+            } else {
+                4
+            }
+        );
+    }
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "ward-broken")
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(kind, _)| kind == "artifact-consumed-after-strike")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn mixed_attacker_bonus_split_stays_explicitly_unsupported_without_mutation() {
+    let (mut game, _, _) = fight_setup();
+    let mut defender = game.position.units[1].clone();
+    defender.card.instance_id = id("split-defender");
+    let target = UnitTarget::Minion {
+        instance_id: defender.card.instance_id.clone(),
+        seat: Seat::South,
+    };
+    game.position.units.push(defender);
+    let pending = game.position.pending_combat.as_mut().unwrap();
+    pending.allocations[0].amount = 2;
+    pending.allocations.push(super::StrikeAllocation {
+        amount: 1,
+        target_instance_id: target.instance_id().clone(),
+    });
+    pending.combatants.push(target);
+    let before = game.position.clone();
+    assert!(matches!(
+        game.resolve_pending_fight(&mut super::OutcomeLog::Ignore),
+        Err(super::GameError::UnsupportedMechanic(_))
+    ));
+    assert_eq!(game.position, before);
+}
