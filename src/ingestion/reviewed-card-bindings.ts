@@ -58,9 +58,12 @@ export function mergeReviewedCardBindings(
         throw new Error(`reviewed binding differs from source ${key}: ${row.cardId}`);
       }
     }
+    if ((source.cardType === 'minion' || source.cardType === 'site')
+      && (row.facts.ordinary === true) !== (source.rarity === 'ordinary')) {
+      throw new Error(`reviewed binding differs from source ordinary: ${row.cardId}`);
+    }
     if (source.cardType === 'minion') {
       for (const [key, expected] of [
-        ['ordinary', source.rarity === 'ordinary'],
         ['mortal', source.subtypes.includes('Mortal')],
         ['undead', source.subtypes.includes('Undead')],
       ] as const) {

@@ -102,6 +102,22 @@ test('optional reviewed binding file fails closed on malformed data and file ali
   }
 });
 
+test('reviewed sites retain printed rarity for shared ordinary-site effects', () => {
+  const source = authority.cards.find((card) => card.stableId === 'site')!;
+  const row = { cardId: source.stableId, sourceCardHash: identityHash(source as unknown as JsonValue),
+    facts: { ...facts.site!, ordinary: true }, review: { entireRulesText: true,
+      proofs: ['synthetic ordinary-site ability suppression scenario'] } };
+  const file = { schemaVersion: 1, authorityHash: authority.authorityHash,
+    revisionId: authority.revisionId, cards: [row] };
+  assert.equal(mergeReviewedCardBindings(file, authority, new Map()).size, 1);
+  assert.throws(() => mergeReviewedCardBindings({ ...file,
+    cards: [{ ...row, facts: facts.site }] }, authority, new Map()), /source ordinary/);
+  const exceptional = { ...source, rarity: 'exceptional' as const };
+  assert.throws(() => mergeReviewedCardBindings({ ...file,
+    cards: [{ ...row, sourceCardHash: identityHash(exceptional as unknown as JsonValue) }] },
+  { ...authority, cards: [exceptional] }, new Map()), /source ordinary/);
+});
+
 test('preset pool merges provenance deterministically and rejects authority or fact conflicts', () => {
   const pool = buildPresetCardPool(authority, presets);
   assert.deepEqual(pool, buildPresetCardPool(authority, [...presets].reverse()));
