@@ -67,8 +67,10 @@ artifact-directory writes are disabled; use the local session protocol for check
 
 The private corpus contains all 1,100 unique card names returned by the official API
 in the 2026-09-26 completeness check. Identity coverage is separate from gameplay
-support. Source-checked scenarios and reviewed local bindings supply the playable
-pool. Export a fresh private catalog to discover those cards, their exact facts,
+support. Source-checked scenarios and reviewed local bindings supply the admitted
+pool. The [full-corpus engine review](docs/engine-redesign.md) identifies shared-rule
+gaps even in some admitted bindings, so admission is not complete rules certification.
+Export a fresh private catalog to discover those cards, their exact facts,
 rarity, printed rules, source/fact hashes, and the scenarios supplying each binding:
 
 ```sh

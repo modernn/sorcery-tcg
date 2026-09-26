@@ -1,5 +1,13 @@
 # Local release assessment
 
+The release checks below are historical, bounded workflow results. The expanded goal
+now requires all officially released cards through shared rules. See the
+[corpus-first engine redesign](engine-redesign.md): the 190 admitted bindings are
+provisional, and the full-card review found missing global behavior, including normal
+transferable Lance token handling. Existing deterministic traces do not certify rule
+completeness. The earlier advice against architectural work no longer limits the
+user-authorized redesign.
+
 Assessed 2026-09-25 on `master`, starting at `a0391e0bb`. Scope agreed with the user:
 reliable local self-play, search, replay, and an LLM-usable deck variation interface.
 

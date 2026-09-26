@@ -1,5 +1,10 @@
 # Shared rule behaviors
 
+The corpus-first [engine redesign](engine-redesign.md) now defines the architectural
+direction. It follows a full-text review of all 1,100 released card identities and
+supersedes expanding the current runtime merely by adding more compound fact flags.
+The small site-count slice below is historical groundwork, not the final model.
+
 The expansion unit is a reusable rule behavior, not a card implementation. Card IDs
 belong in private binding data. The Rust engine parses those bindings into typed
 facts at manifest admission and owns every legal action and resulting state change.
