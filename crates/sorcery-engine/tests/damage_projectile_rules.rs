@@ -770,40 +770,23 @@ fn after_fixed_projectile_mask_ready(carry_mask: bool) -> Session {
 }
 
 #[test]
-fn rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask()
- {
-    let mut session = after_fixed_projectile_mask_ready(true);
-    let shooter_id = unit_id(&session, "north-shooter");
-    let target_id = unit_id(&session, "south-minion");
-    let receipt = fire_south(&mut session, &shooter_id, &target_id);
-    assert_eq!(projectile_amount(&receipt, &target_id), 2);
-    assert!(
-        state(&session)["realm"]["units"]
+fn fixed_damage_projectile_is_not_a_strike_even_near_a_strike_doubler() {
+    for carry_mask in [true, false] {
+        let mut session = after_fixed_projectile_mask_ready(carry_mask);
+        let shooter_id = unit_id(&session, "north-shooter");
+        let target_id = unit_id(&session, "south-minion");
+        let receipt = fire_south(&mut session, &shooter_id, &target_id);
+        assert_eq!(projectile_amount(&receipt, &target_id), 1);
+        let after = state(&session);
+        let target = after["realm"]["units"]
             .as_array()
             .expect("units")
             .iter()
-            .all(|unit| unit["instanceId"] != target_id),
-        "a 1-damage nearby fixed projectile strike must deal 2 and kill a 2-defense minion"
-    );
-    assert_exact_replay(&session);
-}
-
-#[test]
-fn rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask() {
-    let mut session = after_fixed_projectile_mask_ready(false);
-    let shooter_id = unit_id(&session, "north-shooter");
-    let target_id = unit_id(&session, "south-minion");
-    let receipt = fire_south(&mut session, &shooter_id, &target_id);
-    assert_eq!(projectile_amount(&receipt, &target_id), 1);
-    let after = state(&session);
-    let target = after["realm"]["units"]
-        .as_array()
-        .expect("units")
-        .iter()
-        .find(|unit| unit["instanceId"] == target_id)
-        .expect("south minion survives an undoubled 1-damage fixed projectile strike");
-    assert_eq!(target["damage"], 1);
-    assert_exact_replay(&session);
+            .find(|unit| unit["instanceId"] == target_id)
+            .expect("fixed damage leaves the 2-defense minion alive");
+        assert_eq!(target["damage"], 1);
+        assert_exact_replay(&session);
+    }
 }
 
 fn atlas_len(snapshot: &Value, seat: &str) -> usize {

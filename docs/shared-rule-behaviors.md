@@ -130,6 +130,8 @@ incarnations, then consumes marked artifacts after damage even when damage was
 prevented. Normal artifacts enter their owner's cemetery; tokens are banished.
 Source removal and resulting power-loss deaths settle together with combat deaths.
 Undefended site strikes neither gain the unit-only bonus nor consume its sources.
+Fixed-damage projectile abilities deal their specified damage without strike-only
+modifiers. Ranged projectiles that cause a strike still use the shared strike rules.
 
 Additive bonuses combined with temporary or nearby doubling require controller-owned
 damage-replacement ordering. Until those choices exist, exercised combinations fail

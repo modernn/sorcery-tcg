@@ -10785,16 +10785,10 @@ impl Game {
             UnitTarget::Avatar { .. } => UnitKind::Avatar,
             UnitTarget::Minion { .. } => UnitKind::Minion,
         };
-        let allocated = self.nearby_unit_strike_amount(
-            amount,
-            0,
-            target_kind,
-            target.seat(),
-            target.instance_id(),
-        )?;
+        // Fixed projectile damage is not a strike; strike-only modifiers do not apply.
         outcomes.push("projectile-damage-allocated", || {
             json!({
-                "amount": allocated,
+                "amount": amount,
                 "sourceInstanceId": shooter_instance_id,
                 "targetInstanceId": target.instance_id(),
             })
@@ -10803,7 +10797,7 @@ impl Game {
             target_kind,
             target.seat(),
             target.instance_id(),
-            allocated,
+            amount,
             damage_source,
             outcomes,
         )?;

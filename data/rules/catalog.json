@@ -22099,7 +22099,7 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "A fixed-damage projectile strike deals double damage when the struck unit is nearby a nearby-double-strike source. The multiplier uses the struck unit's location and emits projectile-damage-allocated.",
+      "plainLanguage": "A fixed-damage projectile deals its specified damage, not a strike. Nearby strike-only damage multipliers do not apply; a 1-damage projectile leaves a 2-defense minion alive with 1 damage.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapToShootProjectileDamage",
@@ -22110,12 +22110,11 @@
       ],
       "eventHints": [
         "projectile-damage-allocated",
-        "damage-dealt",
-        "minion-died"
+        "damage-dealt"
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
-        "testName": "rule_catalog_0954_fixed_projectile_strike_deals_double_damage_when_the_struck_unit_is_nearby_mask"
+        "testName": "fixed_damage_projectile_is_not_a_strike_even_near_a_strike_doubler"
       }
     },
     {
@@ -22315,7 +22314,7 @@
         "RULE-02",
         "RULE-04"
       ],
-      "plainLanguage": "The same nearby-double-strike fact does not change a fixed-damage projectile whose struck unit is not nearby the source. A 1-power undoubled projectile leaves a 2-defense minion wounded.",
+      "plainLanguage": "A fixed-damage projectile also keeps its specified damage when the impacted unit is outside a nearby strike-multiplier source. The effect does not become a strike based on source proximity.",
       "implementationStatus": "rust-supported",
       "genericFactHints": [
         "tapToShootProjectileDamage",
@@ -22329,7 +22328,7 @@
       ],
       "scenarioProof": {
         "file": "crates/sorcery-engine/tests/damage_projectile_rules.rs",
-        "testName": "rule_catalog_0963_fixed_projectile_strike_is_not_doubled_when_struck_unit_is_not_nearby_mask"
+        "testName": "fixed_damage_projectile_is_not_a_strike_even_near_a_strike_doubler"
       }
     },
     {
