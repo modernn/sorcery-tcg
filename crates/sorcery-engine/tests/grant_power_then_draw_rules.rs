@@ -7,6 +7,10 @@
 //! after the grant is a deck-out. Strike damage follows current derived power,
 //! including printed attack plus active temporary grants.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -284,6 +288,10 @@ fn assert_exact_replay(session: &Session) {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one scenario checks recipient legality, hidden draw, expiration and replay"
+)]
 fn rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell() {
     let encoded = (529..529 + 256)
         .map(gift_manifest)
@@ -362,7 +370,7 @@ fn rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell() {
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryPowerSources"][0],
+        modifier_sources(unit(&after, &ally_id), "power")[0],
         granted.events[0].payload["instanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]
@@ -384,7 +392,10 @@ fn rule_catalog_0529_power_grant_offers_allied_minions_then_draws_a_spell() {
     let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(event_types(&ended).contains(&"power-expired"));
     let expired = state(&session);
-    assert!(unit(&expired, &ally_id)["temporaryPowerSources"].is_null());
+    assert_eq!(
+        modifier_sources(unit(&expired, &ally_id), "power"),
+        json!([])
+    );
     assert_exact_replay(&session);
 }
 
@@ -445,7 +456,7 @@ fn rule_catalog_0530_power_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryPowerSources"]
+        modifier_sources(unit(&after, &ally_id), "power")
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -670,7 +681,7 @@ fn rule_catalog_1061_grant_power_then_draw_withheld_during_pending_deathrite_ord
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryPowerSources"][0],
+        modifier_sources(unit(&after, &ally_id), "power")[0],
         granted.events[0].payload["instanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]
@@ -855,9 +866,9 @@ fn expire_grant_power(session: &mut Session, ally_id: &str, grant_source: &str) 
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryPowerSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -920,9 +931,9 @@ fn rule_catalog_1633_printed_power_strikes_at_full_attack_without_grant() {
     assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 5);
     assert_eq!(unit(&state(&session), &enemy_id)["damage"], 5);
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryPowerSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
 }
@@ -946,7 +957,7 @@ fn rule_catalog_1634_granted_power_strikes_at_boosted_power_before_end_of_turn()
     );
     assert_eq!(receipt.events[1].payload["amount"], 2);
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryPowerSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "power"),
         json!([descriptor["cardInstanceId"]])
     );
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);
@@ -1014,7 +1025,7 @@ fn rule_catalog_1637_printed_and_granted_power_compose_while_grant_is_active() {
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryPowerSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "power"),
         json!([descriptor["cardInstanceId"]])
     );
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);

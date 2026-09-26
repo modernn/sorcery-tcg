@@ -7,6 +7,10 @@
 //! reach a cell two steps away. While Deathrites wait for ordering, the
 //! grant stays withheld until the chain drains.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -338,9 +342,9 @@ fn expire_grant_movement(session: &mut Session, ally_id: &str, grant_source: &st
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryMovementSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "movement")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -420,7 +424,7 @@ fn rule_catalog_0535_movement_grant_offers_allies_then_draws_a_spell() {
     assert_eq!(granted.events[1].payload["amount"], 1);
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryMovementSources"][0],
+        modifier_sources(unit(&after, &ally_id), "movement")[0],
         granted.events[0].payload["instanceId"]
     );
     assert!(
@@ -442,9 +446,9 @@ fn rule_catalog_0535_movement_grant_offers_allies_then_draws_a_spell() {
         event.event_type == "movement-expired" && event.payload["instanceId"] == ally_id
     }));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryMovementSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "movement")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
 }
@@ -504,7 +508,7 @@ fn rule_catalog_1614_granted_movement_reaches_two_step_cell_before_end_of_turn()
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryMovementSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "movement"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(can_move_to(&session, &ally_id, "C2"));
@@ -553,7 +557,7 @@ fn rule_catalog_1617_printed_and_granted_movement_compose_while_grant_is_active(
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryMovementSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "movement"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(can_move_to(&session, &ally_id, "C2"));
@@ -802,7 +806,7 @@ fn rule_catalog_1066_grant_movement_then_draw_withheld_during_pending_deathrite_
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryMovementSources"][0],
+        modifier_sources(unit(&after, &ally_id), "movement")[0],
         granted.events[0].payload["instanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]

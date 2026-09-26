@@ -6,6 +6,10 @@
 //! prevention. Distinct from 0529–0530, which grant to a minion then draw and
 //! do not offer Avatars.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::{modifier_rows, modifier_sources};
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -628,8 +632,12 @@ fn rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase
         })
     );
     assert_eq!(
-        realm_unit(&state(&session), &fighter_id)["temporaryPowerSources"],
+        modifier_sources(realm_unit(&state(&session), &fighter_id), "power"),
         json!([source_id])
+    );
+    assert_eq!(
+        modifier_rows(realm_unit(&state(&session), &fighter_id), "power")[0]["amount"],
+        2
     );
 
     accept_where(&mut session, |descriptor| {
@@ -686,7 +694,11 @@ fn rule_catalog_0700_overpower_changes_current_power_until_the_current_end_phase
             "sourceInstanceId": source_id,
         })
     );
-    assert!(realm_unit(&state(&session), &fighter_id)["temporaryPowerSources"].is_null());
+    assert!(
+        modifier_sources(realm_unit(&state(&session), &fighter_id), "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert_exact_replay(&session);
 }
 
@@ -726,7 +738,11 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
         .position(|event| event.event_type == "turn-ended")
         .expect("Avatar turn ended");
     assert!(avatar_expiry < avatar_turn_ended);
-    assert!(state(&session)["players"]["north"]["avatar"]["temporaryPowerSources"].is_null());
+    assert!(
+        modifier_sources(&state(&session)["players"]["north"]["avatar"], "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
 
     session = checkpoint;
     let overpower_ids: Vec<_> = state(&session)["players"]["north"]["hand"]["spellbook"]
@@ -753,7 +769,7 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
             && descriptor["ally"]["instanceId"] == fighter_id
     });
     assert_eq!(
-        realm_unit(&state(&session), &fighter_id)["temporaryPowerSources"],
+        modifier_sources(realm_unit(&state(&session), &fighter_id), "power"),
         json!(overpower_ids)
     );
 
@@ -776,7 +792,11 @@ fn rule_catalog_1128_overpower_offers_allies_and_stacks_until_end_phase() {
             }))
             .collect::<Vec<_>>()
     );
-    assert!(realm_unit(&state(&session), &fighter_id)["temporaryPowerSources"].is_null());
+    assert!(
+        modifier_sources(realm_unit(&state(&session), &fighter_id), "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert_exact_replay(&session);
 }
 
@@ -819,7 +839,7 @@ fn rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup() {
     let wounded_state = state(&session);
     let wounded = realm_unit(&wounded_state, &fighter_id);
     assert_eq!(wounded["damage"], 2);
-    assert_eq!(wounded["temporaryPowerSources"], json!([source_id]));
+    assert_eq!(modifier_sources(wounded, "power"), json!([source_id]));
     assert_eq!(observed_unit(&observed(&session), &fighter_id)["attack"], 4);
 
     let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
@@ -852,7 +872,11 @@ fn rule_catalog_1140_overpower_power_expires_after_end_phase_cleanup() {
     let cleaned_state = state(&session);
     let cleaned = realm_unit(&cleaned_state, &fighter_id);
     assert_eq!(cleaned["damage"], 0);
-    assert!(cleaned["temporaryPowerSources"].is_null());
+    assert!(
+        modifier_sources(cleaned, "power")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert_eq!(observed_unit(&observed(&session), &fighter_id)["attack"], 2);
     assert_eq!(cleaned_state["activeSeat"], "south");
     assert_exact_replay(&session);
@@ -935,7 +959,7 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
     let after_avatar = observed(&session);
     assert_eq!(avatar_stats(&after_avatar, "north"), (3, 3));
     assert_eq!(
-        after_avatar["players"]["north"]["avatar"]["temporaryPowerSources"]
+        modifier_sources(&after_avatar["players"]["north"]["avatar"], "power")
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -958,7 +982,7 @@ fn rule_catalog_0722_temporary_power_raises_observed_avatar_and_disabled_minion_
     assert_eq!(powered["stealthed"], false);
     assert_eq!(powered["warded"], false);
     assert_eq!(
-        powered["temporaryPowerSources"].as_array().map(Vec::len),
+        modifier_sources(powered, "power").as_array().map(Vec::len),
         Some(1)
     );
     assert_exact_replay(&session);

@@ -300,13 +300,17 @@ fn compiled_area_activation_requires_the_source_to_retain_its_ability() {
     let mut actions = Vec::new();
     game.append_area_damage_actions(&mut actions, Seat::North);
     assert_eq!(actions.len(), 1, "the source can select its own location");
-    game.position.units[0]
-        .temporary_silence_sources
-        .push(source_id);
+    game.position.units[0].temporary_modifiers.grant(
+        super::super::TemporaryModifierKind::Silence,
+        1,
+        source_id,
+    );
     actions.clear();
     game.append_area_damage_actions(&mut actions, Seat::North);
     assert!(actions.is_empty(), "silence removes the activated ability");
-    game.position.units[0].temporary_silence_sources.clear();
+    game.position.units[0]
+        .temporary_modifiers
+        .take(super::super::TemporaryModifierKind::Silence);
     game.append_area_damage_actions(&mut actions, Seat::North);
     assert_eq!(actions.len(), 1, "the ability returns when silence expires");
 }

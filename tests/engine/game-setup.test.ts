@@ -6,7 +6,7 @@ import {
   parseGameCheckpoint,
   serializeGameCheckpoint,
 } from '../../src/engine/checkpoint.ts';
-import { opaqueActionId, type EngineActionDescriptor } from '../../src/engine/contract.ts';
+import { opaqueActionId, type EngineActionDescriptor, type StateHash } from '../../src/engine/contract.ts';
 import {
   assertCanonicalGameManifest,
   createGameManifest,
@@ -17,11 +17,20 @@ import {
   type GameManifest,
   type GameSession,
   type GameStepResult,
+  type TemporaryModifier,
 } from '../../src/engine/game.ts';
 import { SetupCtx, findOpeningManifest, withFork, withPreview, withSetup } from './rust-setup-session.ts';
 
 const SYNTHETIC_AUTHORITY_HASH =
   'sha256:1111111111111111111111111111111111111111111111111111111111111111' as const;
+
+function temporarySources(
+  modifiers: readonly TemporaryModifier[] | undefined,
+  kind: TemporaryModifier['kind'],
+): StateHash[] {
+  return modifiers?.filter((modifier) => modifier.kind === kind)
+    .map(({ sourceInstanceId }) => sourceInstanceId) ?? [];
+}
 
 function deck(prefix: string, atlasCount = 30, spellbookCount = 50): GameDeckSpec {
   return {
@@ -8224,8 +8233,8 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
           'charge-granted',
           'magic-resolved',
         ]);
-        assert.equal(avatarFork.state.realm.units.every(({ temporaryChargeSources }) =>
-          temporaryChargeSources === undefined), true);
+        assert.equal(avatarFork.state.realm.units.every(({ temporaryModifiers }) =>
+          temporarySources(temporaryModifiers, 'charge').length === 0), true);
         assert.equal(await avatarFork.verifyReplay(), true);
       });
 
@@ -8240,8 +8249,8 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
         'charge-granted',
         'magic-resolved',
       ]);
-      assert.deepEqual(ctx.state.realm.units.find(({ instanceId }) =>
-        instanceId === summoned.instanceId)?.temporaryChargeSources, [chargeCards[0]!.instanceId]);
+      assert.deepEqual(temporarySources(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === summoned.instanceId)?.temporaryModifiers, 'charge'), [chargeCards[0]!.instanceId]);
       assert.equal((await ctx.legalActions('north')).some(({ descriptor }) =>
         descriptor.kind === 'move-and-attack'
           && descriptor.unitInstanceId === summoned.instanceId), true);
@@ -8252,8 +8261,8 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
           && descriptor.ally?.instanceId === summoned.instanceId));
       assert.equal(second.accepted, true);
       if (!second.accepted) return;
-      assert.deepEqual(ctx.state.realm.units.find(({ instanceId }) =>
-        instanceId === summoned.instanceId)?.temporaryChargeSources, chargeCards.map(({ instanceId }) => instanceId));
+      assert.deepEqual(temporarySources(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === summoned.instanceId)?.temporaryModifiers, 'charge'), chargeCards.map(({ instanceId }) => instanceId));
       assert.equal(ctx.state.players.north.mana, 0);
       assert.equal(ctx.state.players.north.cemetery.filter(({ instanceId }) =>
         chargeCards.some((card) => card.instanceId === instanceId)).length, 2);
@@ -8279,10 +8288,10 @@ test('RULE-03 Charge Magic grants an untargeted ally Charge only for the current
         sourceInstanceId: card.instanceId,
       })));
       const expired = ctx.state.realm.units.find(({ instanceId }) => instanceId === summoned.instanceId);
-      assert.equal(expired?.temporaryChargeSources, undefined);
+      assert.deepEqual(temporarySources(expired?.temporaryModifiers, 'charge'), []);
       assert.equal(expired?.tapped, true);
-      assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
-        instanceId === printedCharge.instanceId)?.temporaryChargeSources, undefined);
+      assert.deepEqual(temporarySources(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === printedCharge.instanceId)?.temporaryModifiers, 'charge'), []);
       assert.equal(gameManifest.cards[printedChargeCardId]?.cardType === 'minion'
         && gameManifest.cards[printedChargeCardId].charge, true);
       assert.equal(await ctx.verifyReplay(), true);
@@ -27568,9 +27577,9 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
     if (typeof allyId !== 'string') {
       return;
     }
-    assert.equal(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
-      undefined,
+    assert.deepEqual(
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'airborne'),
+      [],
     );
     assert.equal(
       ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
@@ -27595,7 +27604,7 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
       'magic-resolved',
     ]);
     assert.deepEqual(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'airborne'),
       [grantAction.descriptor.cardInstanceId],
     );
     assert.equal(
@@ -27617,9 +27626,9 @@ test('RULE-04 grant-Airborne Magic lasts this turn and is required to strike an 
           && payload.instanceId === allyId),
       true,
     );
-    assert.equal(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryAirborneSources,
-      undefined,
+    assert.deepEqual(
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'airborne'),
+      [],
     );
     assert.equal(
       ctx.observe('north').realm.units.find((unit) => unit.instanceId === allyId)?.airborne,
@@ -27863,7 +27872,7 @@ test('RULE-04 grant-Ranged Magic lasts this turn and does not bypass summoning s
       return;
     }
     assert.deepEqual(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryRangedSources,
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'ranged'),
       [grantAction.descriptor.cardInstanceId],
     );
     assert.equal(await canShoot(ctx, allyId), true);
@@ -27877,9 +27886,9 @@ test('RULE-04 grant-Ranged Magic lasts this turn and does not bypass summoning s
       ended.receipt.events.some(({ type }) => type === 'ranged-expired'),
       true,
     );
-    assert.equal(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryRangedSources,
-      undefined,
+    assert.deepEqual(
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'ranged'),
+      [],
     );
     assert.equal(await ctx.verifyReplay(), true);
   });
@@ -27998,7 +28007,7 @@ test('RULE-04 grant-Lethal Magic lasts this turn and is required to kill a tough
       'magic-resolved',
     ]);
     assert.deepEqual(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryLethalSources,
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'lethal'),
       [grantAction.descriptor.cardInstanceId],
     );
     const ended = await ctx.step(await ctx.action(({ descriptor }) =>
@@ -28011,9 +28020,9 @@ test('RULE-04 grant-Lethal Magic lasts this turn and is required to kill a tough
       ended.receipt.events.some(({ type }) => type === 'lethal-expired'),
       true,
     );
-    assert.equal(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryLethalSources,
-      undefined,
+    assert.deepEqual(
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'lethal'),
+      [],
     );
     assert.equal(await ctx.verifyReplay(), true);
   });
@@ -28199,7 +28208,7 @@ test('RULE-04 grant-First-Strike Magic lasts this turn and kills before return d
       'magic-resolved',
     ]);
     assert.deepEqual(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryFirstStrikeSources,
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'first-strike'),
       [grantAction.descriptor.cardInstanceId],
     );
     const ended = await ctx.step(await ctx.action(({ descriptor }) =>
@@ -28212,9 +28221,9 @@ test('RULE-04 grant-First-Strike Magic lasts this turn and kills before return d
       ended.receipt.events.some(({ type }) => type === 'first-strike-expired'),
       true,
     );
-    assert.equal(
-      ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryFirstStrikeSources,
-      undefined,
+    assert.deepEqual(
+      temporarySources(ctx.state.realm.units.find((unit) => unit.instanceId === allyId)?.temporaryModifiers, 'first-strike'),
+      [],
     );
     assert.equal(await ctx.verifyReplay(), true);
   });

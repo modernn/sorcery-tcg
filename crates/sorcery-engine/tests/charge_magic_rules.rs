@@ -6,6 +6,10 @@
 //! immediately after the grant. With no allied minion in play the cast still
 //! resolves as a paid no-op.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -784,7 +788,7 @@ fn rule_catalog_1624_granted_charge_moves_and_attacks_before_end_of_turn() {
         ["magic-cast", "charge-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryChargeSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "charge"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(has_move_and_attack(&session, &ally_id));
@@ -820,7 +824,7 @@ fn rule_catalog_1627_printed_and_granted_charge_compose_while_grant_is_active() 
         ["magic-cast", "charge-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryChargeSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "charge"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(has_move_and_attack(&session, &ally_id));

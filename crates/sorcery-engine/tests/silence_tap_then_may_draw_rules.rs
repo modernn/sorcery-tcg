@@ -7,6 +7,10 @@
 //! Deathrites wait for ordering, Insult Magic stays withheld until the chain
 //! drains.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -724,7 +728,7 @@ fn rule_catalog_0553_insult_silences_and_taps_a_nearby_minion_then_draws() {
     assert!(silenced["disableEffects"].is_null());
     assert!(silenced["disabledUntilDamaged"].is_null());
     assert_eq!(
-        silenced["temporarySilenceSources"],
+        modifier_sources(silenced, "silence"),
         json!([cast["cardInstanceId"]])
     );
     assert!(
@@ -802,7 +806,11 @@ fn rule_catalog_0554_insult_still_silences_and_taps_when_the_draw_is_declined() 
     let after = state(&session);
     assert_eq!(unit(&after, &caster_id)["tapped"], true);
     assert!(unit(&after, &caster_id)["silenced"].is_null());
-    assert!(unit(&after, &caster_id)["temporarySilenceSources"].is_null());
+    assert!(
+        modifier_sources(unit(&after, &caster_id), "silence")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert!(unit(&after, &caster_id)["disableEffects"].is_null());
     assert_exact_replay(&session);
 }

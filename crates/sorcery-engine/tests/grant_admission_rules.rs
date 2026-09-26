@@ -5,6 +5,10 @@
 //! multi-minion, far-enemy, and new-summon proofs on grant-Airborne-to-ally
 //! Magic from the 0734 matrix.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt};
@@ -455,7 +459,7 @@ fn rule_catalog_0941_airborne_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryAirborneSources"]
+        modifier_sources(unit(&after, &ally_id), "airborne")
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -521,7 +525,7 @@ fn rule_catalog_0949_lethal_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryLethalSources"]
+        modifier_sources(unit(&after, &ally_id), "lethal")
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -587,7 +591,7 @@ fn rule_catalog_0956_movement_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryMovementSources"]
+        modifier_sources(unit(&after, &ally_id), "movement")
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -731,7 +735,7 @@ fn rule_catalog_0962_power_grant_then_empty_spellbook_is_a_deck_out() {
     assert_eq!(ended.payload["winner"], "south");
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryPowerSources"]
+        modifier_sources(unit(&after, &ally_id), "power")
             .as_array()
             .map(Vec::len),
         Some(1)

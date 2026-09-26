@@ -10,6 +10,10 @@
 //! While trigger-order is pending, the grant is withheld until the chain
 //! completes.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -395,9 +399,9 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
     let ally_id = summon_north_ally(&mut session);
     let before = state(&session);
     assert!(
-        unit(&before, &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&before, &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = grant_first_strike(&mut session, &ally_id);
@@ -413,7 +417,7 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
     );
     let granted = state(&session);
     assert_eq!(
-        unit(&granted, &ally_id)["temporaryFirstStrikeSources"],
+        modifier_sources(unit(&granted, &ally_id), "first-strike"),
         json!([descriptor["cardInstanceId"]])
     );
 
@@ -425,9 +429,9 @@ fn rule_catalog_0282_grant_first_strike_lasts_only_until_end_of_turn() {
     }));
     let after = state(&session);
     assert!(
-        unit(&after, &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&after, &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
     let checkpoint = create_game_checkpoint(&session).expect("grant-first-strike checkpoint");
@@ -484,9 +488,9 @@ fn rule_catalog_1533_granted_first_strike_kills_before_attacker_strikes_while_de
     assert_eq!(unit(&after, &ally_id)["damage"], 0);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert!(
-        unit(&after, &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&after, &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
 }
@@ -498,7 +502,7 @@ fn rule_catalog_1534_printed_and_granted_first_strike_compose_while_attacking() 
     let enemy_id = south_summons_visitor_at_c4(&mut session);
     let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
     assert!(
-        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
             .as_array()
             .is_some_and(|sources| sources.len() == 1)
     );
@@ -508,7 +512,7 @@ fn rule_catalog_1534_printed_and_granted_first_strike_compose_while_attacking() 
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert_eq!(
         &descriptor["cardInstanceId"],
-        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
             .as_array()
             .and_then(|sources| sources.first())
             .expect("grant source")
@@ -524,7 +528,7 @@ fn rule_catalog_1535_printed_and_granted_first_strike_compose_while_defending() 
     let (descriptor, _) = grant_first_strike(&mut session, &ally_id);
     assert_eq!(
         &descriptor["cardInstanceId"],
-        unit(&state(&session), &ally_id)["temporaryFirstStrikeSources"]
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
             .as_array()
             .and_then(|sources| sources.first())
             .expect("grant source")
@@ -564,9 +568,9 @@ fn rule_catalog_1539_granted_first_strike_expires_before_opponent_turn_combat() 
     grant_first_strike(&mut session, &ally_id);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -586,9 +590,9 @@ fn rule_catalog_1545_attacking_only_printed_plus_grant_trades_after_grant_expire
     grant_first_strike(&mut session, &ally_id);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -694,9 +698,9 @@ fn rule_catalog_1566_defending_only_printed_plus_grant_trades_after_grant_expire
     grant_first_strike(&mut session, &ally_id);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -717,9 +721,9 @@ fn rule_catalog_1567_attacking_only_printed_plus_grant_strikes_first_after_grant
     grant_first_strike(&mut session, &ally_id);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -741,9 +745,9 @@ fn rule_catalog_1568_printed_first_strike_plus_grant_strikes_first_after_grant_e
     grant_first_strike(&mut session, &ally_id);
     accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -763,9 +767,9 @@ fn expire_grant_first_strike(session: &mut Session, ally_id: &str, grant_source:
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -1098,9 +1102,9 @@ fn rule_catalog_1108_grant_first_strike_withheld_during_pending_deathrite_order(
     assert!(unit(&resumed, &ally_id).is_object());
     assert!(grant_ally_ids(session).contains(&ally_id));
     assert!(
-        unit(&resumed, &ally_id)
-            .get("temporaryFirstStrikeSources")
-            .is_none()
+        modifier_sources(unit(&resumed, &ally_id), "first-strike")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = grant_first_strike(session, &ally_id);
@@ -1115,8 +1119,42 @@ fn rule_catalog_1108_grant_first_strike_withheld_during_pending_deathrite_order(
         descriptor["cardInstanceId"]
     );
     assert_eq!(
-        unit(&state(session), &ally_id)["temporaryFirstStrikeSources"],
+        modifier_sources(unit(&state(session), &ally_id), "first-strike"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(session);
+}
+
+#[test]
+fn avatar_receives_first_strike_from_an_engine_issued_ally_grant_and_replays_expiry() {
+    let mut session = opening_main();
+    let before = state(&session);
+    let avatar_id = before["players"]["north"]["avatar"]["card"]["instanceId"]
+        .as_str()
+        .expect("Avatar identity");
+    assert!(grant_ally_ids(&session).iter().any(|id| id == avatar_id));
+    let (descriptor, _) = grant_first_strike(&mut session, avatar_id);
+    assert_eq!(
+        modifier_sources(
+            &state(&session)["players"]["north"]["avatar"],
+            "first-strike"
+        ),
+        json!([descriptor["cardInstanceId"]])
+    );
+    let (_, ended) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
+    assert!(
+        ended
+            .events
+            .iter()
+            .any(|event| event.event_type == "first-strike-expired"
+                && event.payload["instanceId"] == avatar_id)
+    );
+    assert_eq!(
+        modifier_sources(
+            &state(&session)["players"]["north"]["avatar"],
+            "first-strike"
+        ),
+        json!([])
+    );
+    assert_exact_replay(&session);
 }

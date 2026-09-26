@@ -349,6 +349,28 @@ discovery, and spatial operations as their complete shared slices land. Do not w
 for every rare subsystem before replacing common execution, and do not call a wrapper
 around old dispatch a completed migration.
 
+## Shared temporary modifiers
+
+One sparse collection now holds each unit's temporary grants: kind, magnitude, and
+source identity. It replaces nine per-kind vectors on minions and three on Avatars.
+Power and movement use checked magnitude sums; independently granted effects retain
+separate records. End Phase drains the same collection on all units after the ending
+turn's abilities and alongside minion damage healing. Next-strike consumption removes
+only matching grants. Expiration and consumption preserve deterministic record order.
+
+Authoritative state and client observations use `temporaryModifiers` instead of
+per-keyword source fields. Cloned checkpoints preserve the records and their hashes;
+replay checks use the changed engine and schema together. Existing transcripts must
+be replayed with their original engine build. First Strike now uses one query for both
+sides of a fight, respects Silence/Disable, and applies to eligible Avatars.
+
+This is the turn-duration storage migration, not the complete ongoing-effect system.
+Shared ordered grant programs, source-bound effects, characteristic replacement order,
+and the remaining Avatar keyword execution paths still require their rule slices and
+scenario proofs. In particular, multiple next-strike damage replacements must enter the
+shared replacement-order mechanism before their combinations can support ranked play.
+No additional official cards are admitted by this structural change.
+
 ## Performance and learning
 
 Separate immutable compiled rules from per-match seed/deck configuration. Current
@@ -367,13 +389,14 @@ they are useful and their rule dependencies are understood. Avoid allocating JSO
 looking up card text in inner simulation loops.
 
 Preserve ordered batch results and byte-identical worker-count equivalence. The
-shared-choice checkpoint was compared with the preceding shared-trigger checkpoint
+shared-modifier checkpoint was compared with the preceding shared-choice checkpoint
 in three alternating release-build rounds, each with nine samples and 100 seat pairs
-per sample. Median raw throughput was 1,305.531 before and 1,314.102 games/second
-after; recorded replay throughput was 5.711 and 5.652 games/second. These differences
-do not establish a speedup. This synthetic workload does not measure all new ability
-combinations or complete real decks. The verified structural saving is avoiding the
-upfront product of future Genesis target choices; the later decisions still exist.
+per sample. Median raw throughput was 1,338.751 before and 1,346.326 games/second
+after; recorded replay throughput was 5.714 and 5.784 games/second. The roughly 0.6–1.2%
+difference does not establish a substantial speedup. This synthetic workload does not
+measure modifier-heavy positions or complete real decks. The structural savings are
+eight fewer vector headers per minion and two fewer per Avatar, one expiration scan,
+and moving consumed/expired records instead of cloning every source identity.
 
 The most recent worker sweep, from the preceding batch-setup checkpoint, used 48-game
 recorded batches, warmup, and three timed repetitions per count. It measured 3.532
@@ -381,7 +404,7 @@ recorded games/second with one worker, 39.178 with 16, and 39.588 with 24 on thi
 24-logical-CPU machine. Sixteen and 24 were close. Every tested count from 1 through
 24 produced the same result hash. These are synthetic, fully recorded and independently
 replayed batches, not complete real-deck benchmarks or a fresh worker sweep of the
-shared-choice checkpoint. Detailed historical comparisons remain in local receipts.
+shared-modifier checkpoint. Detailed historical comparisons remain in local receipts.
 
 Expose public semantic action information to playing policies from the same compiled
 definitions. This lets a policy evaluate effect purpose and tactical outcomes without

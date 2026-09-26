@@ -6,6 +6,10 @@
 //! uses the shared this-turn source list, expires at End Phase, and lets a
 //! grounded minion strike an Airborne enemy.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -382,7 +386,7 @@ fn rule_catalog_0533_airborne_grant_offers_allied_minions_then_draws_a_spell() {
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryAirborneSources"][0],
+        modifier_sources(unit(&after, &ally_id), "airborne")[0],
         granted.events[0].payload["instanceId"]
     );
     assert!(public_airborne(&session, &ally_id));
@@ -405,9 +409,9 @@ fn rule_catalog_0533_airborne_grant_offers_allied_minions_then_draws_a_spell() {
         event.event_type == "airborne-expired" && event.payload["instanceId"] == ally_id
     }));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!public_airborne(&session, &ally_id));
     assert_exact_replay(&session);
@@ -591,9 +595,9 @@ fn expire_grant_airborne(session: &mut Session, ally_id: &str, grant_source: &st
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -609,9 +613,9 @@ fn rule_catalog_1663_printed_airborne_strikes_airborne_enemy_without_grant() {
     } = airborne_combat_setup(&printed_airborne(), 1663);
     assert!(public_airborne(&session, &ally_id));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
     assert_exact_replay(&session);
@@ -637,7 +641,7 @@ fn rule_catalog_1664_granted_airborne_then_draw_strikes_airborne_enemy_before_en
     );
     assert!(public_airborne(&session, &ally_id));
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"][0],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")[0],
         descriptor["cardInstanceId"]
     );
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
@@ -700,7 +704,7 @@ fn rule_catalog_1667_printed_and_granted_airborne_then_draw_compose_while_grant_
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"][0],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")[0],
         descriptor["cardInstanceId"]
     );
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
@@ -956,7 +960,7 @@ fn rule_catalog_1065_grant_airborne_then_draw_withheld_during_pending_deathrite_
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryAirborneSources"][0],
+        modifier_sources(unit(&after, &ally_id), "airborne")[0],
         granted.events[0].payload["instanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]

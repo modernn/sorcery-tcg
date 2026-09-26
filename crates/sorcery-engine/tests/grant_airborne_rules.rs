@@ -13,6 +13,10 @@
 //! stack-repeat, enemy-arrival, multi-minion, far-minion, and new-summon
 //! proofs on later IDs.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -358,9 +362,9 @@ fn expire_grant_airborne(session: &mut Session, ally_id: &str, grant_source: &st
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -546,9 +550,9 @@ fn rule_catalog_0274_grant_airborne_makes_a_grounded_minion_airborne_until_end_o
     let ally_id = summon_north_ally(&mut session);
     let before = state(&session);
     assert!(
-        unit(&before, &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&before, &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!public_airborne(&session, &ally_id));
 
@@ -569,7 +573,7 @@ fn rule_catalog_0274_grant_airborne_makes_a_grounded_minion_airborne_until_end_o
     );
     let granted = state(&session);
     assert_eq!(
-        unit(&granted, &ally_id)["temporaryAirborneSources"],
+        modifier_sources(unit(&granted, &ally_id), "airborne"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(public_airborne(&session, &ally_id));
@@ -585,9 +589,9 @@ fn rule_catalog_0274_grant_airborne_makes_a_grounded_minion_airborne_until_end_o
     );
     let after = state(&session);
     assert!(
-        unit(&after, &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&after, &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!public_airborne(&session, &ally_id));
     assert_exact_replay(&session);
@@ -654,9 +658,9 @@ fn rule_catalog_0665_grant_airborne_makes_a_grounded_minion_airborne() {
     let mut session = opening_main("south-grounded");
     let ally_id = summon_north_ally(&mut session);
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!public_airborne(&session, &ally_id));
 
@@ -676,7 +680,7 @@ fn rule_catalog_0665_grant_airborne_makes_a_grounded_minion_airborne() {
         descriptor["cardInstanceId"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(public_airborne(&session, &ally_id));
@@ -689,9 +693,9 @@ fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
     let ally_id = summon_north_ally(&mut session);
     assert!(public_airborne(&session, &ally_id));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = accept_where(&mut session, |descriptor| {
@@ -704,7 +708,7 @@ fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
         ["magic-cast", "airborne-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(public_airborne(&session, &ally_id));
@@ -716,9 +720,9 @@ fn rule_catalog_0666_already_airborne_grant_expires_at_end_phase() {
             && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
     }));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(
         public_airborne(&session, &ally_id),
@@ -734,9 +738,9 @@ fn rule_catalog_1603_printed_airborne_without_grant_strikes_airborne_enemy() {
     let enemy_id = south_summons_airborne_at_c4(&mut session);
     assert!(public_airborne(&session, &ally_id));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryAirborneSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "airborne")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
     assert_exact_replay(&session);
@@ -751,7 +755,7 @@ fn rule_catalog_1604_granted_airborne_strikes_airborne_enemy_before_end_of_turn(
     assert!(public_airborne(&session, &ally_id));
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(&session);
@@ -802,7 +806,7 @@ fn rule_catalog_1607_printed_and_granted_airborne_compose_while_grant_is_active(
         ["magic-cast", "airborne-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryAirborneSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "airborne"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(can_strike_minion(&session, &ally_id, &enemy_id));
@@ -1006,11 +1010,9 @@ fn airborne_spells_in_hand(snapshot: &Value) -> usize {
 }
 
 fn temporary_airborne_len(snapshot: &Value, instance_id: &str) -> usize {
-    unit(snapshot, instance_id)
-        .get("temporaryAirborneSources")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default()
+    modifier_sources(unit(snapshot, instance_id), "airborne")
+        .as_array()
+        .map_or(0, Vec::len)
 }
 
 fn offers(session: &Session, predicate: impl Fn(&Value) -> bool) -> bool {

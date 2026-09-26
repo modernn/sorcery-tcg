@@ -9,6 +9,10 @@
 //! only while the mark remains. While trigger-order is pending, the grant is
 //! withheld until the chain completes.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -727,7 +731,7 @@ fn rule_catalog_0565_granted_next_strike_double_kills_a_tougher_minion() {
     );
     let granted = state(&session);
     assert_eq!(
-        unit(&granted, &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&granted, &ally_id), "next-strike-double"),
         json!([descriptor["cardInstanceId"]])
     );
 
@@ -757,8 +761,9 @@ fn rule_catalog_0565_granted_next_strike_double_kills_a_tougher_minion() {
             .iter()
             .find(|unit| unit["instanceId"] == ally_id)
             .expect("surviving ally")
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+            .get("temporaryModifiers")
+            .and_then(Value::as_array)
+            .is_none_or(|rows| !rows.iter().any(|row| row["kind"] == "next-strike-double"))
     );
     let north_view = session.public_view(Seat::North).expect("North public view");
     assert_eq!(north_view["players"]["south"]["hand"]["spellbook"], 2);
@@ -807,7 +812,7 @@ fn rule_catalog_0566_next_strike_double_expires_before_a_later_strike() {
     let enemy_id = south_summons_tough_at_c4(&mut session);
     let (descriptor, _) = grant_double(&mut session, &ally_id);
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double"),
         json!([descriptor["cardInstanceId"]])
     );
 
@@ -818,9 +823,9 @@ fn rule_catalog_0566_next_strike_double_expires_before_a_later_strike() {
             && event.payload["sourceInstanceId"] == descriptor["cardInstanceId"]
     }));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     accept_where(&mut session, |descriptor| {
@@ -1008,9 +1013,9 @@ fn expire_grant_double(session: &mut Session, ally_id: &str, grant_source: &str)
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -1046,9 +1051,9 @@ fn rule_catalog_1643_printed_attack_strikes_at_full_power_without_grant() {
     assert_eq!(strike_allocated_to_target(&fight, &ally_id, &enemy_id), 3);
     assert_eq!(unit(&state(&session), &enemy_id)["damage"], 3);
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
 }
@@ -1066,7 +1071,7 @@ fn rule_catalog_1644_granted_next_strike_double_strikes_at_doubled_power_before_
         ["magic-cast", "next-strike-double-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double"),
         json!([descriptor["cardInstanceId"]])
     );
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);
@@ -1141,7 +1146,7 @@ fn rule_catalog_1647_printed_attack_and_granted_next_strike_double_compose_while
         ["magic-cast", "next-strike-double-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double"),
         json!([descriptor["cardInstanceId"]])
     );
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);
@@ -1202,9 +1207,9 @@ fn rule_catalog_1803_killed_enemy_stays_in_cemetery_after_turns_pass() {
     strike_minion(&mut session, &ally_id, &enemy_id);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     let _ = descriptor;
     advance_full_round(&mut session);
@@ -1224,7 +1229,7 @@ fn rule_catalog_1804_second_grant_stacks_sources_without_doubling_twice() {
     let (first, _) = grant_double(&mut session, &ally_id);
     let (second, _) = grant_double(&mut session, &ally_id);
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double"),
         json!([first["cardInstanceId"], second["cardInstanceId"],])
     );
     let fight = strike_minion(&mut session, &ally_id, &enemy_id);
@@ -1275,13 +1280,16 @@ fn rule_catalog_1806_grant_double_via_avatar_anchor_while_minion_ally_stays_unma
     );
     let avatar = avatar_id(&state(&session));
     assert_eq!(
-        state(&session)["players"]["north"]["avatar"]["temporaryNextStrikeDoubleSources"],
+        modifier_sources(
+            &state(&session)["players"]["north"]["avatar"],
+            "next-strike-double"
+        ),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     let fight = strike_unit(&mut session, &avatar, &enemy_id);
     assert_eq!(strike_allocated_to_target(&fight, &avatar, &enemy_id), 2);
@@ -1508,9 +1516,9 @@ fn rule_catalog_1090_grant_next_strike_double_withheld_during_pending_deathrite_
     assert!(unit(&resumed, &ally_id).is_object());
     assert!(grant_ally_ids(session).contains(&ally_id));
     assert!(
-        unit(&resumed, &ally_id)
-            .get("temporaryNextStrikeDoubleSources")
-            .is_none()
+        modifier_sources(unit(&resumed, &ally_id), "next-strike-double")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = grant_double(session, &ally_id);
@@ -1525,7 +1533,7 @@ fn rule_catalog_1090_grant_next_strike_double_withheld_during_pending_deathrite_
         descriptor["cardInstanceId"]
     );
     assert_eq!(
-        unit(&state(session), &ally_id)["temporaryNextStrikeDoubleSources"],
+        modifier_sources(unit(&state(session), &ally_id), "next-strike-double"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(session);

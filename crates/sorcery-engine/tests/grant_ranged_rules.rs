@@ -8,6 +8,10 @@
 //! While trigger-order is pending, the grant is withheld until the chain
 //! completes.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -332,9 +336,9 @@ fn expire_grant_ranged(session: &mut Session, ally_id: &str, grant_source: &str)
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryRangedSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "ranged")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -364,9 +368,9 @@ fn rule_catalog_0276_grant_ranged_lets_a_ready_minion_shoot_until_end_of_turn() 
     let before = state(&session);
     assert_eq!(unit(&before, &ally_id)["summoningSickness"], false);
     assert!(
-        unit(&before, &ally_id)
-            .get("temporaryRangedSources")
-            .is_none()
+        modifier_sources(unit(&before, &ally_id), "ranged")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!can_shoot(&session, &ally_id));
 
@@ -383,7 +387,7 @@ fn rule_catalog_0276_grant_ranged_lets_a_ready_minion_shoot_until_end_of_turn() 
     );
     let granted = state(&session);
     assert_eq!(
-        unit(&granted, &ally_id)["temporaryRangedSources"],
+        modifier_sources(unit(&granted, &ally_id), "ranged"),
         json!([descriptor["cardInstanceId"]])
     );
     assert!(
@@ -399,9 +403,9 @@ fn rule_catalog_0276_grant_ranged_lets_a_ready_minion_shoot_until_end_of_turn() 
     }));
     let after = state(&session);
     assert!(
-        unit(&after, &ally_id)
-            .get("temporaryRangedSources")
-            .is_none()
+        modifier_sources(unit(&after, &ally_id), "ranged")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert!(!can_shoot(&session, &ally_id));
     assert_exact_replay(&session);
@@ -428,9 +432,9 @@ fn rule_catalog_0277_granted_ranged_does_not_bypass_summoning_sickness() {
     grant_ranged(&mut session, &ally_id);
     let granted = state(&session);
     assert!(
-        unit(&granted, &ally_id)
-            .get("temporaryRangedSources")
-            .is_some()
+        modifier_sources(unit(&granted, &ally_id), "ranged")
+            .as_array()
+            .is_some_and(|sources| !sources.is_empty())
     );
     assert_eq!(unit(&granted, &ally_id)["summoningSickness"], true);
     assert!(
@@ -476,7 +480,7 @@ fn rule_catalog_1584_granted_ranged_shoots_and_kills_before_end_of_turn() {
     );
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryRangedSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "ranged"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(&session);
@@ -528,7 +532,7 @@ fn rule_catalog_1587_printed_and_granted_ranged_compose_while_grant_is_active() 
         ["magic-cast", "ranged-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryRangedSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "ranged"),
         json!([descriptor["cardInstanceId"]])
     );
     shoot_target(&mut session, &ally_id, &enemy_id);
@@ -754,9 +758,9 @@ fn rule_catalog_1107_grant_ranged_withheld_during_pending_deathrite_order() {
     assert!(unit(&resumed, &ally_id).is_object());
     assert!(grant_ally_ids(session).contains(&ally_id));
     assert!(
-        unit(&resumed, &ally_id)
-            .get("temporaryRangedSources")
-            .is_none()
+        modifier_sources(unit(&resumed, &ally_id), "ranged")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = grant_ranged(session, &ally_id);
@@ -771,7 +775,7 @@ fn rule_catalog_1107_grant_ranged_withheld_during_pending_deathrite_order() {
         descriptor["cardInstanceId"]
     );
     assert_eq!(
-        unit(&state(session), &ally_id)["temporaryRangedSources"],
+        modifier_sources(unit(&state(session), &ally_id), "ranged"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(session);

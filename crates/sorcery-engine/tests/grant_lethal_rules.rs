@@ -7,6 +7,10 @@
 //! destroys a tougher minion; the same strike without Lethal only wounds it.
 //! Grant-Lethal Magic stays withheld while Deathrites wait for ordering.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::checkpoint::{
@@ -297,9 +301,9 @@ fn expire_grant_lethal(session: &mut Session, ally_id: &str, grant_source: &str)
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryLethalSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "atlas"
@@ -353,9 +357,9 @@ fn rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn() {
     let ally_id = summon_north_ally(&mut session);
     let before = state(&session);
     assert!(
-        unit(&before, &ally_id)
-            .get("temporaryLethalSources")
-            .is_none()
+        modifier_sources(unit(&before, &ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
 
     let (descriptor, receipt) = grant_lethal(&mut session, &ally_id);
@@ -371,7 +375,7 @@ fn rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn() {
     );
     let granted = state(&session);
     assert_eq!(
-        unit(&granted, &ally_id)["temporaryLethalSources"],
+        modifier_sources(unit(&granted, &ally_id), "lethal"),
         json!([descriptor["cardInstanceId"]])
     );
 
@@ -383,9 +387,9 @@ fn rule_catalog_0278_grant_lethal_lasts_only_until_end_of_turn() {
     }));
     let after = state(&session);
     assert!(
-        unit(&after, &ally_id)
-            .get("temporaryLethalSources")
-            .is_none()
+        modifier_sources(unit(&after, &ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
     let checkpoint = create_game_checkpoint(&session).expect("grant-lethal checkpoint");
@@ -458,7 +462,7 @@ fn rule_catalog_1594_granted_lethal_strikes_and_kills_before_end_of_turn() {
     strike_minion(&mut session, &ally_id, &enemy_id);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryLethalSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "lethal"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(&session);
@@ -510,7 +514,7 @@ fn rule_catalog_1597_printed_and_granted_lethal_compose_while_grant_is_active() 
         ["magic-cast", "lethal-granted", "magic-resolved"]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryLethalSources"],
+        modifier_sources(unit(&state(&session), &ally_id), "lethal"),
         json!([descriptor["cardInstanceId"]])
     );
     strike_minion(&mut session, &ally_id, &enemy_id);
@@ -743,7 +747,7 @@ fn rule_catalog_1106_grant_lethal_withheld_during_pending_deathrite_order() {
     );
     assert_eq!(receipt.events[1].payload["instanceId"], ally_id);
     assert_eq!(
-        unit(&state(session), &ally_id)["temporaryLethalSources"],
+        modifier_sources(unit(&state(session), &ally_id), "lethal"),
         json!([descriptor["cardInstanceId"]])
     );
     assert_exact_replay(session);

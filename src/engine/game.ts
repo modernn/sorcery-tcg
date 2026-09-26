@@ -632,6 +632,13 @@ type ImmobileArea = Readonly<{
   suppressesAirborne?: true;
 }>;
 
+export type TemporaryModifier = Readonly<{
+  amount: number;
+  kind: 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
+    | 'movement' | 'power' | 'ranged' | 'silence';
+  sourceInstanceId: StateHash;
+}>;
+
 type UnitInstance = Readonly<CardInstance & {
   // ponytail: intrinsic Lance marks omit Artifact transfer/drop; promote them to realm Artifacts when a supported card needs it.
   carriedLanceCount?: number;
@@ -649,12 +656,7 @@ type UnitInstance = Readonly<CardInstance & {
   stealthed: boolean;
   summoningSickness: boolean;
   tapped: boolean;
-  temporaryAirborneSources?: readonly StateHash[];
-  temporaryChargeSources?: readonly StateHash[];
-  temporaryFirstStrikeSources?: readonly StateHash[];
-  temporaryLethalSources?: readonly StateHash[];
-  temporaryPowerSources?: readonly StateHash[];
-  temporaryRangedSources?: readonly StateHash[];
+  temporaryModifiers?: readonly TemporaryModifier[];
   warded: boolean;
 }>;
 
@@ -884,7 +886,7 @@ type PlayerState = Readonly<{
     location: RealmCell;
     region: GameRegion;
     tapped: boolean;
-    temporaryPowerSources?: readonly StateHash[];
+    temporaryModifiers?: readonly TemporaryModifier[];
   }>;
   cemetery: readonly CardInstance[];
   domainEstablished: boolean;
@@ -957,7 +959,7 @@ type ObservedPlayer = Readonly<{
     location: RealmCell;
     region: GameRegion;
     tapped: boolean;
-    temporaryPowerSources?: readonly StateHash[];
+    temporaryModifiers?: readonly TemporaryModifier[];
   }>;
   cemetery: readonly Readonly<{ cardId: string; instanceId: StateHash }>[];
   domainEstablished: boolean;
@@ -1029,7 +1031,7 @@ export type GameObservation = Readonly<{
       stealthed: boolean;
       summoningSickness: boolean;
       tapped: boolean;
-      temporaryPowerSources?: readonly StateHash[];
+      temporaryModifiers?: readonly TemporaryModifier[];
       token?: true;
       warded: boolean;
     }>[];

@@ -191,11 +191,9 @@ fn grant_spells_in_hand(snapshot: &Value) -> usize {
 }
 
 fn temporary_airborne_len(snapshot: &Value, instance_id: &str) -> usize {
-    unit(snapshot, instance_id)
-        .get("temporaryAirborneSources")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default()
+    modifier_sources(unit(snapshot, instance_id), "airborne")
+        .as_array()
+        .map_or(0, Vec::len)
 }
 
 fn pass_turn_to_north_spellbook(session: &mut Session) {

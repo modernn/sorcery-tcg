@@ -28,6 +28,7 @@ import {
   type RealmCell,
   type GameSeat,
   type GameSession,
+  type TemporaryModifier,
 } from '../engine/game.ts';
 import {
   RustGameSessionHandle,
@@ -36,6 +37,7 @@ import {
 } from '../engine/rust-session-helpers.ts';
 import { RustSessionClient } from '../engine/rust-engine.ts';
 import { runCounterfactualRollouts } from '../simulator/counterfactual.ts';
+import type { StateHash } from '../engine/contract.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
@@ -48,6 +50,14 @@ const DEFAULT_SCENARIO = resolve(
 
 function ruleTextDigest(rulesText: string): Hash {
   return identityHash(rulesText as JsonValue);
+}
+
+function temporarySources(
+  modifiers: readonly TemporaryModifier[] | undefined,
+  kind: TemporaryModifier['kind'],
+): StateHash[] {
+  return modifiers?.filter((modifier) => modifier.kind === kind)
+    .map(({ sourceInstanceId }) => sourceInstanceId) ?? [];
 }
 
 type ScenarioConfig = Readonly<{
@@ -11943,8 +11953,8 @@ async function runEarthOverpower(
     : undefined;
   const currentPowerIncreasedByTwo = observedAfterGrant.attack === observedBefore.attack + 2
     && observedAfterGrant.defense === observedBefore.defense + 2;
-  const unitStatePreservedOnGrant = afterGrant.temporaryPowerSources?.length === 1
-    && afterGrant.temporaryPowerSources[0] === opening.overpowerInstanceId
+  const unitStatePreservedOnGrant = temporarySources(afterGrant.temporaryModifiers, 'power').length === 1
+    && temporarySources(afterGrant.temporaryModifiers, 'power')[0] === opening.overpowerInstanceId
     && afterGrant.cardId === before.cardId
     && afterGrant.controller === before.controller
     && afterGrant.damage === before.damage
@@ -12000,7 +12010,7 @@ async function runEarthOverpower(
     overpower: input.overpower.name,
     printedPowerRestored: afterExpiry !== undefined
       && observedAfterExpiry !== undefined
-      && afterExpiry.temporaryPowerSources === undefined
+      && temporarySources(afterExpiry.temporaryModifiers, 'power').length === 0
       && observedAfterExpiry.attack === input.elthamTownsfolk.attack
       && observedAfterExpiry.defense === input.elthamTownsfolk.defense
       && afterExpiry.damage === 0,
@@ -21659,8 +21669,8 @@ function runFireCharge(
   const resolvedPayload = castEvents[2] && isJsonRecord(castEvents[2].payload)
     ? castEvents[2].payload
     : undefined;
-  const temporaryChargeRecorded = after.temporaryChargeSources?.length === 1
-    && after.temporaryChargeSources[0] === opening.chargeInstanceId;
+  const temporaryChargeRecorded = temporarySources(after.temporaryModifiers, 'charge').length === 1
+    && temporarySources(after.temporaryModifiers, 'charge')[0] === opening.chargeInstanceId;
   const moveAvailableAfterCharge = hasPositiveRaalMove(session);
   const unitStatePreservedOnGrant = after.cardId === before.cardId
     && after.controller === before.controller
@@ -21686,7 +21696,7 @@ function runFireCharge(
   const turnEndedIndex = expiryEvents.findIndex(({ payload, type }) =>
     type === 'turn-ended' && isJsonRecord(payload) && payload.seat === 'north');
   const expiredAtEndOfTurn = expired !== undefined
-    && expired.temporaryChargeSources === undefined
+    && temporarySources(expired.temporaryModifiers, 'charge').length === 0
     && expiryIndex >= 0
     && expiryIndex < turnEndedIndex;
 

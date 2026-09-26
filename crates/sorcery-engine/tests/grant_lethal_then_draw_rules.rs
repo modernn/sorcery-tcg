@@ -6,6 +6,10 @@
 //! the shared this-turn source list, expires at End Phase, and lets one point
 //! of damage destroy a tougher minion.
 
+#[path = "common/mod.rs"]
+mod common;
+use common::modifier_sources;
+
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{canonical_json, identity_hash};
 use sorcery_engine::contract::{ActionRequest, Receipt, Seat};
@@ -390,7 +394,7 @@ fn rule_catalog_0531_lethal_grant_offers_allied_minions_then_draws_a_spell() {
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(&session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryLethalSources"][0],
+        modifier_sources(unit(&after, &ally_id), "lethal")[0],
         granted.events[0].payload["instanceId"]
     );
     assert!(
@@ -411,7 +415,11 @@ fn rule_catalog_0531_lethal_grant_offers_allied_minions_then_draws_a_spell() {
     assert!(ended.events.iter().any(|event| {
         event.event_type == "lethal-expired" && event.payload["instanceId"] == ally_id
     }));
-    assert!(unit(&state(&session), &ally_id)["temporaryLethalSources"].is_null());
+    assert!(
+        modifier_sources(unit(&state(&session), &ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
     assert_exact_replay(&session);
 }
 
@@ -584,9 +592,9 @@ fn expire_grant_lethal(session: &mut Session, ally_id: &str, grant_source: &str)
             && event.payload["sourceInstanceId"] == grant_source
     }));
     assert!(
-        unit(&state(session), ally_id)
-            .get("temporaryLethalSources")
-            .is_none()
+        modifier_sources(unit(&state(session), ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "draw" && descriptor["zone"] == "spellbook"
@@ -603,9 +611,9 @@ fn rule_catalog_1653_printed_lethal_strikes_and_kills_without_grant() {
     strike_minion(&mut session, &ally_id, &enemy_id);
     assert!(cemetery_has(&session, "south", &enemy_id));
     assert!(
-        unit(&state(&session), &ally_id)
-            .get("temporaryLethalSources")
-            .is_none()
+        modifier_sources(unit(&state(&session), &ally_id), "lethal")
+            .as_array()
+            .is_some_and(Vec::is_empty)
     );
     assert_exact_replay(&session);
 }
@@ -628,7 +636,7 @@ fn rule_catalog_1654_granted_lethal_then_draw_kills_before_end_of_turn() {
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryLethalSources"][0],
+        modifier_sources(unit(&state(&session), &ally_id), "lethal")[0],
         descriptor["cardInstanceId"]
     );
     strike_minion(&mut session, &ally_id, &enemy_id);
@@ -693,7 +701,7 @@ fn rule_catalog_1657_printed_and_granted_lethal_then_draw_compose_while_grant_is
         ]
     );
     assert_eq!(
-        unit(&state(&session), &ally_id)["temporaryLethalSources"][0],
+        modifier_sources(unit(&state(&session), &ally_id), "lethal")[0],
         descriptor["cardInstanceId"]
     );
     strike_minion(&mut session, &ally_id, &enemy_id);
@@ -953,7 +961,7 @@ fn rule_catalog_1064_grant_lethal_then_draw_withheld_during_pending_deathrite_or
     assert_eq!(granted.events[1].payload["instanceId"], ally_id);
     let after = state(session);
     assert_eq!(
-        unit(&after, &ally_id)["temporaryLethalSources"][0],
+        modifier_sources(unit(&after, &ally_id), "lethal")[0],
         granted.events[0].payload["instanceId"]
     );
     let hand_after = after["players"]["north"]["hand"]["spellbook"]

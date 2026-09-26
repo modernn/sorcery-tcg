@@ -28,6 +28,7 @@ use crate::prng::PrngState;
 mod ability;
 mod choices;
 mod effect;
+mod modifiers;
 mod resolution;
 #[cfg(test)]
 mod resolution_tests;
@@ -39,6 +40,7 @@ mod triggers;
 use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use choices::PendingAbilityChoice;
 use effect::{AbilityEntry, EffectFrame, RealmReference};
+use modifiers::{TemporaryModifierKind, TemporaryModifiers};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
 use trigger_order::{TriggerBatch, TriggerOrderStage, TriggerSource};
 use triggers::{GenesisTrigger, PendingTriggerOrder};
@@ -409,9 +411,7 @@ struct AvatarPosition {
     life: u16,
     location: Cell,
     tapped: bool,
-    temporary_movement_sources: Vec<IdentityHash>,
-    temporary_next_strike_double_sources: Vec<IdentityHash>,
-    temporary_power_sources: Vec<IdentityHash>,
+    temporary_modifiers: TemporaryModifiers,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -461,15 +461,7 @@ struct UnitPosition {
     stealthed: bool,
     summoning_sickness: bool,
     tapped: bool,
-    temporary_airborne_sources: Vec<IdentityHash>,
-    temporary_charge_sources: Vec<IdentityHash>,
-    temporary_first_strike_sources: Vec<IdentityHash>,
-    temporary_lethal_sources: Vec<IdentityHash>,
-    temporary_next_strike_double_sources: Vec<IdentityHash>,
-    temporary_movement_sources: Vec<IdentityHash>,
-    temporary_power_sources: Vec<IdentityHash>,
-    temporary_ranged_sources: Vec<IdentityHash>,
-    temporary_silence_sources: Vec<IdentityHash>,
+    temporary_modifiers: TemporaryModifiers,
     warded: bool,
 }
 
@@ -504,15 +496,7 @@ impl SummonPlacement {
             stealthed: self.stealthed,
             summoning_sickness: true,
             tapped: false,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
+            temporary_modifiers: TemporaryModifiers::new(),
             warded: self.warded,
         }
     }
@@ -1966,11 +1950,17 @@ impl Game {
         let player = &self.position.players[seat_index(resource_seat)];
         let enemy = &self.position.players[seat_index(other_seat(resource_seat))];
         let mut powered_unit_instance_ids = Vec::new();
-        if !player.avatar.temporary_power_sources.is_empty() {
+        if player
+            .avatar
+            .temporary_modifiers
+            .has(TemporaryModifierKind::Power)
+        {
             powered_unit_instance_ids.push(player.avatar.card.instance_id.clone());
         }
         for unit in &self.position.units {
-            if unit.controller == resource_seat && !unit.temporary_power_sources.is_empty() {
+            if unit.controller == resource_seat
+                && unit.temporary_modifiers.has(TemporaryModifierKind::Power)
+            {
                 powered_unit_instance_ids.push(unit.card.instance_id.clone());
             }
         }
@@ -2159,11 +2149,8 @@ impl Game {
                 if facts.token {
                     value["token"] = json!(true);
                 }
-                if !unit.temporary_movement_sources.is_empty() {
-                    value["temporaryMovementSources"] = json!(unit.temporary_movement_sources);
-                }
-                if !unit.temporary_power_sources.is_empty() {
-                    value["temporaryPowerSources"] = json!(unit.temporary_power_sources);
+                if !unit.temporary_modifiers.is_empty() {
+                    value["temporaryModifiers"] = json!(unit.temporary_modifiers);
                 }
                 Ok(value)
             })
@@ -2277,20 +2264,8 @@ impl Game {
         if let Some(count) = player.air_thresholds_cast_this_turn {
             value["airThresholdsCastThisTurn"] = json!(count);
         }
-        if !player.avatar.temporary_movement_sources.is_empty() {
-            value["avatar"]["temporaryMovementSources"] =
-                json!(player.avatar.temporary_movement_sources);
-        }
-        if !player
-            .avatar
-            .temporary_next_strike_double_sources
-            .is_empty()
-        {
-            value["avatar"]["temporaryNextStrikeDoubleSources"] =
-                json!(player.avatar.temporary_next_strike_double_sources);
-        }
-        if !player.avatar.temporary_power_sources.is_empty() {
-            value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
+        if !player.avatar.temporary_modifiers.is_empty() {
+            value["avatar"]["temporaryModifiers"] = json!(player.avatar.temporary_modifiers);
         }
         Ok(value)
     }
@@ -2988,7 +2963,7 @@ impl Game {
                     airborne: false,
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
+                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)?),
                     moving_minion: false,
                     occupied_cells: None,
                     power: self.avatar_entry_power(seat),
@@ -3029,7 +3004,7 @@ impl Game {
                     maximum_cost: if facts.cannot_defend || facts.immobile {
                         None
                     } else {
-                        Some(Self::minion_basic_movement_steps(unit, facts))
+                        Some(Self::minion_basic_movement_steps(unit, facts)?)
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -4026,7 +4001,7 @@ impl Game {
                     airborne: false,
                     cause: MovementCause::BasicMovement,
                     connects_top_bottom: false,
-                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
+                    maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)?),
                     moving_minion: false,
                     occupied_cells: None,
                     power: self.avatar_entry_power(seat),
@@ -4061,7 +4036,7 @@ impl Game {
                     maximum_cost: if facts.immobile {
                         None
                     } else {
-                        Some(Self::minion_basic_movement_steps(unit, facts))
+                        Some(Self::minion_basic_movement_steps(unit, facts)?)
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -5825,7 +5800,10 @@ impl Game {
     /// Printed Airborne is lost while the minion is disabled or while a conjured area grounds any
     /// cell of its footprint.
     fn minion_is_airborne(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
-        (facts.airborne || !unit.temporary_airborne_sources.is_empty())
+        (facts.airborne
+            || unit
+                .temporary_modifiers
+                .has(TemporaryModifierKind::Airborne))
             && !self.minion_abilities_lost(unit)
             && !Self::unit_occupied_cells(unit).iter().any(|cell| {
                 self.location_suppresses_airborne(Location {
@@ -5849,7 +5827,7 @@ impl Game {
     }
 
     fn minion_is_silenced(unit: &UnitPosition) -> bool {
-        !unit.temporary_silence_sources.is_empty()
+        unit.temporary_modifiers.has(TemporaryModifierKind::Silence)
     }
 
     fn minion_abilities_lost(&self, unit: &UnitPosition) -> bool {
@@ -5884,7 +5862,7 @@ impl Game {
     fn minion_is_ranged(&self, unit: &UnitPosition, facts: &MinionFacts) -> bool {
         !self.minion_abilities_lost(unit)
             && (facts.ranged
-                || !unit.temporary_ranged_sources.is_empty()
+                || unit.temporary_modifiers.has(TemporaryModifierKind::Ranged)
                 || self.minion_atop_tower(unit))
     }
 
@@ -6299,7 +6277,11 @@ impl Game {
         };
         let instance_id = player.avatar.card.instance_id.clone();
         let location = player.avatar.location;
-        let mut bonus = Self::temporary_power_bonus(&player.avatar.temporary_power_sources)?;
+        let mut bonus = player
+            .avatar
+            .temporary_modifiers
+            .amount(TemporaryModifierKind::Power)
+            .map_err(|_| GameError::IllegalAction)?;
         bonus = bonus
             .checked_add(self.carried_power_bonus(UnitKind::Avatar, seat, &instance_id)?)
             .ok_or(GameError::IllegalAction)?;
@@ -6344,7 +6326,10 @@ impl Game {
                     Self::unit_occupied_cells(unit),
                 )
         };
-        let mut bonus = Self::temporary_power_bonus(&unit.temporary_power_sources)?;
+        let mut bonus = unit
+            .temporary_modifiers
+            .amount(TemporaryModifierKind::Power)
+            .map_err(|_| GameError::IllegalAction)?;
         for source in &self.position.units {
             if source.card.instance_id == unit.card.instance_id
                 || source.controller != unit.controller
@@ -6375,7 +6360,7 @@ impl Game {
             )?)
             .ok_or(GameError::IllegalAction)?;
         let lethal = facts.lethal
-            || !unit.temporary_lethal_sources.is_empty()
+            || unit.temporary_modifiers.has(TemporaryModifierKind::Lethal)
             || self.carried_lethal(UnitKind::Minion, unit.controller, &unit.card.instance_id)?;
         Ok((
             u16::from(facts.attack)
@@ -6388,19 +6373,25 @@ impl Game {
         ))
     }
 
-    fn temporary_power_bonus(sources: &[IdentityHash]) -> Result<u16, GameError> {
-        u16::try_from(sources.len())
-            .map_err(|_| GameError::IllegalAction)?
-            .checked_mul(2)
-            .ok_or(GameError::IllegalAction)
+    fn avatar_basic_movement_steps(avatar: &AvatarPosition) -> Result<usize, GameError> {
+        Ok(1 + usize::from(
+            avatar
+                .temporary_modifiers
+                .amount(TemporaryModifierKind::Movement)
+                .map_err(|_| GameError::IllegalAction)?,
+        ))
     }
 
-    fn avatar_basic_movement_steps(avatar: &AvatarPosition) -> usize {
-        1 + avatar.temporary_movement_sources.len()
-    }
-
-    fn minion_basic_movement_steps(unit: &UnitPosition, facts: &MinionFacts) -> usize {
-        1 + usize::from(facts.movement_bonus.unwrap_or(0)) + unit.temporary_movement_sources.len()
+    fn minion_basic_movement_steps(
+        unit: &UnitPosition,
+        facts: &MinionFacts,
+    ) -> Result<usize, GameError> {
+        Ok(1 + usize::from(facts.movement_bonus.unwrap_or(0))
+            + usize::from(
+                unit.temporary_modifiers
+                    .amount(TemporaryModifierKind::Movement)
+                    .map_err(|_| GameError::IllegalAction)?,
+            ))
     }
 
     fn minion_caster_suffix(&self, seat: Seat, instance_id: &IdentityHash) -> String {
@@ -9401,7 +9392,7 @@ impl Game {
             return false;
         };
         !self.minion_abilities_lost(unit)
-            && (facts.charge || !unit.temporary_charge_sources.is_empty())
+            && (facts.charge || unit.temporary_modifiers.has(TemporaryModifierKind::Charge))
     }
 
     /// The realm layer one combatant currently occupies.
@@ -12199,16 +12190,18 @@ impl Game {
                 if avatar.card.instance_id != *instance_id {
                     return Err(GameError::IllegalAction);
                 }
-                !avatar.temporary_next_strike_double_sources.is_empty()
+                avatar
+                    .temporary_modifiers
+                    .has(TemporaryModifierKind::NextStrikeDouble)
             }
-            UnitKind::Minion => !self
+            UnitKind::Minion => self
                 .position
                 .units
                 .iter()
                 .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
                 .ok_or(GameError::IllegalAction)?
-                .temporary_next_strike_double_sources
-                .is_empty(),
+                .temporary_modifiers
+                .has(TemporaryModifierKind::NextStrikeDouble),
         };
         let amount = if doubled {
             amount.checked_mul(2).ok_or(GameError::IllegalAction)?
@@ -12223,14 +12216,21 @@ impl Game {
         })
     }
 
-    fn combatant_strikes_first_while_attacking(
+    fn combatant_strikes_first(
         &self,
         kind: UnitKind,
         seat: Seat,
         instance_id: &IdentityHash,
+        attacking: bool,
     ) -> Result<bool, GameError> {
         if kind == UnitKind::Avatar {
-            return Ok(false);
+            let avatar = &self.position.players[seat_index(seat)].avatar;
+            if avatar.card.instance_id != *instance_id {
+                return Err(GameError::IllegalAction);
+            }
+            return Ok(avatar
+                .temporary_modifiers
+                .has(TemporaryModifierKind::FirstStrike));
         }
         let unit = self
             .position
@@ -12238,11 +12238,44 @@ impl Game {
             .iter()
             .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
             .ok_or(GameError::IllegalAction)?;
-        Ok(!unit.temporary_first_strike_sources.is_empty()
-            || matches!(
-                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-                CardFacts::Minion(facts) if facts.strikes_first_while_attacking
-            ))
+        let CardFacts::Minion(facts) = &self.rules.cards[usize::from(unit.card.card_id.0)].facts
+        else {
+            return Err(GameError::IllegalAction);
+        };
+        Ok(!self.minion_abilities_lost(unit)
+            && (unit.carried_lance_count > 0
+                || unit
+                    .temporary_modifiers
+                    .has(TemporaryModifierKind::FirstStrike)
+                || if attacking {
+                    facts.strikes_first_while_attacking
+                } else {
+                    facts.strikes_first_while_defending
+                }))
+    }
+
+    fn temporary_modifiers_mut(
+        &mut self,
+        kind: UnitKind,
+        seat: Seat,
+        instance_id: &IdentityHash,
+    ) -> Result<&mut TemporaryModifiers, GameError> {
+        match kind {
+            UnitKind::Avatar => {
+                let avatar = &mut self.position.players[seat_index(seat)].avatar;
+                if avatar.card.instance_id != *instance_id {
+                    return Err(GameError::IllegalAction);
+                }
+                Ok(&mut avatar.temporary_modifiers)
+            }
+            UnitKind::Minion => Ok(&mut self
+                .position
+                .units
+                .iter_mut()
+                .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
+                .ok_or(GameError::IllegalAction)?
+                .temporary_modifiers),
+        }
     }
 
     fn break_lance(
@@ -12277,30 +12310,15 @@ impl Game {
         instance_id: &IdentityHash,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let sources = match kind {
-            UnitKind::Avatar => {
-                let avatar = &mut self.position.players[seat_index(seat)].avatar;
-                if avatar.card.instance_id != *instance_id {
-                    return Err(GameError::IllegalAction);
-                }
-                std::mem::take(&mut avatar.temporary_next_strike_double_sources)
-            }
-            UnitKind::Minion => std::mem::take(
-                &mut self
-                    .position
-                    .units
-                    .iter_mut()
-                    .find(|unit| unit.controller == seat && unit.card.instance_id == *instance_id)
-                    .ok_or(GameError::IllegalAction)?
-                    .temporary_next_strike_double_sources,
-            ),
-        };
+        let sources = self
+            .temporary_modifiers_mut(kind, seat, instance_id)?
+            .take(TemporaryModifierKind::NextStrikeDouble);
         for source in sources {
             outcomes.push("next-strike-double-consumed", || {
                 json!({
                     "instanceId": instance_id,
                     "seat": seat,
-                    "sourceInstanceId": source,
+                    "sourceInstanceId": source.source_instance_id,
                 })
             });
         }
@@ -12452,50 +12470,22 @@ impl Game {
             return Err(GameError::IllegalAction);
         }
         let pending = pending.clone();
-        let attacker = self.combatant_strike_stats(
+        let attacker_struck = self.combatant_strikes_first(
             pending.attacker_kind,
             pending.attacking_seat,
             &pending.attacker_instance_id,
+            true,
         )?;
-        let attacker_enabled = match pending.attacker_kind {
-            UnitKind::Avatar => true,
-            UnitKind::Minion => self
-                .position
-                .units
-                .iter()
-                .find(|unit| unit.card.instance_id == pending.attacker_instance_id)
-                .is_some_and(|unit| !self.minion_is_disabled(unit)),
-        };
-        let attacker_struck = attacker_enabled
-            && (attacker.lance_count > 0
-                || self.combatant_strikes_first_while_attacking(
-                    pending.attacker_kind,
-                    pending.attacking_seat,
-                    &pending.attacker_instance_id,
-                )?);
-        let first_combatant_instance_ids = pending
-            .combatants
-            .iter()
-            .filter_map(|target| {
-                let UnitTarget::Minion { .. } = target else {
-                    return None;
-                };
-                self.position
-                    .units
-                    .iter()
-                    .find(|unit| unit.card.instance_id == *target.instance_id())
-                    .filter(|unit| !self.minion_is_disabled(unit))
-                    .and_then(|unit| {
-                        let strikes_first = unit.carried_lance_count > 0
-                            || !unit.temporary_first_strike_sources.is_empty()
-                            || matches!(
-                                &self.rules.cards[usize::from(unit.card.card_id.0)].facts,
-                                CardFacts::Minion(facts) if facts.strikes_first_while_defending
-                            );
-                        strikes_first.then(|| target.instance_id().clone())
-                    })
-            })
-            .collect::<Vec<_>>();
+        let mut first_combatant_instance_ids = Vec::new();
+        for target in &pending.combatants {
+            let kind = match target {
+                UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                UnitTarget::Minion { .. } => UnitKind::Minion,
+            };
+            if self.combatant_strikes_first(kind, target.seat(), target.instance_id(), false)? {
+                first_combatant_instance_ids.push(target.instance_id().clone());
+            }
+        }
         if attacker_struck || !first_combatant_instance_ids.is_empty() {
             let continuation = FirstStrikeContinuation {
                 attacker_struck,
@@ -14062,7 +14052,7 @@ impl Game {
                         airborne: false,
                         cause: MovementCause::BasicMovement,
                         connects_top_bottom: false,
-                        maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)),
+                        maximum_cost: Some(Self::avatar_basic_movement_steps(&player.avatar)?),
                         moving_minion: false,
                         occupied_cells: None,
                         power: self.avatar_entry_power(seat),
@@ -14098,7 +14088,7 @@ impl Game {
                         maximum_cost: if facts.immobile {
                             None
                         } else {
-                            Some(Self::minion_basic_movement_steps(unit, facts))
+                            Some(Self::minion_basic_movement_steps(unit, facts)?)
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
@@ -14801,15 +14791,7 @@ impl Game {
             stealthed: facts.stealth,
             summoning_sickness: true,
             tapped: false,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
+            temporary_modifiers: TemporaryModifiers::new(),
             warded: matches!(facts.damage_prevention, Some(DamagePrevention::Ward)),
         })
     }
@@ -20064,8 +20046,8 @@ impl Game {
                         unit.card.instance_id == *instance_id && unit.controller == *target_seat
                     })
                     .ok_or(GameError::IllegalAction)?
-                    .temporary_airborne_sources
-                    .push(card_instance_id.clone());
+                    .temporary_modifiers
+                    .grant(TemporaryModifierKind::Airborne, 1, card_instance_id.clone());
                 outcomes.push("airborne-granted", || {
                     json!({
                         "instanceId": instance_id,
@@ -20423,8 +20405,8 @@ impl Game {
                             unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                         })
                         .ok_or(GameError::IllegalAction)?
-                        .temporary_airborne_sources
-                        .push(card_instance_id.clone());
+                        .temporary_modifiers
+                        .grant(TemporaryModifierKind::Airborne, 1, card_instance_id.clone());
                 }
                 outcomes.push("airborne-granted", || {
                     json!({
@@ -20450,8 +20432,8 @@ impl Game {
                         unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                     })
                     .ok_or(GameError::IllegalAction)?
-                    .temporary_airborne_sources
-                    .push(card_instance_id.clone());
+                    .temporary_modifiers
+                    .grant(TemporaryModifierKind::Airborne, 1, card_instance_id.clone());
                 outcomes.push("airborne-granted", || {
                     json!({
                         "instanceId": instance_id,
@@ -20463,21 +20445,16 @@ impl Game {
             }
             MagicEffect::GrantFirstStrikeToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                if let UnitTarget::Minion {
-                    instance_id,
-                    seat: ally_seat,
-                } = ally
-                {
-                    self.position
-                        .units
-                        .iter_mut()
-                        .find(|unit| {
-                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
-                        })
-                        .ok_or(GameError::IllegalAction)?
-                        .temporary_first_strike_sources
-                        .push(card_instance_id.clone());
-                }
+                let kind = match ally {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
+                    .grant(
+                        TemporaryModifierKind::FirstStrike,
+                        1,
+                        card_instance_id.clone(),
+                    );
                 outcomes.push("first-strike-granted", || {
                     json!({
                         "instanceId": ally.instance_id(),
@@ -20500,8 +20477,8 @@ impl Game {
                             unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                         })
                         .ok_or(GameError::IllegalAction)?
-                        .temporary_lethal_sources
-                        .push(card_instance_id.clone());
+                        .temporary_modifiers
+                        .grant(TemporaryModifierKind::Lethal, 1, card_instance_id.clone());
                 }
                 outcomes.push("lethal-granted", || {
                     json!({
@@ -20513,35 +20490,16 @@ impl Game {
             }
             MagicEffect::GrantDoubleDamageToAllyNextStrikeThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                match ally {
-                    UnitTarget::Avatar {
-                        instance_id,
-                        seat: ally_seat,
-                    } => {
-                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
-                        if avatar.card.instance_id != *instance_id {
-                            return Err(GameError::IllegalAction);
-                        }
-                        avatar
-                            .temporary_next_strike_double_sources
-                            .push(card_instance_id.clone());
-                    }
-                    UnitTarget::Minion {
-                        instance_id,
-                        seat: ally_seat,
-                    } => {
-                        self.position
-                            .units
-                            .iter_mut()
-                            .find(|unit| {
-                                unit.card.instance_id == *instance_id
-                                    && unit.controller == *ally_seat
-                            })
-                            .ok_or(GameError::IllegalAction)?
-                            .temporary_next_strike_double_sources
-                            .push(card_instance_id.clone());
-                    }
-                }
+                let kind = match ally {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
+                    .grant(
+                        TemporaryModifierKind::NextStrikeDouble,
+                        1,
+                        card_instance_id.clone(),
+                    );
                 outcomes.push("next-strike-double-granted", || {
                     json!({
                         "instanceId": ally.instance_id(),
@@ -20552,35 +20510,12 @@ impl Game {
             }
             MagicEffect::GrantMovementOneToAllyThisTurnThenDrawSpell => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                match ally {
-                    UnitTarget::Avatar {
-                        instance_id,
-                        seat: ally_seat,
-                    } => {
-                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
-                        if avatar.card.instance_id != *instance_id {
-                            return Err(GameError::IllegalAction);
-                        }
-                        avatar
-                            .temporary_movement_sources
-                            .push(card_instance_id.clone());
-                    }
-                    UnitTarget::Minion {
-                        instance_id,
-                        seat: ally_seat,
-                    } => {
-                        self.position
-                            .units
-                            .iter_mut()
-                            .find(|unit| {
-                                unit.card.instance_id == *instance_id
-                                    && unit.controller == *ally_seat
-                            })
-                            .ok_or(GameError::IllegalAction)?
-                            .temporary_movement_sources
-                            .push(card_instance_id.clone());
-                    }
-                }
+                let kind = match ally {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
+                    .grant(TemporaryModifierKind::Movement, 1, card_instance_id.clone());
                 outcomes.push("movement-granted", || {
                     json!({
                         "amount": 1,
@@ -20607,8 +20542,8 @@ impl Game {
                         unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                     })
                     .ok_or(GameError::IllegalAction)?
-                    .temporary_lethal_sources
-                    .push(card_instance_id.clone());
+                    .temporary_modifiers
+                    .grant(TemporaryModifierKind::Lethal, 1, card_instance_id.clone());
                 outcomes.push("lethal-granted", || {
                     json!({
                         "instanceId": instance_id,
@@ -20632,8 +20567,8 @@ impl Game {
                             unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                         })
                         .ok_or(GameError::IllegalAction)?
-                        .temporary_charge_sources
-                        .push(card_instance_id.clone());
+                        .temporary_modifiers
+                        .grant(TemporaryModifierKind::Charge, 1, card_instance_id.clone());
                 }
                 outcomes.push("charge-granted", || {
                     json!({
@@ -20657,8 +20592,8 @@ impl Game {
                             unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                         })
                         .ok_or(GameError::IllegalAction)?
-                        .temporary_ranged_sources
-                        .push(card_instance_id.clone());
+                        .temporary_modifiers
+                        .grant(TemporaryModifierKind::Ranged, 1, card_instance_id.clone());
                 }
                 outcomes.push("ranged-granted", || {
                     json!({
@@ -20670,33 +20605,12 @@ impl Game {
             }
             MagicEffect::GrantPowerTwoToAllyThisTurn => {
                 let ally = ally.as_ref().ok_or(GameError::IllegalAction)?;
-                match ally {
-                    UnitTarget::Avatar {
-                        instance_id,
-                        seat: ally_seat,
-                    } => {
-                        let avatar = &mut self.position.players[seat_index(*ally_seat)].avatar;
-                        if avatar.card.instance_id != *instance_id {
-                            return Err(GameError::IllegalAction);
-                        }
-                        avatar
-                            .temporary_power_sources
-                            .push(card_instance_id.clone());
-                    }
-                    UnitTarget::Minion {
-                        instance_id,
-                        seat: ally_seat,
-                    } => self
-                        .position
-                        .units
-                        .iter_mut()
-                        .find(|unit| {
-                            unit.card.instance_id == *instance_id && unit.controller == *ally_seat
-                        })
-                        .ok_or(GameError::IllegalAction)?
-                        .temporary_power_sources
-                        .push(card_instance_id.clone()),
-                }
+                let kind = match ally {
+                    UnitTarget::Avatar { .. } => UnitKind::Avatar,
+                    UnitTarget::Minion { .. } => UnitKind::Minion,
+                };
+                self.temporary_modifiers_mut(kind, ally.seat(), ally.instance_id())?
+                    .grant(TemporaryModifierKind::Power, 2, card_instance_id.clone());
                 outcomes.push("power-granted", || {
                     json!({
                         "amount": 2,
@@ -20722,8 +20636,8 @@ impl Game {
                         unit.card.instance_id == *instance_id && unit.controller == *ally_seat
                     })
                     .ok_or(GameError::IllegalAction)?
-                    .temporary_power_sources
-                    .push(card_instance_id.clone());
+                    .temporary_modifiers
+                    .grant(TemporaryModifierKind::Power, 2, card_instance_id.clone());
                 outcomes.push("power-granted", || {
                     json!({
                         "amount": 2,
@@ -23242,12 +23156,15 @@ impl Game {
             return Ok(true);
         }
         if !unit
-            .temporary_silence_sources
-            .iter()
+            .temporary_modifiers
+            .sources(TemporaryModifierKind::Silence)
             .any(|source| source == source_instance_id)
         {
-            unit.temporary_silence_sources
-                .push(source_instance_id.clone());
+            unit.temporary_modifiers.grant(
+                TemporaryModifierKind::Silence,
+                1,
+                source_instance_id.clone(),
+            );
             outcomes.push("minion-silenced", || {
                 json!({
                     "instanceId": instance_id,
@@ -24087,147 +24004,6 @@ impl Game {
                     })
             })
             .collect();
-        let expired_airborne_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_airborne_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let expired_charge_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_charge_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let expired_first_strike_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_first_strike_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let expired_lethal_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_lethal_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let expired_ranged_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_ranged_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let expired_silence_sources: Vec<_> = self
-            .position
-            .units
-            .iter()
-            .flat_map(|unit| {
-                unit.temporary_silence_sources.iter().map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-            })
-            .collect();
-        let ending_avatar = &self.position.players[seat_index(seat)].avatar;
-        let mut expired_movement_sources: Vec<_> = ending_avatar
-            .temporary_movement_sources
-            .iter()
-            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
-            .collect();
-        expired_movement_sources.extend(self.position.units.iter().flat_map(|unit| {
-            unit.temporary_movement_sources.iter().map(|source| {
-                (
-                    unit.card.instance_id.clone(),
-                    unit.controller,
-                    source.clone(),
-                )
-            })
-        }));
-        let mut expired_power_sources: Vec<_> = ending_avatar
-            .temporary_power_sources
-            .iter()
-            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
-            .collect();
-        expired_power_sources.extend(self.position.units.iter().flat_map(|unit| {
-            unit.temporary_power_sources.iter().map(|source| {
-                (
-                    unit.card.instance_id.clone(),
-                    unit.controller,
-                    source.clone(),
-                )
-            })
-        }));
-        let mut expired_next_strike_double_sources: Vec<_> = ending_avatar
-            .temporary_next_strike_double_sources
-            .iter()
-            .map(|source| (ending_avatar.card.instance_id.clone(), seat, source.clone()))
-            .collect();
-        expired_next_strike_double_sources.extend(self.position.units.iter().flat_map(|unit| {
-            unit.temporary_next_strike_double_sources
-                .iter()
-                .map(|source| {
-                    (
-                        unit.card.instance_id.clone(),
-                        unit.controller,
-                        source.clone(),
-                    )
-                })
-        }));
-        self.position.players[seat_index(seat)]
-            .avatar
-            .temporary_movement_sources
-            .clear();
-        self.position.players[seat_index(seat)]
-            .avatar
-            .temporary_next_strike_double_sources
-            .clear();
-        self.position.players[seat_index(seat)]
-            .avatar
-            .temporary_power_sources
-            .clear();
         for (instance_id, controller) in &end_phase_untapped {
             let unit = self
                 .position
@@ -24263,17 +24039,22 @@ impl Game {
                 .then(|| unit.card.instance_id.clone())
             })
             .collect();
+        let mut expired_modifiers = Vec::new();
+        for (index, player) in self.position.players.iter_mut().enumerate() {
+            let controller = if index == 0 { Seat::North } else { Seat::South };
+            for modifier in player.avatar.temporary_modifiers.drain() {
+                expired_modifiers.push((
+                    player.avatar.card.instance_id.clone(),
+                    controller,
+                    modifier,
+                ));
+            }
+        }
         for (unit, gains_stealth) in self.position.units.iter_mut().zip(end_turn_stealth_gained) {
             unit.damage = 0;
-            unit.temporary_airborne_sources.clear();
-            unit.temporary_charge_sources.clear();
-            unit.temporary_first_strike_sources.clear();
-            unit.temporary_lethal_sources.clear();
-            unit.temporary_next_strike_double_sources.clear();
-            unit.temporary_movement_sources.clear();
-            unit.temporary_power_sources.clear();
-            unit.temporary_ranged_sources.clear();
-            unit.temporary_silence_sources.clear();
+            for modifier in unit.temporary_modifiers.drain() {
+                expired_modifiers.push((unit.card.instance_id.clone(), unit.controller, modifier));
+            }
             if unit.controller == seat {
                 if gains_stealth {
                     unit.stealthed = true;
@@ -24318,87 +24099,20 @@ impl Game {
         self.position.active_seat = next_seat;
         self.position.decision_seat = next_seat;
         self.activate_pending_player_control(next_seat, outcomes);
-        for (instance_id, controller, source_instance_id) in expired_airborne_sources {
-            outcomes.push("airborne-expired", || {
-                json!({
+        for (instance_id, controller, modifier) in expired_modifiers {
+            outcomes.push(modifier.kind.expiration_event(), || {
+                let mut value = json!({
                     "instanceId": instance_id,
                     "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_charge_sources {
-            outcomes.push("charge-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_first_strike_sources {
-            outcomes.push("first-strike-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_lethal_sources {
-            outcomes.push("lethal-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_next_strike_double_sources {
-            outcomes.push("next-strike-double-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_movement_sources {
-            outcomes.push("movement-expired", || {
-                json!({
-                    "amount": 1,
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_ranged_sources {
-            outcomes.push("ranged-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_silence_sources {
-            outcomes.push("silence-expired", || {
-                json!({
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
-            });
-        }
-        for (instance_id, controller, source_instance_id) in expired_power_sources {
-            outcomes.push("power-expired", || {
-                json!({
-                    "amount": 2,
-                    "instanceId": instance_id,
-                    "seat": controller,
-                    "sourceInstanceId": source_instance_id,
-                })
+                    "sourceInstanceId": modifier.source_instance_id,
+                });
+                if matches!(
+                    modifier.kind,
+                    TemporaryModifierKind::Movement | TemporaryModifierKind::Power
+                ) {
+                    value["amount"] = json!(modifier.amount);
+                }
+                value
             });
         }
         for (instance_id, controller, _, count) in &counted_auras {
@@ -25011,20 +24725,8 @@ impl Game {
                 }
             }
         }
-        if !player.avatar.temporary_movement_sources.is_empty() {
-            value["avatar"]["temporaryMovementSources"] =
-                json!(player.avatar.temporary_movement_sources);
-        }
-        if !player
-            .avatar
-            .temporary_next_strike_double_sources
-            .is_empty()
-        {
-            value["avatar"]["temporaryNextStrikeDoubleSources"] =
-                json!(player.avatar.temporary_next_strike_double_sources);
-        }
-        if !player.avatar.temporary_power_sources.is_empty() {
-            value["avatar"]["temporaryPowerSources"] = json!(player.avatar.temporary_power_sources);
+        if !player.avatar.temporary_modifiers.is_empty() {
+            value["avatar"]["temporaryModifiers"] = json!(player.avatar.temporary_modifiers);
         }
         value
     }
@@ -25089,10 +24791,6 @@ impl Game {
         value
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "authoritative unit JSON keeps every named dynamic flag on one explicit surface"
-    )]
     fn unit_value(&self, unit: &UnitPosition) -> Value {
         let mut value = self.card_value(&unit.card);
         let Value::Object(object) = &mut value else {
@@ -25152,58 +24850,10 @@ impl Game {
                 json!(unit.carried_lance_count),
             );
         }
-        if !unit.temporary_airborne_sources.is_empty() {
+        if !unit.temporary_modifiers.is_empty() {
             object.insert(
-                "temporaryAirborneSources".to_owned(),
-                json!(unit.temporary_airborne_sources),
-            );
-        }
-        if !unit.temporary_charge_sources.is_empty() {
-            object.insert(
-                "temporaryChargeSources".to_owned(),
-                json!(unit.temporary_charge_sources),
-            );
-        }
-        if !unit.temporary_first_strike_sources.is_empty() {
-            object.insert(
-                "temporaryFirstStrikeSources".to_owned(),
-                json!(unit.temporary_first_strike_sources),
-            );
-        }
-        if !unit.temporary_lethal_sources.is_empty() {
-            object.insert(
-                "temporaryLethalSources".to_owned(),
-                json!(unit.temporary_lethal_sources),
-            );
-        }
-        if !unit.temporary_next_strike_double_sources.is_empty() {
-            object.insert(
-                "temporaryNextStrikeDoubleSources".to_owned(),
-                json!(unit.temporary_next_strike_double_sources),
-            );
-        }
-        if !unit.temporary_movement_sources.is_empty() {
-            object.insert(
-                "temporaryMovementSources".to_owned(),
-                json!(unit.temporary_movement_sources),
-            );
-        }
-        if !unit.temporary_power_sources.is_empty() {
-            object.insert(
-                "temporaryPowerSources".to_owned(),
-                json!(unit.temporary_power_sources),
-            );
-        }
-        if !unit.temporary_ranged_sources.is_empty() {
-            object.insert(
-                "temporaryRangedSources".to_owned(),
-                json!(unit.temporary_ranged_sources),
-            );
-        }
-        if !unit.temporary_silence_sources.is_empty() {
-            object.insert(
-                "temporarySilenceSources".to_owned(),
-                json!(unit.temporary_silence_sources),
+                "temporaryModifiers".to_owned(),
+                json!(unit.temporary_modifiers),
             );
         }
         value
@@ -25523,9 +25173,7 @@ fn create_player(
         location: Cell::parse(if seat == Seat::North { "C4" } else { "C1" })
             .map_err(|_| invalid("avatar start cell must be valid"))?,
         tapped: false,
-        temporary_movement_sources: Vec::new(),
-        temporary_next_strike_double_sources: Vec::new(),
-        temporary_power_sources: Vec::new(),
+        temporary_modifiers: TemporaryModifiers::new(),
     };
     let remaining_atlas = atlas.split_off(3);
     let remaining_spellbook = spellbook.split_off(3);
@@ -25847,15 +25495,7 @@ pub mod catalog_proofs {
             stealthed: false,
             summoning_sickness: false,
             tapped: true,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
+            temporary_modifiers: TemporaryModifiers::new(),
             warded: false,
         }
     }
@@ -28531,15 +28171,7 @@ pub mod catalog_proofs {
             stealthed: false,
             summoning_sickness: false,
             tapped: false,
-            temporary_airborne_sources: Vec::new(),
-            temporary_charge_sources: Vec::new(),
-            temporary_first_strike_sources: Vec::new(),
-            temporary_lethal_sources: Vec::new(),
-            temporary_next_strike_double_sources: Vec::new(),
-            temporary_movement_sources: Vec::new(),
-            temporary_power_sources: Vec::new(),
-            temporary_ranged_sources: Vec::new(),
-            temporary_silence_sources: Vec::new(),
+            temporary_modifiers: TemporaryModifiers::new(),
             warded: false,
         });
         game.position.active_seat = Seat::North;
