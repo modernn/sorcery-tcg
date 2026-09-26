@@ -51,6 +51,7 @@ type EffectProgramUnitCohort = Readonly<{
   kind?: 'avatar' | 'minion' | null;
   controller?: 'any' | 'allied' | 'enemy';
   excludeSource?: boolean;
+  relation?: EffectProgramRelation | null;
 }>;
 type EffectProgramRecipients = 'target' | 'chosen' | Readonly<{ query: EffectProgramUnitCohort }>;
 type EffectDuration = 'this-turn' | 'until-your-next-turn';
@@ -63,6 +64,7 @@ type EffectProgramEffect =
   | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
   | Readonly<{
     alliedOnly?: boolean;
+    excludeSource?: boolean;
     op: 'choose-unit';
     optional?: boolean;
     relation: EffectProgramRelation;
@@ -553,6 +555,7 @@ export type GameCardDefinition =
     genesisDrawSite?: boolean;
     genesisEachPlayerControlledByPreviousPlayerNextTurn?: true;
     genesisGainControlOfTappedMinionsHereUntilThisLeaves?: true;
+    genesisProgram?: EffectProgram;
     nearbyAvatarsMayDiscardCardToGainControlOfThis?: true;
     genesisHealController?: 2;
     genesisLoseControllerLife?: 2;
@@ -582,7 +585,7 @@ export type GameCardDefinition =
     demon?: true;
     mortal?: true;
     undead?: true;
-    movementBonus?: 1 | 2;
+    movementBonus?: 1 | 2 | 3;
     movesOnlyForward?: boolean;
     movesOnlySideways?: boolean;
     mustAttackAUnitIfAble?: true;
@@ -1450,7 +1453,7 @@ const SUPPORTED_CARD_FIELDS = {
     deathriteLoseLifePerNearbySiteControlled defense discardRandomCardInsteadOfMana
     discardSpellToDamageRandomOtherUnitHere diesAtEndOfControllerTurn enemiesMustAttackThisIfAble genesisDamageEachOtherUnitHere
     genesisDisableSelfUntilDamaged genesisDrawSite genesisDrawSpells genesisEachPlayerControlledByPreviousPlayerNextTurn genesisGainControlOfTappedMinionsHereUntilThisLeaves genesisHealController
-    genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
+    genesisLoseControllerLife genesisMayDamageTargetAdjacentUnit genesisProgram genesisStrikeEachEnemyHere genesisUntapAdjacentAllies
     gainsPowerRangedAndSpellcasterAtopTower gainsStealthAtEndOfTurn
     gainsStealthAtEndOfTurnIfNoEnemiesNearby immobile lanceCount landbound lethal
     manaCost mayRangedStrikeOnceDuringBasicMovement mayStepAfterRangedStrike demon mortal undead movementBonus
@@ -2509,6 +2512,21 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       `${path}.genesisGainControlOfTappedMinionsHereUntilThisLeaves must be true when defined`,
     );
   }
+  if (card.genesisProgram !== undefined) {
+    validateEffectProgram(card.genesisProgram, `${path}.genesisProgram`);
+    if (card.genesisProgram.selection?.kind === 'location') {
+      throw new RangeError(
+        `${path}.genesisProgram location selection is unsupported for Genesis programs`,
+      );
+    }
+    const hasLegacyGenesisField = Object.keys(card)
+      .some((field) => field.startsWith('genesis') && field !== 'genesisProgram');
+    if (hasLegacyGenesisField) {
+      throw new RangeError(
+        `${path}.genesisProgram cannot be mixed with legacy Genesis effects`,
+      );
+    }
+  }
   if (card.nearbyAvatarsMayDiscardCardToGainControlOfThis !== undefined
     && card.nearbyAvatarsMayDiscardCardToGainControlOfThis !== true) {
     throw new RangeError(
@@ -2677,8 +2695,8 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
   if (card.movementBonus !== undefined
     && (!Number.isSafeInteger(card.movementBonus)
       || card.movementBonus < 1
-      || card.movementBonus > 2)) {
-    throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 2`);
+      || card.movementBonus > 3)) {
+    throw new RangeError(`${path}.movementBonus must be a safe integer between 1 and 3`);
   }
   if (card.demon !== undefined && card.demon !== true) {
     throw new RangeError(`${path}.demon must be true when defined`);
@@ -3357,6 +3375,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             attack: card.attack,
             ...(card.burrowing === true ? { burrowing: true } : {}),
             cardType: 'minion' as const,
+            ...(card.genesisProgram !== undefined
+              ? { genesisProgram: cloneEffectProgram(card.genesisProgram) }
+              : {}),
             ...(card.cannotAttackSites === true ? { cannotAttackSites: true } : {}),
             ...(card.charge === true ? { charge: true } : {}),
             ...(card.mustAttackAUnitIfAble === true ? { mustAttackAUnitIfAble: true as const } : {}),

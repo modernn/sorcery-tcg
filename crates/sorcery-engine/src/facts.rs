@@ -439,6 +439,7 @@ pub struct MinionFacts {
     pub genesis_disable_self_until_damaged: bool,
     pub genesis_draw_site: bool,
     pub genesis_draw_spells: Option<u8>,
+    pub genesis_program: Option<std::sync::Arc<crate::ability::AbilityProgram>>,
     pub genesis_each_player_controlled_by_previous_player_next_turn: bool,
     pub genesis_gain_control_of_tapped_minions_here_until_this_leaves: bool,
     pub genesis_heal_controller: bool,
@@ -982,6 +983,7 @@ const MINION_FIELDS: &[&str] = &[
     "genesisDisableSelfUntilDamaged",
     "genesisDrawSite",
     "genesisDrawSpells",
+    "genesisProgram",
     "genesisEachPlayerControlledByPreviousPlayerNextTurn",
     "genesisGainControlOfTappedMinionsHereUntilThisLeaves",
     "genesisHealController",
@@ -1498,6 +1500,9 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
             ));
         }
         if program.effects.iter().any(|effect| {
+            if matches!(effect, crate::ability::Effect::ChooseUnit(spec) if spec.exclude_source) {
+                return true;
+            }
             let recipients = match effect {
                 crate::ability::Effect::Damage { recipients, .. }
                 | crate::ability::Effect::Untap { recipients }
@@ -1929,6 +1934,34 @@ fn parse_provides(object: &Map<String, Value>, path: &str) -> Result<Option<Elem
 )]
 fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, FactError> {
     reject_unknown(object, MINION_FIELDS, path)?;
+    let genesis_program = if let Some(value) = object.get("genesisProgram") {
+        if object
+            .keys()
+            .any(|field| field.starts_with("genesis") && field != "genesisProgram")
+        {
+            return Err(FactError::new(
+                format!("{path}.genesisProgram"),
+                "cannot be mixed with legacy Genesis effects",
+            ));
+        }
+        let program: crate::ability::AbilityProgram = serde_json::from_value(value.clone())
+            .map_err(|error| FactError::new(format!("{path}.genesisProgram"), error.to_string()))?;
+        program
+            .validate()
+            .map_err(|error| FactError::new(format!("{path}.genesisProgram"), error))?;
+        if matches!(
+            program.selection,
+            Some(crate::ability::SelectionSpec::Location { .. })
+        ) {
+            return Err(FactError::new(
+                format!("{path}.genesisProgram"),
+                "location selection is unsupported for Genesis programs",
+            ));
+        }
+        Some(std::sync::Arc::new(program))
+    } else {
+        None
+    };
     let airborne = optional_bool(object, "airborne", path)?;
     let alternative_summon_payment = parse_alternative_summon_payment(object, path)?;
     let at_end_of_controller_turn_controller_gains_life = optional_bounded_integer(
@@ -2189,6 +2222,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         genesis_disable_self_until_damaged,
         genesis_draw_site,
         genesis_draw_spells,
+        genesis_program,
         genesis_each_player_controlled_by_previous_player_next_turn,
         genesis_gain_control_of_tapped_minions_here_until_this_leaves,
         genesis_heal_controller,
@@ -2204,7 +2238,7 @@ fn parse_minion(object: &Map<String, Value>, path: &str) -> Result<MinionFacts, 
         may_ranged_strike_once_during_basic_movement,
         may_step_after_ranged_strike,
         mortal: true_only(object, "mortal", path)?,
-        movement_bonus: optional_bounded_integer(object, "movementBonus", 1, 2, path)?
+        movement_bonus: optional_bounded_integer(object, "movementBonus", 1, 3, path)?
             .map(compact_u8),
         movement_restriction,
         must_attack_a_unit_if_able,

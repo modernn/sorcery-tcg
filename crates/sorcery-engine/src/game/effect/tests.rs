@@ -20,12 +20,14 @@ const OTHER_UNITS_HERE: UnitSet = UnitSet::Query(UnitCohort {
     area: UnitArea::Source,
     kind: None,
     controller: ControllerRelation::Any,
+    relation: None,
     exclude_source: true,
 });
 const AT_LOCATION: UnitSet = UnitSet::Query(UnitCohort {
     area: UnitArea::Location,
     kind: None,
     controller: ControllerRelation::Any,
+    relation: None,
     exclude_source: false,
 });
 
@@ -948,7 +950,7 @@ fn exhausted_draw_finishes_held_magic_before_the_terminal_event() {
 }
 
 #[test]
-fn other_units_query_includes_a_new_incarnation_of_the_old_source() {
+fn departed_source_cannot_anchor_a_query_but_its_new_incarnation_can_join_realm_cohorts() {
     let mut game = fixture_game();
     let original = minion(&game, "south-spell-3", Seat::North, "query-source", false);
     let reference = RealmReference::from_card(&original.card);
@@ -972,7 +974,24 @@ fn other_units_query_includes_a_new_incarnation_of_the_old_source() {
             .is_empty()
     );
     game.position.units[0].card.enter_realm().unwrap();
-    let recipients = game.effect_recipients(&frame, OTHER_UNITS_HERE).unwrap();
+    assert!(matches!(
+        game.effect_recipients(&frame, OTHER_UNITS_HERE),
+        Err(GameError::UnsupportedMechanic(_))
+    ));
+    let recipients = game
+        .effect_recipients(
+            &frame,
+            UnitSet::Query(UnitCohort {
+                area: UnitArea::Realm {
+                    region: Some(Region::Surface),
+                },
+                relation: None,
+                kind: Some(super::super::UnitKind::Minion),
+                controller: ControllerRelation::Any,
+                exclude_source: true,
+            }),
+        )
+        .unwrap();
     assert_eq!(recipients.len(), 1);
     assert_eq!(recipients[0].0, instance_id);
 }
@@ -1431,6 +1450,7 @@ fn ordinary_unit_choice_resumes_one_effect_and_survives_checkpoint_cloning() {
         &mut game,
         vec![
             Effect::ChooseUnit(UnitChoiceSpec {
+                exclude_source: false,
                 kind: None,
                 relation: SpatialRelation::Adjacent,
                 allied_only: true,
@@ -1506,6 +1526,7 @@ fn emptied_choice_after_source_departure_resumes_independent_effects() {
         &mut game,
         vec![
             Effect::ChooseUnit(UnitChoiceSpec {
+                exclude_source: false,
                 kind: Some(super::super::UnitKind::Minion),
                 relation: SpatialRelation::Adjacent,
                 allied_only: true,
@@ -1557,6 +1578,7 @@ fn ordinary_anywhere_choice_crosses_regions_but_targets_and_nearby_do_not() {
     game.position.units.push(hidden);
     let source = source("surface-source", Seat::North, 0, None);
     let spec = UnitChoiceSpec {
+        exclude_source: false,
         kind: Some(UnitKind::Minion),
         relation: SpatialRelation::Anywhere,
         allied_only: true,
@@ -1598,6 +1620,7 @@ fn empty_second_choice_does_not_reuse_first_chosen_unit() {
     let source = source("successive-choice", Seat::North, 0, None);
     let source_id = source.instance_id.clone();
     let spec = UnitChoiceSpec {
+        exclude_source: false,
         kind: Some(UnitKind::Avatar),
         relation: SpatialRelation::Anywhere,
         allied_only: true,
@@ -1673,6 +1696,7 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
         area: UnitArea::Realm { region: None },
         kind: Some(super::super::UnitKind::Minion),
         controller: ControllerRelation::Allied,
+        relation: None,
         exclude_source: false,
     });
     let magic = install(
@@ -1691,6 +1715,7 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
                 area: UnitArea::Source,
                 kind: None,
                 controller: ControllerRelation::Any,
+                relation: None,
                 exclude_source: true,
             }),
             vec![avatar_id, ids[4].clone()],
@@ -1700,6 +1725,7 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
                 area: UnitArea::Source,
                 kind: Some(super::super::UnitKind::Minion),
                 controller: ControllerRelation::Enemy,
+                relation: None,
                 exclude_source: false,
             }),
             vec![ids[4].clone()],
@@ -1711,6 +1737,7 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
                 },
                 kind: Some(super::super::UnitKind::Minion),
                 controller: ControllerRelation::Any,
+                relation: None,
                 exclude_source: false,
             }),
             vec![ids[0].clone(), ids[3].clone(), ids[4].clone()],
@@ -1752,4 +1779,63 @@ fn authored_cohorts_share_controller_region_footprint_and_source_filters() {
     assert_eq!(emitted, expected);
     emitted.dedup();
     assert_eq!(emitted.len(), 4);
+}
+
+#[test]
+fn ordinary_choice_excludes_only_the_sources_original_realm_incarnation() {
+    let mut game = fixture_game();
+    let source_unit = minion(&game, "south-spell-3", Seat::North, "choice-source", false);
+    let ally = minion(&game, "south-spell-3", Seat::North, "choice-ally", false);
+    let enemy = minion(&game, "south-spell-3", Seat::South, "choice-enemy", false);
+    let source_id = source_unit.card.instance_id.clone();
+    let ally_id = ally.card.instance_id.clone();
+    game.position.units = vec![source_unit, ally, enemy];
+    let target = UnitTarget::Minion {
+        instance_id: source_id.clone(),
+        seat: Seat::North,
+    };
+    let source = game.unit_effect_source(&target).unwrap();
+    let spec = crate::ability::UnitChoiceSpec {
+        kind: Some(super::super::UnitKind::Minion),
+        relation: SpatialRelation::Anywhere,
+        allied_only: true,
+        exclude_source: true,
+        optional: false,
+    };
+    let choices = game.ability_unit_choices(&source, spec);
+    assert_eq!(choices.len(), 1);
+    assert_eq!(choices[0].instance_id(), &ally_id);
+    game.position.units[0].card.enter_realm().unwrap();
+    let choices = game.ability_unit_choices(&source, spec);
+    assert_eq!(choices.len(), 2);
+    assert!(
+        choices
+            .iter()
+            .any(|choice| choice.instance_id() == &source_id)
+    );
+}
+
+#[test]
+fn source_anchor_tracks_the_live_unit_and_rejects_unresolved_departure_geometry() {
+    let mut game = fixture_game();
+    let source_unit = minion(&game, "south-spell-3", Seat::North, "moving-source", false);
+    let source_id = source_unit.card.instance_id.clone();
+    game.position.units = vec![source_unit];
+    let source = game
+        .unit_effect_source(&UnitTarget::Minion {
+            instance_id: source_id,
+            seat: Seat::North,
+        })
+        .unwrap();
+    let destination = Cell::parse("B2").unwrap();
+    game.position.units[0].location = destination;
+    assert_eq!(
+        game.effect_anchor(&source).unwrap(),
+        (Region::Surface, vec![destination])
+    );
+    game.position.units.clear();
+    assert!(matches!(
+        game.effect_anchor(&source),
+        Err(GameError::UnsupportedMechanic(_))
+    ));
 }

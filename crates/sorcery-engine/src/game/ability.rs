@@ -94,6 +94,7 @@ fn ally_grant(
         Effect::ChooseUnit(UnitChoiceSpec {
             kind,
             relation: SpatialRelation::Anywhere,
+            exclude_source: false,
             allied_only: true,
             optional: false,
         }),
@@ -196,6 +197,7 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
                         area: UnitArea::Realm { region: None },
                         kind: Some(super::UnitKind::Minion),
                         controller: ControllerRelation::Allied,
+                        relation: None,
                         exclude_source: false,
                     }),
                 },
@@ -231,6 +233,7 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
                 },
                 kind: Some(super::UnitKind::Minion),
                 controller: ControllerRelation::Any,
+                relation: None,
                 exclude_source: false,
             }),
             amount: 1,
@@ -240,6 +243,7 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>
                 area: UnitArea::Location,
                 kind: None,
                 controller: ControllerRelation::Any,
+                relation: None,
                 exclude_source: false,
             }),
             amount: u16::from(*amount),
@@ -266,6 +270,7 @@ fn compile_minion_activation(facts: &MinionFacts) -> Option<Arc<AbilityProgram>>
                     area: UnitArea::Location,
                     kind: None,
                     controller: ControllerRelation::Any,
+                    relation: None,
                     exclude_source: false,
                 }),
                 amount: 2,
@@ -275,7 +280,8 @@ fn compile_minion_activation(facts: &MinionFacts) -> Option<Arc<AbilityProgram>>
 }
 
 pub(super) fn genesis_clause_count(facts: &MinionFacts) -> usize {
-    usize::from(facts.genesis_damage_each_other_unit_here)
+    usize::from(facts.genesis_program.is_some())
+        + usize::from(facts.genesis_damage_each_other_unit_here)
         + usize::from(facts.genesis_disable_self_until_damaged)
         + usize::from(facts.genesis_draw_site)
         + usize::from(facts.genesis_draw_spells.is_some())
@@ -289,6 +295,9 @@ pub(super) fn genesis_clause_count(facts: &MinionFacts) -> usize {
 }
 
 fn compile_genesis(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
+    if let Some(program) = &facts.genesis_program {
+        return Some(Arc::clone(program));
+    }
     if genesis_clause_count(facts) != 1 {
         return None;
     }
@@ -310,6 +319,7 @@ fn compile_genesis(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
                 area: UnitArea::Source,
                 kind: None,
                 controller: ControllerRelation::Any,
+                relation: None,
                 exclude_source: true,
             }),
             amount: 1,
@@ -333,6 +343,7 @@ fn compile_genesis(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
             Effect::ChooseUnit(UnitChoiceSpec {
                 kind: None,
                 relation: SpatialRelation::Adjacent,
+                exclude_source: false,
                 allied_only: true,
                 optional: false,
             }),
@@ -579,6 +590,7 @@ mod tests {
                 Effect::ChooseUnit(UnitChoiceSpec {
                     kind: None,
                     relation: SpatialRelation::Adjacent,
+                    exclude_source: false,
                     allied_only: true,
                     optional: false,
                 }),

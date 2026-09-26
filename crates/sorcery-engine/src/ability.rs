@@ -103,6 +103,15 @@ impl AbilityProgram {
             }
             UnitSet::Chosen => {}
             UnitSet::Query(cohort) => {
+                if let Some(relation) = cohort.relation {
+                    if matches!(cohort.area, UnitArea::Realm { .. }) {
+                        return Err(format!(
+                            "{path}.recipients realm query has no distance anchor"
+                        ));
+                    }
+                    validate_relation(relation)
+                        .map_err(|error| format!("{path}.recipients.query.relation: {error}"))?;
+                }
                 if matches!(cohort.area, UnitArea::Location)
                     && !matches!(self.selection, Some(SelectionSpec::Location { .. }))
                 {
@@ -229,6 +238,9 @@ pub struct UnitChoiceSpec {
     /// Restricts the choice to allied units.
     #[serde(default)]
     pub allied_only: bool,
+    /// Excludes the original realm object owning the ability.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclude_source: bool,
     /// Allows declining the choice.
     #[serde(default)]
     pub optional: bool,
@@ -303,6 +315,9 @@ pub enum ControllerRelation {
 pub struct UnitCohort {
     /// The area from which units are selected.
     pub area: UnitArea,
+    /// Expands an anchored area using the shared selection geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation: Option<SpatialRelation>,
     /// Restricts the query to a unit kind, when present.
     #[serde(default)]
     pub kind: Option<UnitKind>,
@@ -573,6 +588,7 @@ mod tests {
                     area: UnitArea::Realm { region: None },
                     kind: Some(UnitKind::Minion),
                     controller: ControllerRelation::Any,
+                    relation: None,
                     exclude_source: false,
                 }),
                 modifier: TemporaryModifierKind::Silence,
@@ -619,6 +635,7 @@ mod tests {
             area: UnitArea::Location,
             kind: None,
             controller: ControllerRelation::Any,
+            relation: None,
             exclude_source: false,
         });
         let program = AbilityProgram {
@@ -640,6 +657,7 @@ mod tests {
             area: UnitArea::Realm { region: None },
             kind: None,
             controller: ControllerRelation::Any,
+            relation: None,
             exclude_source: false,
         });
         let valid = AbilityProgram {
@@ -650,6 +668,23 @@ mod tests {
         valid
             .validate()
             .expect("realm query needs no declared location");
+
+        for (area, relation) in [
+            (UnitArea::Realm { region: None }, SpatialRelation::Nearby),
+            (UnitArea::Source, SpatialRelation::Measured(0)),
+        ] {
+            let mut invalid = valid.clone();
+            invalid.effects[0] = Effect::Untap {
+                recipients: UnitSet::Query(UnitCohort {
+                    area,
+                    relation: Some(relation),
+                    kind: None,
+                    controller: ControllerRelation::Any,
+                    exclude_source: false,
+                }),
+            };
+            assert!(invalid.validate().is_err());
+        }
     }
 
     #[test]
@@ -675,6 +710,7 @@ mod tests {
                     area: UnitArea::Realm { region: None },
                     kind: Some(UnitKind::Minion),
                     controller: ControllerRelation::Allied,
+                    relation: None,
                     exclude_source: true,
                 }),
             }]

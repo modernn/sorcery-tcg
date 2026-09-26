@@ -1244,3 +1244,24 @@ fn rule_catalog_2477_rats_leave_a_far_site_threshold_untouched() {
 fn rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site() {
     sorcery_engine::game::catalog_proofs::rule_catalog_2478_newly_summoned_rats_start_suppressing_the_occupied_site();
 }
+
+#[test]
+fn movement_bonus_three_uses_the_shared_four_step_budget() {
+    let mut mover = minion(2, 3);
+    mover["movementBonus"] = json!(3);
+    let (mut session, instance_id) = ready_movement_session(53, mover, Seat::North, "C2", false);
+    let paths = movement_paths(&session, &instance_id);
+    assert!(paths.iter().all(|path| path.split(',').count() <= 5));
+    let (_, receipt) = accept_where(&mut session, |d| {
+        d["kind"] == "move-and-attack"
+            && d["unitInstanceId"] == instance_id
+            && d["path"].as_array().is_some_and(|path| {
+                path.iter()
+                    .map(|point| point["cell"].as_str().unwrap())
+                    .eq(["C2", "C1", "C2", "C3", "B3"])
+            })
+    });
+    assert_eq!(receipt.events[0].payload["steps"], 4);
+    assert_eq!(state(&session)["realm"]["units"][0]["location"], "B3");
+    assert_exact_replay(&session);
+}

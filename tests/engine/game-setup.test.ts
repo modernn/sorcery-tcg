@@ -3237,7 +3237,7 @@ test('RULE-06 the manifest accepts only exact deck-scoped supported card facts',
     ...input,
     cards: {
       ...cards,
-      [firstSpell]: { ...cards[firstSpell]!, movementBonus: 3 } as unknown as GameCardDefinition,
+      [firstSpell]: { ...cards[firstSpell]!, movementBonus: 4 } as unknown as GameCardDefinition,
     },
   }), /movementBonus/);
   assert.throws(() => createGameManifest({

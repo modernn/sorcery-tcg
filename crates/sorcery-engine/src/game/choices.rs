@@ -35,7 +35,13 @@ impl Game {
                 cells: Some(&source.cells),
                 kind: spec.kind,
                 controller: spec.allied_only.then_some(source.controller),
-                exclude: None,
+                exclude: source
+                    .realm
+                    .as_ref()
+                    .filter(|reference| {
+                        spec.exclude_source && self.realm_reference_exists(reference)
+                    })
+                    .map(super::effect::RealmReference::instance_id),
             },
             spec.relation,
             None,
@@ -48,6 +54,9 @@ impl Game {
         spec: UnitChoiceSpec,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
+        if spec.relation != SpatialRelation::Anywhere {
+            (frame.source.region, frame.source.cells) = self.effect_anchor(&frame.source)?;
+        }
         self.select_effect_unit(&mut frame, None)?;
         if self.ability_unit_choices(&frame.source, spec).is_empty() {
             return self.run_effect_frame(frame, outcomes);

@@ -24,6 +24,10 @@ pub(super) struct RealmReference {
 }
 
 impl RealmReference {
+    pub(super) fn instance_id(&self) -> &IdentityHash {
+        &self.instance_id
+    }
+
     pub(super) fn from_card(card: &CardInstance) -> Self {
         Self {
             instance_id: card.instance_id.clone(),
@@ -118,6 +122,34 @@ impl CardInstance {
 }
 
 impl Game {
+    pub(super) fn effect_anchor(
+        &self,
+        source: &EffectSource,
+    ) -> Result<(Region, Vec<Cell>), GameError> {
+        if let Some(reference) = &source.realm {
+            if !self.realm_reference_exists(reference) {
+                return Err(GameError::UnsupportedMechanic(
+                    "source location after realm departure is unresolved".to_owned(),
+                ));
+            }
+            return self.referenced_geometry(reference);
+        }
+        if let Some(actor) = &source.actor {
+            if self.referenced_unit(actor).is_none() {
+                return Err(GameError::UnsupportedMechanic(
+                    "casting location after spellcaster departure is unresolved".to_owned(),
+                ));
+            }
+            let geometry = self.referenced_geometry(actor)?;
+            if geometry.0 != source.region || geometry.1 != source.cells {
+                return Err(GameError::UnsupportedMechanic(
+                    "casting location after spellcaster movement is unresolved".to_owned(),
+                ));
+            }
+        }
+        Ok((source.region, source.cells.clone()))
+    }
+
     pub(super) fn compiled_ability(
         &self,
         card_id: CardId,
@@ -400,12 +432,15 @@ impl Game {
                 })
             }
             UnitSet::Query(cohort) => {
+                let anchor = matches!(cohort.area, super::ability::UnitArea::Source)
+                    .then(|| self.effect_anchor(&frame.source))
+                    .transpose()?;
                 let (region, cells) = match cohort.area {
                     super::ability::UnitArea::Realm { region } => (region, None),
-                    super::ability::UnitArea::Source => (
-                        Some(frame.source.region),
-                        Some(frame.source.cells.as_slice()),
-                    ),
+                    super::ability::UnitArea::Source => {
+                        let (region, cells) = anchor.as_ref().ok_or(GameError::IllegalAction)?;
+                        (Some(*region), Some(cells.as_slice()))
+                    }
                     super::ability::UnitArea::Location => {
                         let binding = frame.location.as_ref().ok_or(GameError::IllegalAction)?;
                         if binding.state != BindingState::Active {
@@ -424,9 +459,20 @@ impl Game {
                         Some(super::other_seat(frame.source.controller))
                     }
                 };
+                let expanded = match (cohort.relation, region, cells) {
+                    (Some(relation), Some(region), Some(anchor)) => {
+                        self.selection_cells(region, anchor, relation)
+                    }
+                    (Some(_), _, _) => return Err(GameError::IllegalAction),
+                    (None, _, _) => None,
+                };
                 Ok(self.query_units(UnitQuery {
                     region,
-                    cells,
+                    cells: if cohort.relation.is_some() {
+                        expanded.as_deref()
+                    } else {
+                        cells
+                    },
                     kind: cohort.kind,
                     controller,
                     exclude: cohort

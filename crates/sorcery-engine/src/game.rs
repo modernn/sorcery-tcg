@@ -1644,6 +1644,7 @@ fn account_for_selfplay_minion_fields(facts: &MinionFacts) {
         genesis_lose_controller_life: _,
         genesis_gain_control_of_tapped_minions_here_until_this_leaves: _,
         genesis_may_damage_target_adjacent_unit: _,
+        genesis_program: _,
         genesis_strike_each_enemy_here: _,
         genesis_untap_adjacent_allies: _,
         immobile: _,

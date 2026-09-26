@@ -6,7 +6,7 @@ use super::{
 };
 
 impl Game {
-    fn selection_cells(
+    pub(super) fn selection_cells(
         &self,
         region: Region,
         anchor: &[Cell],

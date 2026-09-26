@@ -434,6 +434,13 @@ identity order. Source exclusion checks the original realm incarnation. Untarget
 queries include Stealth and Warded units; the chosen effect determines how protection
 applies. Declared targets retain their separate targeting checks.
 
+An optional query `relation` expands a source or location anchor using the same
+adjacent, nearby, or measured geometry as ordinary unit selection. Realm queries
+have no distance anchor. Ordinary `choose-unit` instructions can also set
+`excludeSource: true`; they still choose one unit, whereas a query affects every
+matching unit. Both source-exclusion paths distinguish the original realm object
+from a later incarnation of the same physical card.
+
 `give-stealth` requires minions and uses the existing Stealth lifecycle, including its
 normal consumption rules, rather than adding a timed modifier. The legacy targeted
 Stealth and allied-minions-Stealth-plus-draw inputs now compile into this operation.
@@ -467,6 +474,22 @@ facts hash, in addition to the unchanged authority and source-card hashes. A sta
 absent prior binding rejects the replacement. This allows complete reviewed programs
 to supersede scenario definitions without adding card-specific ingestion branches.
 Binding admission and direct rule probes remain separate from full deck eligibility.
+
+Minion definitions can provide `genesisProgram` using these same instructions.
+It replaces all legacy Genesis flags on that definition and compiles into the
+existing trigger and effect-frame machinery. The minion pays its normal summon
+cost once, enters the realm, and then resolves its program with ordinary trigger
+ordering and suspension for deaths or choices. Printed static keywords and separate
+Deathrites remain independent facts. Declared location targets are rejected for this
+entry until the trigger declaration interface supports them; declared unit targets
+and ordinary unit choices use their existing shared paths.
+
+Anchored operations read a live realm source's current geometry. A departed source
+cannot silently supply an assumed location: exercising that unresolved case returns
+an unsupported-mechanic error. Independent instructions in an already-started frame
+can still finish after the source leaves, while departure before frame start cancels
+the event. Magic whose caster moves or leaves before a later anchored instruction
+also fails closed where the casting-origin rule remains unresolved.
 
 ## Performance and learning
 
