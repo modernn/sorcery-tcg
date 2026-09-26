@@ -635,6 +635,13 @@ pub enum ActionDescriptor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<UnitTarget>,
     },
+    /// Choose the deck from which an authored ability draws one card.
+    ChooseAbilityDraw {
+        /// Authoritative ability source identity.
+        source_instance_id: IdentityHash,
+        /// Deck selected for the draw.
+        zone: DeckZone,
+    },
     /// Commit one Lucky Charm random branch before resolving the deferred action.
     ResolveRandomOutcome {
         /// Authoritative candidate identity chosen by the controller.
@@ -1072,6 +1079,17 @@ impl ActionDescriptor {
                 target: None,
             } => Some(format!(
                 "Decline optional ability from {}…",
+                short_identity(source_instance_id)
+            )),
+            Self::ChooseAbilityDraw {
+                source_instance_id,
+                zone,
+            } => Some(format!(
+                "Draw {} card for ability from {}…",
+                match zone {
+                    DeckZone::Atlas => "atlas",
+                    DeckZone::Spellbook => "spellbook",
+                },
                 short_identity(source_instance_id)
             )),
             Self::ResolveRandomOutcome { .. }
@@ -1757,6 +1775,18 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                             )
                         }),
                     (
+                        ActionDescriptor::ChooseAbilityDraw {
+                            source_instance_id: left,
+                            zone: left_zone,
+                        },
+                        ActionDescriptor::ChooseAbilityDraw {
+                            source_instance_id: right,
+                            zone: right_zone,
+                        },
+                    ) => left
+                        .cmp(right)
+                        .then_with(|| deck_zone_order(*left_zone).cmp(&deck_zone_order(*right_zone))),
+                    (
                         ActionDescriptor::ResolveStartTurnTrigger {
                             lure_destination: left_destination,
                             lure_target_instance_id: left_target,
@@ -2226,9 +2256,9 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ActivateArtifactDamage { .. } => 1,
         ActionDescriptor::ActivateArtifactDiscardAreaDamage { .. } => 2,
         ActionDescriptor::ActivateArtifactRollDamage { .. } => 3,
-        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 47,
-        ActionDescriptor::ActivateDiscardToGainControl { .. } => 48,
-        ActionDescriptor::DeclineFilteredSitePlay => 49,
+        ActionDescriptor::ActivateArtifactSacrificeControl { .. } => 48,
+        ActionDescriptor::ActivateDiscardToGainControl { .. } => 49,
+        ActionDescriptor::DeclineFilteredSitePlay => 50,
         ActionDescriptor::ActivateDiscardRandomDamage { .. } => 4,
         ActionDescriptor::ActivateMana { .. } => 5,
         ActionDescriptor::ActivateSiteDestruction { .. } => 6,
@@ -2238,40 +2268,41 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::CastArtifact { .. } => 10,
         ActionDescriptor::CastAura { .. } => 11,
         ActionDescriptor::CastMagic { .. } => 12,
-        ActionDescriptor::CloseDefend { .. } => 14,
-        ActionDescriptor::CloseIntercept {} => 15,
-        ActionDescriptor::ContinueBasicMovement { .. } => 16,
-        ActionDescriptor::DeclareAttack { .. } => 17,
-        ActionDescriptor::DeclineAttack => 18,
-        ActionDescriptor::Defend { .. } => 19,
-        ActionDescriptor::Draw { .. } => 20,
-        ActionDescriptor::DrawSite => 21,
-        ActionDescriptor::DrawSpell => 22,
-        ActionDescriptor::DropArtifacts { .. } => 23,
-        ActionDescriptor::EndTurn => 24,
-        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 42,
-        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 43,
-        ActionDescriptor::ResolveRandomOutcome { .. } => 44,
-        ActionDescriptor::ResolveStartTurnTrigger { .. } => 45,
-        ActionDescriptor::DiscardCard { .. } => 46,
-        ActionDescriptor::ExtendChainMagic { .. } => 25,
-        ActionDescriptor::FlySite { .. } => 26,
-        ActionDescriptor::Intercept { .. } => 27,
-        ActionDescriptor::OrderTriggers { .. } => 28,
+        ActionDescriptor::CloseDefend { .. } => 15,
+        ActionDescriptor::CloseIntercept {} => 16,
+        ActionDescriptor::ContinueBasicMovement { .. } => 17,
+        ActionDescriptor::DeclareAttack { .. } => 18,
+        ActionDescriptor::DeclineAttack => 19,
+        ActionDescriptor::Defend { .. } => 20,
+        ActionDescriptor::Draw { .. } => 21,
+        ActionDescriptor::DrawSite => 22,
+        ActionDescriptor::DrawSpell => 23,
+        ActionDescriptor::DropArtifacts { .. } => 24,
+        ActionDescriptor::EndTurn => 25,
+        ActionDescriptor::ResolveEndTurnAuraMove { .. } => 43,
+        ActionDescriptor::ResolveEndTurnAuraRandom { .. } => 44,
+        ActionDescriptor::ResolveRandomOutcome { .. } => 45,
+        ActionDescriptor::ResolveStartTurnTrigger { .. } => 46,
+        ActionDescriptor::DiscardCard { .. } => 47,
+        ActionDescriptor::ExtendChainMagic { .. } => 26,
+        ActionDescriptor::FlySite { .. } => 27,
+        ActionDescriptor::Intercept { .. } => 28,
+        ActionDescriptor::OrderTriggers { .. } => 29,
         ActionDescriptor::ChooseAbility { .. } => 13,
-        ActionDescriptor::PickUpArtifacts { .. } => 29,
-        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 30,
-        ActionDescriptor::ResolveChainMagic => 31,
-        ActionDescriptor::ResolveGenesisSpell { .. } => 32,
-        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 33,
-        ActionDescriptor::ResolveGenesisToken { .. } => 34,
-        ActionDescriptor::ResolveRangedStep { .. } => 35,
-        ActionDescriptor::Mulligan { .. } => 36,
-        ActionDescriptor::PlaySite { .. } => 37,
-        ActionDescriptor::ShootDamageProjectile { .. } => 38,
-        ActionDescriptor::ShootDragProjectile { .. } => 39,
-        ActionDescriptor::ShootProjectile { .. } => 40,
-        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 41,
+        ActionDescriptor::ChooseAbilityDraw { .. } => 14,
+        ActionDescriptor::PickUpArtifacts { .. } => 30,
+        ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 31,
+        ActionDescriptor::ResolveChainMagic => 32,
+        ActionDescriptor::ResolveGenesisSpell { .. } => 33,
+        ActionDescriptor::ResolveGenesisSpellOrder { .. } => 34,
+        ActionDescriptor::ResolveGenesisToken { .. } => 35,
+        ActionDescriptor::ResolveRangedStep { .. } => 36,
+        ActionDescriptor::Mulligan { .. } => 37,
+        ActionDescriptor::PlaySite { .. } => 38,
+        ActionDescriptor::ShootDamageProjectile { .. } => 39,
+        ActionDescriptor::ShootDragProjectile { .. } => 40,
+        ActionDescriptor::ShootProjectile { .. } => 41,
+        ActionDescriptor::SummonMinion { .. } | ActionDescriptor::MoveAndAttack { .. } => 42,
     }
 }
 
@@ -2472,6 +2503,32 @@ mod tests {
 
     use super::{ActionDescriptor, compare_canonical, compare_json_integers, compare_json_strings};
     use crate::canonical::canonical_json;
+
+    #[test]
+    fn draw_choice_native_order_matches_canonical_json() {
+        let source = format!("sha256:{}", "a".repeat(64));
+        let descriptors = [
+            json!({"kind": "choose-ability", "sourceInstanceId": source}),
+            json!({"kind": "choose-ability-draw", "sourceInstanceId": source, "zone": "spellbook"}),
+            json!({"kind": "choose-ability-draw", "sourceInstanceId": source, "zone": "atlas"}),
+            json!({"kind": "close-defend", "originalTargetParticipates": true}),
+        ];
+        let actions: Vec<ActionDescriptor> = descriptors
+            .iter()
+            .cloned()
+            .map(|value| serde_json::from_value(value).unwrap())
+            .collect();
+        for left in &actions {
+            for right in &actions {
+                assert_eq!(
+                    compare_canonical(left, right),
+                    canonical_json(&serde_json::to_value(left).unwrap())
+                        .unwrap()
+                        .cmp(&canonical_json(&serde_json::to_value(right).unwrap()).unwrap())
+                );
+            }
+        }
+    }
 
     const COMBAT_RESPONSE_FIXTURE: &str =
         include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
@@ -2919,6 +2976,7 @@ mod tests {
     fn ability_choice_order_matches_canonical_json_with_trigger_order_actions() {
         let actions = [
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_A}),
+            json!({"kind":"choose-ability-draw", "sourceInstanceId":CARD_A, "zone":"atlas"}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_A,
                 "target":{"instanceId":CASTER_A, "kind":"avatar", "seat":"north"}}),
             json!({"kind":"choose-ability", "sourceInstanceId":CARD_B,

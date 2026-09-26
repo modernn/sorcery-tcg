@@ -399,3 +399,33 @@ fn avatar_first_strike_prevents_return_damage_on_either_side_of_a_fight() {
         );
     }
 }
+
+#[test]
+fn silence_suppresses_printed_and_granted_movement_without_removing_power() {
+    let game = fixture_game();
+    let mut unit = fixture_minion(&game, "south-spell-1", Seat::North, "movement-loss");
+    let crate::facts::CardFacts::Minion(mut facts) = game.rules.cards
+        [usize::from(unit.card.card_id.0)]
+    .facts
+    .clone() else {
+        panic!("minion facts")
+    };
+    facts.movement_bonus = Some(2);
+    unit.temporary_modifiers
+        .grant(TemporaryModifierKind::Movement, 1, source("movement"));
+    unit.temporary_modifiers
+        .grant(TemporaryModifierKind::Power, 2, source("power"));
+    assert_eq!(game.minion_basic_movement_steps(&unit, &facts).unwrap(), 4);
+    unit.temporary_modifiers
+        .grant(TemporaryModifierKind::Silence, 1, source("silence"));
+    assert_eq!(game.minion_basic_movement_steps(&unit, &facts).unwrap(), 1);
+    assert_eq!(
+        unit.temporary_modifiers
+            .amount(TemporaryModifierKind::Power)
+            .unwrap(),
+        2
+    );
+    unit.temporary_modifiers
+        .take(TemporaryModifierKind::Silence);
+    assert_eq!(game.minion_basic_movement_steps(&unit, &facts).unwrap(), 4);
+}

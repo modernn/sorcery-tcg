@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+use crate::ability::UnitKind;
 use crate::action::{
     ActionDescriptor, CombatTarget, DeckZone, GenesisSpellChoice, GenesisTokenChoice,
     ProjectileDirection, RangedStepChoice, SummonPaymentMode, UnitTarget, compare_canonical,
@@ -662,29 +663,14 @@ struct MagicChoice {
     tempted_enemy: Option<UnitTarget>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UnitKind {
-    Avatar,
-    Minion,
-}
-
 /// A spatial cohort, independent of whether an ability explicitly targets its members.
 #[derive(Clone, Copy)]
 struct UnitQuery<'a> {
-    region: Region,
+    region: Option<Region>,
     cells: Option<&'a [Cell]>,
     kind: Option<UnitKind>,
     controller: Option<Seat>,
     exclude: Option<&'a IdentityHash>,
-}
-
-impl UnitKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Avatar => "avatar",
-            Self::Minion => "minion",
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1470,7 +1456,8 @@ const fn artifact_effect_supported(effect: ArtifactEffect) -> bool {
 
 fn unsupported_magic_effect(effect: &MagicEffect) -> Option<&'static str> {
     match effect {
-        MagicEffect::HealController(_)
+        MagicEffect::Program(_)
+        | MagicEffect::HealController(_)
         | MagicEffect::HealTargetMinion(_)
         | MagicEffect::BurrowAllMinionsAndArtifactsAtTargetLandSite
         | MagicEffect::BurrowTargetAdjacentMinion
@@ -3004,7 +2991,7 @@ impl Game {
                     maximum_cost: if facts.cannot_defend || facts.immobile {
                         None
                     } else {
-                        Some(Self::minion_basic_movement_steps(unit, facts)?)
+                        Some(self.minion_basic_movement_steps(unit, facts)?)
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -4036,7 +4023,7 @@ impl Game {
                     maximum_cost: if facts.immobile {
                         None
                     } else {
-                        Some(Self::minion_basic_movement_steps(unit, facts)?)
+                        Some(self.minion_basic_movement_steps(unit, facts)?)
                     },
                     moving_minion: true,
                     occupied_cells: unit.occupied_cells,
@@ -5140,7 +5127,7 @@ impl Game {
             };
             let targets = self.selected_units(
                 UnitQuery {
-                    region: carried_at.region,
+                    region: Some(carried_at.region),
                     cells: Some(self.unit_target_occupied_cells(&bearer)?),
                     kind,
                     controller: None,
@@ -6383,9 +6370,13 @@ impl Game {
     }
 
     fn minion_basic_movement_steps(
+        &self,
         unit: &UnitPosition,
         facts: &MinionFacts,
     ) -> Result<usize, GameError> {
+        if self.minion_abilities_lost(unit) {
+            return Ok(1);
+        }
         Ok(1 + usize::from(facts.movement_bonus.unwrap_or(0))
             + usize::from(
                 unit.temporary_modifiers
@@ -7547,7 +7538,8 @@ impl Game {
                 });
                 targets
             }
-            MagicEffect::DamageTargetUnit { .. }
+            MagicEffect::Program(_)
+            | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)
             | MagicEffect::DrawSpells(_)
@@ -9162,7 +9154,7 @@ impl Game {
             .chain(minions)
             .filter(|(id, kind, controller, region, occupied, hidden)| {
                 !hidden
-                    && *region == query.region
+                    && query.region.is_none_or(|required| *region == required)
                     && query.kind.is_none_or(|required| *kind == required)
                     && query
                         .controller
@@ -9181,7 +9173,7 @@ impl Game {
     /// Every unit standing at one location in canonical identity order, for random selection.
     fn units_at_location(&self, location: Location) -> Vec<(IdentityHash, UnitKind, Seat)> {
         self.query_units(UnitQuery {
-            region: location.region,
+            region: Some(location.region),
             cells: Some(std::slice::from_ref(&location.cell)),
             kind: None,
             controller: None,
@@ -10347,6 +10339,15 @@ impl Game {
                     outcomes,
                     random_draws,
                 ),
+            ActionDescriptor::ChooseAbilityDraw {
+                source_instance_id,
+                zone,
+            } => self.apply_ability_draw_choice_action(
+                action.seat,
+                source_instance_id,
+                *zone,
+                outcomes,
+            ),
             ActionDescriptor::ChooseAbility {
                 source_instance_id,
                 target,
@@ -14088,7 +14089,7 @@ impl Game {
                         maximum_cost: if facts.immobile {
                             None
                         } else {
-                            Some(Self::minion_basic_movement_steps(unit, facts)?)
+                            Some(self.minion_basic_movement_steps(unit, facts)?)
                         },
                         moving_minion: true,
                         occupied_cells: unit.occupied_cells,
@@ -21741,7 +21742,8 @@ impl Game {
                 }
             }
             // Compiled entries have already transferred ownership to the common runner.
-            MagicEffect::DamageTargetUnit { .. }
+            MagicEffect::Program(_)
+            | MagicEffect::DamageTargetUnit { .. }
             | MagicEffect::UntapTargetMinion
             | MagicEffect::DrawSites(_)
             | MagicEffect::DrawSpells(_)
@@ -22910,7 +22912,7 @@ impl Game {
         enemies_only: bool,
     ) -> Vec<(IdentityHash, UnitKind, Seat)> {
         self.query_units(UnitQuery {
-            region: source.region,
+            region: Some(source.region),
             cells: Some(Self::unit_occupied_cells(source)),
             kind: None,
             controller: enemies_only.then(|| other_seat(source.controller)),
@@ -30453,7 +30455,7 @@ mod tests {
         game.position.units.reverse();
         let query_cells = [cells[3], cells[1], cells[1], cells[0]];
         let query = UnitQuery {
-            region: Region::Surface,
+            region: Some(Region::Surface),
             cells: Some(&query_cells),
             kind: None,
             controller: None,
@@ -30472,7 +30474,7 @@ mod tests {
         );
         assert_eq!(
             game.query_units(UnitQuery {
-                region: Region::Underground,
+                region: Some(Region::Underground),
                 cells: Some(&query_cells),
                 kind: Some(UnitKind::Minion),
                 controller: Some(Seat::South),
@@ -30496,7 +30498,7 @@ mod tests {
         );
         assert_eq!(
             game.query_units(UnitQuery {
-                region: Region::Surface,
+                region: Some(Region::Surface),
                 cells: None,
                 kind: Some(UnitKind::Minion),
                 controller: None,

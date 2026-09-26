@@ -2,24 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::{Game, GameError, OutcomeLog, Seat, UnitKind, json};
 use crate::canonical::IdentityHash;
 
-/// Temporary effects that remain active through the current End Phase.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum TemporaryModifierKind {
-    Airborne,
-    Charge,
-    FirstStrike,
-    Lethal,
-    NextStrikeDouble,
-    Movement,
-    Power,
-    Ranged,
-    Silence,
-}
+pub(super) use crate::ability::TemporaryModifierKind;
 
 impl TemporaryModifierKind {
+    const fn grant_event(self) -> &'static str {
+        match self {
+            Self::Airborne => "airborne-granted",
+            Self::Charge => "charge-granted",
+            Self::FirstStrike => "first-strike-granted",
+            Self::Lethal => "lethal-granted",
+            Self::NextStrikeDouble => "next-strike-double-granted",
+            Self::Movement => "movement-granted",
+            Self::Power => "power-granted",
+            Self::Ranged => "ranged-granted",
+            Self::Silence => "silence-granted",
+        }
+    }
+
     pub(super) const fn expiration_event(self) -> &'static str {
         match self {
             Self::Airborne => "airborne-expired",
@@ -32,6 +34,32 @@ impl TemporaryModifierKind {
             Self::Ranged => "ranged-expired",
             Self::Silence => "silence-expired",
         }
+    }
+}
+
+impl Game {
+    pub(super) fn grant_unit_modifier(
+        &mut self,
+        (instance_id, kind, seat): (IdentityHash, UnitKind, Seat),
+        modifier: TemporaryModifierKind,
+        amount: u16,
+        source: &IdentityHash,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        self.temporary_modifiers_mut(kind, seat, &instance_id)?
+            .grant(modifier, amount, source.clone());
+        outcomes.push(modifier.grant_event(), || {
+            let mut value =
+                json!({"instanceId": instance_id, "seat": seat, "sourceInstanceId": source});
+            if matches!(
+                modifier,
+                TemporaryModifierKind::Movement | TemporaryModifierKind::Power
+            ) {
+                value["amount"] = json!(amount);
+            }
+            value
+        });
+        Ok(())
     }
 }
 

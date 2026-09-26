@@ -1,5 +1,6 @@
 //! Authoritative Sorcery engine primitives.
 
+pub mod ability;
 pub mod action;
 pub mod batch;
 pub mod board;

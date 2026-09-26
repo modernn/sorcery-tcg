@@ -32,6 +32,45 @@ export type GameThresholds = Readonly<Record<GameElement, number>>;
 export type GameRegion = 'surface' | 'underground' | 'underwater' | 'void';
 export type TwoByTwoArea = readonly [RealmCell, RealmCell, RealmCell, RealmCell];
 
+type EffectProgramRelation = 'anywhere' | 'nearby' | 'adjacent' | Readonly<{ measured: number }>;
+type EffectProgramUnitSelection = Readonly<{
+  kind: 'unit';
+  relation: EffectProgramRelation;
+  unitKind?: 'avatar' | 'minion' | null;
+}>;
+type EffectProgramLocationSelection = Readonly<{
+  kind: 'location';
+  relation: EffectProgramRelation;
+}>;
+type EffectProgramSelection = EffectProgramUnitSelection | EffectProgramLocationSelection;
+type EffectProgramRecipients = 'target' | 'chosen' | 'location' | 'other-units-here' | 'surface-minions';
+type EffectProgramModifier =
+  | 'airborne' | 'charge' | 'first-strike' | 'lethal' | 'next-strike-double'
+  | 'movement' | 'power' | 'ranged' | 'silence';
+type EffectProgramEffect =
+  | Readonly<{ amount: number; op: 'damage'; recipients: EffectProgramRecipients }>
+  | Readonly<{ op: 'untap'; recipients: EffectProgramRecipients }>
+  | Readonly<{ count: number; op: 'draw'; zone: DeckZone }>
+  | Readonly<{
+    alliedOnly?: boolean;
+    op: 'choose-unit';
+    optional?: boolean;
+    relation: EffectProgramRelation;
+    kind?: 'avatar' | 'minion' | null;
+  }>
+  | Readonly<{
+    amount: number;
+    op: 'grant-this-turn';
+    modifier: EffectProgramModifier;
+    recipients: EffectProgramRecipients;
+  }>
+  | Readonly<{ op: 'draw-card' }>;
+type EffectProgram = Readonly<{
+  effects: readonly EffectProgramEffect[];
+  optionalSelection?: boolean;
+  selection?: EffectProgramSelection | null;
+}>;
+
 export type SiteCountQuery = Readonly<{
   controller?: 'any' | 'controlled' | 'enemy';
   occupant?: 'any' | 'enemyAtop';
@@ -390,6 +429,7 @@ export type GameCardDefinition =
     damageRandomUnitAtLocation?: number;
     damageTargetUnit?: number;
     discardCardAsAdditionalCost?: true;
+    effectProgram?: EffectProgram;
     discardSiteAsAdditionalCost?: true;
     disableTargetMinionWithinTwoStepsUntilDamaged?: true;
     disableTargetNearbyMinionUntilNextTurn?: true;
@@ -1294,6 +1334,11 @@ type GameActionDescriptor =
     target?: GameUnitRef;
   }>
   | Readonly<{
+    kind: 'choose-ability-draw';
+    sourceInstanceId: StateHash;
+    zone: DeckZone;
+  }>
+  | Readonly<{
     auraInstanceId: StateHash;
     kind: 'resolve-end-turn-aura-random';
     outcomeInstanceId: StateHash;
@@ -1367,7 +1412,7 @@ const SUPPORTED_CARD_FIELDS = {
     disableTargetNearbyMinionUntilNextTurn
     damageUnitsAboveAndBelowTargetSiteByManhattanDistance discardCardAsAdditionalCost
     discardSiteAsAdditionalCost
-    destroyArtifactsAndAurasAtLocationWithinTwoSteps destroyMinionsAtWaterSiteWithinTwoSteps
+    destroyArtifactsAndAurasAtLocationWithinTwoSteps destroyMinionsAtWaterSiteWithinTwoSteps effectProgram
     destroyOwnArtifactAtLocationForAreaDamage
     destroyUndeadMinionsAndArtifactsAtLocationWithinTwoSteps
     destroyTargetArtifact destroyTargetAura destroyTargetSite
@@ -1424,6 +1469,47 @@ function rejectUnknownCardFields(card: GameCardDefinition, path: string): void {
   if (!fields) throw new RangeError(`${path}.cardType is unsupported`);
   const unknown = Object.keys(card).find((field) => !fields.has(field));
   if (unknown) throw new RangeError(`${path}.${unknown} is unsupported`);
+}
+
+function validateEffectProgram(program: unknown, path: string): asserts program is EffectProgram {
+  if (program === null || typeof program !== 'object' || Array.isArray(program)) {
+    throw new RangeError(`${path} must be an object`);
+  }
+  const candidate = program as Record<string, unknown>;
+  if (!Array.isArray(candidate.effects)) throw new RangeError(`${path}.effects must be an array`);
+  if (candidate.optionalSelection !== undefined && typeof candidate.optionalSelection !== 'boolean') {
+    throw new RangeError(`${path}.optionalSelection must be boolean`);
+  }
+  if (candidate.selection !== undefined && candidate.selection !== null) {
+    const selection = candidate.selection;
+    if (selection === null || typeof selection !== 'object' || Array.isArray(selection)) {
+      throw new RangeError(`${path}.selection must be an object`);
+    }
+    const value = selection as Record<string, unknown>;
+    if (value.kind !== 'unit' && value.kind !== 'location') {
+      throw new RangeError(`${path}.selection.kind is unsupported`);
+    }
+    const relation = value.relation;
+    if (relation !== 'anywhere' && relation !== 'nearby' && relation !== 'adjacent'
+      && (relation === null
+        || typeof relation !== 'object'
+        || Array.isArray(relation)
+        || typeof (relation as Record<string, unknown>).measured !== 'number')) {
+      throw new RangeError(`${path}.selection.relation is unsupported`);
+    }
+  }
+  candidate.effects.forEach((effect, index) => {
+    const effectPath = `${path}.effects[${index}]`;
+    if (effect === null || typeof effect !== 'object' || Array.isArray(effect)) {
+      throw new RangeError(`${effectPath} must be an object`);
+    }
+    const value = effect as Record<string, unknown>;
+    if (typeof value.op !== 'string') throw new RangeError(`${effectPath}.op must be a string`);
+  });
+}
+
+function cloneEffectProgram(program: EffectProgram): EffectProgram {
+  return structuredClone(program);
 }
 
 function rejectUnknownThresholds(
@@ -2164,7 +2250,14 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
       + Number(card.teleportNearbyAllyThenDrawCard === true)
       + Number(card.teleportTargetMinionArtifactOrAuraOneDiagonal === true)
       + Number(card.untapTargetMinion === true);
-    if (effectCount !== 1) {
+    if (card.effectProgram !== undefined) {
+      validateEffectProgram(card.effectProgram, `${path}.effectProgram`);
+      if (effectCount !== 0) {
+        throw new RangeError(`${path}.effectProgram cannot be mixed with legacy Magic effects`);
+      }
+    }
+    const totalEffectCount = effectCount + Number(card.effectProgram !== undefined);
+    if (totalEffectCount !== 1) {
       throw new RangeError(`${path} must define exactly one supported Magic effect`);
     }
     if (card.targetNearby !== undefined && typeof card.targetNearby !== 'boolean') {
@@ -2989,6 +3082,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
           : card.cardType === 'magic'
             ? {
               cardType: 'magic' as const,
+              ...(card.effectProgram !== undefined
+                ? { effectProgram: cloneEffectProgram(card.effectProgram) }
+                : {}),
               ...(card.burrowAllMinionsAndArtifactsAtTargetLandSite === true
                 ? { burrowAllMinionsAndArtifactsAtTargetLandSite: true as const }
                 : card.discardSiteAsAdditionalCost === true

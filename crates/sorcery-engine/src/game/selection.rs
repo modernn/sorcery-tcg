@@ -58,7 +58,11 @@ impl Game {
         relation: SpatialRelation,
         targeted_by: Option<Seat>,
     ) -> Vec<UnitTarget> {
-        let cells = self.selection_cells(query.region, query.cells.unwrap_or(&[]), relation);
+        let cells = match query.region {
+            Some(region) => self.selection_cells(region, query.cells.unwrap_or(&[]), relation),
+            None if relation == SpatialRelation::Anywhere => None,
+            None => return Vec::new(),
+        };
         let query = UnitQuery {
             cells: cells.as_deref(),
             ..query
@@ -84,7 +88,7 @@ impl Game {
             Some(SelectionSpec::Unit { kind, relation }) => self
                 .selected_units(
                     UnitQuery {
-                        region,
+                        region: Some(region),
                         cells: Some(anchor),
                         kind,
                         controller: None,

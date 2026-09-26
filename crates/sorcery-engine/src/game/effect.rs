@@ -1,6 +1,6 @@
 //! Shared execution of admitted composed abilities, suspended by the existing death driver.
 
-use super::ability::{CompiledAbility, Effect, SelectionSpec, UnitSet};
+use super::ability::{AbilityProgram, Effect, SelectionSpec, UnitSet};
 use super::{
     CardFacts, CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError, IdentityHash,
     Location, OutcomeLog, Region, ResolutionContinuation, Seat, UnitDamageSource, UnitKind,
@@ -122,14 +122,14 @@ impl Game {
         &self,
         card_id: CardId,
         entry: AbilityEntry,
-    ) -> Option<&CompiledAbility> {
+    ) -> Option<&AbilityProgram> {
         let abilities = &self.rules.cards[usize::from(card_id.0)].abilities;
         match entry {
             AbilityEntry::Magic => &abilities.magic,
             AbilityEntry::Genesis => &abilities.genesis,
             AbilityEntry::Activated => &abilities.activated,
         }
-        .as_ref()
+        .as_deref()
     }
 
     fn referenced_unit(&self, reference: &RealmReference) -> Option<(UnitKind, Seat)> {
@@ -309,7 +309,7 @@ impl Game {
                 Some(SelectionSpec::Unit { kind, relation }) => self
                     .selected_units(
                         UnitQuery {
-                            region: frame.source.region,
+                            region: Some(frame.source.region),
                             cells: Some(&frame.source.cells),
                             kind,
                             controller: None,
@@ -408,7 +408,7 @@ impl Game {
                 })
             }
             UnitSet::OtherUnitsHere => Ok(self.query_units(UnitQuery {
-                region: frame.source.region,
+                region: Some(frame.source.region),
                 cells: Some(&frame.source.cells),
                 kind: None,
                 controller: None,
@@ -420,7 +420,7 @@ impl Game {
                     .map(|reference| &reference.instance_id),
             })),
             UnitSet::SurfaceMinions => Ok(self.query_units(UnitQuery {
-                region: Region::Surface,
+                region: Some(Region::Surface),
                 cells: None,
                 kind: Some(UnitKind::Minion),
                 controller: None,
@@ -466,6 +466,10 @@ impl Game {
         Ok(true)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one ordered operation dispatch owns suspension and settlement"
+    )]
     pub(super) fn run_effect_frame(
         &mut self,
         mut frame: EffectFrame,
@@ -556,6 +560,25 @@ impl Game {
                                 outcomes,
                             )?,
                         }
+                    }
+                }
+                Effect::DrawCard => {
+                    self.begin_ability_draw_choice(frame);
+                    return Ok(());
+                }
+                Effect::GrantThisTurn {
+                    recipients,
+                    modifier,
+                    amount,
+                } => {
+                    for (id, kind, seat) in self.effect_recipients(&frame, recipients)? {
+                        self.grant_unit_modifier(
+                            (id, kind, seat),
+                            modifier,
+                            amount,
+                            &frame.source.instance_id,
+                            outcomes,
+                        )?;
                     }
                 }
                 Effect::Draw { zone, count } => self.apply_genesis_draws(

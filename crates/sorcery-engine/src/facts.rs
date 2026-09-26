@@ -254,6 +254,7 @@ pub struct AuraFacts {
 /// The single supported effect carried by Magic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MagicEffect {
+    Program(std::sync::Arc<crate::ability::AbilityProgram>),
     BanishDemonAndUndeadMinionsAtLocationWithinTwoSteps,
     BurrowAllMinionsAndArtifactsAtTargetLandSite,
     BurrowTargetAdjacentMinion,
@@ -843,6 +844,7 @@ const AURA_FIELDS: &[&str] = &[
 ];
 
 const MAGIC_FIELDS: &[&str] = &[
+    "effectProgram",
     "allyStrikesEachEnemyAtItsLocation",
     "allySubmergesTargetNearbyMinion",
     "allyTakesUpToTwoSteps",
@@ -1471,6 +1473,54 @@ fn parse_damage_grid(
 )]
 fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, FactError> {
     reject_unknown(object, MAGIC_FIELDS, path)?;
+    let program = if let Some(value) = object.get("effectProgram") {
+        reject_unknown(
+            object,
+            &[
+                "cardType",
+                "manaCost",
+                "thresholds",
+                "effectProgram",
+                "discardCardAsAdditionalCost",
+                "payLifeAsAdditionalCost",
+            ],
+            path,
+        )?;
+        let program: crate::ability::AbilityProgram = serde_json::from_value(value.clone())
+            .map_err(|error| FactError::new(format!("{path}.effectProgram"), error.to_string()))?;
+        program
+            .validate()
+            .map_err(|error| FactError::new(format!("{path}.effectProgram"), error))?;
+        if program.optional_selection {
+            return Err(FactError::new(
+                format!("{path}.effectProgram"),
+                "optional Magic target declaration is unsupported",
+            ));
+        }
+        if program.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                crate::ability::Effect::Damage {
+                    recipients: crate::ability::UnitSet::OtherUnitsHere,
+                    ..
+                } | crate::ability::Effect::Untap {
+                    recipients: crate::ability::UnitSet::OtherUnitsHere
+                } | crate::ability::Effect::GrantThisTurn {
+                    recipients: crate::ability::UnitSet::OtherUnitsHere,
+                    ..
+                }
+            )
+        }) {
+            return Err(FactError::new(
+                format!("{path}.effectProgram"),
+                "other-units-here requires a realm unit source",
+            ));
+        }
+        Some(std::sync::Arc::new(program))
+    } else {
+        None
+    };
+
     let target_nearby = optional_bool(object, "targetNearby", path)?;
     let untap_target_minion_after_damage = true_only(object, "untapTargetMinionAfterDamage", path)?;
     let damage_target =
@@ -1524,6 +1574,7 @@ fn parse_magic(object: &Map<String, Value>, path: &str) -> Result<MagicFacts, Fa
     )?;
     let effect = one_effect(
         [
+            program.map(MagicEffect::Program),
             true_only(
                 object,
                 "banishDemonAndUndeadMinionsAtLocationWithinTwoSteps",

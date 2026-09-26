@@ -365,11 +365,48 @@ be replayed with their original engine build. First Strike now uses one query fo
 sides of a fight, respects Silence/Disable, and applies to eligible Avatars.
 
 This is the turn-duration storage migration, not the complete ongoing-effect system.
-Shared ordered grant programs, source-bound effects, characteristic replacement order,
+Source-bound effects, characteristic replacement order,
 and the remaining Avatar keyword execution paths still require their rule slices and
 scenario proofs. In particular, multiple next-strike damage replacements must enter the
 shared replacement-order mechanism before their combinations can support ranked play.
 No additional official cards are admitted by this structural change.
+
+## Authored ordered Magic programs
+
+Magic facts can now contain `effectProgram` instead of a compound effect flag. Rust
+validates the program once at admission and shares that immutable allocation with the
+compiled card definition. Both authored and migrated legacy abilities use the same
+effect-frame runner; there is no second interpreter in TypeScript. The boundary
+preserves the program and Rust supplies all executable choices.
+
+The initial operations are `damage`, `untap`, fixed-deck `draw`, `draw-card`,
+`choose-unit`, and `grant-this-turn`. A declared target uses `selection`; an ordinary
+choice uses a `choose-unit` operation at its actual position in the sequence. Unqualified
+ordinary choices span regions, while declared targets and nearby choices retain their
+regional restrictions. A new choice clears the previous chosen object, including when
+no eligible units remain. Temporary Movement obeys ability loss in the shared movement
+query, including printed and granted bonuses.
+
+For example, this synthetic program targets a minion, deals one damage, and then
+draws a site after any resulting death resolution:
+
+```json
+{
+  "selection": {"kind": "unit", "unitKind": "minion", "relation": "nearby"},
+  "effects": [
+    {"op": "damage", "recipients": "target", "amount": 1},
+    {"op": "draw", "zone": "atlas", "count": 1}
+  ]
+}
+```
+
+`draw-card` pauses for an engine-issued `choose-ability-draw` action selecting Atlas
+or Spellbook; the next instruction follows that draw. It represents one card. A single
+effect drawing multiple unspecified cards still needs a shared upfront deck-count
+declaration and must not be approximated by independent `draw-card` instructions.
+Authored Silence and next-strike replacements remain rejected. Airborne, Lethal, and
+Ranged grants require minion-only recipients. Legacy compound grant inputs still need
+binding migration; this change does not admit additional official cards or decks.
 
 ## Performance and learning
 

@@ -1,15 +1,8 @@
 use serde_json::{Value, json};
 use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
-#[expect(
-    dead_code,
-    reason = "the focused test imports the complete future public module"
-)]
-#[path = "../src/facts.rs"]
-mod facts;
-
-use facts::{
-    ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, RequiredCastRegion,
+use sorcery_engine::facts::{
+    self, ArtifactEffect, CardFacts, Element, EndTurnStealth, MagicEffect, RequiredCastRegion,
     Thresholds, parse_card_definition,
 };
 

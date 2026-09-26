@@ -1,68 +1,19 @@
 //! Statically lowered ability effects used by the effect-frame runtime.
 
+use std::sync::Arc;
+
+pub(super) use crate::ability::{
+    AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitChoiceSpec, UnitSet,
+};
 use crate::action::DeckZone;
 use crate::facts::{ArtifactEffect, CardFacts, MagicEffect, MinionFacts};
 
 /// The immutable, supported entries for one card definition.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CompiledAbilities {
-    pub(super) magic: Option<CompiledAbility>,
-    pub(super) genesis: Option<CompiledAbility>,
-    pub(super) activated: Option<CompiledAbility>,
-}
-
-/// One statically ordered effect program.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CompiledAbility {
-    pub(super) selection: Option<SelectionSpec>,
-    pub(super) optional_selection: bool,
-    pub(super) effects: Box<[Effect]>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SpatialRelation {
-    Anywhere,
-    Nearby,
-    Adjacent,
-    Measured(u8),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum SelectionSpec {
-    Unit {
-        kind: Option<super::UnitKind>,
-        relation: SpatialRelation,
-    },
-    Location {
-        relation: SpatialRelation,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct UnitChoiceSpec {
-    pub(super) kind: Option<super::UnitKind>,
-    pub(super) relation: SpatialRelation,
-    pub(super) allied_only: bool,
-    pub(super) optional: bool,
-}
-
-/// An operation understood by the first effect-frame slice.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum Effect {
-    Damage { recipients: UnitSet, amount: u16 },
-    Untap { recipients: UnitSet },
-    Draw { zone: DeckZone, count: u8 },
-    ChooseUnit(UnitChoiceSpec),
-}
-
-/// A fixed recipient query for a compiled operation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum UnitSet {
-    Target,
-    Chosen,
-    Location,
-    OtherUnitsHere,
-    SurfaceMinions,
+    pub(super) magic: Option<Arc<AbilityProgram>>,
+    pub(super) genesis: Option<Arc<AbilityProgram>>,
+    pub(super) activated: Option<Arc<AbilityProgram>>,
 }
 
 impl CompiledAbilities {
@@ -108,14 +59,14 @@ impl CompiledAbilities {
     }
 }
 
-fn ability<const N: usize>(effects: [Effect; N]) -> CompiledAbility {
+fn ability<const N: usize>(effects: [Effect; N]) -> Arc<AbilityProgram> {
     ability_with_selection(None, effects)
 }
 
 fn ability_with_selection<const N: usize>(
     selection: Option<SelectionSpec>,
     effects: [Effect; N],
-) -> CompiledAbility {
+) -> Arc<AbilityProgram> {
     ability_with_options(selection, false, effects)
 }
 
@@ -123,16 +74,17 @@ fn ability_with_options<const N: usize>(
     selection: Option<SelectionSpec>,
     optional_selection: bool,
     effects: [Effect; N],
-) -> CompiledAbility {
-    CompiledAbility {
+) -> Arc<AbilityProgram> {
+    Arc::new(AbilityProgram {
         selection,
         optional_selection,
         effects: Box::new(effects),
-    }
+    })
 }
 
-fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<CompiledAbility> {
+fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<Arc<AbilityProgram>> {
     let effect = match &facts.effect {
+        MagicEffect::Program(program) => return Some(Arc::clone(program)),
         MagicEffect::DamageTargetUnit {
             amount,
             target_nearby,
@@ -202,7 +154,7 @@ fn compile_magic(facts: &crate::facts::MagicFacts) -> Option<CompiledAbility> {
     Some(ability_with_selection(selection, [effect]))
 }
 
-fn compile_minion_activation(facts: &MinionFacts) -> Option<CompiledAbility> {
+fn compile_minion_activation(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
     facts.tap_to_damage_each_unit_at_adjacent_location.then(|| {
         ability_with_selection(
             Some(SelectionSpec::Location {
@@ -230,7 +182,7 @@ pub(super) fn genesis_clause_count(facts: &MinionFacts) -> usize {
         + usize::from(facts.genesis_untap_adjacent_allies)
 }
 
-fn compile_genesis(facts: &MinionFacts) -> Option<CompiledAbility> {
+fn compile_genesis(facts: &MinionFacts) -> Option<Arc<AbilityProgram>> {
     if genesis_clause_count(facts) != 1 {
         return None;
     }
@@ -290,6 +242,26 @@ mod tests {
     };
     use crate::facts::parse_card_definition;
     use crate::game::UnitKind;
+
+    #[test]
+    fn authored_program_reuses_the_validated_allocation() {
+        let facts = magic(&json!({"effectProgram": {"effects": [
+            {"op": "draw-card"},
+            {"op": "choose-unit", "relation": "anywhere", "alliedOnly": true},
+            {"op": "grant-this-turn", "recipients": "chosen", "modifier": "movement", "amount": 1}
+        ]}}));
+        let compiled = CompiledAbilities::from_facts(&facts);
+        let crate::facts::CardFacts::Magic(facts) = facts else {
+            panic!("Magic")
+        };
+        let crate::facts::MagicEffect::Program(program) = facts.effect else {
+            panic!("program")
+        };
+        assert!(std::sync::Arc::ptr_eq(
+            &program,
+            compiled.magic.as_ref().unwrap()
+        ));
+    }
 
     fn minion(extra: &serde_json::Value) -> crate::facts::CardFacts {
         let mut value = json!({

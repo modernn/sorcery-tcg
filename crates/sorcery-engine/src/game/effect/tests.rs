@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use super::super::ability::{CompiledAbility, Effect, SelectionSpec, SpatialRelation, UnitSet};
+use super::super::ability::{AbilityProgram, Effect, SelectionSpec, SpatialRelation, UnitSet};
 use super::super::{
     ActionDescriptor, CardId, CardInstance, CardSource, Cell, Game, GameError, OutcomeLog, Phase,
     Region, Seat, SummonPlacement, UnitDamageSource, UnitPosition, UnitTarget, seat_index,
@@ -115,7 +115,9 @@ fn source_for_unit(
 fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
     let id = card_id(game, "north-spell-1");
     let selection = effects.iter().find_map(|effect| match effect {
-        Effect::Damage { recipients, .. } | Effect::Untap { recipients } => match recipients {
+        Effect::Damage { recipients, .. }
+        | Effect::Untap { recipients }
+        | Effect::GrantThisTurn { recipients, .. } => match recipients {
             UnitSet::Target => Some(SelectionSpec::Unit {
                 kind: None,
                 relation: SpatialRelation::Anywhere,
@@ -125,17 +127,17 @@ fn install(game: &mut Game, effects: Vec<Effect>) -> CardId {
             }),
             UnitSet::OtherUnitsHere | UnitSet::SurfaceMinions | UnitSet::Chosen => None,
         },
-        Effect::Draw { .. } | Effect::ChooseUnit(_) => None,
+        Effect::Draw { .. } | Effect::DrawCard | Effect::ChooseUnit(_) => None,
     });
     Arc::get_mut(&mut game.rules)
         .expect("fixture rules are uniquely owned")
         .cards[usize::from(id.0)]
     .abilities
-    .magic = Some(CompiledAbility {
+    .magic = Some(Arc::new(AbilityProgram {
         optional_selection: false,
         selection,
         effects: effects.into_boxed_slice(),
-    });
+    }));
     id
 }
 
@@ -244,7 +246,7 @@ fn shared_selection_separates_adjacent_nearby_regions_and_targeting() {
     game.position.units = vec![diagonal, underground, large];
     let anchor = [Cell::parse("C3").unwrap()];
     let query = UnitQuery {
-        region: Region::Surface,
+        region: Some(Region::Surface),
         cells: Some(&anchor),
         kind: Some(UnitKind::Minion),
         controller: None,
@@ -343,12 +345,14 @@ fn selection_is_revalidated_before_protection_but_not_after_an_effect_starts() {
             },
         ],
     );
-    Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
-        .abilities
-        .magic
-        .as_mut()
-        .unwrap()
-        .selection = Some(SelectionSpec::Unit {
+    Arc::make_mut(
+        Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
+            .abilities
+            .magic
+            .as_mut()
+            .unwrap(),
+    )
+    .selection = Some(SelectionSpec::Unit {
         kind: Some(super::super::UnitKind::Minion),
         relation: SpatialRelation::Nearby,
     });
@@ -582,12 +586,14 @@ fn magic_moved_caster_with_spatial_selection_returns_explicit_unsupported_error(
             },
         ],
     );
-    Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
-        .abilities
-        .magic
-        .as_mut()
-        .unwrap()
-        .selection = Some(SelectionSpec::Unit {
+    Arc::make_mut(
+        Arc::get_mut(&mut game.rules).unwrap().cards[usize::from(magic.0)]
+            .abilities
+            .magic
+            .as_mut()
+            .unwrap(),
+    )
+    .selection = Some(SelectionSpec::Unit {
         kind: Some(super::super::UnitKind::Minion),
         relation: SpatialRelation::Nearby,
     });
@@ -1510,4 +1516,109 @@ fn emptied_choice_after_source_departure_resumes_independent_effects() {
     assert_eq!(game.position.phase, Phase::Main);
     assert!(game.position.pending_ability_choice.is_none());
     assert_eq!(game.position.players[0].hand_spellbook.len(), before + 1);
+}
+
+#[test]
+fn ordinary_anywhere_choice_crosses_regions_but_targets_and_nearby_do_not() {
+    use crate::ability::{UnitChoiceSpec, UnitKind};
+    let mut game = fixture_game();
+    let mut hidden = minion(
+        &game,
+        "south-spell-1",
+        Seat::North,
+        "underground-ally",
+        false,
+    );
+    hidden.region = Region::Underground;
+    hidden.stealthed = true;
+    hidden.warded = true;
+    let selected = UnitTarget::Minion {
+        instance_id: hidden.card.instance_id.clone(),
+        seat: Seat::North,
+    };
+    game.position.units.push(hidden);
+    let source = source("surface-source", Seat::North, 0, None);
+    let spec = UnitChoiceSpec {
+        kind: Some(UnitKind::Minion),
+        relation: SpatialRelation::Anywhere,
+        allied_only: true,
+        optional: false,
+    };
+    assert_eq!(game.ability_unit_choices(&source, spec), vec![selected]);
+    assert!(
+        game.ability_unit_choices(
+            &source,
+            UnitChoiceSpec {
+                relation: SpatialRelation::Nearby,
+                ..spec
+            }
+        )
+        .is_empty()
+    );
+    assert!(
+        game.selection_choices(
+            Seat::North,
+            Region::Surface,
+            &source.cells,
+            Some(SelectionSpec::Unit {
+                kind: Some(UnitKind::Minion),
+                relation: SpatialRelation::Anywhere
+            })
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn empty_second_choice_does_not_reuse_first_chosen_unit() {
+    use crate::ability::{TemporaryModifierKind, UnitChoiceSpec, UnitKind};
+    let mut game = fixture_game();
+    let selected = UnitTarget::Avatar {
+        instance_id: game.position.players[0].avatar.card.instance_id.clone(),
+        seat: Seat::North,
+    };
+    let source = source("successive-choice", Seat::North, 0, None);
+    let source_id = source.instance_id.clone();
+    let spec = UnitChoiceSpec {
+        kind: Some(UnitKind::Avatar),
+        relation: SpatialRelation::Anywhere,
+        allied_only: true,
+        optional: false,
+    };
+    let id = install(
+        &mut game,
+        vec![
+            Effect::ChooseUnit(spec),
+            Effect::GrantThisTurn {
+                recipients: UnitSet::Chosen,
+                modifier: TemporaryModifierKind::Movement,
+                amount: 1,
+            },
+            Effect::ChooseUnit(UnitChoiceSpec {
+                kind: Some(UnitKind::Minion),
+                ..spec
+            }),
+            Effect::GrantThisTurn {
+                recipients: UnitSet::Chosen,
+                modifier: TemporaryModifierKind::Power,
+                amount: 2,
+            },
+        ],
+    );
+    let frame = game
+        .effect_frame(id, AbilityEntry::Magic, source, None, None, None)
+        .unwrap();
+    game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
+        .unwrap();
+    game.apply_ability_choice_action(
+        Seat::North,
+        &source_id,
+        Some(&selected),
+        &mut OutcomeLog::Ignore,
+    )
+    .unwrap();
+    let modifiers = &game.position.players[0].avatar.temporary_modifiers;
+    assert!(modifiers.has(TemporaryModifierKind::Movement));
+    assert!(!modifiers.has(TemporaryModifierKind::Power));
+    assert!(game.position.pending_ability_choice.is_none());
 }
