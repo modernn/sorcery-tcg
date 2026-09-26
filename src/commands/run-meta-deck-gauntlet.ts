@@ -17,6 +17,7 @@ import {
 } from '../ingestion/load-topdeck-snapshot.ts';
 import { selectTopDecksPerAvatar, type MetaDeckCandidate } from '../ingestion/select-meta-decks.ts';
 import { runTwoDeckGauntlet } from '../simulator/gauntlet.ts';
+import { MAX_GAME_BATCH_WORKERS } from './run-game-batch.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, '..', '..');
 const DEFAULT_SCENARIO = resolve(
@@ -114,8 +115,8 @@ export async function runMetaDeckGauntlet(
     throw new RangeError('--per-avatar must be an integer from 1 through 8');
   }
   const workers = Number(values.workers);
-  if (!Number.isInteger(workers) || workers < 1 || workers > 8) {
-    throw new RangeError('--workers must be an integer from 1 through 8');
+  if (!Number.isInteger(workers) || workers < 1 || workers > MAX_GAME_BATCH_WORKERS) {
+    throw new RangeError(`--workers must be an integer from 1 through ${MAX_GAME_BATCH_WORKERS}`);
   }
   const seeds = parseSeeds(values.seeds);
 

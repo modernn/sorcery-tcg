@@ -347,7 +347,7 @@ fn run_batch_json(input: &[u8]) -> CliResult<Vec<GameBatchResult>> {
         return Err(io::Error::other("batch-json schemaVersion must be 1").into());
     }
     if !(1..=MAX_BATCH_WORKERS).contains(&request.workers) {
-        return Err(io::Error::other("batch-json workers must be 1-8").into());
+        return Err(io::Error::other("batch-json workers must be 1-64").into());
     }
     if request.jobs.is_empty() || request.jobs.len() > MAX_BATCH_JOBS {
         return Err(io::Error::other("batch-json must contain 1-256 jobs").into());
@@ -477,7 +477,7 @@ fn parse_experiment_json(input: &[u8]) -> CliResult<ExperimentJsonRequest> {
         return Err(io::Error::other("experiment-json schemaVersion must be 1").into());
     }
     if !(1..=MAX_BATCH_WORKERS).contains(&request.workers) {
-        return Err(io::Error::other("experiment-json workers must be 1-8").into());
+        return Err(io::Error::other("experiment-json workers must be 1-64").into());
     }
     if request.seeds.is_empty() || request.seeds.len() > MAX_BATCH_JOBS / 2 {
         return Err(io::Error::other("experiment-json requires 1-128 seeds").into());
@@ -768,9 +768,9 @@ fn parse_seed(value: &str) -> CliResult<u32> {
 fn parse_workers(value: &str) -> CliResult<usize> {
     let workers = value
         .parse::<usize>()
-        .map_err(|_| io::Error::other("workers must be an integer from 1 through 8"))?;
+        .map_err(|_| io::Error::other("workers must be an integer from 1 through 64"))?;
     if !(1..=MAX_BATCH_WORKERS).contains(&workers) {
-        return Err(io::Error::other("workers must be an integer from 1 through 8").into());
+        return Err(io::Error::other("workers must be an integer from 1 through 64").into());
     }
     Ok(workers)
 }
@@ -897,7 +897,7 @@ mod tests {
         };
 
         assert_eq!(
-            (seeds, (1..=8).contains(&workers), artifacts_dir),
+            (seeds, (1..=64).contains(&workers), artifacts_dir),
             (vec![1], true, None)
         );
     }
@@ -978,20 +978,20 @@ mod tests {
         };
 
         assert_eq!(
-            (seeds, (1..=8).contains(&workers), artifacts_dir),
+            (seeds, (1..=64).contains(&workers), artifacts_dir),
             (vec![1], true, None)
         );
     }
 
     #[test]
     fn parse_args_should_reject_out_of_range_workers() {
-        let error = parse_args(["batch".to_owned(), "9".to_owned()].into_iter())
+        let error = parse_args(["batch".to_owned(), "65".to_owned()].into_iter())
             .err()
             .expect("invalid workers");
 
         assert_eq!(
             error.to_string(),
-            "workers must be an integer from 1 through 8"
+            "workers must be an integer from 1 through 64"
         );
     }
 

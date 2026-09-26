@@ -6,6 +6,7 @@ import {
   type EligibilityReason,
 } from '../engine/eligibility.ts';
 import { runRustEngineCommand, type Sha256Hash } from '../engine/rust-engine.ts';
+import { MAX_GAME_BATCH_WORKERS } from './run-game-batch.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -263,8 +264,8 @@ export function runGameSchedule(
   if (seeds.length === 0 || seeds.length > 128) {
     throw new RangeError('schedule must contain 1-128 seeds');
   }
-  if (!Number.isSafeInteger(workers) || workers < 1 || workers > 8) {
-    throw new RangeError('workers must be 1-8');
+  if (!Number.isSafeInteger(workers) || workers < 1 || workers > MAX_GAME_BATCH_WORKERS) {
+    throw new RangeError(`workers must be 1-${MAX_GAME_BATCH_WORKERS}`);
   }
   return parseSchedule(runRustEngineCommand([
     'schedule',

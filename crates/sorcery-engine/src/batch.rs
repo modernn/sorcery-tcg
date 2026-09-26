@@ -3,6 +3,7 @@
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use serde::Serialize;
@@ -20,7 +21,7 @@ use crate::simulator::{SimulatorError, replay_selected, run_game};
 /// Maximum jobs accepted by one bounded batch.
 pub const MAX_BATCH_JOBS: usize = 256;
 /// Maximum native workers accepted by one batch.
-pub const MAX_BATCH_WORKERS: usize = 8;
+pub const MAX_BATCH_WORKERS: usize = 64;
 /// Maximum aggregate canonical manifest bytes accepted by one batch.
 pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
 /// Existing deterministic-agent action limit for one complete game.
@@ -367,7 +368,7 @@ fn run_batch_inner(
         return Err(BatchError::Invalid("batch must contain 1-256 jobs"));
     }
     if !(1..=MAX_BATCH_WORKERS).contains(&requested_workers) {
-        return Err(BatchError::Invalid("batch workers must be 1-8"));
+        return Err(BatchError::Invalid("batch workers must be 1-64"));
     }
     let bytes = jobs.iter().try_fold(jobs.len() + 1, |total, job| {
         total.checked_add(job.manifest_json.len())
@@ -377,35 +378,38 @@ fn run_batch_inner(
     }
 
     let worker_count = requested_workers.min(jobs.len());
-    let chunk_size = jobs.len().div_ceil(worker_count);
+    let next_job = AtomicUsize::new(0);
     let results = thread::scope(|scope| {
-        let handles = jobs
-            .chunks(chunk_size)
-            .enumerate()
-            .map(|(chunk_index, chunk)| {
-                scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .enumerate()
-                        .map(|(offset, job)| {
-                            finish_job(
-                                chunk_index * chunk_size + offset,
-                                job,
-                                artifacts_dir,
-                                job_index_base,
-                            )
-                        })
-                        .collect::<Vec<_>>()
+        let handles = (0..worker_count)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut results = Vec::new();
+                    loop {
+                        let job_index = next_job.fetch_add(1, Ordering::Relaxed);
+                        let Some(job) = jobs.get(job_index) else {
+                            break;
+                        };
+                        results.push((
+                            job_index,
+                            finish_job(job_index, job, artifacts_dir, job_index_base),
+                        ));
+                    }
+                    results
                 })
             })
             .collect::<Vec<_>>();
-        let mut results = Vec::with_capacity(jobs.len());
+        let mut indexed_results = Vec::with_capacity(jobs.len());
         for handle in handles {
-            results.extend(handle.join().map_err(|_| BatchError::WorkerPanicked)?);
+            indexed_results.extend(handle.join().map_err(|_| BatchError::WorkerPanicked)?);
+        }
+        indexed_results.sort_unstable_by_key(|(job_index, _)| *job_index);
+        let mut results = Vec::with_capacity(indexed_results.len());
+        for (_, result) in indexed_results {
+            results.push(result?);
         }
         Ok::<_, BatchError>(results)
     })?;
-    results.into_iter().collect()
+    Ok(results)
 }
 
 /// Runs an ordered native batch and returns the exact external report contract.

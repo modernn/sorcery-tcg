@@ -79,5 +79,5 @@ test('one and many workers produce byte-identical ordered game reports', async (
     canonicalJson(chainTwoWorkers as unknown as JsonValue),
   );
   assert.equal(chainOneWorker[0]?.report.replayVerified, true);
-  await assert.rejects(runGameBatch(manifests, 9), /requestedWorkers/);
+  await assert.rejects(runGameBatch(manifests, 65), /requestedWorkers/);
 });

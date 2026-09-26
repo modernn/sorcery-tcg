@@ -32,6 +32,13 @@ export type GameThresholds = Readonly<Record<GameElement, number>>;
 export type GameRegion = 'surface' | 'underground' | 'underwater' | 'void';
 export type TwoByTwoArea = readonly [RealmCell, RealmCell, RealmCell, RealmCell];
 
+export type SiteCountQuery = Readonly<{
+  controller?: 'any' | 'controlled' | 'enemy';
+  occupant?: 'any' | 'enemyAtop';
+  sameCard?: boolean;
+  scope: 'adjacent' | 'nearby' | 'realm';
+}>;
+
 export type GameCardDefinition =
   | Readonly<{
     attack: number;
@@ -271,6 +278,7 @@ export type GameCardDefinition =
     genesisDrawSpellPerAdjacentSameCard?: boolean;
     genesisEnemiesLoseStealth?: true;
     genesisGainMana?: number;
+    genesisGainManaPerSite?: SiteCountQuery;
     genesisGainManaIfOnlyControlledCopy?: 1;
     genesisHealNearbyAvatars?: 3;
     genesisImmobilizeNearbyUntilNextTurn?: true;
@@ -1401,7 +1409,7 @@ const SUPPORTED_CARD_FIELDS = {
     cannotBeMovedDestroyedOrModified cardType connectsBurrowedAllies elements
     flyToNearbyVoidOncePerTurnAtAirThreshold
     genesisDiscardTopSpells genesisDrawSpellPerAdjacentSameCard genesisEnemiesLoseStealth
-    genesisGainMana genesisGainManaIfOnlyControlledCopy genesisHealNearbyAvatars
+    genesisGainMana genesisGainManaIfOnlyControlledCopy genesisGainManaPerSite genesisHealNearbyAvatars
     genesisImmobilizeNearbyUntilNextTurn genesisMayBottomNextSpell genesisPayOneManaToSummonToken
     genesisReorderNextSpells
     isTower ordinary ordinaryMinionManaDiscount rangedUnitsHereRangeBonus sacrificeToDestroyNearbySite
@@ -1426,7 +1434,7 @@ function rejectUnknownThresholds(
   if (unknown) throw new RangeError(`${path}.thresholds.${unknown} is unsupported`);
 }
 
-function validateCardDefinition(card: GameCardDefinition, path: string): void {
+export function validateCardDefinition(card: GameCardDefinition, path: string): void {
   const elements: readonly GameElement[] = ['earth', 'fire', 'water', 'air'];
   if (Object.prototype.hasOwnProperty.call(card, 'genesisDrawSpell')) {
     throw new RangeError(`${path}.genesisDrawSpell is obsolete; use genesisDrawSpells`);
@@ -1505,6 +1513,26 @@ function validateCardDefinition(card: GameCardDefinition, path: string): void {
     if (card.genesisGainManaIfOnlyControlledCopy !== undefined
       && card.genesisGainManaIfOnlyControlledCopy !== 1) {
       throw new RangeError(`${path}.genesisGainManaIfOnlyControlledCopy must be 1`);
+    }
+    if (card.genesisGainManaPerSite !== undefined) {
+      const query = card.genesisGainManaPerSite;
+      const unknown = Object.keys(query).find((field) =>
+        !['controller', 'occupant', 'sameCard', 'scope'].includes(field));
+      if (unknown) throw new RangeError(`${path}.genesisGainManaPerSite.${unknown} is unsupported`);
+      if (!['adjacent', 'nearby', 'realm'].includes(query.scope)) {
+        throw new RangeError(`${path}.genesisGainManaPerSite.scope is unsupported`);
+      }
+      if (query.controller !== undefined
+        && !['any', 'controlled', 'enemy'].includes(query.controller)) {
+        throw new RangeError(`${path}.genesisGainManaPerSite.controller is unsupported`);
+      }
+      if (query.occupant !== undefined
+        && !['any', 'enemyAtop'].includes(query.occupant)) {
+        throw new RangeError(`${path}.genesisGainManaPerSite.occupant is unsupported`);
+      }
+      if (query.sameCard !== undefined && typeof query.sameCard !== 'boolean') {
+        throw new RangeError(`${path}.genesisGainManaPerSite.sameCard must be boolean`);
+      }
     }
     if (card.genesisHealNearbyAvatars !== undefined
       && card.genesisHealNearbyAvatars !== 3) {
@@ -2880,6 +2908,9 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
             ...(card.genesisGainManaIfOnlyControlledCopy === 1
               ? { genesisGainManaIfOnlyControlledCopy: 1 as const }
               : {}),
+            ...(card.genesisGainManaPerSite
+              ? { genesisGainManaPerSite: { ...card.genesisGainManaPerSite } }
+              : {}),
             ...(card.genesisHealNearbyAvatars === 3
               ? { genesisHealNearbyAvatars: 3 as const }
               : {}),
@@ -3414,4 +3445,3 @@ export function replayGame(manifest: GameManifest, actionIds: readonly string[])
 export function verifyGameReplay(expected: GameSession): boolean {
   return rustVerifyGameReplay(expected);
 }
-

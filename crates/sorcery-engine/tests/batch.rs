@@ -87,8 +87,58 @@ fn worker_counts_should_produce_identical_ordered_authoritative_results() {
     );
     assert_eq!(one_value[0]["report"]["terminal"]["status"], "finished");
     assert!(one_value[0].get("acceptedActionCount").is_none());
-    assert!(matches!(run_batch(&jobs, 9), Err(BatchError::Invalid(_))));
-    assert!((1..=8).contains(&default_batch_workers()));
+    assert!((1..=64).contains(&default_batch_workers()));
+}
+
+#[test]
+fn expanded_worker_batches_preserve_ordered_results() {
+    let manifests = (0..9)
+        .map(|seed| synthetic_demo_manifest_json(31 + seed).expect("seed manifest"))
+        .collect::<Vec<_>>();
+    let policy = policy(&manifests[0]);
+    let jobs = manifests
+        .iter()
+        .map(|manifest_json| BatchJob {
+            manifest_json,
+            north_deck_id: policy.deck_id(),
+            north_policy: &policy,
+            south_deck_id: policy.deck_id(),
+            south_policy: &policy,
+        })
+        .collect::<Vec<_>>();
+    let one = run_game_batch(&jobs, 1).expect("one-worker batch");
+    let many = run_game_batch(&jobs, 16).expect("sixteen-worker batch");
+    assert_eq!(one, many);
+    assert_eq!(
+        one.iter()
+            .map(|result| result.job_index)
+            .collect::<Vec<_>>(),
+        (0..9).collect::<Vec<_>>()
+    );
+    assert!(matches!(run_batch(&jobs, 65), Err(BatchError::Invalid(_))));
+
+    let uneven_manifests = (0..25)
+        .map(|seed| synthetic_demo_manifest_json(100 + seed).expect("uneven seed manifest"))
+        .collect::<Vec<_>>();
+    let uneven_jobs = uneven_manifests
+        .iter()
+        .map(|manifest_json| BatchJob {
+            manifest_json,
+            north_deck_id: policy.deck_id(),
+            north_policy: &policy,
+            south_deck_id: policy.deck_id(),
+            south_policy: &policy,
+        })
+        .collect::<Vec<_>>();
+    let uneven = run_game_batch(&uneven_jobs, 24).expect("uneven 24-worker batch");
+    assert_eq!(
+        uneven
+            .iter()
+            .map(|result| result.job_index)
+            .collect::<Vec<_>>(),
+        (0..25).collect::<Vec<_>>()
+    );
+    assert!(uneven.iter().all(|result| result.report.replay_verified));
 
     let invalid_jobs = [
         jobs[0],

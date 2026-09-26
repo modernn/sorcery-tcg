@@ -8,7 +8,8 @@ import { loadPrivateCardSnapshot } from '../authority/private-cards.ts';
 import { readBoundedWithinAuthorityRoot, resolveWithinAuthorityRoot } from '../authority/validate-bundle.ts';
 import { RustSessionClient } from '../engine/rust-engine.ts';
 import { buildPresetCardPool, prepareBoundExperiment, presetCardCatalog } from '../ingestion/preset-card-pool.ts';
-import { loadPrivateStarterCatalog } from './run-private-game-check.ts';
+import { loadReviewedCardBindings } from '../ingestion/reviewed-card-bindings.ts';
+import { loadPrivateScenarioCatalog, loadPrivateStarterCatalog } from './run-private-game-check.ts';
 
 /** Writes an experiment from existing, explicitly bound private preset facts. */
 export async function createPrivateExperiment(argv: readonly string[]): Promise<string> {
@@ -38,20 +39,11 @@ export async function createPrivateExperiment(argv: readonly string[]): Promise<
     if (read.status !== 'ok') throw new Error('deck input must be a private JSON file of at most 1 MiB');
     deckInput = parseJsonWithDuplicateKeyCheck(Buffer.from(read.bytes).toString('utf8'));
   }
-  const presets = await loadPrivateStarterCatalog();
-  const preset = presets.find(({ id }) => id === (values.preset ?? 'air-vs-earth-lesson'));
-  if (!preset) throw new RangeError(`--preset must be one of: ${presets.map(({ id }) => id).join(', ')}`);
-  let document: unknown = {
-    schemaVersion: 1,
-    baseManifest: preset.manifest,
-    candidate: preset.manifest.decks.north,
-    opponent: preset.manifest.decks.south,
-    seeds: [preset.manifest.seed],
-    workers: 1,
-  };
+  let document: unknown;
   if (values.catalog || deckInput !== undefined) {
     const authority = await loadPrivateCardSnapshot(resolve(authorityRoot, 'scenarios/vanilla-constructed.json'), root);
-    const pool = buildPresetCardPool(authority, presets);
+    const pool = await loadReviewedCardBindings(authorityRoot, authority,
+      buildPresetCardPool(authority, await loadPrivateScenarioCatalog()));
     if (values.catalog) {
       document = presetCardCatalog(authority, pool);
     } else {
@@ -64,6 +56,15 @@ export async function createPrivateExperiment(argv: readonly string[]): Promise<
       }
       document = request;
     }
+  } else {
+    const presets = await loadPrivateStarterCatalog();
+    const preset = presets.find(({ id }) => id === (values.preset ?? 'air-vs-earth-lesson'));
+    if (!preset) throw new RangeError(`--preset must be one of: ${presets.map(({ id }) => id).join(', ')}`);
+    document = {
+      schemaVersion: 1, baseManifest: preset.manifest,
+      candidate: preset.manifest.decks.north, opponent: preset.manifest.decks.south,
+      seeds: [preset.manifest.seed], workers: 1,
+    };
   }
   const experimentRoot = resolve(authorityRoot, 'experiments');
   await mkdir(experimentRoot, { recursive: true });

@@ -5041,10 +5041,38 @@ export function baselineGameDefinition(
   return gameDefinition(card, drawSpell);
 }
 
+const PRIVATE_BINDING_SCENARIOS = [
+  'air', 'air-arc-lightning', 'air-bladderblimp', 'air-chain-lightning',
+  'air-devils-egg', 'air-fire-fatality', 'air-genesis-spell', 'air-grandmaster-wizard',
+  'air-kite-archer', 'air-leyline', 'air-lightning-bolt', 'air-lucky-charm',
+  'air-nimbus-jinn', 'air-rain-of-arrows', 'air-raise-dead', 'air-skirmishers-of-mu',
+  'air-sling-pixies', 'air-spellcaster-freeze', 'air-spire-lich', 'air-static-servant',
+  'air-teleport', 'air-thunderstorm', 'air-void-artifact', 'air-voidwalk',
+  'air-zap', 'airborne', 'combat', 'earth',
+  'earth-bedrock', 'earth-border-militia', 'earth-burrowing', 'earth-bury',
+  'earth-cave-in', 'earth-craterize', 'earth-divine-healing', 'earth-duel',
+  'earth-entangle-terrain', 'earth-entombed', 'earth-first-strike', 'earth-forward',
+  'earth-grain-sparrow', 'earth-holy-ground', 'earth-humble-village', 'earth-hunters-lodge',
+  'earth-immobile', 'earth-king-of-realm', 'earth-malakhim', 'earth-mountain-giant',
+  'earth-overpower', 'earth-payload-trebuchet', 'earth-poisonous-dagger', 'earth-quagmire',
+  'earth-rescue', 'earth-rolling-boulder', 'earth-shallow-grave', 'earth-siege-ballista',
+  'earth-sinkhole', 'earth-slumbering-giantess', 'earth-sword-and-shield', 'earth-tunnel',
+  'earth-ward', 'earth-wraetannis-titan', 'fire', 'fire-aramos',
+  'fire-charge', 'fire-genesis-life-loss', 'fire-granary-rats', 'fire-hamlet',
+  'fire-ignited', 'fire-lash', 'fire-leap-attack', 'fire-minor-explosion',
+  'fire-reckless-squire', 'fire-sacred-scarabs', 'fire-vikings', 'fire-vile-imp',
+  'movement-two', 'stealth', 'water', 'water-conditional-stealth',
+  'water-drown', 'water-drowned', 'water-edge-connection', 'water-freeze',
+  'water-gnarled-wendigo', 'water-lugbog', 'water-lure', 'water-mesmerism',
+  'water-pirate-ship', 'water-river', 'water-sideways', 'water-stealth',
+  'water-submerge', 'air-vs-earth-lesson', 'earth-vs-air-lesson', 'air-starter',
+  'earth-starter', 'fire-starter', 'water-starter',
+] as const;
+
 function buildManifest(
   input: Awaited<ReturnType<typeof readPrivateInputs>>,
   seed: number,
-  scenario: 'air' | 'air-arc-lightning' | 'air-bladderblimp' | 'air-chain-lightning' | 'air-devils-egg' | 'air-fire-fatality' | 'air-genesis-spell' | 'air-grandmaster-wizard' | 'air-kite-archer' | 'air-leyline' | 'air-lightning-bolt' | 'air-lucky-charm' | 'air-nimbus-jinn' | 'air-rain-of-arrows' | 'air-raise-dead' | 'air-skirmishers-of-mu' | 'air-sling-pixies' | 'air-spellcaster-freeze' | 'air-spire-lich' | 'air-static-servant' | 'air-teleport' | 'air-thunderstorm' | 'air-void-artifact' | 'air-voidwalk' | 'air-zap' | 'airborne' | BetaLessonScenario | 'combat' | 'earth' | 'earth-bedrock' | 'earth-border-militia' | 'earth-burrowing' | 'earth-bury' | 'earth-cave-in' | 'earth-craterize' | 'earth-divine-healing' | 'earth-duel' | 'earth-entangle-terrain' | 'earth-entombed' | 'earth-first-strike' | 'earth-forward' | 'earth-grain-sparrow' | 'earth-holy-ground' | 'earth-humble-village' | 'earth-hunters-lodge' | 'earth-immobile' | 'earth-king-of-realm' | 'earth-malakhim' | 'earth-mountain-giant' | 'earth-overpower' | 'earth-payload-trebuchet' | 'earth-poisonous-dagger' | 'earth-quagmire' | 'earth-rescue' | 'earth-rolling-boulder' | 'earth-shallow-grave' | 'earth-siege-ballista' | 'earth-sinkhole' | 'earth-slumbering-giantess' | 'earth-sword-and-shield' | 'earth-tunnel' | 'earth-ward' | 'earth-wraetannis-titan' | 'fire' | 'fire-aramos' | 'fire-charge' | 'fire-genesis-life-loss' | 'fire-granary-rats' | 'fire-hamlet' | 'fire-ignited' | 'fire-lash' | 'fire-leap-attack' | 'fire-minor-explosion' | 'fire-reckless-squire' | 'fire-sacred-scarabs' | 'fire-vikings' | 'fire-vile-imp' | 'movement-two' | StarterScenario | 'stealth' | 'water' | 'water-conditional-stealth' | 'water-drown' | 'water-drowned' | 'water-edge-connection' | 'water-freeze' | 'water-gnarled-wendigo' | 'water-lugbog' | 'water-lure' | 'water-mesmerism' | 'water-pirate-ship' | 'water-river' | 'water-sideways' | 'water-stealth' | 'water-submerge' = 'combat',
+  scenario: (typeof PRIVATE_BINDING_SCENARIOS)[number] = 'combat',
 ): Readonly<{ manifest: GameManifest; names: ReadonlyMap<string, string> }> {
   const configuredAvatar = input.cards.find(({ stableId }) => stableId === input.config.avatar.stableId);
   if (!configuredAvatar || configuredAvatar.cardType !== 'avatar') {
@@ -8379,6 +8407,15 @@ async function findStarterOpening(
     await client.close();
   }
   throw new Error(`private ${scenario} scenario no longer produces its supported opening`);
+}
+
+/** Reuses source-checked scenario facts without creating more UI presets. */
+export async function loadPrivateScenarioCatalog(path = DEFAULT_SCENARIO) {
+  const input = await readPrivateInputs(path);
+  return PRIVATE_BINDING_SCENARIOS.map((scenario) => ({
+    id: `scenario:${scenario}`,
+    manifest: buildManifest(input, input.config.seed, scenario).manifest,
+  }));
 }
 
 export async function loadPrivateStarterCatalog(

@@ -121,7 +121,7 @@ fn experiments_reject_invalid_compositions_facts_bounds_and_private_artifact_wri
     let base = example();
     for (pointer, replacement, expected) in [
         ("/schemaVersion", json!(2), "schemaVersion"),
-        ("/workers", json!(9), "workers"),
+        ("/workers", json!(65), "workers"),
         ("/seeds", json!([]), "seeds"),
         (
             "/candidate/avatar",

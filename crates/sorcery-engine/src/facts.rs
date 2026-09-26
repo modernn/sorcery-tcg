@@ -138,6 +138,38 @@ pub struct AvatarFacts {
     pub tap_damage_random_other_unit_at_nearby_location_per_air_threshold_cast_this_turn: bool,
 }
 
+/// Scope for a bounded site count query.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SiteCountScope {
+    Adjacent,
+    Nearby,
+    Realm,
+}
+
+/// Controller relation for a bounded site count query.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SiteCountController {
+    Any,
+    Controlled,
+    Enemy,
+}
+
+/// Occupant relation for a bounded site count query.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SiteCountOccupant {
+    Any,
+    EnemyAtop,
+}
+
+/// Strict, finite selector used by supported site-count effects.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SiteCountQuery {
+    pub scope: SiteCountScope,
+    pub same_card: bool,
+    pub controller: SiteCountController,
+    pub occupant: SiteCountOccupant,
+}
+
 /// Site facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[expect(
@@ -155,6 +187,7 @@ pub struct SiteFacts {
     pub genesis_draw_spell_per_adjacent_same_card: bool,
     pub genesis_enemies_lose_stealth: bool,
     pub genesis_gain_mana: Option<u8>,
+    pub genesis_gain_mana_per_site: Option<SiteCountQuery>,
     pub genesis_gain_mana_if_only_controlled_copy: bool,
     pub genesis_heal_nearby_avatars: bool,
     pub genesis_immobilize_nearby_until_next_turn: bool,
@@ -760,6 +793,7 @@ const SITE_FIELDS: &[&str] = &[
     "genesisDrawSpellPerAdjacentSameCard",
     "genesisEnemiesLoseStealth",
     "genesisGainMana",
+    "genesisGainManaPerSite",
     "genesisGainManaIfOnlyControlledCopy",
     "genesisHealNearbyAvatars",
     "genesisImmobilizeNearbyUntilNextTurn",
@@ -1065,6 +1099,75 @@ fn parse_avatar(object: &Map<String, Value>, path: &str) -> Result<AvatarFacts, 
     })
 }
 
+fn parse_site_count_query(
+    object: &Map<String, Value>,
+    field: &str,
+    path: &str,
+) -> Result<Option<SiteCountQuery>, FactError> {
+    let Some(value) = object.get(field) else {
+        return Ok(None);
+    };
+    let query_path = format!("{path}.{field}");
+    let query = value
+        .as_object()
+        .ok_or_else(|| FactError::new(&query_path, "must be an object"))?;
+    reject_unknown(
+        query,
+        &["controller", "occupant", "sameCard", "scope"],
+        &query_path,
+    )?;
+    let scope = match query.get("scope").and_then(Value::as_str) {
+        Some("adjacent") => SiteCountScope::Adjacent,
+        Some("nearby") => SiteCountScope::Nearby,
+        Some("realm") => SiteCountScope::Realm,
+        _ => {
+            return Err(FactError::new(
+                format!("{query_path}.scope"),
+                "must be adjacent, nearby, or realm",
+            ));
+        }
+    };
+    let controller = match query.get("controller") {
+        None => SiteCountController::Any,
+        Some(Value::String(value)) if value == "any" => SiteCountController::Any,
+        Some(Value::String(value)) if value == "controlled" => SiteCountController::Controlled,
+        Some(Value::String(value)) if value == "enemy" => SiteCountController::Enemy,
+        _ => {
+            return Err(FactError::new(
+                format!("{query_path}.controller"),
+                "must be any, controlled, or enemy",
+            ));
+        }
+    };
+    let occupant = match query.get("occupant") {
+        None => SiteCountOccupant::Any,
+        Some(Value::String(value)) if value == "any" => SiteCountOccupant::Any,
+        Some(Value::String(value)) if value == "enemyAtop" => SiteCountOccupant::EnemyAtop,
+        _ => {
+            return Err(FactError::new(
+                format!("{query_path}.occupant"),
+                "must be any or enemyAtop",
+            ));
+        }
+    };
+    let same_card = match query.get("sameCard") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(FactError::new(
+                format!("{query_path}.sameCard"),
+                "must be boolean",
+            ));
+        }
+    };
+    Ok(Some(SiteCountQuery {
+        scope,
+        same_card,
+        controller,
+        occupant,
+    }))
+}
+
 fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, FactError> {
     reject_unknown(object, SITE_FIELDS, path)?;
     let genesis_gain_mana =
@@ -1072,6 +1175,8 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
             .map(compact_u8);
     let genesis_gain_mana_if_only_controlled_copy =
         fixed_integer(object, "genesisGainManaIfOnlyControlledCopy", 1, path)?;
+    let genesis_gain_mana_per_site =
+        parse_site_count_query(object, "genesisGainManaPerSite", path)?;
 
     let genesis_discard_top_spells = fixed_integer(object, "genesisDiscardTopSpells", 2, path)?;
     let genesis_draw_spell_per_adjacent_same_card =
@@ -1113,6 +1218,7 @@ fn parse_site(object: &Map<String, Value>, path: &str) -> Result<SiteFacts, Fact
         genesis_draw_spell_per_adjacent_same_card,
         genesis_enemies_lose_stealth,
         genesis_gain_mana,
+        genesis_gain_mana_per_site,
         genesis_gain_mana_if_only_controlled_copy,
         genesis_heal_nearby_avatars,
         genesis_immobilize_nearby_until_next_turn,

@@ -122,12 +122,55 @@ direct proof for each missing rule slice, bind matching cards, and rerun admissi
 The first narrow candidate has 15 missing bindings and an already bound Avatar.
 No per-deck rules engine, automatic text interpreter, or replacement preset is needed.
 
+## Shared behavior expansion, cycle 1 (2026-09-26)
+
+The private corpus matches all 1,100 unique card names and their set memberships in
+the live official API. No names are missing locally or present only locally. This
+checks identity completeness, not current rules wording: gameplay still uses the
+pinned private authority revision. Unreleased expansion cards are outside this scope.
+
+The usable pool grew from 96 to 190 bindings: 59 from existing source-checked scenario
+facts and 35 reviewed private entries. Private bindings require exact source identity,
+matching base stats, complete-text review, and references to direct scenario proofs.
+The engine still owns legality. Review metadata does not confer ranked eligibility.
+There are 910 unbound cards; 732 occur in the selected benchmark field. All 136
+researched decks remain blocked, and the closest initial candidate now lacks 13 cards.
+
+One typed shared site-count query now handles scope, controller, same-card identity,
+and enemy surface occupancy. Existing conditional mana and adjacent-copy draw paths
+reuse it, alongside Genesis mana per matching site. The direct scenario checks timing
+after site placement, duplicate occupants, excluded regions, deterministic transitions,
+strict query validation, and checkpoint resume. Other new bindings reuse existing
+keyword and effect implementations; no new per-card dispatcher was added.
+
+Four private deck compositions (a control and one, two, or three card replacements)
+completed 32 paired games with verified replay. Repeating those cases at one and 16
+workers produced byte-identical reports to eight workers. Three separate guided
+probes actually summoned the new cards, branched search without changing the root,
+resumed checkpoints exactly, and replayed to completion. Guided openings establish
+coverage, not unbiased deck strength; all four small paired samples finished 5–3.
+
+Rust batches now distribute independent jobs through an atomic work queue and retain
+canonical output order. A release benchmark on this 24-logical-CPU machine measured
+3.53 games/second with one worker, 38.59 with 16, and 37.43 with 24 (medians of three
+runs after warmup, 48 fixed games per run). Every worker count produced the same
+result hash. Peak process RSS was approximately 94 MiB. These are local workload
+measurements, not a promise for other machines or deck workloads. Single-position
+search remains serial; independent games are the parallel unit.
+
+Final validation passed formatting, locked compilation, Clippy, 2,153 ordinary Rust
+tests, and all 486 public tests with typecheck and lint. The two optional release-only
+Rust tests remain ignored by this ordinary run; their earlier release results are
+recorded above. Private coverage, guided records, and experiment receipts are under
+`.local/authority/binding-cycles/cycle-01/`; verification and performance logs are under
+`.local/recovery/`. The earlier intake counts above describe the pre-expansion snapshot.
+
 ## Remaining work, in order
 
-1. Expand the 96-card preset binding pool for the desired deck field. Current
-   private presets have bindings; arbitrary tournament imports do not. Report which
-   missing mechanics prevent each target deck from running. Prioritize decks, not more
-   generic catalog rows.
+1. Expand the 190-card binding pool through shared behavior slices and complete-card
+   review. Use the whole released corpus to identify reusable behavior families, then
+   prioritize slices that unblock the fixed benchmark decks. Repeat small deck changes,
+   guided mechanic exercises, and deterministic replay checks after each expansion.
 2. Improve the baseline policy using observed tactical state and engine-issued actions.
    Its observation currently contains deck counts, enemy Avatar position, and temporary
    power identities; it needs more public tactical information to evaluate spell effects.

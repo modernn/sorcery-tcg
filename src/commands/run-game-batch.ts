@@ -10,7 +10,7 @@ import type { GameDeckSpec, GameManifest } from '../engine/game.ts';
 import type { DeterministicGameReport } from './run-game-demo.ts';
 
 const MAX_JOBS = 256;
-const MAX_WORKERS = 8;
+export const MAX_GAME_BATCH_WORKERS = 64;
 const MAX_BATCH_BYTES = 64 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -150,7 +150,7 @@ async function runRustBatch(request: string): Promise<unknown> {
 
 export async function runGameBatch(
   manifests: readonly GameManifest[],
-  requestedWorkers = Math.min(availableParallelism(), MAX_WORKERS),
+  requestedWorkers = Math.min(availableParallelism(), MAX_GAME_BATCH_WORKERS),
   artifactsDir?: string,
 ): Promise<readonly GameBatchResult[]> {
   if (manifests.length === 0 || manifests.length > MAX_JOBS) {
@@ -158,8 +158,8 @@ export async function runGameBatch(
   }
   if (!Number.isSafeInteger(requestedWorkers)
     || requestedWorkers < 1
-    || requestedWorkers > MAX_WORKERS) {
-    throw new RangeError(`requestedWorkers must be 1-${MAX_WORKERS}`);
+    || requestedWorkers > MAX_GAME_BATCH_WORKERS) {
+    throw new RangeError(`requestedWorkers must be 1-${MAX_GAME_BATCH_WORKERS}`);
   }
   if (Buffer.byteLength(canonicalJson(manifests as unknown as JsonValue)) > MAX_BATCH_BYTES) {
     throw new RangeError(`game batch exceeds ${MAX_BATCH_BYTES} bytes`);

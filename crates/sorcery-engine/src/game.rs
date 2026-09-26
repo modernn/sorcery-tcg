@@ -19,7 +19,8 @@ use crate::contract::{LegalAction, Seat, opaque_action_id};
 use crate::facts::{
     AlternativeSummonPayment, ArtifactEffect, ArtifactFacts, AuraEffect, AuraFacts, AvatarFacts,
     BasicMovementRestriction, CardFacts, DamagePrevention, Element, ElementSet, EndTurnStealth,
-    FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion, SiteFacts, Thresholds,
+    FactError, MagicEffect, MagicFacts, MinionFacts, RequiredCastRegion, SiteCountController,
+    SiteCountOccupant, SiteCountQuery, SiteCountScope, SiteFacts, Thresholds,
     parse_card_definition, validate_identifier,
 };
 use crate::prng::PrngState;
@@ -1558,6 +1559,7 @@ fn account_for_selfplay_site_fields(facts: &SiteFacts) {
         genesis_draw_spell_per_adjacent_same_card: _,
         genesis_enemies_lose_stealth: _,
         genesis_gain_mana: _,
+        genesis_gain_mana_per_site: _,
         genesis_gain_mana_if_only_controlled_copy: _,
         genesis_heal_nearby_avatars: _,
         genesis_immobilize_nearby_until_next_turn: _,
@@ -6012,6 +6014,55 @@ impl Game {
                         Self::unit_occupied_cells(unit),
                         Self::unit_occupied_cells(enemy),
                     )
+            })
+    }
+
+    fn count_sites(
+        &self,
+        query: SiteCountQuery,
+        seat: Seat,
+        source_cell: Cell,
+        source_card_id: CardId,
+    ) -> usize {
+        Cell::ALL
+            .into_iter()
+            .filter(|candidate| match query.scope {
+                SiteCountScope::Adjacent => {
+                    source_cell.bordering(false).any(|cell| cell == *candidate)
+                }
+                SiteCountScope::Nearby => {
+                    *candidate == source_cell
+                        || source_cell.bordering(false).any(|cell| cell == *candidate)
+                        || source_cell.diagonals(false).any(|cell| cell == *candidate)
+                }
+                SiteCountScope::Realm => true,
+            })
+            .filter(|cell| {
+                let Some(site) = self.position.sites[cell.index()].as_ref() else {
+                    return false;
+                };
+                (query.controller == SiteCountController::Any
+                    || (query.controller == SiteCountController::Controlled
+                        && site.controller == seat)
+                    || (query.controller == SiteCountController::Enemy && site.controller != seat))
+                    && (!query.same_card || site.card.card_id == source_card_id)
+                    && (query.occupant == SiteCountOccupant::Any
+                        || (query.occupant == SiteCountOccupant::EnemyAtop
+                            && self.site_has_enemy_atop(seat, *cell)))
+            })
+            .count()
+    }
+
+    fn site_has_enemy_atop(&self, seat: Seat, cell: Cell) -> bool {
+        if self.position.sites[cell.index()].is_none() {
+            return false;
+        }
+        let enemy = other_seat(seat);
+        self.position.players[seat_index(enemy)].avatar.location == cell
+            || self.position.units.iter().any(|unit| {
+                unit.controller == enemy
+                    && unit.region == Region::Surface
+                    && Self::unit_occupies_cell(unit, cell)
             })
     }
 
@@ -14592,12 +14643,17 @@ impl Game {
             return (None, 0);
         }
         let only_controlled_copy = facts.genesis_gain_mana_if_only_controlled_copy
-            && !self
-                .position
-                .sites
-                .iter()
-                .flatten()
-                .any(|site| site.controller == seat && site.card.card_id == card_id);
+            && self.count_sites(
+                SiteCountQuery {
+                    scope: SiteCountScope::Realm,
+                    same_card: true,
+                    controller: SiteCountController::Controlled,
+                    occupant: SiteCountOccupant::Any,
+                },
+                seat,
+                cell,
+                card_id,
+            ) == 0;
         let genesis_gain_mana = match (facts.genesis_gain_mana, only_controlled_copy.then_some(1)) {
             (Some(unconditional), Some(conditional)) => {
                 Some(unconditional.saturating_add(conditional))
@@ -14607,13 +14663,17 @@ impl Game {
             (None, None) => None,
         };
         let genesis_spell_draw_count = if facts.genesis_draw_spell_per_adjacent_same_card {
-            cell.bordering(false)
-                .filter(|neighbor| {
-                    self.position.sites[neighbor.index()]
-                        .as_ref()
-                        .is_some_and(|site| site.card.card_id == card_id)
-                })
-                .count()
+            self.count_sites(
+                SiteCountQuery {
+                    scope: SiteCountScope::Adjacent,
+                    same_card: true,
+                    controller: SiteCountController::Any,
+                    occupant: SiteCountOccupant::Any,
+                },
+                seat,
+                cell,
+                card_id,
+            )
         } else {
             0
         };
@@ -14900,6 +14960,15 @@ impl Game {
             return Err(GameError::IllegalAction);
         };
         let abilities_lost = self.fate_covers_cell(cell) && !facts.ordinary;
+        // Count on resolution, after the incoming site and any entry settlement.
+        let genesis_gain_mana =
+            if let Some(query) = facts.genesis_gain_mana_per_site.filter(|_| !abilities_lost) {
+                let count = u8::try_from(self.count_sites(query, seat, cell, card_id))
+                    .expect("realm site count fits in u8");
+                Some(genesis_gain_mana.unwrap_or(0).saturating_add(count))
+            } else {
+                genesis_gain_mana
+            };
         self.position.phase = Phase::Main;
         self.position.decision_seat = seat;
         let paid_token =
@@ -27978,6 +28047,203 @@ pub mod catalog_proofs {
         assert_eq!(replay.authoritative_state(), final_state);
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one direct scenario distinguishes selector semantics and replays the transition"
+    )]
+    pub fn rule_catalog_0737_beacon_counts_nearby_enemy_sites_once() {
+        let manifest = selfplay_manifest_with(211, |manifest| {
+            for ordinal in 1..=30 {
+                manifest["cards"][format!("north-site-{ordinal}")] = json!({
+                    "cardType": "site", "elements": ["air"],
+                    "genesisGainManaPerSite": { "occupant": "enemyAtop", "scope": "nearby" },
+                });
+            }
+            for definition in manifest["cards"].as_object_mut().unwrap().values_mut() {
+                if definition["cardType"] == "minion" {
+                    definition["burrowing"] = json!(true);
+                }
+            }
+        });
+        for invalid in [
+            json!({"scope":"nearby","controller":null}),
+            json!({"scope":"nearby","occupant":42}),
+            json!({"scope":"nearby","sameCard":"yes"}),
+            json!({"scope":"nearby","extra":true}),
+            json!({"scope":"unbounded"}),
+        ] {
+            let mut bad: Value = serde_json::from_str(&manifest).expect("fixture JSON");
+            bad["cards"]["north-site-1"]["genesisGainManaPerSite"] = invalid;
+            let error =
+                crate::facts::parse_card_definition("north-site-1", &bad["cards"]["north-site-1"])
+                    .expect_err("invalid selector must fail fact parsing itself");
+            assert!(error.to_string().contains("genesisGainManaPerSite"));
+        }
+        let mut session = crate::session::Session::new(&manifest).expect("selector session");
+        for _ in 0..8 {
+            let action = session
+                .select_baseline_policy_action()
+                .expect("issued baseline action");
+            let result = session
+                .step(crate::contract::ActionRequest {
+                    action_id: action.action_id.to_string(),
+                    seat: action.seat,
+                    state_version: action.state_version,
+                })
+                .expect("legal transition");
+            assert!(matches!(result, crate::session::StepResult::Accepted(_)));
+        }
+        let checkpoint = crate::checkpoint::create_game_checkpoint(&session).expect("checkpoint");
+        let restored = crate::checkpoint::resume_game_checkpoint(&checkpoint).expect("resume");
+        assert_eq!(
+            session.session_hash().unwrap(),
+            restored.session_hash().unwrap()
+        );
+        let mut game = Game::from_manifest_json(&manifest).expect("valid site count manifest");
+        let cell = Cell::parse("C4").unwrap();
+        for (name, controller) in [
+            ("C3", Seat::South),
+            ("B3", Seat::South),
+            ("B4", Seat::South),
+            ("D4", Seat::North),
+            ("A1", Seat::South),
+        ] {
+            let site = game.position.players[seat_index(controller)]
+                .atlas
+                .remove(0);
+            game.position.sites[Cell::parse(name).unwrap().index()] = Some(SitePosition {
+                card: site,
+                controller,
+                last_flight_turn: None,
+                warded: false,
+            });
+        }
+        for (name, seat, region) in [
+            ("C3", Seat::South, Region::Surface),
+            ("C3", Seat::South, Region::Surface),
+            ("A1", Seat::South, Region::Surface),
+            ("B4", Seat::South, Region::Underground),
+            ("D4", Seat::North, Region::Surface),
+        ] {
+            let card = game.position.players[seat_index(seat)].spellbook.remove(0);
+            let mut unit = test_minion(
+                card.card_id,
+                card.instance_id.as_str(),
+                seat,
+                Cell::parse(name).unwrap(),
+                None,
+            );
+            unit.region = region;
+            game.position.units.push(unit);
+        }
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = Cell::parse("B3").unwrap();
+        let (site_id, card_id) = {
+            let north = &mut game.position.players[seat_index(Seat::North)];
+            north.avatar.location = cell;
+            north.avatar.tapped = false;
+            north.domain_established = true;
+            (
+                north.hand_atlas[0].instance_id.clone(),
+                north.hand_atlas[0].card_id,
+            )
+        };
+        let query = SiteCountQuery {
+            scope: SiteCountScope::Nearby,
+            same_card: false,
+            controller: SiteCountController::Any,
+            occupant: SiteCountOccupant::EnemyAtop,
+        };
+        assert_eq!(
+            game.count_sites(query, Seat::North, cell, card_id),
+            2,
+            "two occupied sites, including an avatar-only diagonal; exclude allied/underground/distant"
+        );
+        assert_eq!(
+            game.count_sites(
+                SiteCountQuery {
+                    scope: SiteCountScope::Adjacent,
+                    ..query
+                },
+                Seat::North,
+                cell,
+                card_id
+            ),
+            1,
+            "adjacent excludes diagonal avatar"
+        );
+        assert_eq!(
+            game.count_sites(
+                SiteCountQuery {
+                    scope: SiteCountScope::Realm,
+                    ..query
+                },
+                Seat::North,
+                cell,
+                card_id
+            ),
+            3,
+            "realm includes distant enemy"
+        );
+        let controlled_card = game.position.sites[Cell::parse("D4").unwrap().index()]
+            .as_ref()
+            .unwrap()
+            .card
+            .card_id;
+        let same_card = SiteCountQuery {
+            scope: SiteCountScope::Adjacent,
+            same_card: true,
+            controller: SiteCountController::Controlled,
+            occupant: SiteCountOccupant::Any,
+        };
+        assert_eq!(
+            game.count_sites(same_card, Seat::North, cell, controlled_card),
+            1
+        );
+        assert_eq!(game.count_sites(same_card, Seat::North, cell, card_id), 0);
+        assert_eq!(
+            game.count_sites(
+                SiteCountQuery {
+                    controller: SiteCountController::Enemy,
+                    ..same_card
+                },
+                Seat::North,
+                cell,
+                controlled_card
+            ),
+            0
+        );
+        // The incoming site must count once occupied, even though this cell was void.
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = cell;
+        assert_eq!(game.count_sites(query, Seat::North, cell, card_id), 1);
+        game.position.active_seat = Seat::North;
+        game.position.decision_seat = Seat::North;
+        game.position.phase = Phase::Main;
+        let action = play_site_actions(&game, &site_id).into_iter().find(|action| {
+            matches!(action.descriptor, ActionDescriptor::PlaySite { cell: target, .. } if target == cell)
+        }).expect("issued site action");
+        let mut replay = game.clone();
+        let (events, random) = game.apply_action_recorded(&action).expect("site Genesis");
+        let (replay_events, replay_random) = replay.apply_action_recorded(&action).expect("replay");
+        assert_eq!(events, replay_events);
+        assert_eq!(random, replay_random);
+        assert_eq!(game.authoritative_state(), replay.authoritative_state());
+        assert!(random.is_empty());
+        assert_eq!(
+            game.position.players[seat_index(Seat::North)].mana,
+            3,
+            "one ordinary mana plus two occupied sites, including the newly played site"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|(kind, payload)| kind == "mana-gained" && payload["amount"] == 2)
+        );
+    }
+
     pub fn rule_catalog_0715_oversized_attack_chooses_lowest_shared_contested_cell() {
         let manifest = selfplay_manifest_with(31, |manifest| {
             for card_id in ["north-spell-1", "south-spell-1"] {
@@ -30913,5 +31179,10 @@ mod tests {
     #[test]
     fn supported_magic_effects_should_be_selfplay_supported() {
         catalog_proofs::rule_catalog_0736_supported_magic_effects_should_cover_every_admitted_variant();
+    }
+
+    #[test]
+    fn beacon_genesis_counts_nearby_enemy_sites_once() {
+        catalog_proofs::rule_catalog_0737_beacon_counts_nearby_enemy_sites_once();
     }
 }

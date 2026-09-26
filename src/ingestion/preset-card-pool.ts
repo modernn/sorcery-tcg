@@ -3,18 +3,17 @@ import { z } from 'zod';
 import { canonicalJson, type JsonValue } from '../authority/canonical-json.ts';
 import { identityHash } from '../authority/hash.ts';
 import type { PrivateCardSnapshot } from '../authority/private-cards.ts';
-import type { PrivateStarterPreset } from '../commands/run-private-game-check.ts';
-import { createGameManifest, type GameCardDefinition, type GameDeckSpec } from '../engine/game.ts';
+import { createGameManifest, type GameCardDefinition, type GameDeckSpec, type GameManifest } from '../engine/game.ts';
 
 export type PresetCardBinding = Readonly<{
   definition: GameCardDefinition;
   presetIds: readonly string[];
 }>;
 
-/** Existing source-checked presets supply facts; no printed-text inference or new rules. */
+/** Existing source-checked manifests supply facts; no printed-text inference or new rules. */
 export function buildPresetCardPool(
   authority: PrivateCardSnapshot,
-  presets: readonly PrivateStarterPreset[],
+  presets: readonly Readonly<{ id: string; manifest: GameManifest }>[],
 ): ReadonlyMap<string, PresetCardBinding> {
   const pool = new Map<string, PresetCardBinding>();
   const known = new Set(authority.cards.map(({ stableId }) => stableId));
@@ -58,14 +57,14 @@ export function presetCardCatalog(authority: PrivateCardSnapshot, pool: Readonly
           rarity: card.rarity,
           rulesText: card.rulesText,
           engineSupported: binding !== undefined,
-          reason: binding ? null : 'no-preset-binding',
+          reason: binding ? null : 'no-reviewed-binding',
           presetIds: binding?.presetIds ?? [],
           sourceCardHash: identityHash(card as unknown as JsonValue),
           factsHash: binding ? identityHash(binding.definition as JsonValue) : null,
           facts: binding?.definition ?? null,
         };
       }),
-    limitations: ['Bindings reuse source-checked presets; arbitrary cards remain unsupported.',
+    limitations: ['Bindings reuse source-checked scenarios and reviewed local facts; unbound cards remain unsupported.',
       'Engine support is not proof of Constructed deck legality or independently verified authority.'],
   };
 }
@@ -84,7 +83,7 @@ const requestSchema = z.strictObject({
   candidate: deckSchema,
   opponent: deckSchema,
   seeds: z.array(z.number().int().min(0).max(0xffff_ffff)).min(1).max(128).default([1]),
-  workers: z.number().int().min(1).max(8).default(1),
+  workers: z.number().int().min(1).max(64).default(1),
 });
 
 /** Creates a manifest from deck IDs only. The Rust session admits it before publication. */
@@ -99,7 +98,7 @@ export function prepareBoundExperiment(
   };
   const referenced = new Set(Object.values(decks).flatMap((deck) => [deck.avatar, ...deck.atlas, ...deck.spellbook]));
   const unsupported = [...referenced].filter((id) => !pool.has(id)).sort();
-  if (unsupported.length) throw new Error(`unsupported cards (no preset binding): ${unsupported.join(', ')}`);
+  if (unsupported.length) throw new Error(`unsupported cards (no reviewed binding): ${unsupported.join(', ')}`);
   // Include engine token dependencies, including tokens outside the selected deck zones.
   for (const id of referenced) {
     const facts = pool.get(id)!.definition;

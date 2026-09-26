@@ -65,23 +65,25 @@ artifact-directory writes are disabled; use the local session protocol for check
 
 ### Build decks across presets
 
-The recovered presets currently bind 96 of the 1,100 cards. Export a private catalog
-to discover those cards, their exact facts, rarity, printed rules, source/fact hashes,
-and the presets supplying each binding:
+The private corpus contains all 1,100 unique card names returned by the official API
+in the 2026-09-26 completeness check. Identity coverage is separate from gameplay
+support. Source-checked scenarios and reviewed local bindings supply the playable
+pool. Export a fresh private catalog to discover those cards, their exact facts,
+rarity, printed rules, source/fact hashes, and the scenarios supplying each binding:
 
 ```sh
 pnpm game:experiment-private --catalog --output-id bound-cards
 ```
 
 Read `.local/authority/experiments/bound-cards.catalog.json`. Cards without bindings have
-`engineSupported: false` and `reason: "no-preset-binding"`; being in the source corpus
+`engineSupported: false` and `reason: "no-reviewed-binding"`; being in the source corpus
 does not make a card playable. The catalog also includes the local Constructed format.
 
 Create `.local/authority/experiments/decks.json` with `schemaVersion: 1`, `candidate`,
 `opponent`, `seeds`, and `workers`. Decks have the same avatar/atlas/spellbook shape used
 above; counted and expanded zones are accepted. You can start by copying an existing
 experiment request and removing `baseManifest`. Select card IDs from any supported
-preset, then prepare and run:
+binding, then prepare and run:
 
 ```sh
 pnpm game:experiment-private --decks experiments/decks.json --output-id custom-decks
@@ -90,11 +92,37 @@ pnpm --silent game:experiment < .local/authority/experiments/custom-decks.json \
 ```
 
 `--decks` is relative to `.local/authority/` and accepts at most 1 MiB. Only deck
-composition, seeds, and worker count may be supplied: facts come from the source-checked
-presets. Conflicting authority/fact bindings and unsupported cards fail closed. Required
+composition, seeds, and worker count may be supplied: facts come from source-checked
+scenarios and the fixed private `bindings/reviewed.json` file. That file contains exact
+source hashes, complete reviewed facts, and proof references; it does not accept code.
+Changing source stats, omitting review, conflicting bindings, and unsupported cards fail closed. Required
 tokens are retained, and Rust validates the manifest before it is written. This does not
 prove Constructed legality or improve the baseline policy. Generated files are private,
 created with owner-only permissions, and never overwrite an existing file.
+
+See [shared rule behaviors](docs/shared-rule-behaviors.md) for the implementation and
+deck-variation cycle. Review references record evidence; they do not grant ranked
+eligibility or establish that every card interaction has been verified.
+
+### CPU worker budget
+
+Batch and experiment interfaces accept 1–64 native Rust workers, bounded by the
+number of jobs. The batch default uses available logical CPUs. In deck experiment
+JSON, set `workers` explicitly; run both seats over enough seeds to supply each worker.
+Independent jobs retain their seed and output order across worker counts. Search
+within one position and policy-training loops are still serial.
+
+Measure this machine before choosing a large run:
+
+```sh
+CARGO_BUILD_JOBS=2 cargo run --release --locked -p sorcery-engine \
+  --bin engine-benchmark -- --worker-scaling
+```
+
+The benchmark compares 1/2/4/8/16/24 workers over the same 48 synthetic games, with
+warmups, three samples, and an identical-result hash check. It reports median games
+per second. The best worker count depends on game length, CPU contention, and memory;
+swap capacity alone is not a throughput estimate.
 
 ## Search, checkpoint, and replay
 

@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { canonicalJson, type JsonValue } from '../../src/authority/canonical-json.ts';
 import type { PrivateCardSnapshot } from '../../src/authority/private-cards.ts';
+import { identityHash } from '../../src/authority/hash.ts';
 import type { PrivateStarterPreset } from '../../src/commands/run-private-game-check.ts';
 import { createGameManifest, type GameCardDefinition } from '../../src/engine/game.ts';
 import { RustSessionClient } from '../../src/engine/rust-engine.ts';
 import { buildPresetCardPool, prepareBoundExperiment, presetCardCatalog } from '../../src/ingestion/preset-card-pool.ts';
+import { loadReviewedCardBindings, mergeReviewedCardBindings } from '../../src/ingestion/reviewed-card-bindings.ts';
 
 const thresholds = { air: 0, earth: 0, fire: 0, water: 0 };
 const facts: Record<string, GameCardDefinition> = {
@@ -52,6 +57,50 @@ const input = {
   candidate: { avatar: 'avatar', atlas: ['site', 'site', 'site'], spellbook: ['spell', 'b', 'a'] },
   opponent: { avatar: 'avatar', atlas: ['site', 'site', 'site'], spellbook: ['b', 'b', 'b'] },
 };
+
+test('reviewed local bindings require exact source identity, complete review and matching printed stats', () => {
+  const pool = buildPresetCardPool(authority, presets);
+  const source = authority.cards.find((card) => card.stableId === 'unbound')!;
+  const row = { cardId: source.stableId, sourceCardHash: identityHash(source as unknown as JsonValue),
+    facts: { ...facts.a!, ordinary: true }, review: { entireRulesText: true,
+      proofs: ['synthetic vanilla minion movement and combat proof'] } };
+  const file = { schemaVersion: 1, authorityHash: authority.authorityHash,
+    revisionId: authority.revisionId, cards: [row] };
+  const merged = mergeReviewedCardBindings(file, authority, pool);
+  assert.deepEqual(merged.get('unbound')?.definition, row.facts);
+  assert.equal(pool.has('unbound'), false);
+  assert.deepEqual(mergeReviewedCardBindings(file, authority, merged), merged);
+  assert.throws(() => mergeReviewedCardBindings({ ...file, revisionId: 'stale' }, authority, pool), /authority/);
+  for (const changed of [
+    { ...row, sourceCardHash: `sha256:${'f'.repeat(64)}` },
+    { ...row, facts: { ...row.facts, attack: 99 } },
+    { ...row, facts: { ...row.facts, ordinary: false } },
+    { ...row, facts: { ...row.facts, unknownAbility: true } },
+    { ...row, review: { ...row.review, entireRulesText: false } },
+    { ...row, review: { ...row.review, proofs: [] } },
+  ]) assert.throws(() => mergeReviewedCardBindings({ ...file, cards: [changed] }, authority, pool));
+  assert.throws(() => mergeReviewedCardBindings({ ...file, cards: [row, row] }, authority, pool), /duplicate/);
+  assert.throws(() => mergeReviewedCardBindings(file, authority,
+    new Map([...pool, ['unbound', { definition: facts.b!, presetIds: [] }]])), /conflicting/);
+});
+
+test('optional reviewed binding file fails closed on malformed data and file aliases', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'reviewed-bindings-'));
+  const pool = buildPresetCardPool(authority, presets);
+  try {
+    assert.equal(await loadReviewedCardBindings(root, authority, pool), pool);
+    await mkdir(join(root, 'bindings'));
+    const path = join(root, 'bindings/reviewed.json');
+    await writeFile(path, '{"schemaVersion":1,"schemaVersion":2}');
+    await assert.rejects(loadReviewedCardBindings(root, authority, pool));
+    await rm(path);
+    await writeFile(join(root, 'other.json'), '{}');
+    await symlink(join(root, 'other.json'), path);
+    await assert.rejects(loadReviewedCardBindings(root, authority, pool));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('preset pool merges provenance deterministically and rejects authority or fact conflicts', () => {
   const pool = buildPresetCardPool(authority, presets);
@@ -103,10 +152,10 @@ test('cross-preset compositions preserve facts and token dependencies and are ad
 
 test('deck-only input rejects unbound cards, rule overrides, invalid zones and excessive requests', () => {
   const pool = buildPresetCardPool(authority, presets);
-  assert.throws(() => prepareBoundExperiment({ ...input, candidate: { ...input.candidate, spellbook: ['unbound'] } }, authority, pool), /no preset binding/);
+  assert.throws(() => prepareBoundExperiment({ ...input, candidate: { ...input.candidate, spellbook: ['unbound'] } }, authority, pool), /no reviewed binding/);
   for (const changed of [
     { ...input, baseManifest: {} }, { ...input, cards: facts }, { ...input, seeds: [] },
-    { ...input, workers: 9 }, { ...input, seeds: [-1] },
+    { ...input, workers: 65 }, { ...input, seeds: [-1] },
     { ...input, candidate: { ...input.candidate, atlas: ['b', 'b', 'b'] } },
     { ...input, candidate: { ...input.candidate, spellbook: ['token', 'token', 'token'] } },
     { ...input, candidate: { ...input.candidate, spellbook: [{ cardId: 'a', copies: 201 }] } },

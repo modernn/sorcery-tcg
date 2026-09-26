@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sorcery_engine::batch::MAX_GAME_ACTIONS;
+use sorcery_engine::batch::{BatchJob, MAX_GAME_ACTIONS, run_game_batch};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
 use sorcery_engine::game::Game;
 use sorcery_engine::policy::{PolicySnapshot, parse_policy_snapshot};
@@ -75,6 +75,14 @@ fn main() -> BenchmarkResult<()> {
         )
         .into());
     }
+    if std::env::args().any(|arg| arg == "--worker-scaling") {
+        let report = worker_scaling_report()?;
+        let stdout = io::stdout();
+        let mut output = stdout.lock();
+        serde_json::to_writer(&mut output, &report)?;
+        writeln!(output)?;
+        return Ok(());
+    }
 
     let configuration = BenchmarkConfiguration {
         sample_count: positive_integer("BENCHMARK_SAMPLES", 5, MAX_SAMPLES)?,
@@ -124,6 +132,81 @@ fn main() -> BenchmarkResult<()> {
     serde_json::to_writer(&mut output, &report)?;
     writeln!(output)?;
     Ok(())
+}
+
+fn worker_scaling_report() -> BenchmarkResult<Value> {
+    const JOB_COUNT: u32 = 48;
+    const REPEATS: usize = 3;
+    const WORKERS: [usize; 6] = [1, 2, 4, 8, 16, 24];
+    let manifests = (1..=JOB_COUNT)
+        .map(synthetic_demo_manifest_json)
+        .collect::<Result<Vec<_>, _>>()?;
+    let policy = baseline_policy(&manifests[0])?;
+    let second_policy = baseline_policy(&manifests[1])?;
+    if policy.deck_id() != second_policy.deck_id() {
+        return Err(io::Error::other("synthetic scaling manifests changed deck identity").into());
+    }
+    let jobs = manifests
+        .iter()
+        .map(|manifest_json| BatchJob {
+            manifest_json,
+            north_deck_id: policy.deck_id(),
+            north_policy: &policy,
+            south_deck_id: policy.deck_id(),
+            south_policy: &policy,
+        })
+        .collect::<Vec<_>>();
+    let mut baseline_hash = None;
+    let mut samples = Vec::with_capacity(WORKERS.len());
+    for workers in WORKERS {
+        let warmup_hash = {
+            let warmup = run_game_batch(&jobs, workers)?;
+            identity_hash(&serde_json::to_value(&warmup)?)?
+        };
+        if let Some(expected) = &baseline_hash {
+            if expected != &warmup_hash {
+                return Err(
+                    io::Error::other("worker scaling changed deterministic batch output").into(),
+                );
+            }
+        } else {
+            baseline_hash = Some(warmup_hash);
+        }
+        let mut durations = Vec::with_capacity(REPEATS);
+        let mut hashes = Vec::with_capacity(REPEATS);
+        for _ in 0..REPEATS {
+            let started = Instant::now();
+            let results = run_game_batch(&jobs, workers)?;
+            let elapsed = started.elapsed();
+            let hash = identity_hash(&serde_json::to_value(&results)?)?;
+            if baseline_hash.as_ref() != Some(&hash) {
+                return Err(
+                    io::Error::other("worker scaling changed deterministic batch output").into(),
+                );
+            }
+            durations.push(elapsed.as_secs_f64() * 1_000.0);
+            hashes.push(hash);
+        }
+        durations.sort_by(f64::total_cmp);
+        let median_ms = durations[REPEATS / 2];
+        samples.push(json!({
+            "workers": workers,
+            "durationMs": round(median_ms),
+            "games": JOB_COUNT,
+            "gamesPerSecond": round(f64::from(JOB_COUNT) / (median_ms / 1_000.0)),
+            "sampleDurationsMs": durations.into_iter().map(round).collect::<Vec<_>>(),
+            "resultHashes": hashes,
+        }));
+    }
+    Ok(json!({
+        "benchmarkVersion": 1,
+        "mode": "worker-scaling",
+        "jobCount": JOB_COUNT,
+        "repeats": REPEATS,
+        "logicalCpuCount": std::thread::available_parallelism()?.get(),
+        "workers": samples,
+        "deterministicResultHash": baseline_hash,
+    }))
 }
 
 fn paired_workload() -> BenchmarkResult<PairedWorkload> {
