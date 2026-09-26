@@ -94,6 +94,34 @@ two workers. Synthetic regressions cover conflicting bindings, authority mismatc
 token dependencies, canonical deck encodings, unsupported cards, and input bounds.
 The follow-up `pnpm verify` passed typecheck, lint, and all 484 public tests.
 
+## Real-deck benchmark intake (2026-09-26)
+
+A private research snapshot inspected 434 published lists from SorceryCard and
+Curiosa, with additional discovery and corroboration from SorceryRec and Sorcerers
+Summit. It selects four distinct compositions for each of the 34 Avatars and a
+12-deck budget shortlist. Seventy selected lists have a source-reported tournament
+finish; the other selections are provisional community benchmarks, not established
+top-four competitive decks. Element diversity uses spell composition rather than
+only the site's primary-element badge.
+
+The snapshot, linked review index, counted-card requests, admission diagnostics, and
+offline reproduction scripts live under the ignored
+`.local/authority/sorcerycard-research/2026-09-26/` directory. External deck lists are
+examples to test, never authority for card behavior. Obvious incomplete lists and
+copy-limit violations were excluded; the intake screen does not replace engine
+legality. Prices are source estimates, not complete purchase quotes.
+
+All selected card names resolve to the recovered authority. The 136 selections use
+881 distinct main-deck cards, including 805 without current engine bindings. All 136
+correctly fail preparation; none has a simulated win rate. A separate supported
+control completed four games with every replay verified. This proves the control
+workflow and rejection boundary, not support for the researched decks.
+
+Grow support against these fixed requests: reuse shared Rust mechanics, add one
+direct proof for each missing rule slice, bind matching cards, and rerun admission.
+The first narrow candidate has 15 missing bindings and an already bound Avatar.
+No per-deck rules engine, automatic text interpreter, or replacement preset is needed.
+
 ## Remaining work, in order
 
 1. Expand the 96-card preset binding pool for the desired deck field. Current
