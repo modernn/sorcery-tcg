@@ -258,6 +258,14 @@ Previously saved checkpoints remain available as independent branches. Disposabl
 rollouts consume their game state through the same dispatcher, returning it only on
 success, so they do not copy a rollback position on every action.
 
+Area spells, location activations, and Genesis/turn pulses now share unit cohort
+selection and area-damage execution. The query filters region, intersecting cells,
+unit kind, controller, and excluded source; each physical unit appears once in
+canonical identity order. One executor freezes recipient defenses before allocating
+and applying damage. Callers still own death settlement and suspended continuations;
+the composed effect frame below remains to be implemented. Area membership does not
+apply explicit-target restrictions such as Stealth.
+
 Next migrate a complete composed slice across spells, Genesis, minion activations,
 and artifact activations: common selectors and atomic costs, then damage, untap, and
 draw operations in a resumable effect frame. Source context retains instance identity,

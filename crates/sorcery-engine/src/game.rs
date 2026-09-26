@@ -666,6 +666,16 @@ enum UnitKind {
     Minion,
 }
 
+/// A spatial cohort, independent of whether an ability explicitly targets its members.
+#[derive(Clone, Copy)]
+struct UnitQuery<'a> {
+    region: Region,
+    cells: Option<&'a [Cell]>,
+    kind: Option<UnitKind>,
+    controller: Option<Seat>,
+    exclude: Option<&'a IdentityHash>,
+}
+
 impl UnitKind {
     const fn as_str(self) -> &'static str {
         match self {
@@ -1118,6 +1128,12 @@ enum WinReason {
 struct DamageResult {
     minion_died: bool,
     avatar_defeated: bool,
+}
+
+#[derive(Default)]
+struct DamageCasualties {
+    minions: Vec<IdentityHash>,
+    avatars: Vec<Seat>,
 }
 
 #[derive(Clone, Copy)]
@@ -9284,34 +9300,56 @@ impl Game {
         self.surface_location_exists(cell) && !self.is_water_site(cell)
     }
 
-    /// Every unit standing at one location in canonical identity order, for random selection.
-    fn units_at_location(&self, location: Location) -> Vec<(IdentityHash, UnitKind, Seat)> {
-        let mut candidates = Vec::new();
-        if location.region == Region::Surface {
-            for seat in [Seat::North, Seat::South] {
-                let avatar = &self.position.players[seat_index(seat)].avatar;
-                if avatar.location == location.cell {
-                    candidates.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
-                }
-            }
-        }
-        candidates.extend(
-            self.position
-                .units
-                .iter()
-                .filter(|unit| {
-                    unit.region == location.region && Self::unit_occupies_cell(unit, location.cell)
-                })
-                .map(|unit| {
-                    (
-                        unit.card.instance_id.clone(),
-                        UnitKind::Minion,
-                        unit.controller,
-                    )
-                }),
-        );
+    /// Select each physical unit once, even when several occupied cells overlap the query.
+    /// Stealth and Ward do not remove members from an untargeted area effect.
+    fn query_units(&self, query: UnitQuery<'_>) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        let avatars = [Seat::North, Seat::South].into_iter().map(|seat| {
+            let avatar = &self.position.players[seat_index(seat)].avatar;
+            (
+                &avatar.card.instance_id,
+                UnitKind::Avatar,
+                seat,
+                Region::Surface,
+                std::slice::from_ref(&avatar.location),
+            )
+        });
+        let minions = self.position.units.iter().map(|unit| {
+            (
+                &unit.card.instance_id,
+                UnitKind::Minion,
+                unit.controller,
+                unit.region,
+                Self::unit_occupied_cells(unit),
+            )
+        });
+        let mut candidates: Vec<_> = avatars
+            .chain(minions)
+            .filter(|(id, kind, controller, region, occupied)| {
+                *region == query.region
+                    && query.kind.is_none_or(|required| *kind == required)
+                    && query
+                        .controller
+                        .is_none_or(|required| *controller == required)
+                    && query.exclude != Some(*id)
+                    && query
+                        .cells
+                        .is_none_or(|cells| cells.iter().any(|cell| occupied.contains(cell)))
+            })
+            .map(|(id, kind, controller, _, _)| (id.clone(), kind, controller))
+            .collect();
         candidates.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         candidates
+    }
+
+    /// Every unit standing at one location in canonical identity order, for random selection.
+    fn units_at_location(&self, location: Location) -> Vec<(IdentityHash, UnitKind, Seat)> {
+        self.query_units(UnitQuery {
+            region: location.region,
+            cells: Some(std::slice::from_ref(&location.cell)),
+            kind: None,
+            controller: None,
+            exclude: None,
+        })
     }
 
     /// Every unit the printed grid reaches above and below one cell, in canonical target order.
@@ -16381,21 +16419,18 @@ impl Game {
         )
     }
 
-    /// Damages every unit standing at one location and settles the deaths it caused.
-    ///
-    /// Every occupant is announced under `allocated`, then damaged against one snapshot, so the
-    /// blanket lands simultaneously instead of letting an early death shield a later target.
-    fn damage_each_unit_at_location(
+    /// Freeze every recipient's defenses before allocating or applying any damage. Deaths are
+    /// returned to the invoking ability, which owns the phase and suspended continuation.
+    fn apply_area_damage(
         &mut self,
-        target_location: Location,
+        targets: Vec<(IdentityHash, UnitKind, Seat)>,
         amount: u16,
         source: UnitDamageSource,
         allocated: (&'static str, &IdentityHash),
         outcomes: &mut OutcomeLog<'_>,
-    ) -> Result<(), GameError> {
+    ) -> Result<DamageCasualties, GameError> {
         let (allocated_event, source_instance_id) = allocated;
-        let targets = self
-            .units_at_location(target_location)
+        let targets = targets
             .into_iter()
             .map(|(instance_id, kind, target_seat)| {
                 let status = match kind {
@@ -16414,8 +16449,7 @@ impl Game {
                 })
             });
         }
-        let mut dead_minions = Vec::new();
-        let mut defeated_avatars = Vec::new();
+        let mut casualties = DamageCasualties::default();
         for (target_instance_id, kind, target_seat, status) in targets {
             let result = self.apply_simple_damage_with_status(
                 kind,
@@ -16427,17 +16461,34 @@ impl Game {
                 outcomes,
             )?;
             if result.minion_died {
-                dead_minions.push(target_instance_id);
+                casualties.minions.push(target_instance_id);
             }
-            if result.avatar_defeated && !defeated_avatars.contains(&target_seat) {
-                defeated_avatars.push(target_seat);
+            if result.avatar_defeated && !casualties.avatars.contains(&target_seat) {
+                casualties.avatars.push(target_seat);
             }
         }
+        Ok(casualties)
+    }
+
+    /// Damages every unit standing at one location and settles the deaths it caused.
+    ///
+    /// Every occupant is announced under `allocated`, then damaged against one snapshot, so the
+    /// blanket lands simultaneously instead of letting an early death shield a later target.
+    fn damage_each_unit_at_location(
+        &mut self,
+        target_location: Location,
+        amount: u16,
+        source: UnitDamageSource,
+        allocated: (&'static str, &IdentityHash),
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
+        let targets = self.units_at_location(target_location);
+        let casualties = self.apply_area_damage(targets, amount, source, allocated, outcomes)?;
         self.position.state_version += 1;
-        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+        if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
             self.begin_minion_deaths(
-                &dead_minions,
-                &defeated_avatars,
+                &casualties.minions,
+                &casualties.avatars,
                 Phase::Main,
                 self.position.active_seat,
                 outcomes,
@@ -22020,130 +22071,39 @@ impl Game {
                     )?;
                 }
             }
-            MagicEffect::DamageEachAbovegroundMinionOne => {
-                let mut targets = self
-                    .position
-                    .units
-                    .iter()
-                    .filter(|unit| unit.region == Region::Surface)
-                    .map(|unit| {
-                        Ok((
-                            unit.card.instance_id.clone(),
-                            unit.controller,
-                            self.minion_damage_status(&unit.card.instance_id)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, GameError>>()?;
-                targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-                for (instance_id, _, _) in &targets {
-                    outcomes.push("magic-damage-allocated", || {
-                        json!({
-                            "amount": 1,
-                            "sourceInstanceId": card_instance_id,
-                            "targetInstanceId": instance_id,
-                        })
-                    });
-                }
-                let mut dead_minions = Vec::new();
-                for (instance_id, target_seat, status) in targets {
-                    if self
-                        .apply_simple_damage_with_status(
-                            UnitKind::Minion,
-                            target_seat,
-                            &instance_id,
-                            1,
-                            UnitDamageSource {
-                                current_power: 0,
-                                lethal: false,
-                            },
-                            Some(status),
-                            outcomes,
-                        )?
-                        .minion_died
-                    {
-                        dead_minions.push(instance_id);
-                    }
-                }
-                if !dead_minions.is_empty() {
-                    self.begin_minion_deaths(
-                        &dead_minions,
-                        &[],
-                        Phase::Main,
-                        self.position.active_seat,
-                        outcomes,
-                    )?;
-                }
-            }
-            MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(amount) => {
-                let target_location = target_location.ok_or(GameError::IllegalAction)?;
-                let mut targets = Vec::new();
-                if target_location.region == Region::Surface {
-                    for target_seat in [Seat::North, Seat::South] {
-                        let avatar = &self.position.players[seat_index(target_seat)].avatar;
-                        if avatar.location == target_location.cell {
-                            targets.push((
-                                avatar.card.instance_id.clone(),
-                                UnitKind::Avatar,
-                                target_seat,
-                                None,
-                            ));
-                        }
-                    }
-                }
-                targets.extend(
-                    self.position
-                        .units
-                        .iter()
-                        .filter(|unit| {
-                            unit.region == target_location.region
-                                && Self::unit_occupies_cell(unit, target_location.cell)
-                        })
-                        .map(|unit| {
-                            Ok((
-                                unit.card.instance_id.clone(),
-                                UnitKind::Minion,
-                                unit.controller,
-                                Some(self.minion_damage_status(&unit.card.instance_id)?),
-                            ))
-                        })
-                        .collect::<Result<Vec<_>, GameError>>()?,
-                );
-                targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-                for (instance_id, _, _, _) in &targets {
-                    outcomes.push("magic-damage-allocated", || {
-                        json!({
-                            "amount": amount,
-                            "sourceInstanceId": card_instance_id,
-                            "targetInstanceId": instance_id,
-                        })
-                    });
-                }
-                let mut dead_minions = Vec::new();
-                let mut defeated_avatars = Vec::new();
-                for (instance_id, kind, target_seat, status) in targets {
-                    let damage = self.apply_simple_damage_with_status(
-                        kind,
-                        target_seat,
-                        &instance_id,
+            MagicEffect::DamageEachAbovegroundMinionOne
+            | MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(_) => {
+                let (targets, amount) = match effect {
+                    MagicEffect::DamageEachAbovegroundMinionOne => (
+                        self.query_units(UnitQuery {
+                            region: Region::Surface,
+                            cells: None,
+                            kind: Some(UnitKind::Minion),
+                            controller: None,
+                            exclude: None,
+                        }),
+                        1,
+                    ),
+                    MagicEffect::DamageEachUnitAtLocationWithinTwoSteps(amount) => (
+                        self.units_at_location(target_location.ok_or(GameError::IllegalAction)?),
                         u16::from(amount),
-                        UnitDamageSource {
-                            current_power: 0,
-                            lethal: false,
-                        },
-                        status,
-                        outcomes,
-                    )?;
-                    if damage.minion_died {
-                        dead_minions.push(instance_id);
-                    }
-                    if damage.avatar_defeated && !defeated_avatars.contains(&target_seat) {
-                        defeated_avatars.push(target_seat);
-                    }
-                }
-                if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+                    ),
+                    _ => unreachable!("matched area damage"),
+                };
+                let casualties = self.apply_area_damage(
+                    targets,
+                    amount,
+                    UnitDamageSource {
+                        current_power: 0,
+                        lethal: false,
+                    },
+                    ("magic-damage-allocated", card_instance_id),
+                    outcomes,
+                )?;
+                if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
                     self.begin_minion_deaths(
-                        &dead_minions,
-                        &defeated_avatars,
+                        &casualties.minions,
+                        &casualties.avatars,
                         Phase::Main,
                         self.position.active_seat,
                         outcomes,
@@ -23557,41 +23517,13 @@ impl Game {
         source: &UnitPosition,
         enemies_only: bool,
     ) -> Vec<(IdentityHash, UnitKind, Seat)> {
-        let seats: &[Seat] = if enemies_only {
-            &[other_seat(source.controller)]
-        } else {
-            &[Seat::North, Seat::South]
-        };
-        let mut targets = Vec::new();
-        for seat in seats.iter().copied() {
-            let avatar = &self.position.players[seat_index(seat)].avatar;
-            if source.region == Region::Surface && Self::unit_occupies_cell(source, avatar.location)
-            {
-                targets.push((avatar.card.instance_id.clone(), UnitKind::Avatar, seat));
-            }
-        }
-        targets.extend(
-            self.position
-                .units
-                .iter()
-                .filter(|unit| {
-                    seats.contains(&unit.controller)
-                        && unit.region == source.region
-                        && unit.card.instance_id != source.card.instance_id
-                        && Self::unit_occupied_cells(unit)
-                            .iter()
-                            .any(|cell| Self::unit_occupies_cell(source, *cell))
-                })
-                .map(|unit| {
-                    (
-                        unit.card.instance_id.clone(),
-                        UnitKind::Minion,
-                        unit.controller,
-                    )
-                }),
-        );
-        targets.sort_unstable_by(|left, right| left.0.cmp(&right.0));
-        targets
+        self.query_units(UnitQuery {
+            region: source.region,
+            cells: Some(Self::unit_occupied_cells(source)),
+            kind: None,
+            controller: enemies_only.then(|| other_seat(source.controller)),
+            exclude: Some(&source.card.instance_id),
+        })
     }
 
     /// Genesis damage that hits everything sharing the newcomer's own location.
@@ -23698,50 +23630,18 @@ impl Game {
         }
         let (_, damage_source) =
             self.combatant_damage_stats(UnitKind::Minion, source.controller, source_instance_id)?;
-        let targets = self
-            .units_sharing_footprint(&source, false)
-            .into_iter()
-            .map(|(instance_id, kind, seat)| {
-                let status = if kind == UnitKind::Minion {
-                    Some(self.minion_damage_status(&instance_id)?)
-                } else {
-                    None
-                };
-                Ok((instance_id, kind, seat, status))
-            })
-            .collect::<Result<Vec<_>, GameError>>()?;
-        for (target_instance_id, _, _, _) in &targets {
-            outcomes.push(allocation_event, || {
-                json!({
-                    "amount": amount,
-                    "sourceInstanceId": source_instance_id,
-                    "targetInstanceId": target_instance_id,
-                })
-            });
-        }
-        let mut dead_minions = Vec::new();
-        let mut defeated_avatars = Vec::new();
-        for (target_instance_id, kind, seat, status) in targets {
-            let result = self.apply_simple_damage_with_status(
-                kind,
-                seat,
-                &target_instance_id,
-                amount,
-                damage_source,
-                status,
-                outcomes,
-            )?;
-            if result.minion_died {
-                dead_minions.push(target_instance_id);
-            }
-            if result.avatar_defeated && !defeated_avatars.contains(&seat) {
-                defeated_avatars.push(seat);
-            }
-        }
-        if !dead_minions.is_empty() || !defeated_avatars.is_empty() {
+        let targets = self.units_sharing_footprint(&source, false);
+        let casualties = self.apply_area_damage(
+            targets,
+            amount,
+            damage_source,
+            (allocation_event, source_instance_id),
+            outcomes,
+        )?;
+        if !casualties.minions.is_empty() || !casualties.avatars.is_empty() {
             self.begin_minion_deaths_with_continuation(
-                &dead_minions,
-                &defeated_avatars,
+                &casualties.minions,
+                &casualties.avatars,
                 self.position.phase,
                 self.position.active_seat,
                 continuation,
@@ -31453,6 +31353,146 @@ mod tests {
             )
             .expect("split-power strike damage");
             assert_eq!(game.position.units[1].damage, dealt);
+        }
+    }
+
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one scenario proves cohort filters, canonical allocation, protection, and deferred deaths"
+    )]
+    fn area_cohort_counts_oversized_units_once_and_keeps_canonical_simultaneous_order() {
+        let (mut game, source, target) = split_power_damage_fixture(3, 5, 4);
+        let cells = ["C2", "C3", "D2", "D3"].map(|cell| Cell::parse(cell).expect("cell"));
+        game.position.units[0].occupied_cells = Some(cells);
+        game.position.units[0].damage = 4;
+        game.position.units[1].warded = true;
+        game.position.units[1].stealthed = true;
+        game.position.players[seat_index(Seat::North)]
+            .avatar
+            .location = Cell::parse("A1").expect("outside");
+        game.position.players[seat_index(Seat::South)]
+            .avatar
+            .location = cells[1];
+        let avatar = game.position.players[seat_index(Seat::South)]
+            .avatar
+            .card
+            .instance_id
+            .clone();
+        let mut buried = game.position.units[1].clone();
+        buried.card = game.position.players[seat_index(Seat::South)]
+            .spellbook
+            .remove(0);
+        buried.region = Region::Underground;
+        let buried_id = buried.card.instance_id.clone();
+        game.position.units.push(buried);
+        // Selection order must not depend on position storage or query-cell order.
+        game.position.units.reverse();
+        let query_cells = [cells[3], cells[1], cells[1], cells[0]];
+        let query = UnitQuery {
+            region: Region::Surface,
+            cells: Some(&query_cells),
+            kind: None,
+            controller: None,
+            exclude: None,
+        };
+        let targets = game.query_units(query);
+        let mut expected = vec![
+            (source.clone(), UnitKind::Minion, Seat::North),
+            (target.clone(), UnitKind::Minion, Seat::South),
+            (avatar.clone(), UnitKind::Avatar, Seat::South),
+        ];
+        expected.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(
+            targets, expected,
+            "Ward and Stealth do not hide area recipients"
+        );
+        assert_eq!(
+            game.query_units(UnitQuery {
+                region: Region::Underground,
+                cells: Some(&query_cells),
+                kind: Some(UnitKind::Minion),
+                controller: Some(Seat::South),
+                exclude: None,
+            }),
+            vec![(buried_id.clone(), UnitKind::Minion, Seat::South)]
+        );
+        let source_unit = game
+            .position
+            .units
+            .iter()
+            .find(|unit| unit.card.instance_id == source)
+            .expect("source");
+        assert_eq!(
+            game.units_sharing_footprint(source_unit, true),
+            expected
+                .iter()
+                .filter(|(_, _, seat)| *seat == Seat::South)
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            game.query_units(UnitQuery {
+                region: Region::Surface,
+                cells: None,
+                kind: Some(UnitKind::Minion),
+                controller: None,
+                exclude: Some(&source),
+            }),
+            vec![(target.clone(), UnitKind::Minion, Seat::South)]
+        );
+
+        let mut events = Vec::new();
+        let casualties = game
+            .apply_area_damage(
+                targets,
+                1,
+                UnitDamageSource {
+                    current_power: 0,
+                    lethal: false,
+                },
+                ("magic-damage-allocated", &source),
+                &mut OutcomeLog::Record(&mut events),
+            )
+            .expect("area damage");
+        assert_eq!(casualties.minions, std::slice::from_ref(&source));
+        assert!(casualties.avatars.is_empty());
+        for (event, (id, _, _)) in events[..expected.len()].iter().zip(&expected) {
+            assert_eq!(
+                event.0, "magic-damage-allocated",
+                "all allocations precede damage"
+            );
+            assert_eq!(event.1["targetInstanceId"], json!(id));
+        }
+        let dealt: Vec<_> = events
+            .iter()
+            .filter(|(kind, _)| kind == "damage-dealt")
+            .map(|(_, payload)| payload["instanceId"].clone())
+            .collect();
+        assert_eq!(
+            dealt,
+            expected
+                .iter()
+                .map(|(id, _, _)| json!(id))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            game.position.units.len(),
+            3,
+            "caller settles deaths after the whole cohort"
+        );
+        for unit in &game.position.units {
+            assert_eq!(
+                unit.damage,
+                if unit.card.instance_id == source {
+                    5
+                } else {
+                    0
+                }
+            );
+            if unit.card.instance_id == target {
+                assert!(!unit.warded, "Ward prevented the area's damage");
+            }
         }
     }
 
