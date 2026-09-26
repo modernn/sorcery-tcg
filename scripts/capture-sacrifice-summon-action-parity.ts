@@ -185,7 +185,7 @@ export async function captureSacrificeSummonActionParityFixture(): Promise<JsonV
         throw new Error('Deathrite checkpoint did not restore byte-identically');
       }
       const orderActions = (await deathriteHandle.legalActions('north')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       if (orderActions.length !== 2) {
         throw new Error(`expected two Deathrite order actions, received ${orderActions.length}`);
       }

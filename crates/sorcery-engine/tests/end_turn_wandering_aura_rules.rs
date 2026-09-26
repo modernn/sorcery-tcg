@@ -1,5 +1,5 @@
 //! Direct proofs for end-of-each-turn wandering Auras (RULE-CATALOG-0262–0263)
-//! and resolve-end-turn-aura-move withheld during deathrite-order
+//! and resolve-end-turn-aura-move withheld during trigger-order
 //! (RULE-CATALOG-1156).
 //!
 //! Official cards such as Wildfire conjure atop a single nearby site. At the
@@ -344,7 +344,7 @@ fn rule_catalog_1156_resolve_end_turn_aura_move_withheld_during_pending_deathrit
             .any(|event| event.event_type == "aura-end-turn-triggered")
     );
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -359,14 +359,14 @@ fn rule_catalog_1156_resolve_end_turn_aura_move_withheld_during_pending_deathrit
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "resolve-end-turn-aura-move"),
-        "deathrite-order must issue no resolve-end-turn-aura-move"
+        "trigger-order must issue no resolve-end-turn-aura-move"
     );
 
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -376,8 +376,7 @@ fn rule_catalog_1156_resolve_end_turn_aura_move_withheld_during_pending_deathrit
         .collect();
     assert_eq!(order_sources, deathrite_ids);
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(&session);

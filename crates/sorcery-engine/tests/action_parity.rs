@@ -15,7 +15,7 @@ const CAST_MAGIC_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/cast-magic-action-v1.json");
 const COMBAT_RESPONSE_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/combat-response-action-v1.json");
-const DEATHRITE_ORDER_FIXTURE: &str =
+const TRIGGER_ORDER_FIXTURE: &str =
     include_str!("../../../tests/engine/fixtures/deathrite-order-action-v1.json");
 const DUEL_FIXTURE: &str = include_str!("../../../tests/engine/fixtures/duel-action-v1.json");
 const SHOOT_PROJECTILE_FIXTURE: &str =
@@ -79,7 +79,7 @@ fn descriptor_kind(descriptor: &ActionDescriptor) -> &'static str {
         ActionDescriptor::Defend { .. } => "defend",
         ActionDescriptor::CloseDefend { .. } => "close-defend",
         ActionDescriptor::Intercept { .. } => "intercept",
-        ActionDescriptor::OrderDeathrites { .. } => "order-deathrites",
+        ActionDescriptor::OrderTriggers { .. } => "order-triggers",
         ActionDescriptor::ShootProjectile { .. } => "shoot-projectile",
         ActionDescriptor::ShootDamageProjectile { .. } => "shoot-damage-projectile",
         ActionDescriptor::ShootDragProjectile { .. } => "shoot-drag-projectile",
@@ -1839,11 +1839,11 @@ fn sparkmage_descriptors_order_and_action_ids_should_match_typescript() {
 }
 
 #[test]
-fn deathrite_order_descriptors_and_action_ids_should_match_typescript() {
+fn trigger_order_descriptors_and_action_ids_should_match_typescript() {
     let fixture: Value =
-        serde_json::from_str(DEATHRITE_ORDER_FIXTURE).expect("valid Deathrite fixture");
+        serde_json::from_str(TRIGGER_ORDER_FIXTURE).expect("valid trigger-order fixture");
     assert_eq!(fixture["schemaVersion"], 1);
-    assert_eq!(fixture["source"], "typescript-legality-engine");
+    assert_eq!(fixture["source"], "synthetic-action-contract");
     let contract = fixture["contract"].as_str().expect("action contract");
     let seat: Seat = serde_json::from_value(fixture["seat"].clone()).expect("fixture seat");
     let state_version = fixture["stateVersion"]
@@ -1856,7 +1856,7 @@ fn deathrite_order_descriptors_and_action_ids_should_match_typescript() {
         .map(|action| {
             let descriptor: ActionDescriptor =
                 serde_json::from_value(action["descriptor"].clone()).expect("valid descriptor");
-            assert_eq!(descriptor_kind(&descriptor), "order-deathrites");
+            assert_eq!(descriptor_kind(&descriptor), "order-triggers");
             assert_eq!(descriptor.state_independent_label(), None);
             let serialized = serde_json::to_value(&descriptor).expect("serialized descriptor");
             let expected_id =
@@ -1873,10 +1873,10 @@ fn deathrite_order_descriptors_and_action_ids_should_match_typescript() {
     assert!(matches!(
         &descriptors[..],
         [
-            ActionDescriptor::OrderDeathrites {
+            ActionDescriptor::OrderTriggers {
                 source_instance_id: first,
             },
-            ActionDescriptor::OrderDeathrites {
+            ActionDescriptor::OrderTriggers {
                 source_instance_id: second,
             },
         ] if first < second
@@ -1894,9 +1894,9 @@ fn deathrite_order_descriptors_and_action_ids_should_match_typescript() {
             .clone()
     );
     for invalid in [
-        json!({ "kind": "order-deathrites", "sourceInstanceId": null }),
+        json!({ "kind": "order-triggers", "sourceInstanceId": null }),
         json!({
-            "kind": "order-deathrites",
+            "kind": "order-triggers",
             "sourceInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
             "unknown": true,
         }),

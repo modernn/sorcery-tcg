@@ -1,9 +1,8 @@
 //! Ordered work that resumes after an interrupting effect finishes.
 
 use super::{
-    CardFacts, CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError,
-    GenesisDamageChoice, IdentityHash, OutcomeLog, ResolutionContinuation, Seat, UnitPosition,
-    UnitTarget, seat_index,
+    CardId, CardInstance, Cell, DeferredMagicResolved, Game, GameError, GenesisDamageChoice,
+    IdentityHash, OutcomeLog, ResolutionContinuation, Seat, UnitPosition, UnitTarget, seat_index,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -47,6 +46,10 @@ impl ResolutionContinuation {
             Self::Blink(_) | Self::LeapAttack(_) | Self::MagicResolved { .. } => true,
             Self::Effect(frame) => frame.magic.is_some(),
             Self::Sequence(steps) => steps.iter().any(Self::owns_magic_completion),
+            Self::TriggerBatch(pending) => pending
+                .continuation
+                .as_ref()
+                .is_some_and(Self::owns_magic_completion),
             _ => false,
         }
     }
@@ -59,43 +62,30 @@ impl Game {
         entries: Vec<TokenEntryContinuation>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        let mut genesis = None;
-        for entry in &entries {
-            let CardFacts::Minion(facts) =
-                &self.rules.cards[usize::from(entry.token.card.card_id.0)].facts
-            else {
-                return Err(GameError::IllegalAction);
-            };
-            if super::ability::genesis_clause_count(facts) == 0 {
-                continue;
-            }
-            if genesis.is_some() {
-                return Err(GameError::UnsupportedMechanic(
-                    "simultaneous token Genesis requires player-selected trigger ordering"
-                        .to_owned(),
-                ));
-            }
-            genesis = Some((
-                entry.seat,
-                entry.token.card.instance_id.clone(),
-                entry.token.card.card_id,
-                entry.genesis_damage_choice,
-                entry.genesis_damage_target.clone(),
-            ));
-        }
+        let sources = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.seat,
+                    entry.token.card.instance_id.clone(),
+                    entry.token.card.card_id,
+                    entry.genesis_damage_choice,
+                    entry.genesis_damage_target.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         for entry in entries {
             self.enter_token_unit(entry, outcomes)?;
         }
-        if let Some((seat, instance_id, card_id, choice, target)) = genesis {
-            self.apply_minion_genesis(
-                seat,
-                &instance_id,
-                card_id,
-                choice,
-                target.as_ref(),
-                outcomes,
-            )?;
+        let mut triggers = Vec::new();
+        for (seat, instance_id, card_id, choice, target) in sources {
+            if let Some(trigger) =
+                self.genesis_trigger(seat, &instance_id, card_id, choice, target)?
+            {
+                triggers.push(trigger);
+            }
         }
+        self.begin_genesis_triggers(triggers, outcomes)?;
         Ok(())
     }
 
@@ -127,6 +117,11 @@ impl Game {
         if self.position.terminal.is_some() {
             self.emit_interrupted_magic_resolved(Some(&continuation), outcomes);
         } else if let Some(pending) = &mut self.position.pending_deathrites {
+            pending.continuation = Some(match pending.continuation.take() {
+                Some(first) => first.followed_by(continuation),
+                None => continuation,
+            });
+        } else if let Some(pending) = &mut self.position.pending_trigger_order {
             pending.continuation = Some(match pending.continuation.take() {
                 Some(first) => first.followed_by(continuation),
                 None => continuation,

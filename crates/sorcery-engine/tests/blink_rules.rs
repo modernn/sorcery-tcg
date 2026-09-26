@@ -667,7 +667,7 @@ fn ordered_blink_scenario() -> OrderedBlink {
     }
 }
 
-/// Area damage kills two Deathrite allies before Blink is cast, pausing in deathrite-order.
+/// Area damage kills two Deathrite allies before Blink is cast, pausing in trigger-order.
 fn external_deathrite_blink_scenario() -> OrderedBlink {
     let mut session = Session::new(&ordered_manifest()).expect("valid external Blink scenario");
     keep(&mut session);
@@ -718,7 +718,7 @@ fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
     let spell = checkpoint.spell.clone();
     let session = &mut checkpoint.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "north");
     assert!(
         deathrite_ids
@@ -742,7 +742,7 @@ fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -756,7 +756,7 @@ fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, expected);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == expected[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == expected[0]
     });
 
     let resumed = state(session);
@@ -774,7 +774,7 @@ fn rule_catalog_1004_blink_cast_withheld_during_pending_deathrite_order() {
                 action.descriptor["kind"] == "cast-magic"
                     && action.descriptor["cardInstanceId"] == spell.as_str()
             }),
-        "Blink must be offered again once deathrite-order clears"
+        "Blink must be offered again once trigger-order clears"
     );
 
     let receipt = cast_blink(session, &spell, &sparkmage, "E4", "atlas");
@@ -816,7 +816,7 @@ fn rule_catalog_1117_blink_draw_deferred_until_deathrites_ordered() {
         "Blink may not resolve while the deaths it caused still owe an order"
     );
     let pending = state(&checkpoint.session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert_eq!(pending["decisionSeat"], "north");
     assert_eq!(
         pending["pendingDeathrites"]["continuation"],
@@ -837,7 +837,7 @@ fn rule_catalog_1117_blink_draw_deferred_until_deathrites_ordered() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect();
     assert_eq!(orders.len(), 2, "either corpse may strike first");
 
@@ -854,7 +854,7 @@ fn rule_catalog_1117_blink_draw_deferred_until_deathrites_ordered() {
             panic!("engine-issued Deathrite order must be accepted");
         };
         let types = event_types(&ordered);
-        assert_eq!(types.first(), Some(&"deathrite-order-committed"));
+        assert_eq!(types.first(), Some(&"trigger-order-committed"));
         assert_eq!(
             types.last(),
             Some(&"magic-resolved"),

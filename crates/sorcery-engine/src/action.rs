@@ -666,9 +666,9 @@ pub enum ActionDescriptor {
         /// Authoritative target identity.
         target_instance_id: IdentityHash,
     },
-    /// Commit one source first within the acting player's simultaneous Deathrites.
-    OrderDeathrites {
-        /// Authoritative dead minion source identity.
+    /// Commit one source first within the acting player's simultaneous triggers.
+    OrderTriggers {
+        /// Authoritative trigger source identity.
         source_instance_id: IdentityHash,
     },
     /// Commit one Lucky Charm random branch before resolving the deferred action.
@@ -1103,7 +1103,7 @@ impl ActionDescriptor {
             | Self::ActivateSparkmage { .. }
             | Self::PlaySite { .. }
             | Self::ContinueBasicMovement { .. }
-            | Self::OrderDeathrites { .. }
+            | Self::OrderTriggers { .. }
             | Self::ResolveGenesisSpell { .. }
             | Self::ResolveGenesisSpellOrder { .. }
             | Self::ResolveGenesisToken { .. }
@@ -1768,10 +1768,10 @@ pub(crate) fn compare_canonical(left: &ActionDescriptor, right: &ActionDescripto
                         },
                     )
                     | (
-                        ActionDescriptor::OrderDeathrites {
+                        ActionDescriptor::OrderTriggers {
                             source_instance_id: left,
                         },
-                        ActionDescriptor::OrderDeathrites {
+                        ActionDescriptor::OrderTriggers {
                             source_instance_id: right,
                         },
                     )
@@ -2353,7 +2353,7 @@ const fn action_kind(action: &ActionDescriptor) -> u8 {
         ActionDescriptor::ExtendChainMagic { .. } => 24,
         ActionDescriptor::FlySite { .. } => 25,
         ActionDescriptor::Intercept { .. } => 26,
-        ActionDescriptor::OrderDeathrites { .. } => 27,
+        ActionDescriptor::OrderTriggers { .. } => 27,
         ActionDescriptor::PickUpArtifacts { .. } => 28,
         ActionDescriptor::ReplaceRubbleWithTopAtlasSite { .. } => 29,
         ActionDescriptor::ResolveChainMagic => 30,

@@ -560,7 +560,7 @@ fn rule_catalog_0749_first_strike_deathrites_pause_order_and_resume_return_once(
     }
 
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         paused["pendingDeathrites"]["continuation"]["kind"],
@@ -604,7 +604,7 @@ fn rule_catalog_0749_first_strike_deathrites_pause_order_and_resume_return_once(
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(actions.len(), 2);
     let first_source = actions[0].descriptor["sourceInstanceId"]
@@ -613,7 +613,7 @@ fn rule_catalog_0749_first_strike_deathrites_pause_order_and_resume_return_once(
         .to_owned();
     let before_version = paused["stateVersion"].as_u64().expect("paused version");
     let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_source
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == first_source
     });
     assert_eq!(receipt.state_version, before_version);
     assert_eq!(receipt.next_state_version, before_version + 1);
@@ -741,7 +741,7 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
     }
 
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         paused["pendingDeathrites"]["continuation"]["kind"],
@@ -779,7 +779,7 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(actions.len(), 2);
     let first_source = actions[0].descriptor["sourceInstanceId"]
@@ -788,7 +788,7 @@ fn rule_catalog_0978_defending_first_strike_deathrite_pauses_order_and_resumes_o
         .to_owned();
     let before_version = paused["stateVersion"].as_u64().expect("paused version");
     let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_source
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == first_source
     });
     assert_eq!(receipt.state_version, before_version);
     assert_eq!(receipt.next_state_version, before_version + 1);
@@ -914,7 +914,7 @@ fn rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_r
     }
 
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         paused["pendingDeathrites"]["continuation"]["kind"],
@@ -952,7 +952,7 @@ fn rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_r
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(actions.len(), 2);
     let first_source = actions[0].descriptor["sourceInstanceId"]
@@ -961,7 +961,7 @@ fn rule_catalog_0991_printed_first_strike_defending_deathrite_pauses_order_and_r
         .to_owned();
     let before_version = paused["stateVersion"].as_u64().expect("paused version");
     let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_source
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == first_source
     });
     assert_eq!(receipt.state_version, before_version);
     assert_eq!(receipt.next_state_version, before_version + 1);
@@ -1086,7 +1086,7 @@ fn rule_catalog_1000_printed_first_strike_attacking_deathrite_pauses_order_and_r
     }
 
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         paused["pendingDeathrites"]["continuation"]["kind"],
@@ -1130,7 +1130,7 @@ fn rule_catalog_1000_printed_first_strike_attacking_deathrite_pauses_order_and_r
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(actions.len(), 2);
     let first_source = actions[0].descriptor["sourceInstanceId"]
@@ -1139,7 +1139,7 @@ fn rule_catalog_1000_printed_first_strike_attacking_deathrite_pauses_order_and_r
         .to_owned();
     let before_version = paused["stateVersion"].as_u64().expect("paused version");
     let (_, receipt) = accept_where(&mut setup.session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_source
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == first_source
     });
     assert_eq!(receipt.state_version, before_version);
     assert_eq!(receipt.next_state_version, before_version + 1);

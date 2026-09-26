@@ -901,7 +901,7 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
             .iter()
             .all(|event| event.event_type != "site-drawn" && event.event_type != "minion-died")
     );
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert_eq!(state(&session)["decisionSeat"], "north");
     let ap_state = state(&session);
     let ap_pending = &ap_state["pendingDeathrites"];
@@ -931,7 +931,7 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
         .legal_actions()
         .expect("AP ordering actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect();
     for action in &ap_actions {
         let source = ap_pending["batches"][0]["activeRemaining"]
@@ -943,7 +943,7 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
         assert_eq!(
             action.label,
             format!(
-                "Order {} first within your Deathrites",
+                "Order {} first within your triggers",
                 source["unit"]["cardId"].as_str().expect("source card ID")
             )
         );
@@ -962,9 +962,9 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
             .clone(),
     ];
     let (_, committed) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == ap_first_id
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == ap_first_id
     });
-    assert_eq!(event_types(&committed), ["deathrite-order-committed"]);
+    assert_eq!(event_types(&committed), ["trigger-order-committed"]);
     assert_eq!(
         committed.events[0].payload,
         json!({ "seat": "north", "sourceInstanceId": ap_first_id })
@@ -982,7 +982,7 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
         .legal_actions()
         .expect("NAP ordering actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect();
     let nap_first_id = nap_actions[0].descriptor["sourceInstanceId"]
         .as_str()
@@ -997,7 +997,7 @@ fn rule_catalog_0876_ap_commits_deathrite_order_before_nap_resolves_first() {
             .clone(),
     ];
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == nap_first_id
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == nap_first_id
     });
     let source_order: Vec<_> = resolved
         .events
@@ -1117,7 +1117,7 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
     assert!(trigger.events.iter().all(|event| {
         event.event_type != "deathrite-damage-allocated" && event.event_type != "minion-died"
     }));
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert_eq!(state(&session)["decisionSeat"], "south");
     assert_eq!(
         state(&session)["pendingDeathrites"]["batches"][0]["stage"],
@@ -1132,7 +1132,7 @@ fn rule_catalog_0877_deathrite_area_damage_chains_in_ordered_simultaneous_batche
         .expect("first Deathrite source")
         .to_owned();
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == first_id
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == first_id
     });
     let allocations: Vec<_> = resolved
         .events

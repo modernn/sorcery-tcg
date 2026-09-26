@@ -1,8 +1,8 @@
 //! Direct proofs that Lucky Charm extra-random for discard-here uses a 2×2
 //! source's whole footprint (RULE-CATALOG-0369–0370), that
-//! activate-discard-random-damage stays withheld during deathrite-order
+//! activate-discard-random-damage stays withheld during trigger-order
 //! (RULE-CATALOG-1147), and that resolve-random-outcome stays withheld while
-//! deathrite-order interrupts a pending Lucky Charm random-choice
+//! trigger-order interrupts a pending Lucky Charm random-choice
 //! (RULE-CATALOG-1167).
 //!
 //! Discard-funded random-here already hits every unit sharing any occupied
@@ -659,7 +659,7 @@ fn try_pending_deathrite_with_activate_discard(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -690,7 +690,7 @@ fn rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deat
     let giant_id = setup.giant_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     let giant = realm_unit(&paused, &giant_id).expect("2x2 remains in play");
     assert_eq!(giant["location"], "A3");
@@ -716,7 +716,7 @@ fn rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deat
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -727,8 +727,7 @@ fn rule_catalog_1147_activate_discard_random_damage_withheld_during_pending_deat
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -1072,7 +1071,7 @@ fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
         .expect("resolve-random-outcome before Deathrites");
 
     let paused = branched.authoritative_state();
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "random-choice");
     assert!(deathrite_ids.iter().all(|instance_id| {
@@ -1093,14 +1092,14 @@ fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
                     ActionDescriptor::ResolveRandomOutcome { .. }
                 )
             }),
-        "deathrite-order must issue no resolve-random-outcome"
+        "trigger-order must issue no resolve-random-outcome"
     );
 
     let order_sources: Vec<_> = branched
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
+        .filter(|action| issued_descriptor(action)["kind"] == "order-triggers")
         .map(|action| {
             issued_descriptor(&action)["sourceInstanceId"]
                 .as_str()
@@ -1115,7 +1114,7 @@ fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
         .into_iter()
         .find(|action| {
             let descriptor = issued_descriptor(action);
-            descriptor["kind"] == "order-deathrites"
+            descriptor["kind"] == "order-triggers"
                 && descriptor["sourceInstanceId"] == deathrite_ids[0]
         })
         .expect("order first Deathrite");
@@ -1134,6 +1133,6 @@ fn rule_catalog_1167_random_choice_withheld_during_pending_deathrite_order() {
                 action.descriptor(),
                 ActionDescriptor::ResolveRandomOutcome { .. }
             )),
-        "resolve-random-outcome must return once deathrite-order clears"
+        "resolve-random-outcome must return once trigger-order clears"
     );
 }

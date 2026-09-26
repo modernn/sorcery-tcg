@@ -2130,8 +2130,8 @@ fn rule_catalog_0384_magic_token_summon_should_issue_and_apply_adjacent_genesis_
     accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "play-site" && descriptor["cell"] == "C4"
     });
-    // Only C3 borders an enemy site. Multiple simultaneous token Genesis needs its own
-    // player-selected ordering; resolution_tests proves that missing mechanism aborts.
+    // Only C3 borders an enemy site. Simultaneous targeted Genesis still needs
+    // post-entry choices; compiled draw/area ordering is covered in resolution_tests.
     for (draw_zone, site_cell) in [
         (Some("atlas"), Some("C1")),
         (Some("atlas"), Some("C3")),

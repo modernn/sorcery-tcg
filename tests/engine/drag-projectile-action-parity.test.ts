@@ -131,7 +131,7 @@ test('Pudge drag projectile fixture regenerates byte-identically from Rust legal
   assert.equal(fixture.fightTransition.replayVerified, true);
 
   assert.equal(fixture.movementDeathrite.pending.continuation.kind, 'drag-projectile');
-  assert.equal(fixture.movementDeathrite.pending.phase, 'deathrite-order');
+  assert.equal(fixture.movementDeathrite.pending.phase, 'trigger-order');
   assert.equal(fixture.movementDeathrite.pending.checkpointRoundTrip, true);
   assert.equal(fixture.movementDeathrite.pending.targetLocationAfterFirstDrag, 'C3');
   assert.equal(fixture.movementDeathrite.resolved.targetLocationAfterResume, 'C4');

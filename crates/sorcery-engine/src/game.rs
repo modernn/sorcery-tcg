@@ -31,9 +31,15 @@ mod resolution;
 #[cfg(test)]
 mod resolution_tests;
 mod selection;
+mod trigger_order;
+#[cfg(test)]
+mod trigger_tests;
+mod triggers;
 use ability::{CompiledAbilities, SelectionSpec, SpatialRelation};
 use effect::{AbilityEntry, EffectFrame, RealmReference};
 use resolution::{SiteGenesisTail, TokenEntryContinuation};
+use trigger_order::{TriggerBatch, TriggerOrderStage, TriggerSource};
+use triggers::{GenesisTrigger, PendingTriggerOrder};
 
 /// Frozen public engine version bound into every admitted manifest.
 pub const ENGINE_VERSION: &str = "sorcery-core-v1";
@@ -71,6 +77,7 @@ pub struct Position {
     pending_chain_magic: PendingField<PendingChainMagic>,
     pending_combat: Option<PendingCombat>,
     pending_deathrites: Option<PendingDeathrites>,
+    pending_trigger_order: Option<Box<PendingTriggerOrder>>,
     pending_genesis_spell: PendingField<PendingGenesisSpell>,
     pending_genesis_spell_order: PendingField<PendingGenesisSpellOrder>,
     pending_genesis_token: PendingField<PendingGenesisToken>,
@@ -757,21 +764,15 @@ struct PendingDeathriteSource {
     unit: UnitPosition,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DeathriteStage {
-    ActiveOrder,
-    NonActiveOrder,
-    Resolve,
-}
+type PendingDeathriteBatch = TriggerBatch<PendingDeathriteSource>;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PendingDeathriteBatch {
-    active_order: Vec<PendingDeathriteSource>,
-    active_remaining: Vec<PendingDeathriteSource>,
-    non_active_order: Vec<PendingDeathriteSource>,
-    non_active_remaining: Vec<PendingDeathriteSource>,
-    resolving: Vec<PendingDeathriteSource>,
-    stage: DeathriteStage,
+impl TriggerSource for PendingDeathriteSource {
+    fn controller(&self) -> Seat {
+        self.controller
+    }
+    fn instance_id(&self) -> &IdentityHash {
+        &self.instance_id
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -883,6 +884,8 @@ enum ResolutionContinuation {
     LeapAttack(LeapAttackContinuation),
     PaidSummon(PaidSummonContinuation),
     Sequence(Vec<Self>),
+    TriggerBatch(Box<PendingTriggerOrder>),
+    Genesis(GenesisTrigger),
     SiteGenesis(SiteGenesisContinuation),
     SiteGenesisTail(SiteGenesisTail),
     TokenEntries(Vec<TokenEntryContinuation>),
@@ -1035,7 +1038,7 @@ enum Phase {
     Attack,
     CemeterySummon,
     ChainMagic,
-    DeathriteOrder,
+    TriggerOrder,
     Defend,
     DiscardCard,
     Draw,
@@ -1082,7 +1085,7 @@ impl Phase {
             Self::Attack => "attack",
             Self::CemeterySummon => "cemetery-summon",
             Self::ChainMagic => "chain-magic",
-            Self::DeathriteOrder => "deathrite-order",
+            Self::TriggerOrder => "trigger-order",
             Self::Defend => "defend",
             Self::DiscardCard => "discard-card",
             Self::Draw => "draw",
@@ -1841,6 +1844,7 @@ impl Game {
                 pending_chain_magic: PendingField::Absent,
                 pending_combat: None,
                 pending_deathrites: None,
+                pending_trigger_order: None,
                 pending_genesis_spell: PendingField::Absent,
                 pending_genesis_spell_order: PendingField::Absent,
                 pending_genesis_token: PendingField::Absent,
@@ -2368,7 +2372,7 @@ impl Game {
             Phase::Attack => self.append_attack_actions(&mut actions)?,
             Phase::CemeterySummon => self.append_cemetery_summon_actions(&mut actions)?,
             Phase::ChainMagic => self.append_chain_magic_actions(&mut actions)?,
-            Phase::DeathriteOrder => self.append_deathrite_order_actions(&mut actions)?,
+            Phase::TriggerOrder => self.append_trigger_order_actions(&mut actions)?,
             Phase::Defend => self.append_defend_actions(&mut actions)?,
             Phase::DiscardCard => self.append_discard_card_actions(&mut actions)?,
             Phase::Draw => self.append_draw_actions(&mut actions)?,
@@ -2671,25 +2675,6 @@ impl Game {
         Ok(())
     }
 
-    fn append_deathrite_order_actions(
-        &self,
-        actions: &mut Vec<IssuedAction>,
-    ) -> Result<(), GameError> {
-        let sources = self.pending_deathrite_order()?;
-        for source in sources {
-            let descriptor = ActionDescriptor::OrderDeathrites {
-                source_instance_id: source.instance_id.clone(),
-            };
-            let card_id = &self.rules.cards[usize::from(source.unit.card.card_id.0)].id;
-            self.push_action(
-                actions,
-                descriptor,
-                format!("Order {card_id} first within your Deathrites"),
-            );
-        }
-        Ok(())
-    }
-
     fn pending_deathrite_order(&self) -> Result<&[PendingDeathriteSource], GameError> {
         let batch = self
             .position
@@ -2697,11 +2682,7 @@ impl Game {
             .as_ref()
             .and_then(|pending| pending.batches.first())
             .ok_or(GameError::IllegalAction)?;
-        let sources = match batch.stage {
-            DeathriteStage::ActiveOrder => &batch.active_remaining,
-            DeathriteStage::NonActiveOrder => &batch.non_active_remaining,
-            DeathriteStage::Resolve => return Err(GameError::IllegalAction),
-        };
+        let sources = batch.pending_order().ok_or(GameError::IllegalAction)?;
         if sources.len() < 2
             || sources
                 .first()
@@ -10732,8 +10713,8 @@ impl Game {
                 unit_instance_id,
                 outcomes,
             ),
-            ActionDescriptor::OrderDeathrites { source_instance_id } => self
-                .apply_deathrite_order_action(
+            ActionDescriptor::OrderTriggers { source_instance_id } => self
+                .apply_trigger_order_action(
                     action.seat,
                     source_instance_id,
                     outcomes,
@@ -10778,8 +10759,14 @@ impl Game {
             self.queue_ranged_step(action.seat, shooter_instance_id)?;
         }
         outcomes.move_tail_before_completion(settlement_start);
+        if self.position.terminal.is_some()
+            && let Some(pending) = self.position.pending_trigger_order.take()
+        {
+            self.emit_interrupted_magic_resolved(pending.continuation.as_ref(), outcomes);
+        }
         // Magic that owns its own resolution event resumes through its continuation instead.
-        let continuing_cast = self.position.pending_cemetery_summon.is_some()
+        let continuing_cast = self.position.pending_trigger_order.is_some()
+            || self.position.pending_cemetery_summon.is_some()
             || self.position.pending_discard_cards.is_some()
             || self.position.pending_filtered_site_play.is_some()
             || matches!(
@@ -10804,7 +10791,9 @@ impl Game {
             pending.deferred_magic_resolved = Some(completion);
             outcomes.remove_first("magic-resolved");
         }
-        if self.position.pending_deathrites.is_none() {
+        if self.position.pending_deathrites.is_none()
+            && self.position.pending_trigger_order.is_none()
+        {
             self.reconcile_projectile_continuations()?;
         }
         Ok(())
@@ -13446,50 +13435,7 @@ impl Game {
         &self,
         sources: Vec<PendingDeathriteSource>,
     ) -> Option<PendingDeathriteBatch> {
-        if sources.is_empty() {
-            return None;
-        }
-        let (active, non_active): (Vec<_>, Vec<_>) = sources
-            .into_iter()
-            .partition(|source| source.controller == self.position.active_seat);
-        let active_needs_order = active.len() > 1;
-        let non_active_needs_order = non_active.len() > 1;
-        let stage = if active_needs_order {
-            DeathriteStage::ActiveOrder
-        } else if non_active_needs_order {
-            DeathriteStage::NonActiveOrder
-        } else {
-            DeathriteStage::Resolve
-        };
-        let resolving = if stage == DeathriteStage::Resolve {
-            non_active.iter().chain(&active).cloned().collect()
-        } else {
-            Vec::new()
-        };
-        Some(PendingDeathriteBatch {
-            active_order: if active_needs_order {
-                Vec::new()
-            } else {
-                active.clone()
-            },
-            active_remaining: if active_needs_order {
-                active
-            } else {
-                Vec::new()
-            },
-            non_active_order: if non_active_needs_order {
-                Vec::new()
-            } else {
-                non_active.clone()
-            },
-            non_active_remaining: if non_active_needs_order {
-                non_active
-            } else {
-                Vec::new()
-            },
-            resolving,
-            stage,
-        })
+        TriggerBatch::new(sources, self.position.active_seat)
     }
 
     fn collect_minion_deaths(
@@ -13864,7 +13810,7 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
-        if self.position.phase != Phase::DeathriteOrder
+        if self.position.phase != Phase::TriggerOrder
             || seat != self.position.decision_seat
             || !self
                 .pending_deathrite_order()?
@@ -13878,57 +13824,17 @@ impl Game {
             .pending_deathrites
             .take()
             .ok_or(GameError::IllegalAction)?;
-        Self::commit_deathrite_order(&mut pending, source_instance_id)?;
+        pending
+            .batches
+            .first_mut()
+            .ok_or(GameError::IllegalAction)?
+            .commit(source_instance_id)?;
         outcomes.push(
-            "deathrite-order-committed",
+            "trigger-order-committed",
             || json!({ "seat": seat, "sourceInstanceId": source_instance_id }),
         );
         self.drive_deathrites(pending, outcomes, random_draws)?;
         self.position.state_version += 1;
-        Ok(())
-    }
-
-    fn commit_deathrite_order(
-        pending: &mut PendingDeathrites,
-        source_instance_id: &IdentityHash,
-    ) -> Result<(), GameError> {
-        let batch = pending
-            .batches
-            .first_mut()
-            .ok_or(GameError::IllegalAction)?;
-        let active_stage = batch.stage == DeathriteStage::ActiveOrder;
-        let (committed, remaining) = if active_stage {
-            (&mut batch.active_order, &mut batch.active_remaining)
-        } else if batch.stage == DeathriteStage::NonActiveOrder {
-            (&mut batch.non_active_order, &mut batch.non_active_remaining)
-        } else {
-            return Err(GameError::IllegalAction);
-        };
-        if remaining.len() < 2 {
-            return Err(GameError::IllegalAction);
-        }
-        let index = remaining
-            .iter()
-            .position(|source| source.instance_id == *source_instance_id)
-            .ok_or(GameError::IllegalAction)?;
-        committed.push(remaining.remove(index));
-        if remaining.len() == 1 {
-            committed.push(remaining.remove(0));
-        }
-        if remaining.len() > 1 {
-            return Ok(());
-        }
-        if active_stage && batch.non_active_remaining.len() > 1 {
-            batch.stage = DeathriteStage::NonActiveOrder;
-            return Ok(());
-        }
-        batch.resolving = batch
-            .non_active_order
-            .iter()
-            .chain(&batch.active_order)
-            .cloned()
-            .collect();
-        batch.stage = DeathriteStage::Resolve;
         Ok(())
     }
 
@@ -13942,18 +13848,18 @@ impl Game {
             let Some(batch) = pending.batches.first_mut() else {
                 return self.finish_deathrites(pending, outcomes, random_draws);
             };
-            if batch.stage != DeathriteStage::Resolve {
+            if batch.stage != TriggerOrderStage::Resolve {
                 let sources = match batch.stage {
-                    DeathriteStage::ActiveOrder => &batch.active_remaining,
-                    DeathriteStage::NonActiveOrder => &batch.non_active_remaining,
-                    DeathriteStage::Resolve => unreachable!(),
+                    TriggerOrderStage::ActiveOrder => &batch.active_remaining,
+                    TriggerOrderStage::NonActiveOrder => &batch.non_active_remaining,
+                    TriggerOrderStage::Resolve => unreachable!(),
                 };
                 let seat = sources
                     .first()
                     .map(|source| source.controller)
                     .ok_or(GameError::IllegalAction)?;
                 self.position.pending_deathrites = Some(pending);
-                self.position.phase = Phase::DeathriteOrder;
+                self.position.phase = Phase::TriggerOrder;
                 self.position.decision_seat = seat;
                 return Ok(());
             }
@@ -14204,6 +14110,18 @@ impl Game {
             self.position.decision_seat = return_decision_seat;
         };
         match continuation {
+            ResolutionContinuation::TriggerBatch(mut pending) => {
+                restore();
+                // A group queued behind an interruption returns to the resumed phase,
+                // not to the ordering prompt that was open when it was enqueued.
+                pending.return_phase = return_phase;
+                pending.return_decision_seat = return_decision_seat;
+                self.drive_trigger_batch(pending, outcomes)
+            }
+            ResolutionContinuation::Genesis(trigger) => {
+                restore();
+                self.resolve_genesis_trigger(trigger, outcomes)
+            }
             ResolutionContinuation::Sequence(steps) => {
                 restore();
                 for step in steps {
@@ -14286,7 +14204,7 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
         random_draws: Option<&mut Vec<EngineRandomDraw>>,
     ) -> Result<(), GameError> {
-        let ordered_resolution = self.position.phase == Phase::DeathriteOrder;
+        let ordered_resolution = self.position.phase == Phase::TriggerOrder;
         self.finish_corpses(pending.corpses, outcomes);
         if let Some(deferred) = &pending.deferred_magic_resolved {
             self.emit_deferred_magic_resolved(deferred, outcomes);
@@ -22845,6 +22763,10 @@ impl Game {
         outcomes: &mut OutcomeLog<'_>,
     ) {
         let resolution = match continuation {
+            Some(ResolutionContinuation::TriggerBatch(pending)) => {
+                self.emit_interrupted_magic_resolved(pending.continuation.as_ref(), outcomes);
+                return;
+            }
             Some(ResolutionContinuation::Sequence(steps)) => {
                 for step in steps {
                     self.emit_interrupted_magic_resolved(Some(step), outcomes);
@@ -23408,19 +23330,28 @@ impl Game {
         genesis_damage_target: Option<&UnitTarget>,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.rules.cards[usize::from(card_id.0)]
-            .abilities
-            .genesis
-            .is_some()
-        {
-            let source = self.unit_effect_source(&UnitTarget::Minion {
-                instance_id: source_instance_id.clone(),
-                seat,
-            })?;
-            let frame =
-                self.effect_frame(card_id, AbilityEntry::Genesis, source, None, None, None)?;
-            return self.run_effect_frame(frame, outcomes);
-        }
+        let Some(trigger) = self.genesis_trigger(
+            seat,
+            source_instance_id,
+            card_id,
+            genesis_damage_choice,
+            genesis_damage_target.cloned(),
+        )?
+        else {
+            return Ok(());
+        };
+        self.begin_genesis_triggers(vec![trigger], outcomes)
+    }
+
+    fn apply_legacy_minion_genesis(
+        &mut self,
+        seat: Seat,
+        source_instance_id: &IdentityHash,
+        card_id: CardId,
+        genesis_damage_choice: Option<GenesisDamageChoice>,
+        genesis_damage_target: Option<&UnitTarget>,
+        outcomes: &mut OutcomeLog<'_>,
+    ) -> Result<(), GameError> {
         let CardFacts::Minion(facts) = &self.rules.cards[usize::from(card_id.0)].facts else {
             return Err(GameError::IllegalAction);
         };
@@ -25208,6 +25139,12 @@ impl Game {
                     self.pending_deathrites_value(pending),
                 );
             }
+            if let Some(pending) = &self.position.pending_trigger_order {
+                object.insert(
+                    "pendingTriggerOrder".to_owned(),
+                    self.trigger_order_value(pending),
+                );
+            }
             self.insert_pending_movement_state(object);
             self.insert_pending_chain_magic_state(object);
             if let Some(pending) = &self.position.pending_cemetery_summon {
@@ -25375,26 +25312,10 @@ impl Game {
                 "unit": self.unit_value(&source.unit),
             })
         };
-        let sources_json = |sources: &[PendingDeathriteSource]| {
-            Value::Array(sources.iter().map(&source_value).collect())
-        };
         let batches = pending
             .batches
             .iter()
-            .map(|batch| {
-                json!({
-                    "activeOrder": sources_json(&batch.active_order),
-                    "activeRemaining": sources_json(&batch.active_remaining),
-                    "nonActiveOrder": sources_json(&batch.non_active_order),
-                    "nonActiveRemaining": sources_json(&batch.non_active_remaining),
-                    "resolving": sources_json(&batch.resolving),
-                    "stage": match batch.stage {
-                        DeathriteStage::ActiveOrder => "active-order",
-                        DeathriteStage::NonActiveOrder => "non-active-order",
-                        DeathriteStage::Resolve => "resolve",
-                    },
-                })
-            })
+            .map(|batch| Self::trigger_batch_value(batch, source_value))
             .collect::<Vec<_>>();
         let mut value = json!({
             "batches": batches,
@@ -25435,6 +25356,8 @@ impl Game {
 
     fn resolution_continuation_value(&self, continuation: &ResolutionContinuation) -> Value {
         match continuation {
+            ResolutionContinuation::TriggerBatch(pending) => self.trigger_order_value(pending),
+            ResolutionContinuation::Genesis(trigger) => self.genesis_trigger_value(trigger),
             ResolutionContinuation::Sequence(steps) => json!({
                 "kind": "sequence",
                 "steps": steps.iter().map(|step| self.resolution_continuation_value(step)).collect::<Vec<_>>(),
@@ -27908,7 +27831,7 @@ pub mod catalog_proofs {
                 .collect::<Vec<_>>(),
             ["rubble-replaced", "site-played"]
         );
-        assert_eq!(game.position.phase, Phase::DeathriteOrder);
+        assert_eq!(game.position.phase, Phase::TriggerOrder);
         assert_eq!(game.position.players[seat_index(Seat::North)].mana, 1);
         assert_eq!(
             game.authoritative_state()["pendingDeathrites"]["continuation"]["kind"],
@@ -27926,7 +27849,7 @@ pub mod catalog_proofs {
             .find(|action| {
                 matches!(
                     &action.descriptor,
-                    ActionDescriptor::OrderDeathrites { source_instance_id }
+                    ActionDescriptor::OrderTriggers { source_instance_id }
                         if source_instance_id.as_str() == source_ids[0]
                 )
             })
@@ -27940,7 +27863,7 @@ pub mod catalog_proofs {
                 .map(|(event_type, _)| event_type.as_str())
                 .collect::<Vec<_>>(),
             [
-                "deathrite-order-committed",
+                "trigger-order-committed",
                 "site-drawn",
                 "site-drawn",
                 "minion-died",
@@ -27994,7 +27917,7 @@ pub mod catalog_proofs {
             .find(|action| {
                 matches!(
                     &action.descriptor,
-                    ActionDescriptor::OrderDeathrites { source_instance_id }
+                    ActionDescriptor::OrderTriggers { source_instance_id }
                         if source_instance_id.as_str() == source_ids[0]
                 )
             })
@@ -30279,7 +30202,7 @@ pub mod catalog_proofs {
 
     fn chain_cleanup_run_terminal_cleanup(game: &mut Game) {
         game.position.pending_chain_magic = PendingField::Resolved;
-        game.position.phase = Phase::DeathriteOrder;
+        game.position.phase = Phase::TriggerOrder;
         game.position.terminal = Some(chain_cleanup_terminal_win());
         game.clear_ordered_terminal_continuations();
     }
@@ -30308,7 +30231,7 @@ pub mod catalog_proofs {
      {
         let mut game = chain_cleanup_terminal_game();
         assert_eq!(game.position.pending_chain_magic, PendingField::Absent);
-        game.position.phase = Phase::DeathriteOrder;
+        game.position.phase = Phase::TriggerOrder;
         game.position.terminal = Some(chain_cleanup_terminal_win());
         game.clear_ordered_terminal_continuations();
         chain_cleanup_assert_pending_chain_magic_omitted(&game);
@@ -30320,7 +30243,7 @@ pub mod catalog_proofs {
         game.position.pending_chain_magic = PendingField::Resolved;
         game.position.pending_basic_movement = PendingField::Resolved;
         game.position.pending_ranged_step = PendingField::Resolved;
-        game.position.phase = Phase::DeathriteOrder;
+        game.position.phase = Phase::TriggerOrder;
         game.position.terminal = Some(chain_cleanup_terminal_win());
         game.clear_ordered_terminal_continuations();
         chain_cleanup_assert_pending_chain_magic_omitted(&game);
@@ -30375,7 +30298,7 @@ pub mod catalog_proofs {
             source_instance_id: identity_hash(&json!({ "fixture": "chain-cleanup-mover" }))
                 .expect("mover identity"),
         });
-        game.position.phase = Phase::DeathriteOrder;
+        game.position.phase = Phase::TriggerOrder;
         game.position.terminal = Some(chain_cleanup_terminal_win());
         game.clear_ordered_terminal_continuations();
         chain_cleanup_assert_pending_chain_magic_omitted(&game);

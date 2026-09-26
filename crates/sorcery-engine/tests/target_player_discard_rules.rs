@@ -535,7 +535,7 @@ fn try_pending_deathrite_with_discard_magic(encoded: &str) -> Option<PendingDeat
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -768,7 +768,7 @@ fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_ord
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -790,7 +790,7 @@ fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_ord
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -801,8 +801,7 @@ fn rule_catalog_1050_target_player_discard_withheld_during_pending_deathrite_ord
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -1021,7 +1020,7 @@ fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
     });
 
     let paused = branched.authoritative_state();
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "discard-card");
     assert_eq!(paused["pendingDiscardCards"]["remaining"], 2);
@@ -1035,14 +1034,14 @@ fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
     }));
     assert!(
         game_discard_card_ids(&branched).is_empty(),
-        "deathrite-order must issue no discard-card while the Storyline stays pending"
+        "trigger-order must issue no discard-card while the Storyline stays pending"
     );
 
     let order_sources: Vec<_> = branched
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
+        .filter(|action| issued_descriptor(action)["kind"] == "order-triggers")
         .map(|action| {
             issued_descriptor(&action)["sourceInstanceId"]
                 .as_str()
@@ -1052,8 +1051,7 @@ fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
         .collect();
     assert_eq!(order_sources, deathrite_ids);
     apply_where(&mut branched, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = branched.authoritative_state();
@@ -1064,7 +1062,7 @@ fn rule_catalog_1166_discard_card_withheld_during_pending_deathrite_order() {
     let offered = game_discard_card_ids(&branched);
     assert!(
         !offered.is_empty(),
-        "discard-card must return once deathrite-order clears"
+        "discard-card must return once trigger-order clears"
     );
     apply_where(&mut branched, |descriptor| {
         descriptor["kind"] == "discard-card"

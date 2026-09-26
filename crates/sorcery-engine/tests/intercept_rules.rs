@@ -678,7 +678,7 @@ fn intercept_deathrite_minion(extra: Value) -> Value {
 }
 
 fn intercept_deathrite_manifest(seed: u32) -> String {
-    let fixture = "intercept-deathrite-order-withheld";
+    let fixture = "intercept-trigger-order-withheld";
     let mut manifest = json!({
         "authority": {
             "contentHash": identity_hash(&json!({ "fixture": fixture }))
@@ -902,7 +902,7 @@ fn try_pending_intercept_during_deathrite_order(
         descriptor["kind"] == "continue-basic-movement"
     })?;
     fire_south_projectile(&mut session, &attacker_id, &aura_id)?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     Some(PendingInterceptDeathriteSetup {
@@ -932,14 +932,14 @@ fn rule_catalog_1141_intercept_withheld_during_pending_deathrite_order() {
     let interceptor_id = setup.interceptor_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(no_intercept_window_actions(session));
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -950,8 +950,7 @@ fn rule_catalog_1141_intercept_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     while state(session)["phase"] == "movement" {
         accept_where(session, |descriptor| {
@@ -993,7 +992,7 @@ fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
     let interceptor_id = setup.interceptor_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(
         session
@@ -1007,7 +1006,7 @@ fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1018,8 +1017,7 @@ fn rule_catalog_1159_close_intercept_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     while state(session)["phase"] == "movement" {
         accept_where(session, |descriptor| {

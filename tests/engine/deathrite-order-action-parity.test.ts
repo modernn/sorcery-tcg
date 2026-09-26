@@ -26,11 +26,11 @@ const fixture = JSON.parse(readFileSync(
   'utf8',
 )) as Fixture;
 
-test('Deathrite-order descriptors and action IDs stay fixed for Rust parity', () => {
+test('Trigger-order descriptors and action IDs stay fixed for Rust parity', () => {
   assert.equal(fixture.schemaVersion, 1);
-  assert.equal(fixture.source, 'typescript-legality-engine');
+  assert.equal(fixture.source, 'synthetic-action-contract');
   for (const action of fixture.actions) {
-    assert.equal(action.descriptor.kind, 'order-deathrites');
+    assert.equal(action.descriptor.kind, 'order-triggers');
     assert.equal(
       opaqueActionId(fixture.contract, fixture.seat, fixture.stateVersion, action.descriptor),
       action.actionId,

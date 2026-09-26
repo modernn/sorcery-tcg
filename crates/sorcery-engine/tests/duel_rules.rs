@@ -4,7 +4,7 @@
 //! Duel makes a chosen ally fight a targeted adjacent enemy through the shared
 //! fight pipeline. Ward on the target breaks without entering combat. Avatar allies
 //! route strike damage through avatar-life-lost instead of minion damage. Underground
-//! first-strike Duels pause in deathrite-order, survive checkpoint round-trip, and
+//! first-strike Duels pause in trigger-order, survive checkpoint round-trip, and
 //! finish through ordered Deathrites to terminal.
 
 use serde_json::{Value, json};
@@ -798,7 +798,7 @@ fn try_pending_deathrite_with_ready_duel(encoded: &str) -> Option<PendingDeathri
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -950,7 +950,7 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
         ]
     );
     let pending = state(&session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert_eq!(pending["decisionSeat"], "south");
     assert_eq!(
         pending["pendingDeathrites"]["continuation"]["kind"],
@@ -980,7 +980,7 @@ fn rule_catalog_0712_duel_checkpoints_underground_first_strike_and_finishes_befo
     .expect("resumed pending Duel checkpoint");
     assert_eq!(state(&session), pending);
     let (_, completed) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == target_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == target_ids[0]
     });
     let completed_types = event_types(&completed);
     assert_eq!(
@@ -1113,7 +1113,7 @@ fn rule_catalog_1045_duel_magic_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -1137,7 +1137,7 @@ fn rule_catalog_1045_duel_magic_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1148,8 +1148,7 @@ fn rule_catalog_1045_duel_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

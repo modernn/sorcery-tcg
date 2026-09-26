@@ -2,11 +2,11 @@
 //! carries away from a lethally wounded bearer when it is dropped (RULE-CATALOG-0141), the
 //! Lethal a carried Artifact grants its bearer until the bearer falls (RULE-CATALOG-0142), the
 //! measured damage a Siege Ballista shoots for its bearer's tap plus another ally's
-//! (RULE-CATALOG-0143), Siege Ballista activation withheld during deathrite-order
+//! (RULE-CATALOG-0143), Siege Ballista activation withheld during trigger-order
 //! (RULE-CATALOG-1144), the measured location a Payload Trebuchet blankets for those same two
 //! taps plus a discarded card (RULE-CATALOG-0144), Payload Trebuchet activation withheld
-//! during deathrite-order (RULE-CATALOG-1145), and Artifact casting withheld during
-//! deathrite-order (RULE-CATALOG-1155).
+//! during trigger-order (RULE-CATALOG-1145), and Artifact casting withheld during
+//! trigger-order (RULE-CATALOG-1155).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::{IdentityHash, canonical_json, identity_hash};
@@ -1176,7 +1176,7 @@ fn try_pending_deathrite_with_ready_ballista(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1209,7 +1209,7 @@ fn rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -1238,7 +1238,7 @@ fn rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1249,8 +1249,7 @@ fn rule_catalog_1144_activate_artifact_damage_withheld_during_pending_deathrite_
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -1852,7 +1851,7 @@ fn try_pending_deathrite_with_ready_trebuchet(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1886,7 +1885,7 @@ fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pendi
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -1915,7 +1914,7 @@ fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pendi
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1926,8 +1925,7 @@ fn rule_catalog_1145_activate_artifact_discard_area_damage_withheld_during_pendi
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2046,7 +2044,7 @@ fn try_pending_deathrite_with_cast_artifact(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -2075,7 +2073,7 @@ fn rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(north_has_sword(&paused));
     assert!(deathrite_ids.iter().all(|instance_id| {
@@ -2098,7 +2096,7 @@ fn rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -2109,8 +2107,7 @@ fn rule_catalog_1155_cast_artifact_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

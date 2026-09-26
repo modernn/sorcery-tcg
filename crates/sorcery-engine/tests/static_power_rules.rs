@@ -634,7 +634,7 @@ fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defen
         ),
         (
             vec!["basic-movement-started"],
-            json!("deathrite-order"),
+            json!("trigger-order"),
             json!("north")
         ),
         "leaving the aura mid-path must kill both allies and owe an ordered Deathrite"
@@ -650,7 +650,7 @@ fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defen
         .legal_actions()
         .expect("Deathrite ordering actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -666,8 +666,7 @@ fn rule_catalog_0037_aura_loss_deaths_cannot_restore_stale_combat_during_a_defen
 
     // Ordering the owed Deathrites settles both corpses and hands the path back to North.
     let (_, ordered) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == owed[0].as_str()
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == owed[0].as_str()
     });
     let settled = state(&session);
     let settled_cemetery = cemetery_order(&settled, "north");

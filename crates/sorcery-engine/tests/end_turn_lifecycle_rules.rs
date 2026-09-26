@@ -587,7 +587,7 @@ fn rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order() {
         .expect("state version");
     let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["stateVersion"], version_before + 1);
     let remaining_id = remaining_id.expect("second triggered death identity");
     assert_eq!(
@@ -605,7 +605,7 @@ fn rule_catalog_0755_end_turn_deathrites_resume_turn_transition_after_order() {
     );
     assert_checkpoint_round_trip(&session);
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     let types = event_types(&resolved);
     let last_deathrite = types
@@ -831,7 +831,7 @@ fn rule_catalog_1249_ignited_death_withheld_during_pending_end_turn_deathrite_or
     let ignited_id = ignited_id.expect("tracked ignited identity");
     let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert!(
         trigger
             .events
@@ -846,7 +846,7 @@ fn rule_catalog_1249_ignited_death_withheld_during_pending_end_turn_deathrite_or
     );
     assert_checkpoint_round_trip(&session);
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     let types = event_types(&resolved);
     let ignited_death = resolved
@@ -904,7 +904,7 @@ fn rule_catalog_1262_drawrite_b_death_withheld_during_pending_end_turn_deathrite
     let drawrite_b_id = drawrite_b_id.expect("tracked drawrite-b identity");
     let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert!(
         trigger
             .events
@@ -919,7 +919,7 @@ fn rule_catalog_1262_drawrite_b_death_withheld_during_pending_end_turn_deathrite
     );
     assert_checkpoint_round_trip(&session);
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     let types = event_types(&resolved);
     let drawrite_b_death = resolved
@@ -977,7 +977,7 @@ fn rule_catalog_1292_drawrite_a_death_withheld_during_pending_end_turn_deathrite
     let drawrite_a_id = drawrite_a_id.expect("tracked drawrite-a identity");
     let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert!(
         trigger
             .events
@@ -992,7 +992,7 @@ fn rule_catalog_1292_drawrite_a_death_withheld_during_pending_end_turn_deathrite
     );
     assert_checkpoint_round_trip(&session);
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     let types = event_types(&resolved);
     let drawrite_a_death = resolved
@@ -1061,7 +1061,7 @@ fn rule_catalog_1302_ignited_and_drawrite_b_death_withheld_during_pending_end_tu
     let drawrite_b_id = drawrite_b_id.expect("tracked drawrite-b identity");
     let (_, trigger) = accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn");
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     for withheld_id in [&ignited_id, &drawrite_b_id] {
         assert!(
             trigger
@@ -1078,7 +1078,7 @@ fn rule_catalog_1302_ignited_and_drawrite_b_death_withheld_during_pending_end_tu
     );
     assert_checkpoint_round_trip(&session);
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     let types = event_types(&resolved);
     let ignited_death = resolved
@@ -1208,7 +1208,7 @@ fn try_malakhim_untap_withheld(encoded: &str) -> Option<(Session, String)> {
     }
     let (_, trigger) =
         try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if unit(&state(&session), &malakhim_id)["tapped"] != true {
@@ -1276,7 +1276,7 @@ fn try_malakhim_ignited_withheld(encoded: &str) -> Option<(Session, String, Stri
     let ignited_id = ignited_id?;
     let (_, trigger) =
         try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if unit(&state(&session), &malakhim_id)["tapped"] != true {
@@ -1308,21 +1308,21 @@ fn rule_catalog_1312_malakhim_untap_and_ignited_death_withheld_during_pending_en
         );
     let (mut session, malakhim_id, ignited_id) =
         try_malakhim_ignited_withheld(&encoded).expect("complete Malakhim/Ignited withhold setup");
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert!(
         resolved.events.iter().any(|event| {
             event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
         }),
-        "Malakhim untap must resume after deathrite-order clears"
+        "Malakhim untap must resume after trigger-order clears"
     );
     assert!(
         resolved.events.iter().any(|event| {
             event.event_type == "minion-died" && event.payload["instanceId"] == ignited_id
         }),
-        "Ignited death must resume after deathrite-order clears"
+        "Ignited death must resume after trigger-order clears"
     );
     assert_exact_replay(&session);
 }
@@ -1335,15 +1335,15 @@ fn rule_catalog_1282_malakhim_untap_withheld_during_pending_end_turn_deathrite_o
         .expect("bounded seed that reaches pending Deathrites before Malakhim untap");
     let (mut session, malakhim_id) =
         try_malakhim_untap_withheld(&encoded).expect("complete Malakhim untap withheld setup");
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert!(
         resolved.events.iter().any(|event| {
             event.event_type == "minion-untapped" && event.payload["instanceId"] == malakhim_id
         }),
-        "Malakhim untap must resume after deathrite-order clears"
+        "Malakhim untap must resume after trigger-order clears"
     );
     assert_exact_replay(&session);
 }

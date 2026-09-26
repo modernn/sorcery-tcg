@@ -162,7 +162,7 @@ test('Leap Attack fixture regenerates byte-identically from Rust legality', asyn
   assert.equal(fixture.stepTransition.replayVerified, true);
 
   const movement = fixture.movementDeathrite;
-  assert.equal(movement.pending.phase, 'deathrite-order');
+  assert.equal(movement.pending.phase, 'trigger-order');
   assert.equal(movement.pending.checkpointRoundTrip, true);
   assert.equal(movement.pending.continuation.kind, 'leap-attack');
   assert.deepEqual(eventTypes(movement.pending.receipt), ['magic-cast', 'unit-stepped']);

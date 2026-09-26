@@ -187,43 +187,43 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
     ['minion-sacrificed', 'minion-sacrificed'],
   );
   assert.deepEqual(fixture.deathrite.pending.receipt.randomDraws, []);
-  assert.equal(fixture.deathrite.pending.phase, 'deathrite-order');
+  assert.equal(fixture.deathrite.pending.phase, 'trigger-order');
   assert.equal(fixture.deathrite.pending.decisionSeat, 'north');
   assert.equal(fixture.deathrite.pending.stateVersion, 13);
   assert.equal(
     fixture.deathrite.pending.stateHash,
-    'sha256:e19f242cb5d0afd939fea8b31fc5605b7ebf54139607b46932e0a9123284bd95',
+    'sha256:e0639cf457f2a0c54da7a9b154b3d2b6df5b743d41645e1d0f4af09886ce9e9e',
   );
   assert.equal(
     fixture.deathrite.pending.checkpointId,
-    'sha256:d4b17649e7aebe57b097e41587bbda0b8ea19615360000c71acf38e1bd338c29',
+    'sha256:5dd33cd649c004f17547eba55d7d0d59d0d01d41ea14b64b0a8a662a696e4230',
   );
   assert.equal(
     fixture.deathrite.pending.expectedSessionHash,
-    'sha256:0949c1d532d5130a6840c210a6973b441dc8a957bcaebc8bfe783248266b3ceb',
+    'sha256:f2cf90eb4e3e32c38536ad195a9cac59093233f37094d7e5ee59d03766e5d71b',
   );
   assert.equal(fixture.deathrite.pending.checkpointRoundTrip, true);
   assert.equal(
     fixture.deathrite.pending.serializedCheckpointHash,
-    'sha256:cf6ca9b67adb3708cd34c704c6912979e1e0f0835b44653f99d53d611cb2d3bb',
+    'sha256:a4b0e8ef57b511aac77792e86e34a5833b9663d280847c4a076f362905ed8ee2',
   );
   assert.deepEqual(
     fixture.deathrite.pending.orderActions.map(({ actionId, descriptor, label }) => ({
       actionId,
       label,
-      sourceInstanceId: descriptor.kind === 'order-deathrites'
+      sourceInstanceId: descriptor.kind === 'order-triggers'
         ? descriptor.sourceInstanceId
         : undefined,
     })),
     [
       {
-        actionId: 'sha256:a5f2d154d4f3f48f15cf1eee0e0ba57e4641a542520ba5aa7b99a0db088cc16c',
-        label: 'Order synthetic-fodder-minion first within your Deathrites',
+        actionId: 'sha256:c58bec0a6a9bb80bf5f13ae1ae6c4ab6c187df8285fb6096194292f68486e8d1',
+        label: 'Order synthetic-fodder-minion first within your triggers',
         sourceInstanceId: 'sha256:1f833cdf1a322b5e9900977fed2896159ab8397488447b0c1044b915253d2f2d',
       },
       {
-        actionId: 'sha256:d77eb088e2e59baed21adc13c80c52a4ad1c7fff86691de565cff42d620b9736',
-        label: 'Order synthetic-fodder-minion first within your Deathrites',
+        actionId: 'sha256:47ee6fc4d92dd8495af3605fae3a6ea31314884b999fad0f97f076583ca555b1',
+        label: 'Order synthetic-fodder-minion first within your triggers',
         sourceInstanceId: 'sha256:7e59c6b4df41bb2084481b3790eabfdf5640ed893f25d56174ce8d84cdd07090',
       },
     ],
@@ -235,7 +235,7 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
   assert.deepEqual(
     fixture.deathrite.resolved.receipt.events.map(({ type }) => type),
     [
-      'deathrite-order-committed',
+      'trigger-order-committed',
       'site-drawn',
       'site-drawn',
       'minion-died',
@@ -253,11 +253,11 @@ test('sacrifice-summon fixture regenerates byte-identically from Rust legality',
   );
   assert.equal(
     fixture.deathrite.resolved.expectedSessionHash,
-    'sha256:542989126a2a1396337414368b83825f597b6e3c7eb71bb36d1aea1e9575b988',
+    'sha256:01b15c2c781d8666531d3feb2f9314446b128e8c358478fb403a21b360a3edf3',
   );
   assert.equal(
     fixture.deathrite.resolved.serializedCheckpointHash,
-    'sha256:d955347329d35c517b0e8954a33c1a5d96ddd307b9aad5e0d4b44d1d0539f4b0',
+    'sha256:5a55686550b4c342881219fe35b67d50afd91dc5394235c94115b21aee2b2e7a',
   );
   assert.equal(fixture.deathrite.resolved.replayVerified, true);
 });

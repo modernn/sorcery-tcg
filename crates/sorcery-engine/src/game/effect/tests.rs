@@ -760,7 +760,7 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
     let mut outcomes = Vec::new();
     game.run_effect_frame(frame, &mut OutcomeLog::Record(&mut outcomes))
         .expect("cohort damage");
-    assert_eq!(game.position.phase, Phase::DeathriteOrder);
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
     assert!(
         game.position.players[seat_index(Seat::North)]
             .cemetery
@@ -789,7 +789,7 @@ fn damage_cohort_orders_deathrites_then_resumes_draw_and_magic_cleanup() {
         .find(|action| {
             matches!(
                 &action.descriptor,
-                ActionDescriptor::OrderDeathrites { source_instance_id }
+                ActionDescriptor::OrderTriggers { source_instance_id }
                     if source_instance_id == &first_id || source_instance_id == &second_id
             )
         })
@@ -1041,7 +1041,7 @@ fn declaration_side_deaths_finish_before_the_queued_effect_starts() {
         &mut OutcomeLog::Ignore,
     )
     .unwrap();
-    assert_eq!(game.position.phase, Phase::DeathriteOrder);
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
     game.run_effect_frame(frame, &mut OutcomeLog::Ignore)
         .unwrap();
     assert_eq!(

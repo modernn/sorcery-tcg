@@ -31,11 +31,11 @@ impl RealmReference {
         }
     }
 
-    fn matches(&self, card: &CardInstance) -> bool {
+    pub(super) fn matches(&self, card: &CardInstance) -> bool {
         self.instance_id == card.instance_id && self.realm_entry == card.realm_entry
     }
 
-    fn value(&self) -> Value {
+    pub(super) fn value(&self) -> Value {
         json!({ "instanceId": self.instance_id, "realmEntry": self.realm_entry })
     }
 }
@@ -52,6 +52,14 @@ pub(super) struct EffectSource {
     pub(super) region: Region,
     pub(super) cells: Vec<Cell>,
     pub(super) damage: UnitDamageSource,
+}
+
+impl EffectSource {
+    pub(super) fn value(&self) -> Value {
+        json!({ "instanceId": self.instance_id, "owner": self.owner, "controller": self.controller,
+            "realm": self.realm.as_ref().map(RealmReference::value), "actor": self.actor.as_ref().map(RealmReference::value),
+            "region": self.region, "cells": self.cells, "power": self.damage.current_power, "lethal": self.damage.lethal })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,7 +139,7 @@ impl Game {
             .map(|unit| (UnitKind::Minion, unit.controller))
     }
 
-    fn realm_reference_exists(&self, reference: &RealmReference) -> bool {
+    pub(super) fn realm_reference_exists(&self, reference: &RealmReference) -> bool {
         self.referenced_unit(reference).is_some()
             || self
                 .position
@@ -442,7 +450,9 @@ impl Game {
         mut frame: EffectFrame,
         outcomes: &mut OutcomeLog<'_>,
     ) -> Result<(), GameError> {
-        if self.position.pending_deathrites.is_some() {
+        if self.position.pending_deathrites.is_some()
+            || self.position.pending_trigger_order.is_some()
+        {
             return self
                 .continue_resolution(ResolutionContinuation::Effect(Box::new(frame)), outcomes);
         }
@@ -556,9 +566,7 @@ impl Game {
             "kind": "effect", "cardId": self.rules.cards[usize::from(frame.card_id.0)].id,
             "entry": match frame.entry { AbilityEntry::Magic => "magic", AbilityEntry::Genesis => "genesis", AbilityEntry::Activated => "activated" },
             "cursor": frame.cursor, "started": frame.started,
-            "source": { "instanceId": frame.source.instance_id, "owner": frame.source.owner, "controller": frame.source.controller,
-                "realm": frame.source.realm.as_ref().map(RealmReference::value), "actor": frame.source.actor.as_ref().map(RealmReference::value),
-                "region": frame.source.region, "cells": frame.source.cells, "power": frame.source.damage.current_power, "lethal": frame.source.damage.lethal },
+            "source": frame.source.value(),
             "target": frame.target.as_ref().map(|binding| json!({ "object": binding.reference.value(), "state": binding.state.as_str() })),
             "location": frame.location.as_ref().map(|binding| json!({ "location": binding.location, "site": binding.site.as_ref().map(RealmReference::value), "state": binding.state.as_str() })),
             "magic": frame.magic.as_ref().map(|card| self.card_value(card)),

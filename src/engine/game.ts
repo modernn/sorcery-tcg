@@ -751,7 +751,7 @@ type PendingDeathriteBatch = Readonly<{
   stage: 'active-order' | 'non-active-order' | 'resolve';
 }>;
 
-type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'deathrite-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
+type GamePhase = 'allocate' | 'attack' | 'cemetery-summon' | 'chain-magic' | 'trigger-order' | 'defend' | 'discard-card' | 'draw' | 'end-turn-aura' | 'filtered-site-play' | 'genesis' | 'intercept' | 'main' | 'movement' | 'mulligan' | 'random-choice' | 'ranged-step' | 'start-turn' | 'terminal';
 
 type LeapAttackContinuation = Readonly<{
   ally: GameUnitRef;
@@ -1289,7 +1289,7 @@ type GameActionDescriptor =
     kind: 'decline-filtered-site-play';
   }>
   | Readonly<{
-    kind: 'order-deathrites';
+    kind: 'order-triggers';
     sourceInstanceId: StateHash;
   }>
   | Readonly<{

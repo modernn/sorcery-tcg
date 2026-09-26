@@ -2198,10 +2198,10 @@ fn try_pending_deathrite_with_flooded_occupied_water_c3_dualer(
     {
         return None;
     }
-    if snapshot["phase"] != "deathrite-order"
+    if snapshot["phase"] != "trigger-order"
         && (!try_accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
-        }) || state(&session)["phase"] != "deathrite-order")
+        }) || state(&session)["phase"] != "trigger-order")
     {
         return None;
     }
@@ -2245,7 +2245,7 @@ fn rule_catalog_1471_playing_water_onto_flooded_occupied_water_at_c3_relayers_un
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -2263,8 +2263,7 @@ fn rule_catalog_1471_playing_water_onto_flooded_occupied_water_at_c3_relayers_un
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2285,7 +2284,7 @@ fn rule_catalog_1471_playing_water_onto_flooded_occupied_water_at_c3_relayers_un
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "playing Water onto a flooded occupied Water site after deathrite-order must relayer the dual-region unit"
+        "playing Water onto a flooded occupied Water site after trigger-order must relayer the dual-region unit"
     );
     let snapshot = state(session);
     let occupant = realm_unit(&snapshot, &dualer_id);
@@ -2426,10 +2425,10 @@ fn try_pending_deathrite_with_drought_occupied_earth_c3_dualer(
     {
         return None;
     }
-    if snapshot["phase"] != "deathrite-order"
+    if snapshot["phase"] != "trigger-order"
         && (!try_accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
-        }) || state(&session)["phase"] != "deathrite-order")
+        }) || state(&session)["phase"] != "trigger-order")
     {
         return None;
     }
@@ -2467,7 +2466,7 @@ fn rule_catalog_1472_playing_earth_onto_drought_occupied_earth_at_c3_relayers_un
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2485,8 +2484,7 @@ fn rule_catalog_1472_playing_earth_onto_drought_occupied_earth_at_c3_relayers_un
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2507,7 +2505,7 @@ fn rule_catalog_1472_playing_earth_onto_drought_occupied_earth_at_c3_relayers_un
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "playing Earth onto a drought occupied Earth site after deathrite-order must relayer the dual-region unit"
+        "playing Earth onto a drought occupied Earth site after trigger-order must relayer the dual-region unit"
     );
     let snapshot = state(session);
     let occupant = realm_unit(&snapshot, &dualer_id);
@@ -2648,10 +2646,10 @@ fn try_pending_deathrite_with_flooded_occupied_water_c3_dualer_for_earth_play(
     {
         return None;
     }
-    if snapshot["phase"] != "deathrite-order"
+    if snapshot["phase"] != "trigger-order"
         && (!try_accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
-        }) || state(&session)["phase"] != "deathrite-order")
+        }) || state(&session)["phase"] != "trigger-order")
     {
         return None;
     }
@@ -2696,7 +2694,7 @@ fn rule_catalog_1473_playing_earth_onto_flooded_occupied_water_at_c3_relayers_un
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -2714,8 +2712,7 @@ fn rule_catalog_1473_playing_earth_onto_flooded_occupied_water_at_c3_relayers_un
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2736,7 +2733,7 @@ fn rule_catalog_1473_playing_earth_onto_flooded_occupied_water_at_c3_relayers_un
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "playing Earth onto a flooded occupied Water site after deathrite-order must relayer the dual-region unit"
+        "playing Earth onto a flooded occupied Water site after trigger-order must relayer the dual-region unit"
     );
     let snapshot = state(session);
     let occupant = realm_unit(&snapshot, &dualer_id);
@@ -2831,7 +2828,7 @@ fn rule_catalog_1474_playing_water_onto_drought_occupied_earth_at_c3_relayers_un
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2849,8 +2846,7 @@ fn rule_catalog_1474_playing_water_onto_drought_occupied_earth_at_c3_relayers_un
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2871,7 +2867,7 @@ fn rule_catalog_1474_playing_water_onto_drought_occupied_earth_at_c3_relayers_un
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "playing Water onto a drought occupied Earth site after deathrite-order must relayer the dual-region unit"
+        "playing Water onto a drought occupied Earth site after trigger-order must relayer the dual-region unit"
     );
     let snapshot = state(session);
     let occupant = realm_unit(&snapshot, &dualer_id);
@@ -2890,7 +2886,7 @@ fn rule_catalog_1487_play_site_withheld_during_pending_deathrite_order_on_floode
         try_pending_deathrite_with_flooded_occupied_water_c3_dualer_for_earth_play(&encoded)
             .expect("complete earth-on-flooded-occupied-water Deathrite withheld setup");
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
     assert!(
         setup
@@ -2912,7 +2908,7 @@ fn rule_catalog_1488_play_site_withheld_during_pending_deathrite_order_on_drough
         try_pending_deathrite_with_drought_occupied_earth_c3_dualer_for_water_play(&encoded)
             .expect("complete water-on-drought-occupied-earth Deathrite withheld setup");
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
     assert!(
         setup
@@ -2935,7 +2931,7 @@ fn rule_catalog_1497_play_site_earth_offered_after_pending_deathrite_order_on_fl
             .expect("complete earth-on-flooded-occupied-water Deathrite offered setup");
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -2949,8 +2945,7 @@ fn rule_catalog_1497_play_site_earth_offered_after_pending_deathrite_order_on_fl
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2978,7 +2973,7 @@ fn rule_catalog_1498_play_site_water_offered_after_pending_deathrite_order_on_dr
             .expect("complete water-on-drought-occupied-earth Deathrite offered setup");
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2992,8 +2987,7 @@ fn rule_catalog_1498_play_site_water_offered_after_pending_deathrite_order_on_dr
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3019,7 +3013,7 @@ fn rule_catalog_1513_play_site_water_offered_after_pending_deathrite_order_on_fl
         .expect("complete water-on-flooded-occupied-water Deathrite offered setup");
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3033,8 +3027,7 @@ fn rule_catalog_1513_play_site_water_offered_after_pending_deathrite_order_on_fl
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3060,7 +3053,7 @@ fn rule_catalog_1514_play_site_earth_offered_after_pending_deathrite_order_on_dr
         .expect("complete earth-on-drought-occupied-earth Deathrite offered setup");
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3074,8 +3067,7 @@ fn rule_catalog_1514_play_site_earth_offered_after_pending_deathrite_order_on_dr
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

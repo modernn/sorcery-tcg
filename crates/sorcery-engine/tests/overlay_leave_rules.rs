@@ -4,7 +4,7 @@
 //! RULE-CATALOG-1481–1483, RULE-CATALOG-1505–1508),
 //! and that destroy-target-
 //! aura or return-target-aura Magic on Flood or Drought stays withheld during
-//! deathrite-order (RULE-CATALOG-1331–1334, RULE-CATALOG-1485–1486,
+//! trigger-order (RULE-CATALOG-1331–1334, RULE-CATALOG-1485–1486,
 //! RULE-CATALOG-1494–1496, RULE-CATALOG-1503–1504, RULE-CATALOG-1519,
 //! RULE-CATALOG-1525–1528).
 //!
@@ -1145,7 +1145,7 @@ fn try_pending_deathrite_with_overlay_destroy(
     try_accept_where_overlay(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1235,7 +1235,7 @@ fn try_pending_deathrite_with_overlay_occupied_destroy(
     try_accept_where_overlay(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1567,7 +1567,7 @@ fn rule_catalog_1331_destroy_flood_aura_withheld_during_pending_deathrite_order(
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -1578,8 +1578,7 @@ fn rule_catalog_1331_destroy_flood_aura_withheld_during_pending_deathrite_order(
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -1616,7 +1615,7 @@ fn rule_catalog_1332_destroy_drought_aura_withheld_during_pending_deathrite_orde
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -1627,8 +1626,7 @@ fn rule_catalog_1332_destroy_drought_aura_withheld_during_pending_deathrite_orde
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -1984,7 +1982,7 @@ fn rule_catalog_1333_return_flood_aura_withheld_during_pending_deathrite_order()
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -1995,8 +1993,7 @@ fn rule_catalog_1333_return_flood_aura_withheld_during_pending_deathrite_order()
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2033,7 +2030,7 @@ fn rule_catalog_1334_return_drought_aura_withheld_during_pending_deathrite_order
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2044,8 +2041,7 @@ fn rule_catalog_1334_return_drought_aura_withheld_during_pending_deathrite_order
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2203,7 +2199,7 @@ fn rule_catalog_1363_destroy_flood_aura_withheld_during_pending_deathrite_order_
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2214,8 +2210,7 @@ fn rule_catalog_1363_destroy_flood_aura_withheld_during_pending_deathrite_order_
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2253,7 +2248,7 @@ fn rule_catalog_1364_destroy_drought_aura_withheld_during_pending_deathrite_orde
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2264,8 +2259,7 @@ fn rule_catalog_1364_destroy_drought_aura_withheld_during_pending_deathrite_orde
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2303,7 +2297,7 @@ fn rule_catalog_1365_return_flood_aura_withheld_during_pending_deathrite_order_o
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2314,8 +2308,7 @@ fn rule_catalog_1365_return_flood_aura_withheld_during_pending_deathrite_order_o
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2353,7 +2346,7 @@ fn rule_catalog_1366_return_drought_aura_withheld_during_pending_deathrite_order
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2364,8 +2357,7 @@ fn rule_catalog_1366_return_drought_aura_withheld_during_pending_deathrite_order
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2403,7 +2395,7 @@ fn rule_catalog_1415_destroy_flood_aura_withheld_during_pending_deathrite_order_
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2414,8 +2406,7 @@ fn rule_catalog_1415_destroy_flood_aura_withheld_during_pending_deathrite_order_
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2453,7 +2444,7 @@ fn rule_catalog_1416_destroy_drought_aura_withheld_during_pending_deathrite_orde
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2464,8 +2455,7 @@ fn rule_catalog_1416_destroy_drought_aura_withheld_during_pending_deathrite_orde
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2503,7 +2493,7 @@ fn rule_catalog_1417_return_flood_aura_withheld_during_pending_deathrite_order_o
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2514,8 +2504,7 @@ fn rule_catalog_1417_return_flood_aura_withheld_during_pending_deathrite_order_o
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2553,7 +2542,7 @@ fn rule_catalog_1418_return_drought_aura_withheld_during_pending_deathrite_order
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -2564,8 +2553,7 @@ fn rule_catalog_1418_return_drought_aura_withheld_during_pending_deathrite_order
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2724,7 +2712,7 @@ fn rule_catalog_1481_destroying_flood_on_occupied_earth_at_c3_relayers_underwate
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2743,8 +2731,7 @@ fn rule_catalog_1481_destroying_flood_on_occupied_earth_at_c3_relayers_underwate
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2764,7 +2751,7 @@ fn rule_catalog_1481_destroying_flood_on_occupied_earth_at_c3_relayers_underwate
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "destroying Flood on occupied Earth after deathrite-order must relayer the dual-region unit instead of killing it"
+        "destroying Flood on occupied Earth after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -2789,7 +2776,7 @@ fn rule_catalog_1482_destroying_drought_on_occupied_water_at_c3_relayers_underwa
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -2808,8 +2795,7 @@ fn rule_catalog_1482_destroying_drought_on_occupied_water_at_c3_relayers_underwa
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2829,7 +2815,7 @@ fn rule_catalog_1482_destroying_drought_on_occupied_water_at_c3_relayers_underwa
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "destroying Drought on occupied Water after deathrite-order must relayer the dual-region unit instead of killing it"
+        "destroying Drought on occupied Water after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -2853,7 +2839,7 @@ fn rule_catalog_1486_return_drought_aura_withheld_during_pending_deathrite_order
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -2868,8 +2854,7 @@ fn rule_catalog_1486_return_drought_aura_withheld_during_pending_deathrite_order
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2907,7 +2892,7 @@ fn rule_catalog_1485_return_flood_aura_withheld_during_pending_deathrite_order_o
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2922,8 +2907,7 @@ fn rule_catalog_1485_return_flood_aura_withheld_during_pending_deathrite_order_o
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -2962,7 +2946,7 @@ fn rule_catalog_1483_returning_flood_on_occupied_earth_at_c3_relayers_undergroun
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -2981,8 +2965,7 @@ fn rule_catalog_1483_returning_flood_on_occupied_earth_at_c3_relayers_undergroun
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3002,7 +2985,7 @@ fn rule_catalog_1483_returning_flood_on_occupied_earth_at_c3_relayers_undergroun
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "returning Flood on occupied Earth after deathrite-order must relayer the dual-region unit instead of killing it"
+        "returning Flood on occupied Earth after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3027,7 +3010,7 @@ fn rule_catalog_1484_returning_drought_on_occupied_water_at_c3_relayers_underwat
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3046,8 +3029,7 @@ fn rule_catalog_1484_returning_drought_on_occupied_water_at_c3_relayers_underwat
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3067,7 +3049,7 @@ fn rule_catalog_1484_returning_drought_on_occupied_water_at_c3_relayers_underwat
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "returning Drought on occupied Water after deathrite-order must relayer the dual-region unit instead of killing it"
+        "returning Drought on occupied Water after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3096,7 +3078,7 @@ fn rule_catalog_1505_returning_flood_on_flooded_occupied_water_at_c3_relayers_un
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3115,8 +3097,7 @@ fn rule_catalog_1505_returning_flood_on_flooded_occupied_water_at_c3_relayers_un
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3136,7 +3117,7 @@ fn rule_catalog_1505_returning_flood_on_flooded_occupied_water_at_c3_relayers_un
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "returning Flood on flooded occupied Water after deathrite-order must relayer the dual-region unit instead of killing it"
+        "returning Flood on flooded occupied Water after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3164,7 +3145,7 @@ fn rule_catalog_1493_destroy_flood_aura_withheld_during_pending_deathrite_order_
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3179,8 +3160,7 @@ fn rule_catalog_1493_destroy_flood_aura_withheld_during_pending_deathrite_order_
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3218,7 +3198,7 @@ fn rule_catalog_1494_destroy_drought_aura_withheld_during_pending_deathrite_orde
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3233,8 +3213,7 @@ fn rule_catalog_1494_destroy_drought_aura_withheld_during_pending_deathrite_orde
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3272,7 +3251,7 @@ fn rule_catalog_1495_destroy_flood_aura_withheld_during_pending_deathrite_order_
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3287,8 +3266,7 @@ fn rule_catalog_1495_destroy_flood_aura_withheld_during_pending_deathrite_order_
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3328,7 +3306,7 @@ fn rule_catalog_1496_destroy_drought_aura_withheld_during_pending_deathrite_orde
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3343,8 +3321,7 @@ fn rule_catalog_1496_destroy_drought_aura_withheld_during_pending_deathrite_orde
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3386,7 +3363,7 @@ fn rule_catalog_1503_return_flood_aura_withheld_during_pending_deathrite_order_o
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3401,8 +3378,7 @@ fn rule_catalog_1503_return_flood_aura_withheld_during_pending_deathrite_order_o
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3446,7 +3422,7 @@ fn rule_catalog_1504_return_drought_aura_withheld_during_pending_deathrite_order
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3461,8 +3437,7 @@ fn rule_catalog_1504_return_drought_aura_withheld_during_pending_deathrite_order
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3505,7 +3480,7 @@ fn rule_catalog_1506_returning_drought_on_drought_occupied_earth_at_c3_relayers_
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3524,8 +3499,7 @@ fn rule_catalog_1506_returning_drought_on_drought_occupied_earth_at_c3_relayers_
     assert!(!offers_return_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3545,7 +3519,7 @@ fn rule_catalog_1506_returning_drought_on_drought_occupied_earth_at_c3_relayers_
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "returning Drought on drought occupied Earth after deathrite-order must relayer the dual-region unit instead of killing it"
+        "returning Drought on drought occupied Earth after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3574,7 +3548,7 @@ fn rule_catalog_1507_destroying_flood_on_flooded_occupied_water_at_c3_relayers_u
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-water"
@@ -3593,8 +3567,7 @@ fn rule_catalog_1507_destroying_flood_on_flooded_occupied_water_at_c3_relayers_u
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3614,7 +3587,7 @@ fn rule_catalog_1507_destroying_flood_on_flooded_occupied_water_at_c3_relayers_u
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "destroying Flood on flooded occupied Water after deathrite-order must relayer the dual-region unit instead of killing it"
+        "destroying Flood on flooded occupied Water after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3643,7 +3616,7 @@ fn rule_catalog_1508_destroying_drought_on_drought_occupied_earth_at_c3_relayers
     let deathrite_ids = setup.deathrite_ids.clone();
     let dualer_id = setup.dualer_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert_eq!(
         state(session)["realm"]["sites"]["C3"]["cardId"],
         "north-earth"
@@ -3662,8 +3635,7 @@ fn rule_catalog_1508_destroying_drought_on_drought_occupied_earth_at_c3_relayers
     assert!(!offers_destroy_aura(session, &aura_id));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     if state(session)["decisionSeat"] == "north" {
         accept_where(session, |descriptor| descriptor["kind"] == "end-turn");
@@ -3683,7 +3655,7 @@ fn rule_catalog_1508_destroying_drought_on_drought_occupied_earth_at_c3_relayers
             .events
             .iter()
             .all(|event| event.event_type != "minion-died"),
-        "destroying Drought on drought occupied Earth after deathrite-order must relayer the dual-region unit instead of killing it"
+        "destroying Drought on drought occupied Earth after trigger-order must relayer the dual-region unit instead of killing it"
     );
     let current = state(session);
     let occupant = realm_unit(&current, &dualer_id);
@@ -3710,7 +3682,7 @@ fn rule_catalog_1519_return_flood_aura_withheld_during_pending_deathrite_order_o
     .expect("complete Flood return on flooded occupied Water site at C3 Deathrite withheld setup");
     let aura_id = setup.aura_id.clone();
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
@@ -3720,7 +3692,7 @@ fn rule_catalog_1519_return_flood_aura_withheld_during_pending_deathrite_order_o
     );
     assert!(
         !offers_return_aura(&setup.session, &aura_id),
-        "return-target-aura Magic on Flood stays withheld during deathrite-order"
+        "return-target-aura Magic on Flood stays withheld during trigger-order"
     );
     assert_exact_replay(&setup.session);
 }
@@ -3744,7 +3716,7 @@ fn rule_catalog_1525_return_drought_aura_withheld_during_pending_deathrite_order
     );
     let aura_id = setup.aura_id.clone();
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
@@ -3754,7 +3726,7 @@ fn rule_catalog_1525_return_drought_aura_withheld_during_pending_deathrite_order
     );
     assert!(
         !offers_return_aura(&setup.session, &aura_id),
-        "return-target-aura Magic on Drought stays withheld during deathrite-order"
+        "return-target-aura Magic on Drought stays withheld during trigger-order"
     );
     assert_exact_replay(&setup.session);
 }
@@ -3776,7 +3748,7 @@ fn rule_catalog_1526_destroy_flood_aura_withheld_during_pending_deathrite_order_
     .expect("complete Flood destroy on flooded occupied Water site at C3 Deathrite withheld setup");
     let aura_id = setup.aura_id.clone();
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-water");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
@@ -3786,7 +3758,7 @@ fn rule_catalog_1526_destroy_flood_aura_withheld_during_pending_deathrite_order_
     );
     assert!(
         !offers_destroy_aura(&setup.session, &aura_id),
-        "destroy-target-aura Magic on Flood stays withheld during deathrite-order"
+        "destroy-target-aura Magic on Flood stays withheld during trigger-order"
     );
     assert_exact_replay(&setup.session);
 }
@@ -3810,7 +3782,7 @@ fn rule_catalog_1527_destroy_drought_aura_withheld_during_pending_deathrite_orde
     );
     let aura_id = setup.aura_id.clone();
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
@@ -3820,7 +3792,7 @@ fn rule_catalog_1527_destroy_drought_aura_withheld_during_pending_deathrite_orde
     );
     assert!(
         !offers_destroy_aura(&setup.session, &aura_id),
-        "destroy-target-aura Magic on Drought stays withheld during deathrite-order"
+        "destroy-target-aura Magic on Drought stays withheld during trigger-order"
     );
     assert_exact_replay(&setup.session);
 }
@@ -3842,7 +3814,7 @@ fn rule_catalog_1528_return_flood_aura_withheld_during_pending_deathrite_order_o
     .expect("complete Flood return on flooded occupied Earth site at C3 Deathrite withheld setup");
     let aura_id = setup.aura_id.clone();
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["realm"]["sites"]["C3"]["cardId"], "north-earth");
     let paused_actions = setup.session.legal_actions().expect("paused legal actions");
     assert!(
@@ -3852,7 +3824,7 @@ fn rule_catalog_1528_return_flood_aura_withheld_during_pending_deathrite_order_o
     );
     assert!(
         !offers_return_aura(&setup.session, &aura_id),
-        "return-target-aura Magic on Flood stays withheld during deathrite-order"
+        "return-target-aura Magic on Flood stays withheld during trigger-order"
     );
     assert_exact_replay(&setup.session);
 }

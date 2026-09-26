@@ -11,7 +11,7 @@
 //! Supplemental 2423–2428 bind cemetery persistence, empty-repeat, enemy-arrival,
 //! multi-minion, far-minion, and a newly summoned Deathrite. Distinct from 0691,
 //! which settles the first C1 Deathrite on the same turn, from 0692, which
-//! burrows every Deathrite then pauses in deathrite-order, and from 1913–1918 /
+//! burrows every Deathrite then pauses in trigger-order, and from 1913–1918 /
 //! 2243–2248, which kill ordinary minions without a same-receipt site draw.
 
 use serde_json::{Value, json};
@@ -444,7 +444,7 @@ fn rule_catalog_0692_cave_in_burrows_then_orders_deathrites() {
     );
 
     let pending = state(&session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert!(
         victim_ids
             .iter()
@@ -466,7 +466,7 @@ fn rule_catalog_0692_cave_in_burrows_then_orders_deathrites() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -477,12 +477,12 @@ fn rule_catalog_0692_cave_in_burrows_then_orders_deathrites() {
     assert_eq!(order_sources, victim_ids);
 
     let (_, ordered) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == victim_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == victim_ids[0]
     });
     assert_eq!(
         event_types(&ordered),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -556,7 +556,7 @@ fn rule_catalog_0710_bury_defers_until_ordered_static_deathrites_finish() {
     });
     assert_eq!(event_types(&cast), ["magic-cast", "minion-burrowed"]);
     let pending = state(&session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert_eq!(pending["decisionSeat"], "south");
     assert_eq!(
         pending["pendingDeathrites"]["deferredOutcomes"],
@@ -577,12 +577,12 @@ fn rule_catalog_0710_bury_defers_until_ordered_static_deathrites_finish() {
         session.replay_value().expect("source pending state")
     );
     let (_, ordered) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == buff_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == buff_ids[0]
     });
     assert_eq!(
         event_types(&ordered),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",

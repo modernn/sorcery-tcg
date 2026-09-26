@@ -1,7 +1,7 @@
 //! Direct proofs for stacked end-of-controller-turn pulses on one minion
 //! (RULE-CATALOG-0389–0390, RULE-CATALOG-0395–0396, RULE-CATALOG-0905,
 //! RULE-CATALOG-0915, RULE-CATALOG-0925, RULE-CATALOG-0935), and deferred
-//! end-turn here-area pulses withheld during deathrite-order
+//! end-turn here-area pulses withheld during trigger-order
 //! (RULE-CATALOG-1208–1230, RULE-CATALOG-1272).
 
 use serde_json::{Value, json};
@@ -1243,7 +1243,7 @@ fn try_pending_deathrite_during_dual_end_turn_pulse(
             && descriptor["cell"] == "C4"
     })?;
     try_accept_where(&mut session, |descriptor| descriptor["kind"] == "end-turn")?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let first_pulser_id = first.0["cardInstanceId"].as_str()?.to_owned();
@@ -1306,7 +1306,7 @@ fn assert_end_turn_pulse_withheld(setup: PendingEndTurnPulseSetup) {
     let first_pulser_id = setup.first_pulser_id.clone();
     let mut session = setup.session;
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(
         session
@@ -1317,7 +1317,7 @@ fn assert_end_turn_pulse_withheld(setup: PendingEndTurnPulseSetup) {
                 event.event_type == "end-turn-damage-allocated"
                     && event.payload["sourceInstanceId"] == first_pulser_id
             }),
-        "first end-turn here-damage pulse must resolve before deathrite-order"
+        "first end-turn here-damage pulse must resolve before trigger-order"
     );
     assert!(
         session
@@ -1328,12 +1328,11 @@ fn assert_end_turn_pulse_withheld(setup: PendingEndTurnPulseSetup) {
                 event.event_type != "end-turn-damage-allocated"
                     || event.payload["sourceInstanceId"] != deferred_pulser_id
             }),
-        "deferred end-turn here-damage pulse must not resolve during deathrite-order"
+        "deferred end-turn here-damage pulse must not resolve during trigger-order"
     );
 
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     assert!(
@@ -1345,7 +1344,7 @@ fn assert_end_turn_pulse_withheld(setup: PendingEndTurnPulseSetup) {
                 event.event_type == "end-turn-damage-allocated"
                     && event.payload["sourceInstanceId"] == deferred_pulser_id
             }),
-        "deferred end-turn here-damage pulse must resume after deathrite-order clears"
+        "deferred end-turn here-damage pulse must resume after trigger-order clears"
     );
     assert_eq!(state(&session)["phase"], "draw");
     assert_exact_replay(&session);

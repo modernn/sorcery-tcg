@@ -4947,16 +4947,16 @@ test('RULE-03 Sinkhole sacrifices sites into neutral Rubble and preserves relati
         'rubble-created',
       ]);
       const drownedInstanceIds = [drownedCard.instanceId, secondDrownedCard.instanceId].sort();
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'south');
       assert.equal(drownedInstanceIds.every((instanceId) => !ctx.state.realm.units
         .some((unit) => unit.instanceId === instanceId)), true);
       assert.equal(drownedInstanceIds.every((instanceId) => !ctx.state.players.south.cemetery
         .some((card) => card.instanceId === instanceId)), true);
       const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(),
       drownedInstanceIds);
       assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
         instanceId === sourceCard.instanceId), true);
@@ -5621,7 +5621,7 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
       'minion-sacrificed',
       'minion-sacrificed',
     ]);
-    assert.equal(ctx.state.phase, 'deathrite-order');
+    assert.equal(ctx.state.phase, 'trigger-order');
     assert.equal(ctx.state.decisionSeat, 'north');
     assert.deepEqual(ctx.state.terminal, { status: 'active' });
     assert.equal(ctx.state.players.north.mana, 2);
@@ -5634,9 +5634,9 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
     assert.equal(orderedLocals.every(({ instanceId }) => !ctx.state.players.north.cemetery
       .some((card) => card.instanceId === instanceId)), true);
     const orderActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites');
+      descriptor.kind === 'order-triggers');
     assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+      descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(),
     orderedLocals.map(({ instanceId }) => instanceId));
     assert.deepEqual(await ctx.legalActions('south'), []);
 
@@ -5656,8 +5656,8 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
 
     const branchHashes: string[] = [];
     for (const orderAction of orderActions) {
-      assert.equal(orderAction.descriptor.kind, 'order-deathrites');
-      if (orderAction.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+      assert.equal(orderAction.descriptor.kind, 'order-triggers');
+      if (orderAction.descriptor.kind !== 'order-triggers') throw new Error('unreachable');
       const chosenInstanceId = orderAction.descriptor.sourceInstanceId;
       const otherInstanceId = orderedLocals.find(({ instanceId }) =>
         instanceId !== chosenInstanceId)?.instanceId;
@@ -5667,7 +5667,7 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
         assert.equal(ordered.accepted, true);
         if (!ordered.accepted) throw new Error('expected Deathrite order to resolve paid summon');
         assert.deepEqual(ordered.receipt.events.map(({ type }) => type), [
-          'deathrite-order-committed',
+          'trigger-order-committed',
           'site-drawn',
           'site-drawn',
           'minion-died',
@@ -5727,13 +5727,13 @@ test('RULE-03 Gnarled Wendigo sacrifices local minions before paying its discoun
         && descriptor.cell === 'C4'
         && descriptor.manaCost === 2
         && descriptor.sacrificedMinionInstanceIds?.length === 2);
-    assert.equal(ctx.state.phase, 'deathrite-order');
+    assert.equal(ctx.state.phase, 'trigger-order');
     const terminalResult = await ctx.step(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites'));
+      descriptor.kind === 'order-triggers'));
     assert.equal(terminalResult.accepted, true);
     if (!terminalResult.accepted) throw new Error('expected terminal Deathrite order to resolve');
     assert.deepEqual(terminalResult.receipt.events.map(({ type }) => type), [
-      'deathrite-order-committed',
+      'trigger-order-committed',
       'site-drawn',
       'minion-died',
       'minion-died',
@@ -6710,7 +6710,7 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
       'magic-cast',
       'unit-stepped',
     ]);
-    assert.equal(ctx.state.phase, 'deathrite-order');
+    assert.equal(ctx.state.phase, 'trigger-order');
     assert.equal(ctx.state.decisionSeat, 'north');
     assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
       instanceId === source.instanceId)?.location, 'C2');
@@ -6721,9 +6721,9 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
     assert.equal(fragiles.every(({ instanceId }) => !ctx.state.players.north.cemetery
       .some((card) => card.instanceId === instanceId)), true);
     const orderActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites');
+      descriptor.kind === 'order-triggers');
     assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+      descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(),
     fragiles.map(({ instanceId }) => instanceId).sort());
 
     const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
@@ -6741,8 +6741,8 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
     });
     const branchHashes: string[] = [];
     for (const orderAction of orderActions) {
-      assert.equal(orderAction.descriptor.kind, 'order-deathrites');
-      if (orderAction.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+      assert.equal(orderAction.descriptor.kind, 'order-triggers');
+      if (orderAction.descriptor.kind !== 'order-triggers') throw new Error('unreachable');
       const chosenInstanceId = orderAction.descriptor.sourceInstanceId;
       const otherInstanceId = fragiles.find(({ instanceId }) =>
         instanceId !== chosenInstanceId)?.instanceId;
@@ -6753,7 +6753,7 @@ test('RULE-03/04 Leap Attack resumes its strike after ordered movement Deathrite
         if (!ordered.accepted) throw new Error('expected Leap Attack to resume after Deathrites');
         const types = ordered.receipt.events.map(({ type }) => type);
         assert.deepEqual(types.slice(0, 5), [
-          'deathrite-order-committed',
+          'trigger-order-committed',
           'site-drawn',
           'site-drawn',
           'minion-died',
@@ -7689,7 +7689,7 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
       assert.equal(ctx.state.players.south.avatar.life, 17);
       assert.equal(result.receipt.events.some(({ payload, type }) => type === 'avatar-life-lost'
         && (payload as { amount: number }).amount === 3), true);
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'south');
       assert.equal(result.receipt.events.some(({ type }) => type === 'magic-resolved'), false);
       assert.equal(result.receipt.events.some(({ type }) =>
@@ -7709,12 +7709,12 @@ test('RULE-03/04 Minor Explosion damages every unit at a location up to two card
       assert.equal([deathrite.instanceId, stealthed.instanceId].every((instanceId) =>
         !ctx.state.players.south.cemetery.some((card) => card.instanceId === instanceId)), true);
       const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(),
       [deathrite.instanceId, stealthed.instanceId].sort());
       const resolved = await ctx.step(orderActions.find(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites'
+        descriptor.kind === 'order-triggers'
           && descriptor.sourceInstanceId === deathrite.instanceId)!);
       assert.equal(resolved.accepted, true);
       if (!resolved.accepted) return;
@@ -9204,7 +9204,7 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
         && descriptor.path.map(({ cell }) => cell).join(',') === 'B4,A4,B4,C4'));
     assert.equal(defended.accepted, true);
     if (!defended.accepted) return;
-    assert.equal(ctx.state.phase, 'deathrite-order');
+    assert.equal(ctx.state.phase, 'trigger-order');
     assert.equal(ctx.state.decisionSeat, 'north');
     assert.deepEqual(defended.receipt.events.map(({ type }) => type), ['basic-movement-started']);
     assert.equal(fragiles.every(({ instanceId }) => !ctx.state.realm.units
@@ -9212,9 +9212,9 @@ test('RULE-04 aura-loss deaths cannot restore stale combat during a defender pat
     assert.equal(fragiles.every(({ instanceId }) => !ctx.state.players.north.cemetery
       .some((card) => card.instanceId === instanceId)), true);
     const orderActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites');
+      descriptor.kind === 'order-triggers');
     assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(),
+      descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(),
     fragiles.map(({ instanceId }) => instanceId).sort());
 
     await ctx.resume(parseGameCheckpoint(serializeGameCheckpoint(ctx.checkpoint())));
@@ -13938,7 +13938,7 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
         'site-played',
       ]);
       assert.deepEqual(interrupted.receipt.randomDraws, []);
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'north');
       assert.equal(ctx.state.realm.sites.C3?.instanceId, top.instanceId);
       assert.equal(ctx.state.players.north.avatar.tapped, true);
@@ -13956,7 +13956,7 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
         canonicalJson(ctx.session as unknown as JsonValue),
       );
       const orders = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.equal(orders.length, 2);
       assert.deepEqual(await ctx.legalActions('south'), []);
       assert.deepEqual(
@@ -13965,8 +13965,8 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
       );
       const branchHashes: string[] = [];
       for (const order of orders) {
-        assert.equal(order.descriptor.kind, 'order-deathrites');
-        if (order.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+        assert.equal(order.descriptor.kind, 'order-triggers');
+        if (order.descriptor.kind !== 'order-triggers') throw new Error('unreachable');
         const chosenInstanceId = order.descriptor.sourceInstanceId;
         const otherInstanceId = deathrites.find(({ instanceId }) =>
           instanceId !== chosenInstanceId)?.instanceId;
@@ -13976,7 +13976,7 @@ test('RULE-02/03 site Genesis resumes after ordered terrain-replacement Deathrit
           assert.equal(resolved.accepted, true);
           if (!resolved.accepted) throw new Error('expected site Genesis to resume');
           assert.deepEqual(resolved.receipt.events.map(({ type }) => type), [
-            'deathrite-order-committed',
+            'trigger-order-committed',
             'site-drawn',
             'site-drawn',
             'minion-died',
@@ -15204,7 +15204,7 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
             && descriptor.amount === (deathriteIds.includes(descriptor.targetInstanceId) ? 3 : 0));
       }
 
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'south');
       assert.equal(deathriteIds.every((instanceId) => !ctx.state.players.south.cemetery
         .some((card) => card.instanceId === instanceId)), true);
@@ -15218,9 +15218,9 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
           && 'instanceId' in payload
           && payload.instanceId === attackerInstanceId), false);
       const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), deathriteIds);
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(), deathriteIds);
       const ordered = await ctx.step(orderActions[0]!);
       assert.equal(ordered.accepted, true);
       if (!ordered.accepted) return;
@@ -15232,7 +15232,7 @@ test('RULE-04 attacking-only first strike resolves deaths before normal strikes 
           && 'sourceInstanceId' in payload ? payload.sourceInstanceId : undefined)
         .filter((source, index, sources) => source !== undefined && sources.indexOf(source) === index);
       assert.deepEqual(orderedSources, [
-        orderActions[0]!.descriptor.kind === 'order-deathrites'
+        orderActions[0]!.descriptor.kind === 'order-triggers'
           ? orderActions[0]!.descriptor.sourceInstanceId
           : '',
         deathriteIds.find((instanceId) => instanceId !== orderedSources[0])!,
@@ -16438,7 +16438,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
             'projectile-shot',
             'unit-dragged',
           ]);
-          assert.equal(fork.state.phase, 'deathrite-order');
+          assert.equal(fork.state.phase, 'trigger-order');
           assert.equal(fork.state.decisionSeat, 'south');
           assert.equal(fork.state.realm.units.find(({ instanceId }) =>
             instanceId === target.instanceId)?.location, 'C3');
@@ -16454,7 +16454,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
             canonicalJson(fork.session as unknown as JsonValue),
           );
           const orders = (await fork.legalActions('south')).filter(({ descriptor }) =>
-            descriptor.kind === 'order-deathrites');
+            descriptor.kind === 'order-triggers');
           assert.equal(orders.length, 2);
           assert.equal((await fork.legalActions('north')).length, 0);
           const resolved = await fork.step(orders[choiceIndex]!);
@@ -16463,7 +16463,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
           assert.equal(fork.state.stateVersion, restored.state.stateVersion + 1);
           const types = resolved.receipt.events.map(({ type }) => type);
           assert.deepEqual(types.slice(0, 5), [
-            'deathrite-order-committed',
+            'trigger-order-committed',
             'site-drawn',
             'site-drawn',
             'minion-died',
@@ -16503,7 +16503,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
           assert.equal(interrupted.accepted, true);
           if (!interrupted.accepted) throw new Error('expected final drag edge to reach Deathrites');
           assert.equal(fork.state.stateVersion, ctx.state.stateVersion + 1);
-          assert.equal(fork.state.phase, 'deathrite-order');
+          assert.equal(fork.state.phase, 'trigger-order');
           assert.equal(fork.state.realm.units.find(({ instanceId }) =>
             instanceId === target.instanceId)?.location, 'C4');
           assert.equal(interrupted.receipt.events.some(({ type }) => type === 'fight-started'), false);
@@ -16511,7 +16511,7 @@ test('RULE-03/04 a drag projectile resumes after ordered movement Deathrites bef
             fork.checkpoint(),
           )));
           const orders = (await fork.legalActions('south')).filter(({ descriptor }) =>
-            descriptor.kind === 'order-deathrites');
+            descriptor.kind === 'order-triggers');
           assert.equal(orders.length, 2);
           const resolved = await fork.step(orders[choiceIndex]!);
           assert.equal(resolved.accepted, true);
@@ -18963,19 +18963,19 @@ test('RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Death
           && descriptor.cell === 'C4'));
       assert.equal(triggered.accepted, true);
       if (!triggered.accepted) return;
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'north');
       assert.deepEqual(await ctx.legalActions('south'), []);
       const apActions = (await ctx.legalActions('north')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(apActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), apInstanceIds);
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(), apInstanceIds);
       assert.equal(triggered.receipt.events.some(({ type }) =>
         type === 'site-drawn' || type === 'minion-died'), false);
 
       const apFirst = apActions[0]!;
-      assert.equal(apFirst.descriptor.kind, 'order-deathrites');
-      if (apFirst.descriptor.kind !== 'order-deathrites') return;
+      assert.equal(apFirst.descriptor.kind, 'order-triggers');
+      if (apFirst.descriptor.kind !== 'order-triggers') return;
       const apFirstInstanceId = apFirst.descriptor.sourceInstanceId;
       const apCommittedOrder = [
         apFirstInstanceId,
@@ -18984,9 +18984,9 @@ test('RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Death
       const apCommitted = await ctx.step(apFirst);
       assert.equal(apCommitted.accepted, true);
       if (!apCommitted.accepted) return;
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'south');
-      assert.deepEqual(apCommitted.receipt.events.map(({ type }) => type), ['deathrite-order-committed']);
+      assert.deepEqual(apCommitted.receipt.events.map(({ type }) => type), ['trigger-order-committed']);
 
       const restored = await SetupCtx.resumeCheckpoint(parseGameCheckpoint(serializeGameCheckpoint(
         ctx.checkpoint(),
@@ -18996,12 +18996,12 @@ test('RULE-05 AP commits before NAP, then NAP Deathrites resolve before AP Death
         canonicalJson(ctx.session as unknown as JsonValue),
       );
       const napActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(napActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), napInstanceIds);
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(), napInstanceIds);
       const napFirst = napActions[0]!;
-      assert.equal(napFirst.descriptor.kind, 'order-deathrites');
-      if (napFirst.descriptor.kind !== 'order-deathrites') return;
+      assert.equal(napFirst.descriptor.kind, 'order-triggers');
+      if (napFirst.descriptor.kind !== 'order-triggers') return;
       const napFirstInstanceId = napFirst.descriptor.sourceInstanceId;
       const napCommittedOrder = [
         napFirstInstanceId,
@@ -19305,13 +19305,13 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
           && descriptor.cell === 'C1'));
       assert.equal(result.accepted, true);
       if (!result.accepted) return;
-      assert.equal(ctx.state.phase, 'deathrite-order');
+      assert.equal(ctx.state.phase, 'trigger-order');
       assert.equal(ctx.state.decisionSeat, 'south');
       assert.deepEqual(await ctx.legalActions('north'), []);
       const orderActions = (await ctx.legalActions('south')).filter(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites');
+        descriptor.kind === 'order-triggers');
       assert.deepEqual(orderActions.flatMap(({ descriptor }) =>
-        descriptor.kind === 'order-deathrites' ? [descriptor.sourceInstanceId] : []).sort(), scarabInstanceIds);
+        descriptor.kind === 'order-triggers' ? [descriptor.sourceInstanceId] : []).sort(), scarabInstanceIds);
       assert.equal(scarabInstanceIds.every((instanceId) => !ctx.state.players.south.cemetery
         .some((card) => card.instanceId === instanceId)), true);
       assert.equal(ctx.state.realm.units.some(({ instanceId }) => instanceId === chainedInstanceId), true);
@@ -19321,7 +19321,7 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       const beforeOrder = canonicalJson(ctx.state);
       const forged = await ctx.stepRequest({
         actionId: opaqueActionId('sorcery-core-v1', 'south', ctx.state.stateVersion, {
-          kind: 'order-deathrites',
+          kind: 'order-triggers',
           sourceInstanceId,
         }),
         seat: 'south',
@@ -19349,8 +19349,8 @@ test('RULE-05 Deathrite damages each other remaining unit here in simultaneous c
       const northAvatarId = ctx.state.players.north.avatar.card.instanceId;
       const branchHashes: string[] = [];
       for (const orderedFirst of orderActions) {
-        assert.equal(orderedFirst.descriptor.kind, 'order-deathrites');
-        if (orderedFirst.descriptor.kind !== 'order-deathrites') throw new Error('unreachable');
+        assert.equal(orderedFirst.descriptor.kind, 'order-triggers');
+        if (orderedFirst.descriptor.kind !== 'order-triggers') throw new Error('unreachable');
         const chosenInstanceId = orderedFirst.descriptor.sourceInstanceId;
         const otherInstanceId = scarabInstanceIds.find((instanceId) => instanceId !== chosenInstanceId);
         assert.ok(otherInstanceId);

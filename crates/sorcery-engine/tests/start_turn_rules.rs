@@ -11,8 +11,8 @@
 //! (RULE-CATALOG-0980), and thin-Atlas draw-then-teleport edges
 //! (RULE-CATALOG-0983), and thin-library draw-sites-then-draw-spells edges
 //! (RULE-CATALOG-0995), resolve-start-turn-trigger withheld during
-//! deathrite-order (RULE-CATALOG-1163), and stacked start-turn triggers
-//! withheld during deathrite-order (RULE-CATALOG-1183–1310).
+//! trigger-order (RULE-CATALOG-1163), and stacked start-turn triggers
+//! withheld during trigger-order (RULE-CATALOG-1183–1310).
 
 use serde_json::{Value, json};
 use sorcery_engine::canonical::identity_hash;
@@ -3370,7 +3370,7 @@ fn try_pending_deathrite_during_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -3409,7 +3409,7 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
     let gain_id = setup.gain_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -3424,14 +3424,14 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
-        "deathrite-order must issue no resolve-start-turn-trigger"
+        "trigger-order must issue no resolve-start-turn-trigger"
     );
 
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -3442,8 +3442,7 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3459,7 +3458,7 @@ fn rule_catalog_1163_resolve_start_turn_trigger_withheld_during_pending_deathrit
                 action.descriptor["kind"] == "resolve-start-turn-trigger"
                     && action.descriptor["sourceInstanceId"] == gain_id
             }),
-        "resolve-start-turn-trigger must return once deathrite-order clears"
+        "resolve-start-turn-trigger must return once trigger-order clears"
     );
 
     accept_where(session, |descriptor| {
@@ -3597,7 +3596,7 @@ fn try_pending_deathrite_during_start_turn_teleport(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -3636,7 +3635,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "start-turn");
     assert!(deathrite_ids.iter().all(|instance_id| {
@@ -3652,7 +3651,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
-        "deathrite-order must issue no resolve-start-turn-trigger"
+        "trigger-order must issue no resolve-start-turn-trigger"
     );
     assert!(
         session
@@ -3669,7 +3668,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -3680,8 +3679,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3697,7 +3695,7 @@ fn rule_catalog_1180_start_turn_teleport_trigger_withheld_during_pending_deathri
                 action.descriptor["kind"] == "resolve-start-turn-trigger"
                     && action.descriptor["sourceInstanceId"] == teleport_id
             }),
-        "draw-sites teleport trigger must return once deathrite-order clears"
+        "draw-sites teleport trigger must return once trigger-order clears"
     );
     assert_exact_replay(session);
 }
@@ -3829,7 +3827,7 @@ fn try_pending_deathrite_during_draw_mill_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -3868,7 +3866,7 @@ fn rule_catalog_1183_draw_then_mill_start_turn_trigger_withheld_during_pending_d
     let stack_id = setup.stack_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(
         session
@@ -3876,12 +3874,11 @@ fn rule_catalog_1183_draw_then_mill_start_turn_trigger_withheld_during_pending_d
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
-        "deathrite-order must issue no resolve-start-turn-trigger"
+        "trigger-order must issue no resolve-start-turn-trigger"
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3897,7 +3894,7 @@ fn rule_catalog_1183_draw_then_mill_start_turn_trigger_withheld_during_pending_d
                 action.descriptor["kind"] == "resolve-start-turn-trigger"
                     && action.descriptor["sourceInstanceId"] == stack_id
             }),
-        "draw-then-mill start-turn trigger must return once deathrite-order clears"
+        "draw-then-mill start-turn trigger must return once trigger-order clears"
     );
     assert_exact_replay(session);
 }
@@ -4014,7 +4011,7 @@ fn try_pending_deathrite_during_draw_sites_mill_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -4051,7 +4048,7 @@ fn rule_catalog_1184_draw_sites_then_mill_start_turn_trigger_withheld_during_pen
     let deathrite_ids = setup.deathrite_ids.clone();
     let stack_id = setup.stack_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -4060,8 +4057,7 @@ fn rule_catalog_1184_draw_sites_then_mill_start_turn_trigger_withheld_during_pen
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger")
     );
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -4204,7 +4200,7 @@ fn try_pending_deathrite_during_draw_lure_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -4239,7 +4235,7 @@ fn rule_catalog_1185_draw_spells_then_lure_start_turn_trigger_withheld_during_pe
     let deathrite_ids = setup.deathrite_ids.clone();
     let stack_id = setup.stack_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -4248,8 +4244,7 @@ fn rule_catalog_1185_draw_spells_then_lure_start_turn_trigger_withheld_during_pe
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger")
     );
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -4269,7 +4264,7 @@ fn assert_stacked_start_turn_withheld(setup: PendingDeathriteDrawMillSetup) {
     let deathrite_ids = setup.deathrite_ids.clone();
     let stack_id = setup.stack_id.clone();
     let mut session = setup.session;
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -4278,8 +4273,7 @@ fn assert_stacked_start_turn_withheld(setup: PendingDeathriteDrawMillSetup) {
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger")
     );
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(&session)["phase"], "start-turn");
     assert!(
@@ -4665,7 +4659,7 @@ fn try_pending_deathrite_during_draw_sites_here_damage_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -6861,10 +6855,9 @@ fn rule_catalog_1243_teleport_then_life_loss_start_turn_trigger_withheld_during_
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -6950,10 +6943,9 @@ fn rule_catalog_1244_teleport_then_life_gain_start_turn_trigger_withheld_during_
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -7039,10 +7031,9 @@ fn rule_catalog_1245_teleport_then_mana_gain_start_turn_trigger_withheld_during_
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -7340,10 +7331,9 @@ fn rule_catalog_1250_teleport_then_here_damage_start_turn_trigger_withheld_durin
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -7645,10 +7635,9 @@ fn rule_catalog_1256_loss_then_teleport_start_turn_trigger_withheld_during_pendi
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -7732,10 +7721,9 @@ fn rule_catalog_1257_gain_then_teleport_start_turn_trigger_withheld_during_pendi
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -7819,10 +7807,9 @@ fn rule_catalog_1258_mana_then_teleport_start_turn_trigger_withheld_during_pendi
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -8045,10 +8032,9 @@ fn rule_catalog_1263_here_damage_then_teleport_start_turn_trigger_withheld_durin
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -10722,10 +10708,9 @@ fn rule_catalog_1309_teleport_then_draw_spells_start_turn_trigger_withheld_durin
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(
@@ -10811,10 +10796,9 @@ fn rule_catalog_1310_teleport_then_draw_sites_start_turn_trigger_withheld_during
     let deathrite_ids = setup.deathrite_ids.clone();
     let teleport_id = setup.teleport_id.clone();
     let session = &mut setup.session;
-    assert_eq!(state(session)["phase"], "deathrite-order");
+    assert_eq!(state(session)["phase"], "trigger-order");
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(session)["phase"], "start-turn");
     assert!(

@@ -299,10 +299,16 @@ caster's new location determines range. Started frames keep their established bi
 The existing resolution driver also retains ordered caller work. Token-producing
 Magic queues a simultaneous entry group, its remaining draw, and one completion;
 a token's Genesis can suspend that sequence for Deathrite ordering. All members of
-an entry group enter before any Genesis resolves. Multiple simultaneous Genesis
-currently abort explicitly because player-selected trigger ordering has not migrated;
-choosing an arbitrary order would misrepresent the rules. Site effects and raised-minion
-Magic resume their remaining work through the same continuation. The pending state
+an entry group enter before any Genesis resolves. Compiled Genesis and Deathrite
+groups use the same player-selected ordering kernel and public `order-triggers`
+action. The active player commits their order first; the non-active player's
+effects resolve first. Each nested death chain finishes its corpse cleanup before
+the next Genesis resumes. Trigger records retain the ability's controller and
+source incarnation; a departed or re-entered source cannot start its old trigger.
+Single Genesis invocations bypass the ordering batch, and the batch moves records
+into resolution without cloning them. Simultaneous uncompiled Genesis remains
+explicitly unsupported until its choices and ordered effects migrate. Site effects
+and raised-minion Magic resume their remaining work through the same continuation. The pending state
 includes the full sequence and any held Magic, so checkpoint branches preserve both
 event order and card ownership. Terminal cleanup retires the spell once and skips
 remaining effects and draws.

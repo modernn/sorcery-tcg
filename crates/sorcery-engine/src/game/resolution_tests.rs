@@ -156,14 +156,14 @@ fn order_action(game: &Game) -> IssuedAction {
     assert_eq!(
         actions
             .iter()
-            .filter(|action| matches!(action.descriptor, ActionDescriptor::OrderDeathrites { .. }))
+            .filter(|action| matches!(action.descriptor, ActionDescriptor::OrderTriggers { .. }))
             .count(),
         2,
         "two Deathrites require player ordering"
     );
     actions
         .into_iter()
-        .find(|action| matches!(action.descriptor, ActionDescriptor::OrderDeathrites { .. }))
+        .find(|action| matches!(action.descriptor, ActionDescriptor::OrderTriggers { .. }))
         .expect("Deathrite ordering action")
 }
 
@@ -194,7 +194,7 @@ fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
     let (initial_events, _) = game
         .apply_action_recorded(&action)
         .expect("token Magic pauses for Genesis Deathrites");
-    assert_eq!(game.position.phase, Phase::DeathriteOrder);
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
     assert_eq!(token_count(&game), 1);
     assert_eq!(cemetery_count(&game, &magic_id), 0);
     assert!(
@@ -229,7 +229,7 @@ fn token_magic_holds_draw_and_completion_behind_ordered_genesis_deathrites() {
             .count(),
         1
     );
-    assert!(event_types(&events).contains(&"deathrite-order-committed"));
+    assert!(event_types(&events).contains(&"trigger-order-committed"));
     let parent_draws: Vec<_> = events
         .iter()
         .enumerate()
@@ -259,7 +259,7 @@ fn terminal_token_genesis_skips_draw_and_later_resolution_but_retires_magic_once
     let (initial_events, _) = game
         .apply_action_recorded(&action)
         .expect("token Genesis pauses before its draw");
-    assert_eq!(game.position.phase, Phase::DeathriteOrder);
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
     assert_eq!(token_count(&game), 1);
     let continuation = game.authoritative_state()["pendingDeathrites"]["continuation"].clone();
     assert_eq!(continuation["kind"], "sequence");
@@ -344,18 +344,41 @@ fn simultaneous_entry_places_all_tokens_before_genesis_damage() {
 }
 
 #[test]
-fn multiple_simultaneous_genesis_requires_supported_trigger_ordering() {
+fn simultaneous_genesis_resumes_after_nested_deathrite_ordering() {
     let (mut game, _) = fixture(false);
     let entries = vec![
         token_entry(&game, "resolution-token", 0),
         token_entry(&game, "resolution-token", 1),
     ];
-    let before = game.position.clone();
+    let survivor = entries[0].token.card.instance_id.clone();
     let mut events = Vec::new();
+    game.finish_token_entries(entries, &mut super::OutcomeLog::Record(&mut events))
+        .expect("simultaneous entry");
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
+    assert!(game.position.pending_trigger_order.is_some());
+    assert_eq!(event_types(&events), ["minion-summoned", "minion-summoned"]);
+    let first = game
+        .legal_actions()
+        .unwrap()
+        .into_iter()
+        .find(|action| {
+            matches!(&action.descriptor, ActionDescriptor::OrderTriggers { source_instance_id }
+            if *source_instance_id == survivor)
+        })
+        .unwrap();
+    game.apply_action_recorded(&first)
+        .expect("Genesis interrupts with Deathrites");
+    assert_eq!(game.position.phase, Phase::TriggerOrder);
+    assert!(game.position.pending_deathrites.is_some());
+    let deathrite_order = game.legal_actions().unwrap().into_iter().next().unwrap();
+    game.apply_action_recorded(&deathrite_order)
+        .expect("finish nested death chain");
+    assert_eq!(game.position.phase, Phase::Main);
+    assert_eq!(token_count(&game), 1);
     assert!(
-        matches!(game.finish_token_entries(entries, &mut super::OutcomeLog::Record(&mut events)),
-        Err(super::GameError::UnsupportedMechanic(reason)) if reason.contains("trigger ordering"))
+        game.position
+            .units
+            .iter()
+            .any(|unit| unit.card.instance_id == survivor)
     );
-    assert_eq!(game.position, before);
-    assert!(events.is_empty());
 }

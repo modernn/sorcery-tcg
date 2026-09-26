@@ -3056,7 +3056,7 @@ fn try_pending_deathrite_with_ready_potion(encoded: &str) -> Option<PendingDeath
     try_take_action(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -3091,7 +3091,7 @@ fn rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending
     let near_id = setup.near_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -3123,7 +3123,7 @@ fn rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -3134,8 +3134,7 @@ fn rule_catalog_1161_activate_artifact_sacrifice_control_withheld_during_pending
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -3277,7 +3276,7 @@ fn try_pending_deathrite_with_activate_discard_to_gain_control(
         || !try_accept_where(&mut session, |descriptor| {
             descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
         })
-        || state(&session)["phase"] != "deathrite-order"
+        || state(&session)["phase"] != "trigger-order"
     {
         return None;
     }
@@ -3308,7 +3307,7 @@ fn rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_de
     let sellsword_id = setup.sellsword_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     let sellsword = realm_unit(&paused, &sellsword_id).expect("Sellsword remains in play");
     assert_eq!(sellsword["location"], "C3");
@@ -3333,7 +3332,7 @@ fn rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_de
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -3344,8 +3343,7 @@ fn rule_catalog_1162_activate_discard_to_gain_control_withheld_during_pending_de
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

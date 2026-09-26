@@ -4302,7 +4302,7 @@ fn try_pending_deathrite_with_chain_magic(encoded: &str) -> Option<PendingDeathr
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -4331,7 +4331,7 @@ fn rule_catalog_1105_chain_magic_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -4358,7 +4358,7 @@ fn rule_catalog_1105_chain_magic_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -4369,8 +4369,7 @@ fn rule_catalog_1105_chain_magic_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -4515,7 +4514,7 @@ fn try_pending_deathrite_with_extend_hops(encoded: &str) -> Option<PendingDeathr
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -4548,7 +4547,7 @@ fn rule_catalog_1151_extend_chain_magic_withheld_during_pending_deathrite_order(
     let second_id = setup.second_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -4580,7 +4579,7 @@ fn rule_catalog_1151_extend_chain_magic_withheld_during_pending_deathrite_order(
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -4591,8 +4590,7 @@ fn rule_catalog_1151_extend_chain_magic_withheld_during_pending_deathrite_order(
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -4851,7 +4849,7 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
         .expect("extend before Deathrites");
 
     let paused = branched.authoritative_state();
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         paused["pendingChainMagic"]["targets"],
@@ -4886,14 +4884,14 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
                     ActionDescriptor::ResolveChainMagic | ActionDescriptor::ExtendChainMagic { .. }
                 )
             }),
-        "deathrite-order must issue no resolve-chain-magic"
+        "trigger-order must issue no resolve-chain-magic"
     );
 
     let order_sources: Vec<_> = branched
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| issued_descriptor(action)["kind"] == "order-deathrites")
+        .filter(|action| issued_descriptor(action)["kind"] == "order-triggers")
         .map(|action| {
             issued_descriptor(&action)["sourceInstanceId"]
                 .as_str()
@@ -4908,7 +4906,7 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
         .into_iter()
         .find(|action| {
             let descriptor = issued_descriptor(action);
-            descriptor["kind"] == "order-deathrites"
+            descriptor["kind"] == "order-triggers"
                 && descriptor["sourceInstanceId"] == deathrite_ids[0]
         })
         .expect("order first Deathrite");
@@ -4924,6 +4922,6 @@ fn rule_catalog_1152_resolve_chain_magic_withheld_during_pending_deathrite_order
             .expect("resumed chain actions")
             .iter()
             .any(|action| matches!(action.descriptor(), ActionDescriptor::ResolveChainMagic)),
-        "resolve-chain-magic must return once deathrite-order clears"
+        "resolve-chain-magic must return once trigger-order clears"
     );
 }

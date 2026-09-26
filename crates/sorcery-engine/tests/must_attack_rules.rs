@@ -654,7 +654,7 @@ fn try_pending_deathrite_with_must_attack(
                 && descriptor["cardId"] == "north-source"
                 && descriptor["cell"] == "C4"
         })
-        || state(&session)["phase"] != "deathrite-order"
+        || state(&session)["phase"] != "trigger-order"
     {
         return None;
     }
@@ -689,7 +689,7 @@ fn rule_catalog_1170_must_attack_move_and_attack_withheld_during_pending_deathri
     let target_id = setup.target_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         unit_instance_id(&paused, "north-source").as_ref(),
@@ -719,7 +719,7 @@ fn rule_catalog_1170_must_attack_move_and_attack_withheld_during_pending_deathri
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -730,8 +730,7 @@ fn rule_catalog_1170_must_attack_move_and_attack_withheld_during_pending_deathri
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -865,7 +864,7 @@ fn try_pending_deathrite_with_enemies_must_attack(
                 && descriptor["cardId"] == "north-source"
                 && descriptor["cell"] == "C4"
         })
-        || state(&session)["phase"] != "deathrite-order"
+        || state(&session)["phase"] != "trigger-order"
     {
         return None;
     }
@@ -900,7 +899,7 @@ fn rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending
     let target_id = setup.target_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(
         unit_instance_id(&paused, "north-source").as_ref(),
@@ -930,7 +929,7 @@ fn rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -941,8 +940,7 @@ fn rule_catalog_1181_enemies_must_attack_move_and_attack_withheld_during_pending
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -1106,7 +1104,7 @@ fn try_pending_deathrite_with_nearby_must_attack(
         descriptor["kind"] == "summon-minion"
             && descriptor["cardId"] == "north-source"
             && descriptor["cell"] == "C4"
-    }) || state(&session)["phase"] != "deathrite-order"
+    }) || state(&session)["phase"] != "trigger-order"
     {
         return None;
     }
@@ -1149,7 +1147,7 @@ fn rule_catalog_1313_nearby_must_attack_move_and_attack_withheld_during_pending_
     let source_id = setup.source_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "north");
     assert!(
         session
@@ -1164,7 +1162,7 @@ fn rule_catalog_1313_nearby_must_attack_move_and_attack_withheld_during_pending_
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1175,8 +1173,7 @@ fn rule_catalog_1313_nearby_must_attack_move_and_attack_withheld_during_pending_
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

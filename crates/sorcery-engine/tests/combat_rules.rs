@@ -2372,7 +2372,7 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
     }
 
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(realm_unit(&paused, &aura_id).is_none());
     assert!(
@@ -2393,18 +2393,17 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
             .legal_actions()
             .expect("Deathrite order actions")
             .iter()
-            .any(|action| action.descriptor["kind"] == "order-deathrites")
+            .any(|action| action.descriptor["kind"] == "order-triggers")
     );
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(
         event_types(&resolved),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -2450,7 +2449,7 @@ fn rule_catalog_1019_move_and_attack_withheld_during_pending_deathrite_order() {
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(
         !move_and_attack_unit_ids(&session).is_empty(),
-        "Move and Attack must be offered again once deathrite-order clears"
+        "Move and Attack must be offered again once trigger-order clears"
     );
     assert_exact_replay(&session);
 }
@@ -2637,7 +2636,7 @@ fn try_pending_declare_attack_during_deathrite_order_inner(
     })
     .ok_or("move-and-attack")?;
     let paused = state(&session);
-    if paused["phase"] != "deathrite-order" {
+    if paused["phase"] != "trigger-order" {
         return Err("phase");
     }
     if paused["pendingDeathrites"]["returnPhase"] != "attack" {
@@ -2682,7 +2681,7 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "north");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "attack");
     assert!(
@@ -2697,13 +2696,13 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
     assert!(no_kind(session, "declare-attack"));
     assert!(
         no_kind(session, "decline-attack"),
-        "deathrite-order must issue no decline-attack"
+        "trigger-order must issue no decline-attack"
     );
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -2714,8 +2713,7 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -2724,11 +2722,11 @@ fn rule_catalog_1153_declare_attack_withheld_during_pending_deathrite_order() {
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(
         offers_kind(session, "declare-attack"),
-        "Declare Attack must be offered again once deathrite-order clears"
+        "Declare Attack must be offered again once trigger-order clears"
     );
     assert!(
         offers_kind(session, "decline-attack"),
-        "Decline Attack must be offered again once deathrite-order clears"
+        "Decline Attack must be offered again once trigger-order clears"
     );
     accept_where(session, |descriptor| {
         descriptor["kind"] == "declare-attack" && descriptor["target"]["kind"] == "site"
@@ -2747,14 +2745,13 @@ fn rule_catalog_1174_decline_attack_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "attack");
     assert!(no_kind(session, "declare-attack"));
     assert!(no_kind(session, "decline-attack"));
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     assert_eq!(state(session)["phase"], "attack");
@@ -2879,14 +2876,13 @@ fn rule_catalog_1154_allocate_strike_withheld_during_pending_deathrite_order() {
     }
 
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(realm_unit(&paused, &aura_id).is_none());
     assert!(no_kind(&session, "allocate-strike"));
 
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(&session);
@@ -2895,7 +2891,7 @@ fn rule_catalog_1154_allocate_strike_withheld_during_pending_deathrite_order() {
     assert!(resumed["pendingDeathrites"].is_null());
     assert!(
         !move_and_attack_unit_ids(&session).is_empty(),
-        "Move and Attack must be offered again once deathrite-order clears"
+        "Move and Attack must be offered again once trigger-order clears"
     );
     assert_exact_replay(&session);
 }

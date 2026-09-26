@@ -726,7 +726,7 @@ fn try_cast_rain_to_deathrite_order(setup: &mut PendingDeathriteAvatarDrawSetup)
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })
     .is_some()
-        && state(&setup.session)["phase"] == "deathrite-order"
+        && state(&setup.session)["phase"] == "trigger-order"
 }
 
 fn try_pending_deathrite_with_avatar_site_draw(
@@ -765,7 +765,7 @@ fn rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order() 
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
     assert!(
@@ -789,7 +789,7 @@ fn rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order() 
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -800,8 +800,7 @@ fn rule_catalog_1132_avatar_site_draw_withheld_during_pending_deathrite_order() 
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -834,7 +833,7 @@ fn rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order()
     assert!(try_cast_rain_to_deathrite_order(&mut setup));
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
     assert!(no_kind(session, "draw-spell"));
@@ -846,7 +845,7 @@ fn rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order()
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -857,8 +856,7 @@ fn rule_catalog_1133_avatar_spell_draw_withheld_during_pending_deathrite_order()
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -985,7 +983,7 @@ fn try_pending_deathrite_during_draw_step(encoded: &str) -> Option<PendingDeathr
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -1022,7 +1020,7 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "draw");
     assert!(deathrite_ids.iter().all(|instance_id| {
@@ -1038,14 +1036,14 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "draw"),
-        "deathrite-order must issue no draw while Draw step stays pending"
+        "trigger-order must issue no draw while Draw step stays pending"
     );
 
     let order_sources: Vec<_> = session
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1056,8 +1054,7 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -1070,7 +1067,7 @@ fn rule_catalog_1173_draw_withheld_during_pending_deathrite_order() {
             .expect("resumed legal actions")
             .iter()
             .any(|action| action.descriptor["kind"] == "draw"),
-        "draw must return once deathrite-order clears"
+        "draw must return once trigger-order clears"
     );
     assert_exact_replay(session);
 }

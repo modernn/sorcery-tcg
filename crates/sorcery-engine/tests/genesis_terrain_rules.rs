@@ -268,7 +268,7 @@ fn rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deat
         ["rubble-replaced", "site-played"]
     );
     assert!(interrupted.random_draws.is_empty());
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert_eq!(state(&session)["decisionSeat"], "north");
     assert_eq!(
         state(&session)["realm"]["sites"]["C3"]["instanceId"],
@@ -326,7 +326,7 @@ fn rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deat
         .into_iter()
         .filter(|action| {
             action.seat == sorcery_engine::contract::Seat::North
-                && action.descriptor["kind"] == "order-deathrites"
+                && action.descriptor["kind"] == "order-triggers"
         })
         .collect::<Vec<_>>();
     assert_eq!(orders.len(), 2);
@@ -344,12 +344,12 @@ fn rule_catalog_0860_site_genesis_resumes_after_ordered_terrain_replacement_deat
             .as_str()
             .expect("other instance ID");
         let (_, resolved) = accept_where(&mut branch, |descriptor| {
-            descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == chosen
+            descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == chosen
         });
         assert_eq!(
             event_types(&resolved),
             [
-                "deathrite-order-committed",
+                "trigger-order-committed",
                 "site-drawn",
                 "site-drawn",
                 "minion-died",
@@ -566,7 +566,7 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
         ["rubble-replaced", "site-played"]
     );
     assert!(!event_types(&interrupted).contains(&"mana-gained"));
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert_eq!(state(&session)["decisionSeat"], "north");
     assert_eq!(
         state(&session)["players"]["north"]["atlas"]
@@ -600,7 +600,7 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(orders.len(), 2);
 
@@ -608,12 +608,12 @@ fn rule_catalog_0897_ordered_terrain_deathrites_end_game_before_deferred_genesis
         .as_str()
         .expect("chosen source");
     let (_, terminal) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == chosen
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == chosen
     });
     assert_eq!(
         event_types(&terminal),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "minion-died",
             "minion-died",
             "game-ended",
@@ -749,7 +749,7 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
         ["rubble-replaced", "site-played"]
     );
     assert!(!event_types(&interrupted).contains(&"mana-gained"));
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert_eq!(state(&session)["decisionSeat"], "north");
     assert_eq!(
         state(&session)["players"]["north"]["atlas"]
@@ -794,7 +794,7 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
         .legal_actions()
         .expect("restored Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(orders.len(), 2);
 
@@ -802,12 +802,12 @@ fn rule_catalog_0922_ordered_terrain_deathrites_draw_one_site_then_deck_out_befo
         .as_str()
         .expect("chosen source");
     let (_, terminal) = accept_where(&mut restored, |descriptor| {
-        descriptor["kind"] == "order-deathrites" && descriptor["sourceInstanceId"] == chosen
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == chosen
     });
     assert_eq!(
         event_types(&terminal),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "minion-died",
             "minion-died",
@@ -1102,7 +1102,7 @@ fn try_pending_deathrite_with_replace_rubble_legal(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1133,7 +1133,7 @@ fn rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["realm"]["sites"]["C3"]["rubble"], true);
     assert_eq!(paused["players"]["north"]["avatar"]["tapped"], false);
@@ -1160,7 +1160,7 @@ fn rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -1171,8 +1171,7 @@ fn rule_catalog_1118_geomancer_replace_rubble_withheld_during_pending_deathrite_
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

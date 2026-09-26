@@ -3,7 +3,7 @@
 //!
 //! 0599–0600 already cover stepping an ally to strike, and the immobile stay
 //! edge. This slice keeps the 0022 leftover: stepping away from a nearby
-//! power source settles two wounded Deathrite allies into deathrite-order,
+//! power source settles two wounded Deathrite allies into trigger-order,
 //! then the pending leap strike resumes after either order.
 //!
 //! Supplemental 2443–2448 bind persistence, paid-noop-repeat, enemy-arrival,
@@ -324,7 +324,7 @@ fn order_deathrite_actions(session: &Session) -> Vec<LegalAction> {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect()
 }
 
@@ -502,7 +502,7 @@ fn rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_death
     let interrupted = cast_leap(&mut setup.session, &setup.leap_id, &setup.source_id);
     assert_eq!(event_types(&interrupted), ["magic-cast", "unit-stepped"]);
     let pending = state(&setup.session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert_eq!(
         pending["pendingDeathrites"]["continuation"],
         pending_leap(&setup)
@@ -530,7 +530,7 @@ fn rule_catalog_0695_leap_attack_resumes_its_strike_after_ordered_movement_death
     assert_eq!(
         &types[..5],
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -620,7 +620,7 @@ fn rule_catalog_1009_leap_attack_kill_resolves_deathrites_without_repeating_the_
     assert_eq!(&types[..2], ["magic-cast", "unit-stepped"]);
     assert_initial_leap_strike(&interrupted, &setup.enemy_ids, &setup.survivor_id);
     let paused = state(&setup.session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(paused["pendingDeathrites"]["continuation"].is_null());
     assert_eq!(
@@ -663,7 +663,7 @@ fn rule_catalog_1009_leap_attack_kill_resolves_deathrites_without_repeating_the_
     assert_eq!(
         &types[..4],
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",

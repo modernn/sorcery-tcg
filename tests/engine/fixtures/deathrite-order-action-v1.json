@@ -1,27 +1,27 @@
 {
   "actions": [
     {
-      "actionId": "sha256:8699570ca280bfced3ce07d08eff4e8a9a2a8a2ea2e1307f9272826f8e94ab1a",
+      "actionId": "sha256:e9d93b41f8674c3fe14d5422fbc8622e16dd760fa1fc235645d9464920fda7fd",
       "descriptor": {
-        "kind": "order-deathrites",
+        "kind": "order-triggers",
         "sourceInstanceId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       }
     },
     {
-      "actionId": "sha256:38fbee84e1a53362ca6464b2e05e703835e2602d8038857b15ab4b15e5b6e012",
+      "actionId": "sha256:99f9893b48bd4b451690a3c33afceb7099a8ae787ae3e32f6a3d1291f173fead",
       "descriptor": {
-        "kind": "order-deathrites",
+        "kind": "order-triggers",
         "sourceInstanceId": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
       }
     }
   ],
   "canonicalActionIds": [
-    "sha256:8699570ca280bfced3ce07d08eff4e8a9a2a8a2ea2e1307f9272826f8e94ab1a",
-    "sha256:38fbee84e1a53362ca6464b2e05e703835e2602d8038857b15ab4b15e5b6e012"
+    "sha256:e9d93b41f8674c3fe14d5422fbc8622e16dd760fa1fc235645d9464920fda7fd",
+    "sha256:99f9893b48bd4b451690a3c33afceb7099a8ae787ae3e32f6a3d1291f173fead"
   ],
   "contract": "sorcery-core-v1",
   "schemaVersion": 1,
   "seat": "south",
-  "source": "typescript-legality-engine",
+  "source": "synthetic-action-contract",
   "stateVersion": 23
 }

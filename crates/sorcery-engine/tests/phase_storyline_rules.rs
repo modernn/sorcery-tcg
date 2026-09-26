@@ -493,7 +493,7 @@ fn try_pending_deathrite_during_dual_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -534,7 +534,7 @@ fn rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_
     let second_id = setup.second_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "start-turn");
     assert!(deathrite_ids.iter().all(|instance_id| {
@@ -550,7 +550,7 @@ fn rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_
             .expect("paused legal actions")
             .iter()
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger"),
-        "deathrite-order must issue no resolve-start-turn-trigger"
+        "trigger-order must issue no resolve-start-turn-trigger"
     );
     assert!(
         session
@@ -570,7 +570,7 @@ fn rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -581,8 +581,7 @@ fn rule_catalog_1179_dual_start_turn_triggers_withheld_during_pending_deathrite_
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

@@ -1153,7 +1153,7 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
         ["projectile-shot", "strike-damage-allocated", "damage-dealt",]
     );
     let ordered = state(&session);
-    assert_eq!(ordered["phase"], "deathrite-order");
+    assert_eq!(ordered["phase"], "trigger-order");
     assert_eq!(ordered["decisionSeat"], "south");
     assert_eq!(
         ordered["pendingBasicMovement"]["sourceInstanceId"],
@@ -1163,12 +1163,12 @@ fn rule_catalog_0869_ordered_deathrites_clear_incremental_ranged_movement() {
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert_eq!(
         event_types(&resolved),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "minion-died",
             "minion-died",
             "minion-died",
@@ -1420,7 +1420,7 @@ fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defe
         ["projectile-shot", "strike-damage-allocated", "damage-dealt"]
     );
     let ordered = state(&session);
-    assert_eq!(ordered["phase"], "deathrite-order");
+    assert_eq!(ordered["phase"], "trigger-order");
     assert_eq!(ordered["decisionSeat"], "north");
     assert!(ordered.get("pendingRangedStep").is_none());
     assert!(
@@ -1439,12 +1439,12 @@ fn rule_catalog_0871_ranged_step_does_not_queue_after_shooter_loses_derived_defe
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert_eq!(
         event_types(&resolved),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -1714,7 +1714,7 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
         ["projectile-shot", "strike-damage-allocated", "damage-dealt",]
     );
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingBasicMovement"]["sourceInstanceId"], mover_id);
     assert!(paused.get("pendingRangedStep").is_none());
@@ -1730,17 +1730,17 @@ fn rule_catalog_1006_continue_basic_movement_withheld_during_pending_deathrite_o
             .legal_actions()
             .expect("Deathrite order actions")
             .iter()
-            .any(|action| action.descriptor["kind"] == "order-deathrites")
+            .any(|action| action.descriptor["kind"] == "order-triggers")
     );
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert_eq!(
         event_types(&resolved),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -1899,7 +1899,7 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
         ["projectile-shot", "strike-damage-allocated", "damage-dealt"]
     );
     let paused = state(&session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert_eq!(paused["pendingDeathrites"]["returnPhase"], "ranged-step");
     assert_eq!(paused["pendingRangedStep"]["sourceInstanceId"], stepper_id);
@@ -1916,17 +1916,17 @@ fn rule_catalog_1160_resolve_ranged_step_withheld_during_pending_deathrite_order
             .legal_actions()
             .expect("Deathrite order actions")
             .iter()
-            .any(|action| action.descriptor["kind"] == "order-deathrites")
+            .any(|action| action.descriptor["kind"] == "order-triggers")
     );
     assert_checkpoint_round_trip(&session);
 
     let (_, resolved) = accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
+        descriptor["kind"] == "order-triggers"
     });
     assert_eq!(
         event_types(&resolved),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "site-drawn",
             "minion-died",
@@ -2080,7 +2080,7 @@ fn try_pending_deathrite_with_ready_shooter(encoded: &str) -> Option<PendingDeat
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -2113,7 +2113,7 @@ fn rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order() 
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -2136,7 +2136,7 @@ fn rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order() 
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -2148,8 +2148,7 @@ fn rule_catalog_1119_shoot_projectile_withheld_during_pending_deathrite_order() 
     assert_checkpoint_round_trip(session);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

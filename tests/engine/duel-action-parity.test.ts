@@ -197,7 +197,7 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
     underground.duelAction.actionId,
     'sha256:fc0f2936ee40e40b397c23d8692e71fecd950777c09c8936925bd6b87124114d',
   );
-  assert.equal(underground.pending.phase, 'deathrite-order');
+  assert.equal(underground.pending.phase, 'trigger-order');
   assert.equal(underground.pending.decisionSeat, 'south');
   assert.equal(underground.pending.checkpointRoundTrip, true);
   assert.equal(underground.pending.continuation.kind, 'first-strike');
@@ -219,16 +219,16 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   assert.deepEqual(underground.pending.receipt.randomDraws, []);
   assert.equal(
     underground.pending.receipt.receiptId,
-    'sha256:d21505063fd50b296efb01216ef207a861d4ca7dc2829267f7443c4b0389c68c',
+    'sha256:a6f909c96d85929ecb7bedba688ef04b41db8a99e71a07e763dc1f87c9ffee32',
   );
   assert.equal(
     underground.pending.stateHash,
-    'sha256:40d2af84755e2beb54df129e00305dfca9311fe3d7da22e360363654f556d891',
+    'sha256:75222649ee372363f8866f500afd4d707df15aa3315d4c13d821c5fa79cfe8ba',
   );
   assert.equal(underground.pending.orderActions.length, 2);
   assert.equal(underground.resolved.selectedOrderActionId, underground.pending.orderActions[0]?.actionId);
   assert.deepEqual(underground.resolved.receipt.events.map(({ type }) => type), [
-    'deathrite-order-committed',
+    'trigger-order-committed',
     'site-drawn',
     'site-drawn',
     'minion-died',
@@ -239,7 +239,7 @@ test('Duel fixture regenerates byte-identically from Rust legality', async () =>
   assert.deepEqual(underground.resolved.receipt.randomDraws, []);
   assert.equal(
     underground.resolved.receipt.receiptId,
-    'sha256:a17b6a16fc663165ab5e415aca617c03da3f075d0be9516fc55e707a5ec5069a',
+    'sha256:bc77307efe4e4b3635bf16eceaa9cd8aadc9c40ea8b049c488c574a7e22adb21',
   );
   assert.equal(
     underground.resolved.stateHash,

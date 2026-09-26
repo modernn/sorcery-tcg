@@ -491,7 +491,7 @@ fn try_pending_deathrite_during_site_destroy_start_turn(
         descriptor["kind"] == "resolve-start-turn-trigger"
             && descriptor["sourceInstanceId"] == pulser_id
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     if session
@@ -527,7 +527,7 @@ fn rule_catalog_1241_start_turn_site_destroy_trigger_withheld_during_pending_dea
     let aura_id = setup.aura_id.clone();
     let deathrite_ids = setup.deathrite_ids.clone();
     let mut session = setup.session;
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     assert!(
         session
             .legal_actions()
@@ -536,8 +536,7 @@ fn rule_catalog_1241_start_turn_site_destroy_trigger_withheld_during_pending_dea
             .all(|action| action.descriptor["kind"] != "resolve-start-turn-trigger")
     );
     accept_where(&mut session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
     assert_eq!(state(&session)["phase"], "start-turn");
     assert!(

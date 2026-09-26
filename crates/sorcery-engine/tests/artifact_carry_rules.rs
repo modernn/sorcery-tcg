@@ -1,5 +1,5 @@
 //! Direct proofs for Pick Up and Drop locality, Disable filters, oversized drop placement,
-//! Pick Up withheld during deathrite-order, and the Pick Up filter-matrix harness
+//! Pick Up withheld during trigger-order, and the Pick Up filter-matrix harness
 //! (RULE-CATALOG-0140, RULE-CATALOG-0727, RULE-CATALOG-0920, RULE-CATALOG-1130,
 //! RULE-CATALOG-2503–2508).
 //!
@@ -462,7 +462,7 @@ fn try_pending_deathrite_with_uncarried_artifact(
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     realm_unit(&state(&session), &minion_id)?;
@@ -498,7 +498,7 @@ fn rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order()
     let sword_id = setup.sword_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(
         deathrite_ids
@@ -529,7 +529,7 @@ fn rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order()
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -540,8 +540,7 @@ fn rule_catalog_1130_pick_up_artifacts_withheld_during_pending_deathrite_order()
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
@@ -744,7 +743,7 @@ fn try_pending_deathrite_with_carried_artifact(encoded: &str) -> Option<PendingD
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
     let paused = state(&session);
-    if paused["phase"] != "deathrite-order" {
+    if paused["phase"] != "trigger-order" {
         return None;
     }
     realm_unit(&paused, &bearer_id)?;
@@ -781,7 +780,7 @@ fn rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order() {
     let sword_id = setup.sword_id.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(deathrite_ids.iter().all(|instance_id| {
         paused["realm"]["units"]
@@ -804,7 +803,7 @@ fn rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order() {
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .map(|action| {
             action.descriptor["sourceInstanceId"]
                 .as_str()
@@ -815,8 +814,7 @@ fn rule_catalog_1131_drop_artifacts_withheld_during_pending_deathrite_order() {
     assert_eq!(order_sources, deathrite_ids);
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);

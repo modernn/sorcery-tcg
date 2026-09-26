@@ -297,7 +297,7 @@ async function captureMovementDeathriteParityForManifest(
       throw new Error('Leap Attack Deathrite checkpoint did not restore byte-identically');
     }
     const orderActions = (await handle.legalActions()).filter(({ descriptor }) =>
-      descriptor.kind === 'order-deathrites');
+      descriptor.kind === 'order-triggers');
     if (orderActions.length !== 2) {
       throw new Error(`expected two Deathrite order actions, received ${orderActions.length}`);
     }

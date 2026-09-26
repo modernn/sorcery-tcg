@@ -854,7 +854,7 @@ fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_co
         ["minion-sacrificed", "minion-sacrificed"]
     );
     let pending = state(&session);
-    assert_eq!(pending["phase"], "deathrite-order");
+    assert_eq!(pending["phase"], "trigger-order");
     assert_eq!(pending["decisionSeat"], "north");
     assert_eq!(pending["players"]["north"]["mana"], 2);
     assert!(
@@ -886,7 +886,7 @@ fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_co
         .legal_actions()
         .expect("Deathrite order actions")
         .into_iter()
-        .filter(|action| action.descriptor["kind"] == "order-deathrites")
+        .filter(|action| action.descriptor["kind"] == "order-triggers")
         .collect::<Vec<_>>();
     assert_eq!(
         order_actions
@@ -931,7 +931,7 @@ fn rule_catalog_0874_gnarled_wendigo_payment_deathrites_resume_one_summon_and_co
                 .map(|event| event.event_type.as_str())
                 .collect::<Vec<_>>(),
             [
-                "deathrite-order-committed",
+                "trigger-order-committed",
                 "site-drawn",
                 "site-drawn",
                 "minion-died",
@@ -1066,12 +1066,12 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .collect::<Vec<_>>(),
         ["minion-sacrificed", "minion-sacrificed"]
     );
-    assert_eq!(state(&session)["phase"], "deathrite-order");
+    assert_eq!(state(&session)["phase"], "trigger-order");
     let order = session
         .legal_actions()
         .expect("terminal Deathrite order actions")
         .into_iter()
-        .find(|action| action.descriptor["kind"] == "order-deathrites")
+        .find(|action| action.descriptor["kind"] == "order-triggers")
         .expect("terminal Deathrite order");
     let StepResult::Accepted(terminal) = session
         .step(ActionRequest {
@@ -1090,7 +1090,7 @@ fn rule_catalog_0875_gnarled_wendigo_terminal_deathrite_ends_before_deferred_sum
             .map(|event| event.event_type.as_str())
             .collect::<Vec<_>>(),
         [
-            "deathrite-order-committed",
+            "trigger-order-committed",
             "site-drawn",
             "minion-died",
             "minion-died",
@@ -1702,7 +1702,7 @@ fn try_pending_deathrite_with_wounded_visitor(encoded: &str) -> Option<PendingDe
     try_accept_where(&mut session, |descriptor| {
         descriptor["kind"] == "cast-magic" && descriptor["cardId"] == "north-rain"
     })?;
-    if state(&session)["phase"] != "deathrite-order" {
+    if state(&session)["phase"] != "trigger-order" {
         return None;
     }
     let mut deathrite_ids = [
@@ -1746,7 +1746,7 @@ fn rule_catalog_1168_summon_minion_withheld_during_pending_deathrite_order() {
     let deathrite_ids = setup.deathrite_ids.clone();
     let session = &mut setup.session;
     let paused = state(session);
-    assert_eq!(paused["phase"], "deathrite-order");
+    assert_eq!(paused["phase"], "trigger-order");
     assert_eq!(paused["decisionSeat"], "south");
     assert!(
         paused["players"]["north"]["hand"]["spellbook"]
@@ -1762,8 +1762,7 @@ fn rule_catalog_1168_summon_minion_withheld_during_pending_deathrite_order() {
     );
 
     accept_where(session, |descriptor| {
-        descriptor["kind"] == "order-deathrites"
-            && descriptor["sourceInstanceId"] == deathrite_ids[0]
+        descriptor["kind"] == "order-triggers" && descriptor["sourceInstanceId"] == deathrite_ids[0]
     });
 
     let resumed = state(session);
