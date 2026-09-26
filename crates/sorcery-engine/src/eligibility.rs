@@ -59,9 +59,10 @@ pub struct EligibilityPolicy {
     pub authority_verified: bool,
 }
 
-/// Current master policy: catalog rules are complete; authority remains unverified.
+/// The corpus audit found missing shared mechanics, including in admitted bindings.
+/// Successful scenarios and replay do not establish complete card rules or authority.
 pub const CURRENT_ELIGIBILITY_POLICY: EligibilityPolicy = EligibilityPolicy {
-    rules_complete: true,
+    rules_complete: false,
     authority_verified: false,
 };
 
@@ -185,7 +186,7 @@ mod tests {
     };
 
     #[test]
-    fn passing_gates_still_do_not_rank_unverified_authority() {
+    fn passing_gates_cannot_certify_incomplete_rules_or_unverified_authority() {
         let report = evaluate_eligibility(EligibilityGates {
             coverage: true,
             design: true,
@@ -197,15 +198,21 @@ mod tests {
         });
         assert!(!report.ranked);
         assert!(report.gates.all_passed());
-        assert_eq!(report.reasons, [EligibilityReason::UnverifiedAuthority]);
+        assert_eq!(
+            report.reasons,
+            [
+                EligibilityReason::PartialRules,
+                EligibilityReason::UnverifiedAuthority
+            ]
+        );
         assert_eq!(
             report.classification,
-            BatchClassification::UnrankedUnverifiedAuthority
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
     }
 
     #[test]
-    fn partial_rules_policy_keeps_legacy_classification() {
+    fn complete_rules_alone_do_not_verify_authority() {
         let report = evaluate_eligibility_with_policy(
             EligibilityGates {
                 coverage: true,
@@ -217,21 +224,15 @@ mod tests {
                 reporting: true,
             },
             EligibilityPolicy {
-                rules_complete: false,
+                rules_complete: true,
                 authority_verified: false,
             },
         );
         assert!(!report.ranked);
-        assert_eq!(
-            report.reasons,
-            [
-                EligibilityReason::PartialRules,
-                EligibilityReason::UnverifiedAuthority
-            ]
-        );
+        assert_eq!(report.reasons, [EligibilityReason::UnverifiedAuthority]);
         assert_eq!(
             report.classification,
-            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+            BatchClassification::UnrankedUnverifiedAuthority
         );
     }
 
@@ -323,7 +324,7 @@ mod tests {
         assert!(report.reasons.contains(&EligibilityReason::ReplayFailed));
         assert_eq!(
             report.classification,
-            BatchClassification::UnrankedUnverifiedAuthority
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
     }
 }

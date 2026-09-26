@@ -570,6 +570,7 @@ fn rule_catalog_0878_deathrite_area_damage_uses_last_location_ward_reduction_and
 #[test]
 fn rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution() {
     let mut raw = base_manifest(171);
+    // The tower turns base 2/0 into 4/2: general power 3 must survive in the Deathrite snapshot.
     set_all_minions(
         &mut raw,
         "north",
@@ -586,7 +587,7 @@ fn rule_catalog_0794_deathrite_damage_preserves_source_power_until_resolution() 
         &json!({
             "attack": 2,
             "defense": 10,
-            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+            "preventsDamageFromUnitsWithPowerAtLeast": 3,
         }),
     );
     for card in raw["cards"]

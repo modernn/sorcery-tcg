@@ -487,10 +487,11 @@ fn rule_catalog_0154_discard_damage_should_snapshot_derived_power_and_use_ward_a
     assert_eq!(realm_damage(&state(&warded), &ward), 3);
     assert_exact_replay(&warded);
 
+    // The 3/9 Jinn has power 6; the +1 bonus makes it 4/10 with power 7.
     let mut prevented = jinn_versus(
         "south-guard",
         minion(json!({
-            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+            "preventsDamageFromUnitsWithPowerAtLeast": 7,
             "summonToAnySite": true,
         })),
         Some((

@@ -44,8 +44,8 @@ fn grant_double() -> Value {
     })
 }
 
-fn scenario_manifest(seed: u32, source_power: u8, disabled_target: bool) -> String {
-    let mut attacker = minion(source_power, 5);
+fn scenario_manifest(seed: u32, source_attack: u8, disabled_target: bool) -> String {
+    let mut attacker = minion(source_attack, 5);
     attacker["charge"] = json!(true);
     attacker["summonToAnySite"] = json!(true);
     let mut target = minion(1, 10);
@@ -156,8 +156,8 @@ fn assert_exact_replay(session: &Session) {
     assert!(session.verify_replay().expect("verified replay"));
 }
 
-fn resolve_fight(seed: u32, source_power: u8, disabled_target: bool) -> FightResult {
-    let manifest = scenario_manifest(seed, source_power, disabled_target);
+fn resolve_fight(seed: u32, source_attack: u8, disabled_target: bool) -> FightResult {
+    let manifest = scenario_manifest(seed, source_attack, disabled_target);
     let mut session = Session::new(&manifest).expect("valid damage-prevention scenario");
     keep(&mut session);
     keep(&mut session);
@@ -241,7 +241,8 @@ fn resolve_fight(seed: u32, source_power: u8, disabled_target: bool) -> FightRes
     reason = "one direct rule proof compares all threshold and disabled cases"
 )]
 fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() {
-    let prevented = resolve_fight(170, 4, false);
+    // A 3/5 source strikes for 3 but has general power 4, meeting the immunity threshold.
+    let prevented = resolve_fight(170, 3, false);
     assert_eq!(
         event_values(&prevented.fight),
         vec![
@@ -258,7 +259,7 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
             }),
             json!({
                 "payload": {
-                    "amount": 4,
+                    "amount": 3,
                     "strikerInstanceId": prevented.attacker_instance_id,
                     "targetInstanceId": prevented.target_instance_id,
                 },
@@ -278,7 +279,7 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
                 "payload": {
                     "accumulated": 0,
                     "amount": 0,
-                    "attemptedAmount": 4,
+                    "attemptedAmount": 3,
                     "direct": true,
                     "instanceId": prevented.target_instance_id,
                     "prevented": true,
@@ -295,7 +296,8 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
     assert!(prevented.fight.random_draws.is_empty());
     assert_exact_replay(&prevented.session);
 
-    let below_threshold = resolve_fight(172, 3, false);
+    // A 2/5 source has general power floor(7/2) = 3, so its 2-point strike gets through.
+    let below_threshold = resolve_fight(172, 2, false);
     let target_damage = below_threshold
         .fight
         .events
@@ -308,8 +310,8 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
     assert_eq!(
         target_damage.payload,
         json!({
-            "accumulated": 3,
-            "amount": 3,
+            "accumulated": 2,
+            "amount": 2,
             "direct": true,
             "instanceId": below_threshold.target_instance_id,
             "seat": "south",
@@ -320,7 +322,7 @@ fn rule_catalog_0863_active_minion_prevents_damage_at_current_power_threshold() 
             &below_threshold.session,
             &below_threshold.target_instance_id,
         )["damage"],
-        3
+        2
     );
     assert!(below_threshold.fight.random_draws.is_empty());
     assert_exact_replay(&below_threshold.session);

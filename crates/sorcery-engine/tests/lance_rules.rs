@@ -390,7 +390,8 @@ fn rule_catalog_0738_opposing_lances_strike_early_simultaneously_and_break_in_st
 
 #[test]
 fn rule_catalog_0739_ranged_lance_breaks_ward_and_uses_unmodified_power_for_prevention() {
-    let lancer = minion(json!({ "attack": 1, "lanceCount": 1, "ranged": true }));
+    // The 1/2 lancer has power 1; its Lance raises strike damage to 2, not power.
+    let lancer = minion(json!({ "attack": 1, "defense": 2, "lanceCount": 1, "ranged": true }));
     let warded = minion(json!({ "ward": true }));
     let mut ward = prepare_lance(197, &lancer, &warded, true, 6);
     let target_id = ward.target_id.clone().expect("Ward target");

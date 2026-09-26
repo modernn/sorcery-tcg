@@ -357,6 +357,9 @@ impl SessionJsonService {
         let Some(session) = &self.session else {
             return no_session(id);
         };
+        if let Err(error) = session.ensure_active() {
+            return error_response(id, &error.to_string());
+        }
         match serde_json::to_value(crate::game_record::replay_steps_from_transcript(
             session.transcript(),
         )) {

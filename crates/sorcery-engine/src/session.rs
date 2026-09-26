@@ -41,6 +41,7 @@ pub struct Session {
     manifest_json: String,
     state_hash: IdentityHash,
     transcript: Vec<Receipt>,
+    unsupported_mechanic: Option<String>,
 }
 
 /// Session construction, hashing, or replay failed.
@@ -128,6 +129,7 @@ impl Session {
             manifest_json: manifest_json.to_owned(),
             state_hash,
             transcript: Vec::new(),
+            unsupported_mechanic: None,
         })
     }
 
@@ -152,6 +154,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] when observation, legal actions, or policy selection fails.
     pub fn select_baseline_policy_action(&self) -> Result<LegalAction, SessionError> {
+        self.ensure_active()?;
         let seat = self.acting_controller();
         let observation = self.game.observe(seat);
         let actions = self.game.legal_actions()?;
@@ -175,6 +178,7 @@ impl Session {
         committed_action_kinds: &[String],
         committed_event_types: &[String],
     ) -> Result<NoveltyStep, SessionError> {
+        self.ensure_active()?;
         let policy = baseline_policy_snapshot(
             self.game.rules().authority_hash(),
             self.game.rules().engine_version(),
@@ -197,6 +201,7 @@ impl Session {
         &self,
         max_actions: usize,
     ) -> Result<NoveltyRolloutOutput, SessionError> {
+        self.ensure_active()?;
         run_novelty_rollout(self, max_actions)
     }
 
@@ -210,6 +215,7 @@ impl Session {
         &mut self,
         input: ForcedNoveltyInput<'_>,
     ) -> Result<ForcedNoveltyOutput, SessionError> {
+        self.ensure_active()?;
         run_novelty_from_forced_action(self, input)
     }
 
@@ -223,6 +229,7 @@ impl Session {
         max_actions: usize,
         max_branches: usize,
     ) -> Result<NoveltyFrontierSearchOutput, SessionError> {
+        self.ensure_active()?;
         run_novelty_frontier_search(self, max_actions, max_branches)
     }
 
@@ -235,6 +242,7 @@ impl Session {
         &self,
         max_continuation_decisions: usize,
     ) -> Result<CounterfactualReport, SessionError> {
+        self.ensure_active()?;
         run_counterfactual(self, max_continuation_decisions)
     }
 
@@ -244,6 +252,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] when action identity or descriptor serialization fails.
     pub fn legal_actions(&self) -> Result<Vec<LegalAction>, SessionError> {
+        self.ensure_active()?;
         self.game
             .legal_actions()?
             .iter()
@@ -256,11 +265,16 @@ impl Session {
     ///
     /// Rejections append only to the attempts journal. They do not mutate game
     /// state, PRNG state, or the accepted transcript.
+    /// An unsupported transition aborts this session while preserving its last valid
+    /// state and journals for inspection. It cannot be continued or certified afterward.
     ///
     /// # Errors
     ///
     /// Returns [`SessionError`] when authoritative hashing or receipt creation fails.
+    /// Receipt-construction errors after a successful engine transition retain their
+    /// existing non-transactional behavior; only unsupported resolution aborts the session.
     pub fn step(&mut self, request: ActionRequest) -> Result<StepResult, SessionError> {
+        self.ensure_active()?;
         let state_version = self.game.position().state_version();
         let state_hash = self.state_hash.clone();
         if request.state_version != state_version {
@@ -297,7 +311,13 @@ impl Session {
             .event_count
             .checked_add(1)
             .ok_or(SessionError::SequenceExhausted)?;
-        let (outcomes, random_draws) = self.game.apply_action_recorded(&action)?;
+        let (outcomes, random_draws) =
+            self.game.apply_action_recorded(&action).map_err(|error| {
+                if let GameError::UnsupportedMechanic(reason) = &error {
+                    self.unsupported_mechanic = Some(reason.clone());
+                }
+                SessionError::Game(error)
+            })?;
         let post_state_hash = self.game.state_hash()?;
         let next_event_count = self
             .event_count
@@ -364,6 +384,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] if the replay cannot be completed.
     pub fn verify_replay(&self) -> Result<bool, SessionError> {
+        self.ensure_active()?;
         let action_ids: Vec<_> = self
             .transcript
             .iter()
@@ -461,6 +482,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] when transcript serialization or hashing fails.
     pub fn transcript_hash(&self) -> Result<IdentityHash, SessionError> {
+        self.ensure_active()?;
         Ok(identity_hash(&serde_json::to_value(&self.transcript)?)?)
     }
 
@@ -470,6 +492,7 @@ impl Session {
     ///
     /// Returns [`SessionError`] when session data cannot be serialized or hashed.
     pub fn session_hash(&self) -> Result<IdentityHash, SessionError> {
+        self.ensure_active()?;
         Ok(identity_hash(&json!({
             "attempts": self.attempts,
             "initialRandomDraws": self.game.initial_random_draws(),
@@ -495,11 +518,25 @@ impl Session {
     ///
     /// Returns [`SessionError`] when setup draws cannot be serialized.
     pub fn replay_value(&self) -> Result<Value, SessionError> {
+        self.ensure_active()?;
         Ok(json!({
             "initialRandomDraws": serde_json::to_value(self.game.initial_random_draws())?,
             "state": self.game.authoritative_state(),
             "transcript": self.transcript,
         }))
+    }
+
+    /// Returns the exercised mechanic that aborted this session, if any.
+    #[must_use]
+    pub fn unsupported_mechanic(&self) -> Option<&str> {
+        self.unsupported_mechanic.as_deref()
+    }
+
+    pub(crate) fn ensure_active(&self) -> Result<(), SessionError> {
+        if let Some(reason) = &self.unsupported_mechanic {
+            return Err(GameError::UnsupportedMechanic(reason.clone()).into());
+        }
+        Ok(())
     }
 
     fn reject(

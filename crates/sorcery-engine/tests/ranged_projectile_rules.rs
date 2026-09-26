@@ -525,9 +525,10 @@ fn rule_catalog_0814_ranged_damage_keeps_unit_source_without_return_strike() {
     let setup = prepare_ranged(
         186,
         &minion(json!({ "attack": 4, "defense": 1, "ranged": true })),
+        // The 4/1 shooter has power 2, so retaining its unit source prevents the hit.
         &minion(json!({
             "attack": 100,
-            "preventsDamageFromUnitsWithPowerAtLeast": 3,
+            "preventsDamageFromUnitsWithPowerAtLeast": 2,
             "summonToAnySite": true,
         })),
         &minion(json!({})),

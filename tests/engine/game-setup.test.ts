@@ -14907,13 +14907,13 @@ test('RULE-03/04 an undamaged 0/0 Genesis minion survives until it takes positiv
 });
 
 test('RULE-04 an active minion prevents damage from a unit at its current-power threshold', async () => {
-  for (const [seed, sourcePower, disabled, expectedDamage] of [
-    [170, 4, false, 0],
-    [172, 3, false, 3],
+  for (const [seed, sourceAttack, disabled, expectedDamage] of [
+    [170, 3, false, 0], // 3/5 has general power 4.
+    [172, 2, false, 2], // 2/5 has general power 3 after rounding down.
     [173, 4, true, 4],
   ] as const) {
     await withNorthAttacksAtC2(seed, {
-      attack: sourcePower,
+      attack: sourceAttack,
       defense: 5,
       manaCost: 1,
       thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
@@ -14947,7 +14947,7 @@ test('RULE-04 an active minion prevents damage from a unit at its current-power 
         type === 'damage-dealt' && canonicalJson(payload).includes(targetInstanceId));
       assert.equal((targetDamage?.payload as { amount?: number }).amount, expectedDamage);
       assert.equal((targetDamage?.payload as { prevented?: boolean }).prevented,
-        expectedDamage < sourcePower ? true : undefined);
+        expectedDamage < sourceAttack ? true : undefined);
       assert.equal(fought.receipt.randomDraws.length, 0);
       assert.equal(await ctx.verifyReplay(), true);
     });
@@ -19554,53 +19554,55 @@ test('RULE-05 Deathrite uses its moved last location with Ward, reduction, and L
 });
 
 test('RULE-05 Deathrite preserves its unit-source power snapshot before cemetery entry', async () => {
-  await withNorthAttacksAtC2(171, {
-    attack: 4,
-    deathriteDamageEachUnitHere: 1,
-    defense: 1,
-    manaCost: 1,
-    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
-  }, undefined, false, {
-    attack: 1,
-    defense: 10,
-    manaCost: 1,
-    preventsDamageFromUnitsWithPowerAtLeast: 4,
-    thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
-  }, 0, async ({ attackerInstanceId, ctx, targetInstanceId }) => {
-    await ctx.take(({ descriptor }) =>
-      descriptor.kind === 'declare-attack'
-        && descriptor.target.kind === 'minion'
-        && descriptor.target.instanceId === targetInstanceId);
-    const fought = await ctx.step(await ctx.action(({ descriptor }) =>
-      descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
-    assert.equal(fought.accepted, true);
-    if (!fought.accepted) return;
-    assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
-      instanceId === attackerInstanceId), true);
-    assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
-      instanceId === targetInstanceId)?.damage, 0);
-    assert.deepEqual(fought.receipt.events.filter(({ payload, type }) =>
-      type === 'damage-dealt'
-        && canonicalJson(payload).includes(targetInstanceId)).map(({ payload }) => payload), [{
-      accumulated: 0,
-      amount: 0,
-      attemptedAmount: 4,
-      direct: true,
-      instanceId: targetInstanceId,
-      prevented: true,
-      seat: 'south',
-    }, {
-      accumulated: 0,
-      amount: 0,
-      attemptedAmount: 1,
-      direct: true,
-      instanceId: targetInstanceId,
-      prevented: true,
-      seat: 'south',
-    }]);
-    assert.equal(fought.receipt.randomDraws.length, 0);
-    assert.equal(await ctx.verifyReplay(), true);
-  });
+  // The 4/1 source has general power 2, including its captured Deathrite source.
+  // Threshold 4 rejects using attack as power; threshold 2 rejects losing the snapshot to zero.
+  for (const [seed, threshold, prevented] of [[171, 4, false], [172, 2, true]] as const) {
+    await withNorthAttacksAtC2(seed, {
+      attack: 4,
+      deathriteDamageEachUnitHere: 1,
+      defense: 1,
+      manaCost: 1,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    }, undefined, false, {
+      attack: 1,
+      defense: 10,
+      manaCost: 1,
+      preventsDamageFromUnitsWithPowerAtLeast: threshold,
+      thresholds: { air: 0, earth: 1, fire: 0, water: 0 },
+    }, 0, async ({ attackerInstanceId, ctx, targetInstanceId }) => {
+      await ctx.take(({ descriptor }) =>
+        descriptor.kind === 'declare-attack'
+          && descriptor.target.kind === 'minion'
+          && descriptor.target.instanceId === targetInstanceId);
+      const fought = await ctx.step(await ctx.action(({ descriptor }) =>
+        descriptor.kind === 'close-defend' && descriptor.originalTargetParticipates));
+      assert.equal(fought.accepted, true);
+      if (!fought.accepted) return;
+      assert.equal(ctx.state.players.north.cemetery.some(({ instanceId }) =>
+        instanceId === attackerInstanceId), true);
+      assert.equal(ctx.state.realm.units.find(({ instanceId }) =>
+        instanceId === targetInstanceId)?.damage, prevented ? 0 : 5);
+      assert.deepEqual(fought.receipt.events.filter(({ payload, type }) =>
+        type === 'damage-dealt'
+          && canonicalJson(payload).includes(targetInstanceId)).map(({ payload }) => payload), [{
+        accumulated: prevented ? 0 : 4,
+        amount: prevented ? 0 : 4,
+        ...(prevented ? { attemptedAmount: 4, prevented: true } : {}),
+        direct: true,
+        instanceId: targetInstanceId,
+        seat: 'south',
+      }, {
+        accumulated: prevented ? 0 : 5,
+        amount: prevented ? 0 : 1,
+        ...(prevented ? { attemptedAmount: 1, prevented: true } : {}),
+        direct: true,
+        instanceId: targetInstanceId,
+        seat: 'south',
+      }]);
+      assert.equal(fought.receipt.randomDraws.length, 0);
+      assert.equal(await ctx.verifyReplay(), true);
+    });
+  }
 });
 
 test('RULE-05 Deathrite healing caps at maximum, fails at Death\'s Door, and precedes cemetery entry', async () => {
@@ -20817,12 +20819,13 @@ test('RULE-03 Siege Ballista taps its bearer and another ally for measured artif
       manaCost: 0,
       thresholds,
     },
+    // The 4/2 bearer has power 3, so borrowing its unit source would prevent the shot.
     'ballista-near-target': {
       attack: 1,
       cardType: 'minion',
       defense: 5,
       manaCost: 0,
-      preventsDamageFromUnitsWithPowerAtLeast: 4,
+      preventsDamageFromUnitsWithPowerAtLeast: 3,
       thresholds,
     },
     'ballista-north-avatar': {
@@ -31618,4 +31621,3 @@ test('RULE-03 Craterize discards a site, destroys its target, and applies the pr
   const gameManifest = createGameManifest(input);
   assert.deepEqual(gameManifest.cards[craterizeId], cards[craterizeId]);
 });
-

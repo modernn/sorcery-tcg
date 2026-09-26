@@ -369,8 +369,9 @@ fn rule_catalog_0781_ready_minion_taps_to_shoot_fixed_damage_at_first_visible_un
             "ward": true,
         })),
         &minion(json!({ "stealth": true, "summonToAnySite": true })),
+        // The 1/5 shooter has power 3; its fixed 4 damage must not set source power.
         &minion(json!({
-            "preventsDamageFromUnitsWithPowerAtLeast": 3,
+            "preventsDamageFromUnitsWithPowerAtLeast": 4,
             "summonToAnySite": true,
         })),
         true,

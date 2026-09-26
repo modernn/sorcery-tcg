@@ -155,8 +155,7 @@ pub fn search_root_actions(
     let root_actions = game.legal_actions()?;
     let mut rollouts = Vec::with_capacity(root_actions.len().min(max_root_actions));
     for (action_index, action) in root_actions.into_iter().take(max_root_actions).enumerate() {
-        let mut branch = game.clone();
-        branch.apply_action(&action)?;
+        let branch = game.clone().apply_action_owned(&action)?;
         rollouts.push(continue_game(
             branch,
             north_policy,
@@ -276,7 +275,7 @@ fn continue_game(
             .position(|action| std::ptr::eq(action, selected))
             .ok_or(SimulatorError::ReplayDiverged)?;
         action_indices.push(selected_index);
-        game.apply_action(selected)?;
+        game = game.apply_action_owned(selected)?;
     }
     let manifest_id = game.rules().manifest_id().clone();
     let outcome = game.outcome();

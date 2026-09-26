@@ -554,6 +554,7 @@ fn write_canonical_file(path: &Path, value: &Value) -> Result<(), GameRecordErro
 /// Returns [`GameRecordError`] when the session is unfinished, replay diverges,
 /// or canonicalization fails.
 pub fn game_record_from_session(session: &Session) -> Result<GameRecord, GameRecordError> {
+    session.ensure_active()?;
     let (Some(outcome), Some(reason)) = (session.outcome(), session.terminal_reason()) else {
         return Err(GameRecordError::NonTerminal);
     };
@@ -708,6 +709,7 @@ fn flatten_events(transcript: &[Receipt]) -> Vec<Event> {
 }
 
 fn coverage_from_session(session: &Session) -> Result<GameCoverage, GameRecordError> {
+    session.ensure_active()?;
     let mut offered_action_kinds = Vec::new();
     let mut seen_offered = BTreeSet::new();
     let mut committed_action_kinds = Vec::new();
@@ -806,11 +808,14 @@ mod tests {
         assert!(record.eligibility.gates.all_passed());
         assert_eq!(
             record.eligibility.reasons,
-            [crate::eligibility::EligibilityReason::UnverifiedAuthority]
+            [
+                crate::eligibility::EligibilityReason::PartialRules,
+                crate::eligibility::EligibilityReason::UnverifiedAuthority
+            ]
         );
         assert_eq!(
             record.classification,
-            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
+            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         assert_eq!(record.accepted_action_count, 230);
         assert_eq!(record.fight_count, 6);
@@ -898,7 +903,10 @@ mod tests {
         assert_eq!(outcome["finalStateHash"], record.final_state_hash.as_str());
         assert_eq!(outcome["transcriptHash"], record.transcript_hash.as_str());
         assert_eq!(outcome["eventsHash"], record.events_hash.as_str());
-        assert_eq!(outcome["classification"], "unranked_unverified_authority");
+        assert_eq!(
+            outcome["classification"],
+            "unranked_partial_rules_unverified_authority"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -917,7 +925,7 @@ mod tests {
         assert!(report.eligibility.gates.all_passed());
         assert_eq!(
             report.classification,
-            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
+            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         let _ = fs::remove_dir_all(&dir);
     }

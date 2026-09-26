@@ -52,15 +52,18 @@ fn rule_catalog_0506_finished_synthetic_game_classifies_unranked_unverified_auth
     assert!(!record.eligibility.ranked);
     assert_eq!(
         record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         record.eligibility.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         record.eligibility.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -87,15 +90,18 @@ fn rule_catalog_0881_relabelled_synthetic_manifest_stays_unranked() {
     assert!(!record.eligibility.ranked);
     assert_eq!(
         record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         record.eligibility.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         record.eligibility.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -160,7 +166,7 @@ fn rule_catalog_0942_mixed_claimed_and_synthetic_batch_stays_unranked() {
     assert!(!record.eligibility.ranked);
     assert_eq!(
         record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy =
@@ -172,11 +178,14 @@ fn rule_catalog_0942_mixed_claimed_and_synthetic_batch_stays_unranked() {
     assert!(!batch_eligibility.ranked);
     assert_eq!(
         batch_eligibility.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         batch_eligibility.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -204,7 +213,7 @@ fn rule_catalog_0950_private_local_claims_only_batch_stays_unranked() {
     assert!(!record.eligibility.ranked);
     assert_eq!(
         record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy =
@@ -216,11 +225,14 @@ fn rule_catalog_0950_private_local_claims_only_batch_stays_unranked() {
     assert!(!batch_eligibility.ranked);
     assert_eq!(
         batch_eligibility.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         batch_eligibility.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -235,7 +247,7 @@ fn rule_catalog_0961_synthetic_only_batch_keeps_synthetic_game_unranked() {
     assert!(!record.eligibility.ranked);
     assert_eq!(
         record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy = eligibility_policy_for_manifest_jsons([
@@ -249,11 +261,14 @@ fn rule_catalog_0961_synthetic_only_batch_keeps_synthetic_game_unranked() {
     assert!(!batch_eligibility.ranked);
     assert_eq!(
         batch_eligibility.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         batch_eligibility.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -286,7 +301,7 @@ fn rule_catalog_0982_different_private_local_claims_stay_unranked_for_both() {
     assert!(!claimed_record.eligibility.ranked);
     assert_eq!(
         claimed_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let other_claimed_game =
@@ -311,7 +326,7 @@ fn rule_catalog_0982_different_private_local_claims_stay_unranked_for_both() {
     assert!(!other_claimed_record.eligibility.ranked);
     assert_eq!(
         other_claimed_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy = eligibility_policy_for_manifest_jsons([
@@ -325,11 +340,14 @@ fn rule_catalog_0982_different_private_local_claims_stay_unranked_for_both() {
     assert!(!claimed_batch.ranked);
     assert_eq!(
         claimed_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         claimed_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 
     let other_claimed_batch =
@@ -337,11 +355,14 @@ fn rule_catalog_0982_different_private_local_claims_stay_unranked_for_both() {
     assert!(!other_claimed_batch.ranked);
     assert_eq!(
         other_claimed_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         other_claimed_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -373,7 +394,7 @@ fn rule_catalog_1001_mixed_private_local_claim_and_synthetic_batch_stays_unranke
     assert!(!claimed_record.eligibility.ranked);
     assert_eq!(
         claimed_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let synthetic_record = record_synthetic_demo(32).expect("seed-32 finished synthetic record");
@@ -383,7 +404,7 @@ fn rule_catalog_1001_mixed_private_local_claim_and_synthetic_batch_stays_unranke
     assert!(!synthetic_record.eligibility.ranked);
     assert_eq!(
         synthetic_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy = eligibility_policy_for_manifest_jsons([
@@ -397,11 +418,14 @@ fn rule_catalog_1001_mixed_private_local_claim_and_synthetic_batch_stays_unranke
     assert!(!claimed_batch.ranked);
     assert_eq!(
         claimed_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         claimed_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 
     let synthetic_batch =
@@ -409,11 +433,14 @@ fn rule_catalog_1001_mixed_private_local_claim_and_synthetic_batch_stays_unranke
     assert!(!synthetic_batch.ranked);
     assert_eq!(
         synthetic_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
     assert_eq!(
         synthetic_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
+        [
+            EligibilityReason::PartialRules,
+            EligibilityReason::UnverifiedAuthority
+        ]
     );
 }
 
@@ -447,7 +474,7 @@ fn rule_catalog_1012_three_way_private_claims_and_synthetic_batch_stays_unranked
     assert!(!claimed_record.eligibility.ranked);
     assert_eq!(
         claimed_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let other_claimed_game =
@@ -472,7 +499,7 @@ fn rule_catalog_1012_three_way_private_claims_and_synthetic_batch_stays_unranked
     assert!(!other_claimed_record.eligibility.ranked);
     assert_eq!(
         other_claimed_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let synthetic_record = record_synthetic_demo(33).expect("seed-33 finished synthetic record");
@@ -482,7 +509,7 @@ fn rule_catalog_1012_three_way_private_claims_and_synthetic_batch_stays_unranked
     assert!(!synthetic_record.eligibility.ranked);
     assert_eq!(
         synthetic_record.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
+        BatchClassification::UnrankedPartialRulesUnverifiedAuthority
     );
 
     let batch_policy = eligibility_policy_for_manifest_jsons([
@@ -492,41 +519,21 @@ fn rule_catalog_1012_three_way_private_claims_and_synthetic_batch_stays_unranked
     ]);
     assert!(!batch_policy.authority_verified);
 
-    let claimed_batch =
-        evaluate_eligibility_with_policy(claimed_record.eligibility.gates, batch_policy);
-    assert!(!claimed_batch.ranked);
-    assert_eq!(
-        claimed_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
-    );
-    assert_eq!(
-        claimed_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
-    );
-
-    let other_claimed_batch =
-        evaluate_eligibility_with_policy(other_claimed_record.eligibility.gates, batch_policy);
-    assert!(!other_claimed_batch.ranked);
-    assert_eq!(
-        other_claimed_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
-    );
-    assert_eq!(
-        other_claimed_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
-    );
-
-    let synthetic_batch =
-        evaluate_eligibility_with_policy(synthetic_record.eligibility.gates, batch_policy);
-    assert!(!synthetic_batch.ranked);
-    assert_eq!(
-        synthetic_batch.classification,
-        BatchClassification::UnrankedUnverifiedAuthority
-    );
-    assert_eq!(
-        synthetic_batch.reasons,
-        [EligibilityReason::UnverifiedAuthority]
-    );
+    for record in [claimed_record, other_claimed_record, synthetic_record] {
+        let report = evaluate_eligibility_with_policy(record.eligibility.gates, batch_policy);
+        assert!(!report.ranked);
+        assert_eq!(
+            report.classification,
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
+        );
+        assert_eq!(
+            report.reasons,
+            [
+                EligibilityReason::PartialRules,
+                EligibilityReason::UnverifiedAuthority
+            ]
+        );
+    }
 }
 
 #[test]
@@ -548,15 +555,18 @@ fn rule_catalog_1122_synthetic_batch_keeps_all_games_unranked_unverified_authori
         assert!(!record.eligibility.ranked);
         assert_eq!(
             record.classification,
-            BatchClassification::UnrankedUnverifiedAuthority
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         assert_eq!(
             record.eligibility.classification,
-            BatchClassification::UnrankedUnverifiedAuthority
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         assert_eq!(
             record.eligibility.reasons,
-            [EligibilityReason::UnverifiedAuthority]
+            [
+                EligibilityReason::PartialRules,
+                EligibilityReason::UnverifiedAuthority
+            ]
         );
     }
 
@@ -569,11 +579,14 @@ fn rule_catalog_1122_synthetic_batch_keeps_all_games_unranked_unverified_authori
         assert!(!batch_eligibility.ranked);
         assert_eq!(
             batch_eligibility.classification,
-            BatchClassification::UnrankedUnverifiedAuthority
+            BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         assert_eq!(
             batch_eligibility.reasons,
-            [EligibilityReason::UnverifiedAuthority]
+            [
+                EligibilityReason::PartialRules,
+                EligibilityReason::UnverifiedAuthority
+            ]
         );
     }
 }

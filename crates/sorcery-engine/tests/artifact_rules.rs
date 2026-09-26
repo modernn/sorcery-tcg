@@ -707,10 +707,10 @@ fn ballista_scenario() -> String {
         "ballista-far-target": minion(json!({ "defense": 5 })),
         "ballista-helper": minion(json!({ "defense": 2, "tapForMana": 1 })),
         "ballista-hidden-target": minion(json!({ "defense": 5, "stealth": true })),
-        // Four is exactly the bearer's power, so only a source that is not a unit gets through.
+        // The 4/2 bearer has power 3, so borrowing its unit source would prevent the shot.
         "ballista-near-target": minion(json!({
             "defense": 5,
-            "preventsDamageFromUnitsWithPowerAtLeast": 4,
+            "preventsDamageFromUnitsWithPowerAtLeast": 3,
         })),
         "ballista-north-site": { "cardType": "site", "elements": ["earth"] },
         "ballista-south-site": { "cardType": "site", "elements": ["earth", "water"] },

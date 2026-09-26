@@ -799,13 +799,16 @@ mod tests {
         assert_eq!(report.summary.games, 2);
         assert_eq!(
             report.summary.eligibility,
-            crate::batch::BatchClassification::UnrankedUnverifiedAuthority
+            crate::batch::BatchClassification::UnrankedPartialRulesUnverifiedAuthority
         );
         assert!(!report.summary.ranked);
         assert!(report.summary.gates.all_passed());
         assert_eq!(
             report.summary.reasons,
-            [crate::eligibility::EligibilityReason::UnverifiedAuthority]
+            [
+                crate::eligibility::EligibilityReason::PartialRules,
+                crate::eligibility::EligibilityReason::UnverifiedAuthority
+            ]
         );
         assert_eq!(report.summary.by_seat.north.wins, 0);
         assert_eq!(report.summary.by_seat.north.draws, 0);
