@@ -5602,13 +5602,13 @@ impl Game {
         .collect()
     }
 
-    fn artifact_facts(&self, artifact: &ArtifactPosition) -> Result<ArtifactFacts, GameError> {
+    fn artifact_facts(&self, artifact: &ArtifactPosition) -> Result<&ArtifactFacts, GameError> {
         let CardFacts::Artifact(facts) =
             &self.rules.cards[usize::from(artifact.card.card_id.0)].facts
         else {
             return Err(GameError::IllegalAction);
         };
-        Ok(*facts)
+        Ok(facts)
     }
 
     /// Where an Artifact currently sits: its exact carried cell, the bearer's cell, or the cell it
@@ -17567,7 +17567,7 @@ impl Game {
                     .bearer()
                     .is_some_and(|bearer| bearer.seat() == seat)
                     && matches!(
-                        self.rules.cards[usize::from(artifact.card.card_id.0)].facts,
+                        &self.rules.cards[usize::from(artifact.card.card_id.0)].facts,
                         CardFacts::Artifact(facts)
                             if facts.effect
                                 == ArtifactEffect::BearerControllerChoosesExtraRandomOutcome

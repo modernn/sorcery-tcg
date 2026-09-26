@@ -5,6 +5,8 @@ use std::fmt::{self, Display, Formatter};
 
 use serde_json::{Map, Value};
 
+use crate::deck::Rarity;
+
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_SAFE_INTEGER_F64: f64 = 9_007_199_254_740_991.0;
 const MAX_COMBAT_STAT: u64 = 100;
@@ -232,15 +234,18 @@ pub struct BearerUnitStrike {
 }
 
 /// Artifact facts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtifactFacts {
     pub bearer_unit_strike: Option<BearerUnitStrike>,
     pub cannot_be_carried: bool,
+    pub elements: Option<ElementSet>,
     pub effect: ArtifactEffect,
     /// Printed cost; absence is only admitted for generated tokens.
     pub mana_cost: Option<u64>,
     pub token: bool,
     pub nearby_strikes_against_units_deal_double_damage: bool,
+    pub rarity: Option<Rarity>,
+    pub subtypes: Option<Box<[String]>>,
     pub thresholds: Thresholds,
 }
 
@@ -760,6 +765,25 @@ fn parse_elements(object: &Map<String, Value>, path: &str) -> Result<ElementSet,
     Ok(set)
 }
 
+fn parse_optional_rarity(
+    object: &Map<String, Value>,
+    path: &str,
+) -> Result<Option<Rarity>, FactError> {
+    let Some(value) = object.get("rarity") else {
+        return Ok(None);
+    };
+    let field = format!("{path}.rarity");
+    let rarity = match value.as_str() {
+        Some("ordinary") => Rarity::Ordinary,
+        Some("exceptional") => Rarity::Exceptional,
+        Some("elite") => Rarity::Elite,
+        Some("unique") => Rarity::Unique,
+        Some(_) => return Err(FactError::new(&field, "contains an unsupported rarity")),
+        None => return Err(FactError::new(&field, "must be one of the rarity strings")),
+    };
+    Ok(Some(rarity))
+}
+
 /// Full subtype data is optional for legacy bindings, but explicit lists are canonical.
 fn parse_subtypes(
     object: &Map<String, Value>,
@@ -939,17 +963,20 @@ const ARTIFACT_FIELDS: &[&str] = &[
     "bearerUnitStrike",
     "cannotBeCarried",
     "cardType",
+    "elements",
     "grantsBearerLethal",
     "grantsBearerPower",
     "manaCost",
     "nearbyMinionsMustAttackIfAble",
     "nearbyStrikesAgainstUnitsDealDoubleDamage",
+    "rarity",
     "sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves",
     "tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps",
     "tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps",
     "tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath",
     "thresholds",
     "token",
+    "subtypes",
 ];
 
 const AURA_FIELDS: &[&str] = &[
@@ -1393,6 +1420,12 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         .get("bearerUnitStrike")
         .map(|value| parse_bearer_unit_strike(value, path))
         .transpose()?;
+    let elements = object
+        .contains_key("elements")
+        .then(|| parse_elements(object, path))
+        .transpose()?;
+    let subtypes = parse_subtypes(object, path)?;
+    let rarity = parse_optional_rarity(object, path)?;
     let exclusive = [
         true_only(object, "atEndOfControllerTurnUntapNearbyAllies", path)?
             .then_some(ArtifactEffect::AtEndOfControllerTurnUntapNearbyAllies),
@@ -1491,6 +1524,7 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
     Ok(ArtifactFacts {
         bearer_unit_strike,
         cannot_be_carried: true_only(object, "cannotBeCarried", path)?,
+        elements,
         effect,
         mana_cost: match object.get("manaCost") {
             Some(Value::Null) if token => None,
@@ -1503,6 +1537,8 @@ fn parse_artifact(object: &Map<String, Value>, path: &str) -> Result<ArtifactFac
         },
         token,
         nearby_strikes_against_units_deal_double_damage: nearby_double,
+        rarity,
+        subtypes,
         thresholds: parse_thresholds(object, path)?,
     })
 }

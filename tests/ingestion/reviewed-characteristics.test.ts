@@ -3,6 +3,8 @@ import test from 'node:test';
 import { identityHash } from '../../src/authority/hash.ts';
 import type { JsonValue } from '../../src/authority/canonical-json.ts';
 import type { PrivateCardSnapshot } from '../../src/authority/private-cards.ts';
+import { assertPrintedCardFacts, presetCardCatalog } from '../../src/ingestion/preset-card-pool.ts';
+import type { GameCardDefinition } from '../../src/engine/game.ts';
 import { mergeReviewedCardBindings } from '../../src/ingestion/reviewed-card-bindings.ts';
 
 const thresholds = { air: 0, earth: 0, fire: 0, water: 0 };
@@ -51,4 +53,55 @@ test('supplements cannot replace printed scalars, remove retained traits or evad
     { ...row, characteristicSupplement: { ...row.characteristicSupplement, sources: [] } },
     { ...row, characteristicSupplement: { ...row.characteristicSupplement, manaCost: 0 } },
   ]) assert.throws(() => mergeReviewedCardBindings(binding(changed), authority, new Map()));
+});
+
+const artifactSource = { ...source, cardType: 'artifact' as const, attack: null, defense: null,
+  rarity: null, elements: ['air'] as const, subtypes: ['Device'] };
+const artifactFacts = { cardType: 'artifact', manaCost: null, thresholds, token: true,
+  grantsBearerPower: 2, rarity: 'ordinary', elements: ['earth', 'air'], subtypes: ['Device', 'Weapon'] };
+const artifactRow = { ...row, sourceCardHash: identityHash(artifactSource as unknown as JsonValue),
+  facts: artifactFacts, characteristicSupplement: { rarity: 'ordinary', elements: ['earth'], subtypes: ['Weapon'],
+    sources: row.characteristicSupplement.sources } };
+const artifactAuthority: PrivateCardSnapshot = { ...authority, cards: [artifactSource] };
+
+test('reviewed artifact supplements fill absent rarity while preserving retained traits and source identity', () => {
+  const originalHash = identityHash(artifactSource as unknown as JsonValue);
+  const pool = mergeReviewedCardBindings(binding(artifactRow), artifactAuthority, new Map());
+  assert.deepEqual(pool.get(source.stableId)?.definition, artifactFacts);
+  assert.equal(identityHash(artifactSource as unknown as JsonValue), originalHash);
+  assert.equal(artifactSource.rarity, null);
+  assert.equal(presetCardCatalog(artifactAuthority, pool).cards[0]?.rarity, 'ordinary');
+  assert.throws(() => assertPrintedCardFacts(artifactSource, artifactFacts as GameCardDefinition, 'preset binding'));
+  const retainedFacts = { ...artifactFacts, rarity: undefined, elements: ['air'], subtypes: ['Device'] };
+  assertPrintedCardFacts(artifactSource, retainedFacts as GameCardDefinition, 'preset binding');
+});
+
+test('artifact supplements cannot overwrite rarity, invent unreviewed characteristics, or bypass printed scalars', () => {
+  for (const changed of [
+    { ...artifactRow, facts: { ...artifactFacts, rarity: undefined } },
+    { ...artifactRow, facts: { ...artifactFacts, rarity: 'elite' } },
+    { ...artifactRow, facts: { ...artifactFacts, subtypes: ['Weapon'] } },
+    { ...artifactRow, facts: { ...artifactFacts, subtypes: undefined } },
+    { ...artifactRow, facts: { ...artifactFacts, elements: ['earth'] } },
+    { ...artifactRow, facts: { ...artifactFacts, manaCost: 0 } },
+    { ...artifactRow, facts: { ...artifactFacts, thresholds: { ...thresholds, air: 1 } } },
+    { ...artifactRow, characteristicSupplement: undefined },
+    { ...artifactRow, characteristicSupplement: { ...artifactRow.characteristicSupplement, sources: [] } },
+    { ...artifactRow, sourceCardHash: identityHash({ stale: true }) },
+  ]) assert.throws(() => mergeReviewedCardBindings(binding(changed), artifactAuthority, new Map()));
+
+  const retained = { ...artifactSource, rarity: 'elite' as const };
+  const retainedRow = { ...artifactRow, sourceCardHash: identityHash(retained as unknown as JsonValue) };
+  const knownFacts = { ...artifactFacts, rarity: 'elite', elements: ['air'], subtypes: ['Device'] };
+  const knownPool = mergeReviewedCardBindings(binding({ ...retainedRow, facts: knownFacts,
+    characteristicSupplement: undefined }), { ...authority, cards: [retained] }, new Map());
+  assert.deepEqual(knownPool.get(source.stableId)?.definition, knownFacts);
+  for (const rarity of ['ordinary', 'elite']) {
+    assert.throws(() => mergeReviewedCardBindings(binding({ ...retainedRow,
+      facts: { ...artifactFacts, rarity }, characteristicSupplement: { ...artifactRow.characteristicSupplement, rarity },
+    }), { ...authority, cards: [retained] }, new Map()), /only fill absent artifact rarity/);
+  }
+  assert.throws(() => mergeReviewedCardBindings(binding({ ...row,
+    characteristicSupplement: { ...row.characteristicSupplement, rarity: 'ordinary' },
+  }), authority, new Map()), /only fill absent artifact rarity/);
 });

@@ -136,9 +136,8 @@ modifiers. Ranged projectiles that cause a strike still use the shared strike ru
 Additive bonuses combined with temporary or nearby doubling require controller-owned
 damage-replacement ordering. Until those choices exist, exercised combinations fail
 explicitly, including combinations using the legacy Lance counter. This is an
-unsupported interaction, not a fixed arithmetic ordering. Replacement ordering and
-full artifact characteristics are still needed before the old Lance counter can be
-removed or new Lance cards admitted.
+unsupported interaction, not a fixed arithmetic ordering. Replacement ordering is
+still needed before the old Lance counter can be removed or new Lance cards admitted.
 
 Minion `entersCarrying` lists 1–32 carriable artifact-token references, with repeated
 references creating separate artifacts. It lowers to restricted carried-token effects,
@@ -152,13 +151,16 @@ entry equipment from Genesis creation by the same source in the same action.
 Token definitions preserve an absent printed mana cost as explicit `null`, distinct
 from a printed zero. Token minions and artifacts may have that absence; tokens cannot
 enter the spellbook or be cast as ordinary spells. Effect entry pays zero without changing
-the printed characteristic. Optional complete minion `elements` and `subtypes` lists
+the printed characteristic. Optional complete minion and artifact `elements` and `subtypes` lists
 preserve elemental identity independently of casting thresholds. The existing Demon,
 Mortal, and Undead predicates derive from explicit subtypes at admission; contradictory
-legacy flags are rejected. Omitted lists remain unspecified for older bindings.
+legacy flags are rejected. Artifacts also retain optional `rarity` using the four
+existing rarity values. Omitted characteristics remain unspecified for older bindings;
+explicit null rarity is rejected.
 
 When retained normalized data omits a characteristic, reviewed private bindings may
-add an element or subtype with a source hash and locator. These supplements cannot
-remove retained traits or change printed costs, stats, thresholds, or rarity. The
+add an element or subtype with a source hash and locator. For artifacts only, a
+supplement may also fill absent rarity. These supplements cannot remove retained
+traits or change printed costs, stats, thresholds, or existing rarity. The
 references record the review's provenance; they do not automatically verify the
 referenced text or grant ranked eligibility. Authority snapshots remain unchanged.

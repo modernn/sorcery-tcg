@@ -14,7 +14,7 @@ use sorcery_engine::canonical::{
 };
 use sorcery_engine::deck::{
     CandidateDeck, CardCatalogEntry, CardCount, CardType, DeckValidation, FormatContext,
-    OfficialCardMapping, validate_deck,
+    OfficialCardMapping, Rarity, validate_deck,
 };
 use sorcery_engine::game::recompose_manifest_json;
 use sorcery_engine::game_record::{
@@ -150,6 +150,7 @@ struct ManifestDeckEnvelope {
 #[serde(rename_all = "camelCase")]
 struct ManifestCard {
     card_type: CardType,
+    rarity: Option<Rarity>,
     token: Option<bool>,
 }
 
@@ -724,7 +725,7 @@ fn manifest_catalog(cards: BTreeMap<String, ManifestCard>) -> Vec<CardCatalogEnt
         .map(|(stable_id, card)| CardCatalogEntry {
             stable_id,
             card_type: card.card_type,
-            rarity: None,
+            rarity: card.rarity,
             engine_supported: true,
             official_mapping: OfficialCardMapping::Unavailable,
             token: card.token.unwrap_or(false),
@@ -839,14 +840,57 @@ fn write_canonical_json(value: &impl Serialize) -> CliResult<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use serde_json::json;
     use sorcery_engine::canonical::canonical_json;
     use sorcery_engine::synthetic::synthetic_demo_manifest_json;
 
     use super::{
-        Command, MAX_BATCH_JSON_BYTES, manifest_deck_ids, parse_args, policy_for_deck,
-        run_batch_json, validate_batch_json_size,
+        Command, MAX_BATCH_JSON_BYTES, ManifestCard, manifest_catalog, manifest_deck_ids,
+        parse_args, policy_for_deck, run_batch_json, validate_batch_json_size,
     };
+
+    #[test]
+    fn manifest_catalog_preserves_optional_rarity_without_official_mapping() {
+        let mut cards = BTreeMap::new();
+        cards.insert(
+            "lance".to_owned(),
+            ManifestCard {
+                card_type: sorcery_engine::deck::CardType::Artifact,
+                rarity: Some(sorcery_engine::deck::Rarity::Ordinary),
+                token: Some(true),
+            },
+        );
+        cards.insert(
+            "legacy".to_owned(),
+            ManifestCard {
+                card_type: sorcery_engine::deck::CardType::Artifact,
+                rarity: None,
+                token: None,
+            },
+        );
+
+        let catalog = manifest_catalog(cards);
+        let legacy = catalog
+            .iter()
+            .find(|card| card.stable_id == "legacy")
+            .expect("legacy card");
+        let lance = catalog
+            .iter()
+            .find(|card| card.stable_id == "lance")
+            .expect("lance card");
+        assert_eq!(legacy.rarity, None);
+        assert_eq!(
+            legacy.official_mapping,
+            sorcery_engine::deck::OfficialCardMapping::Unavailable
+        );
+        assert_eq!(lance.rarity, Some(sorcery_engine::deck::Rarity::Ordinary));
+        assert_eq!(
+            lance.official_mapping,
+            sorcery_engine::deck::OfficialCardMapping::Unavailable
+        );
+    }
 
     #[test]
     fn parse_args_should_require_replay_dir() {

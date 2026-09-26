@@ -12,9 +12,10 @@ const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const characteristicSupplement = z.strictObject({
   elements: z.array(z.enum(['earth', 'fire', 'water', 'air'])).max(4).optional(),
   subtypes: z.array(z.string().min(1).max(64)).max(16).optional(),
+  rarity: z.enum(['ordinary', 'exceptional', 'elite', 'unique']).optional(),
   sources: z.array(z.strictObject({ contentHash: hash, locator: z.string().min(1).max(512) })).min(1).max(16),
-}).refine((value) => value.elements !== undefined || value.subtypes !== undefined,
-  'a characteristic supplement must supply elements or subtypes');
+}).refine((value) => value.elements !== undefined || value.subtypes !== undefined || value.rarity !== undefined,
+  'a characteristic supplement must supply elements, subtypes, or rarity');
 const bindingFile = z.strictObject({
   schemaVersion: z.literal(1),
   authorityHash: hash,
@@ -58,22 +59,27 @@ export function mergeReviewedCardBindings(
     seen.add(row.cardId);
     const definition = row.facts as GameCardDefinition;
     validateCardDefinition(definition, `reviewed.${row.cardId}`);
-    assertPrintedCardFacts(source, definition, 'reviewed binding');
+    const supplement = row.characteristicSupplement;
+    if (supplement && source.cardType !== 'minion' && source.cardType !== 'artifact') {
+      throw new Error(`characteristic supplements require a minion or artifact: ${row.cardId}`);
+    }
+    if (supplement?.rarity !== undefined && (source.cardType !== 'artifact' || source.rarity !== null)) {
+      throw new Error(`rarity supplements only fill absent artifact rarity: ${row.cardId}`);
+    }
+    // A reviewed source may fill omissions; the retained snapshot and its hash stay unchanged.
+    const subtypes = [...new Set([...source.subtypes, ...(supplement?.subtypes ?? [])])]
+      .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+    const allElements = new Set([...source.elements, ...(supplement?.elements ?? [])]);
+    const elements = (['earth', 'fire', 'water', 'air'] as const).filter((element) => allElements.has(element));
+    const effectiveSource = { ...source, subtypes, elements, rarity: supplement?.rarity ?? source.rarity };
+    assertPrintedCardFacts(effectiveSource, definition, 'reviewed binding');
     if ((source.cardType === 'minion' || source.cardType === 'site')
       && (row.facts.ordinary === true) !== (source.rarity === 'ordinary')) {
       throw new Error(`reviewed binding differs from source ordinary: ${row.cardId}`);
     }
-    if (row.characteristicSupplement && source.cardType !== 'minion') {
-      throw new Error(`characteristic supplements currently require a minion: ${row.cardId}`);
-    }
-    if (source.cardType === 'minion' && definition.cardType === 'minion') {
-      // Supplements can fill omissions, never remove retained source characteristics.
-      // Their references record a human review; they do not independently certify authority.
-      const supplement = row.characteristicSupplement;
-      const subtypes = [...new Set([...source.subtypes, ...(supplement?.subtypes ?? [])])]
-        .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
-      const allElements = new Set([...source.elements, ...(supplement?.elements ?? [])]);
-      const elements = (['earth', 'fire', 'water', 'air'] as const).filter((element) => allElements.has(element));
+    if ((source.cardType === 'minion' && definition.cardType === 'minion')
+      || (source.cardType === 'artifact' && definition.cardType === 'artifact')) {
+      // References record a human review; they do not independently certify authority.
       for (const [key, supplied, expected, supplemented] of [
         ['subtypes', definition.subtypes, subtypes, supplement?.subtypes !== undefined],
         ['elements', definition.elements, elements, supplement?.elements !== undefined],
@@ -83,6 +89,11 @@ export function mergeReviewedCardBindings(
           throw new Error(`reviewed binding differs from source ${key}: ${row.cardId}`);
         }
       }
+      if (supplement?.rarity !== undefined && row.facts.rarity !== supplement.rarity) {
+        throw new Error(`reviewed binding differs from supplemented rarity: ${row.cardId}`);
+      }
+    }
+    if (source.cardType === 'minion' && definition.cardType === 'minion') {
       for (const [key, name] of [['mortal', 'Mortal'], ['undead', 'Undead'], ['demon', 'Demon']] as const) {
         const actual = definition.subtypes?.includes(name) ?? row.facts[key] === true;
         // Preserve old Demon review behavior for legacy facts without a complete subtype list.

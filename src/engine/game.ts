@@ -106,6 +106,11 @@ type BearerUnitStrike = Readonly<{
   destroyAfterStrike?: true;
   firstStrike?: true;
 }>;
+type ArtifactCharacteristics = Readonly<{
+  elements?: readonly GameElement[];
+  rarity?: 'ordinary' | 'exceptional' | 'elite' | 'unique';
+  subtypes?: readonly string[];
+}>;
 
 /** Returns direct token references; callers follow the returned IDs transitively. */
 type TokenRequirement = Readonly<{ cardId: string; kind: 'artifact' | 'minion'; placement?: 'carried' }>;
@@ -177,7 +182,7 @@ export type GameCardDefinition =
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
     token?: true;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     attack: number;
     cardType: 'avatar';
@@ -207,7 +212,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -227,7 +232,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -247,7 +252,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -267,7 +272,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps: 3;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -287,7 +292,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -307,7 +312,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath: 4;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife: number;
@@ -327,7 +332,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -347,7 +352,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -367,7 +372,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -387,7 +392,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies?: never;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -407,7 +412,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     atEndOfControllerTurnUntapNearbyAllies: true;
     atEndOfEachTurnSiteControllerLosesLife?: never;
@@ -427,7 +432,7 @@ export type GameCardDefinition =
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps?: never;
     tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath?: never;
     thresholds: GameThresholds;
-  }>
+  }> & ArtifactCharacteristics
   | Readonly<{
     airborneMinionsAtopMoveFreelyAway?: true;
     blocksGroundMinionEntryWhileMinionAtop?: true;
@@ -1518,12 +1523,13 @@ const SUPPORTED_CARD_FIELDS = {
     cannotBeCarried
     atStartOfSiteControllerTurnLoseLifeAndGainManaThisTurn
     bearerControllerChoosesExtraRandomOutcome cardType
+    elements
     grantsBearerLethal grantsBearerPower manaCost     nearbyMinionsMustAttackIfAble
     nearbyStrikesAgainstUnitsDealDoubleDamage
     sacrificeThisToGainControlOfTargetEnemyMinionHereUntilBearerLeaves
     tapBearerAndAnotherAllyHereAndDiscardCardToDamageEachUnitAtLocationWithinThreeSteps
     tapBearerAndAnotherAllyHereToDamageTargetWithinTwoSteps
-    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds token
+    tapUnitHereToRollInCardinalDirectionAndDamageOtherUnitsAlongPath thresholds token rarity subtypes
   `.trim().split(/\s+/)),
   aura: new Set(`
     affectedNonOrdinarySitesAreFloodedProvideOnlyWaterAndLoseOtherAbilities
@@ -1705,12 +1711,27 @@ function validateMinionMetadata(
     }
     card.entersCarrying.forEach((cardId, index) => requireCardId(cardId, `${path}.entersCarrying[${index}]`));
   }
-  const minionElements = card.elements;
-  if (minionElements !== undefined
-    && (!Array.isArray(minionElements)
-      || minionElements.some((element) => !elements.includes(element))
-      || new Set(minionElements).size !== minionElements.length
-      || minionElements.some((element, index) => elements.indexOf(element) <= elements.indexOf(minionElements[index - 1]!)))) {
+  validateCardCharacteristics(card, path, elements);
+  const subtypes = card.subtypes;
+  if (subtypes === undefined) return;
+  for (const [field, subtype] of [['demon', 'Demon'], ['mortal', 'Mortal'], ['undead', 'Undead']] as const) {
+    if (card[field] === true && !subtypes.includes(subtype)) {
+      throw new RangeError(`${path}.${field} must agree with subtypes`);
+    }
+  }
+}
+
+function validateCardCharacteristics(
+  card: Readonly<{ elements?: readonly GameElement[]; subtypes?: readonly string[] }>,
+  path: string,
+  elements: readonly GameElement[],
+): void {
+  const cardElements = card.elements;
+  if (cardElements !== undefined
+    && (!Array.isArray(cardElements)
+      || cardElements.some((element) => !elements.includes(element))
+      || new Set(cardElements).size !== cardElements.length
+      || cardElements.some((element, index) => elements.indexOf(element) <= elements.indexOf(cardElements[index - 1]!)))) {
     throw new RangeError(`${path}.elements must contain unique elements in canonical order`);
   }
   const subtypes = card.subtypes;
@@ -1730,10 +1751,18 @@ function validateMinionMetadata(
     && Buffer.compare(Buffer.from(subtypes[index - 1]!, 'utf8'), Buffer.from(subtype, 'utf8')) >= 0)) {
     throw new RangeError(`${path}.subtypes must be unique and sorted`);
   }
-  for (const [field, subtype] of [['demon', 'Demon'], ['mortal', 'Mortal'], ['undead', 'Undead']] as const) {
-    if (card[field] === true && !subtypes.includes(subtype)) {
-      throw new RangeError(`${path}.${field} must agree with subtypes`);
-    }
+}
+
+function validateArtifactMetadata(
+  card: Extract<GameCardDefinition, { cardType: 'artifact' }>,
+  path: string,
+  elements: readonly GameElement[],
+): void {
+  validateCardCharacteristics(card, path, elements);
+  if (card.rarity !== undefined
+    && card.rarity !== 'ordinary' && card.rarity !== 'exceptional'
+    && card.rarity !== 'elite' && card.rarity !== 'unique') {
+    throw new RangeError(`${path}.rarity is unsupported`);
   }
 }
 
@@ -1904,6 +1933,7 @@ export function validateCardDefinition(card: GameCardDefinition, path: string): 
     return;
   }
   if (card.cardType === 'artifact') {
+    validateArtifactMetadata(card, path, elements);
     if (card.bearerUnitStrike !== undefined) {
       const modifier = card.bearerUnitStrike;
       if (modifier === null || typeof modifier !== 'object' || Array.isArray(modifier)) {
@@ -3191,6 +3221,7 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
         : card.cardType === 'artifact'
           ? {
             cardType: 'artifact' as const,
+            ...(card.elements !== undefined ? { elements: [...card.elements] } : {}),
             ...(card.bearerUnitStrike !== undefined
               ? { bearerUnitStrike: { ...card.bearerUnitStrike } }
               : {}),
@@ -3246,6 +3277,8 @@ export function createGameManifest(input: GameManifestInput): GameManifest {
                                   }
                                   : { bearerUnitStrike: { ...card.bearerUnitStrike } }),
             manaCost: card.manaCost,
+            ...(card.rarity !== undefined ? { rarity: card.rarity } : {}),
+            ...(card.subtypes !== undefined ? { subtypes: [...card.subtypes] } : {}),
             thresholds: { ...card.thresholds },
             ...(card.token === true ? { token: true as const } : {}),
           }

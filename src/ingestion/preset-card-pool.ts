@@ -28,6 +28,9 @@ export function assertPrintedCardFacts(
       : source.cardType === 'minion' ? ['attack', 'defense', 'manaCost', 'thresholds']
         : ['manaCost', 'thresholds'])];
   const facts = definition as unknown as Record<string, JsonValue>;
+  if (definition.cardType === 'artifact') {
+    fields.push(...(['elements', 'subtypes', 'rarity'] as const).filter((key) => definition[key] !== undefined));
+  }
   for (const key of fields) {
     if (facts[key] === undefined || canonicalJson(facts[key])
       !== canonicalJson(source[key as keyof NormalizedCard] as JsonValue)) {
@@ -82,7 +85,7 @@ export function presetCardCatalog(authority: PrivateCardSnapshot, pool: Readonly
           cardId: card.stableId,
           name: card.name,
           cardType: card.cardType,
-          rarity: card.rarity,
+          rarity: binding?.definition.cardType === 'artifact' ? binding.definition.rarity ?? card.rarity : card.rarity,
           rulesText: card.rulesText,
           engineSupported: binding !== undefined,
           reason: binding ? null : 'no-reviewed-binding',
